@@ -1,0 +1,10 @@
+{
+  "name": "Stockroom Business App",
+  "short_name": "Stockroom Business App",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f1e8",
+  "theme_color": "#173f35",
+  "description": "Offline-first stock and inventory management for growing businesses.",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

@@ -1,0 +1,6 @@
+{
+  "syncApiUrl": "https://api.example.com",
+  "businessId": "client-business-id",
+  "deviceId": "unique-id-for-this-installed-device",
+  "deviceToken": "JWT-issued-by-your-sync-service-for-this-business-and-device"
+}

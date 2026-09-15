@@ -1,0 +1,28 @@
+# Dependencies and generated application bundles
+node_modules/
+dist/
+release/
+
+# Local business data, backups, and per-device sync credentials
+server/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+backups/
+sync-config.json
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# TypeScript/Vite temporary files
+*.tsbuildinfo
+node_modules/.tmp/

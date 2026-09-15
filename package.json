@@ -1,0 +1,42 @@
+{
+  "name": "stockroom-business-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Offline-first stock and inventory management app",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "api": "node server/index.mjs",
+    "start": "node server/index.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "desktop": "npm run build && electron .",
+    "desktop:package": "npm run build && electron-builder --win nsis",
+    "sync-api": "node cloud/index.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "mongodb": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "main": "desktop/main.mjs",
+  "build": {
+    "appId": "com.stockroom.business",
+    "productName": "Stockroom Business",
+    "asar": true,
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "server/**/*", "!server/data/**/*", "desktop/**/*", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}
