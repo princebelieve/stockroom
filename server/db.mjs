@@ -186,9 +186,12 @@ try { database.exec("ALTER TABLE app_settings ADD COLUMN pos_connection TEXT NOT
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'external-pos'") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_reference TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN terminal_provider TEXT NOT NULL DEFAULT ''") } catch {}
+try { database.exec("ALTER TABLE sales ADD COLUMN staff_id TEXT NOT NULL DEFAULT ''") } catch {}
+try { database.exec("ALTER TABLE sales ADD COLUMN staff_name TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE stocktakes ADD COLUMN approval_reason TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DEFAULT 0") } catch {}
 try { database.exec("ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0") } catch {}
+try { database.exec("ALTER TABLE users ADD COLUMN operational_access INTEGER NOT NULL DEFAULT 0") } catch {}
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex')
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
@@ -262,13 +265,9 @@ export async function createOwnerSetup(input) {
   const mongoUri = String(input.mongoUri || '').trim()
   const mongoDatabase = String(input.mongoDatabase || 'stockroom').trim() || 'stockroom'
   if (!email || !password) throw new Error('Owner email and password are required.')
-  const existing = database.prepare('SELECT id FROM users WHERE email = ? AND organization_id = ?').get(email, organizationId)
-  if (existing) {
-    const updatedPassword = hashPassword(password)
-    database.prepare('UPDATE users SET name = ?, password_hash = ? WHERE id = ? AND organization_id = ?').run(ownerName, updatedPassword, existing.id, organizationId)
-  } else {
-    database.prepare('INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, ownerName, email, hashPassword(password), 'owner', now())
-  }
+  const configured = database.prepare('SELECT 1 FROM users WHERE organization_id = ? LIMIT 1').get(organizationId)
+  if (configured) throw new Error('This installation already has an owner account.')
+  database.prepare('INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, ownerName, email, hashPassword(password), 'owner', now())
   database.prepare('UPDATE app_settings SET app_name = ?, updated_at = ? WHERE organization_id = ?').run(appName, now(), organizationId)
   const config = { appName, shopName: appName, ownerName, ownerEmail: email, ownerConfigured: true, mongoUri, mongoDatabase }
   await writeShopConfig(config)
@@ -276,11 +275,16 @@ export async function createOwnerSetup(input) {
 }
 
 export function authenticateUser(email, password) {
-  const user = database.prepare('SELECT id, name, email, password_hash AS passwordHash, role FROM users WHERE email = ? AND organization_id = ?').get(email.toLowerCase(), organizationId)
+  const user = database.prepare('SELECT id, name, email, password_hash AS passwordHash, role, operational_access AS operationalAccess FROM users WHERE email = ? AND organization_id = ?').get(email.toLowerCase(), organizationId)
   if (!user) return null
   if (!matchesPassword(password, user.passwordHash)) return null
   if (!String(user.passwordHash).includes(':')) database.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id)
-  return { id: user.id, name: user.name, email: user.email, role: user.role, organizationId }
+  return { id: user.id, name: user.name, email: user.email, role: user.role, operationalAccess: Boolean(user.operationalAccess), organizationId }
+}
+
+export function getUserById(id) {
+  const user = database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ?').get(id, organizationId)
+  return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId } : null
 }
 
 export function changePassword(userId, currentPassword, newPassword) {
@@ -327,7 +331,7 @@ export function exportSalesCsv() {
 }
 
 export function listUsers() {
-  return database.prepare('SELECT id, name, email, role, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId)
+  return database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess) }))
 }
 
 export function createUser(input) {
@@ -346,9 +350,16 @@ export function createUser(input) {
     if (String(error.message).includes('UNIQUE')) throw new Error('That email address is already in use.')
     throw error
   }
-  const user = database.prepare('SELECT id, name, email, role, created_at AS createdAt FROM users WHERE id = ?').get(id)
+  const user = database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
   queueSync('user', id, 'upsert', user)
-  return user
+  return { ...user, operationalAccess: Boolean(user.operationalAccess) }
+}
+
+export function setCashierOperationalAccess(id, enabled) {
+  const result = database.prepare("UPDATE users SET operational_access = ? WHERE id = ? AND organization_id = ? AND role = 'cashier'").run(enabled ? 1 : 0, id, organizationId)
+  if (!result.changes) throw new Error('Cashier account not found.')
+  const user = database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
+  return { ...user, operationalAccess: Boolean(user.operationalAccess) }
 }
 
 export function provisionCloudUser(input) {
@@ -392,7 +403,7 @@ export function createCustomer(input) {
 }
 
 export function listSales(limit = 100) {
-  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, created_at AS createdAt FROM sales WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, Math.min(Math.max(Number(limit) || 100, 1), 500))
+  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, Math.min(Math.max(Number(limit) || 100, 1), 500))
   const itemQuery = database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?')
   return sales.map((sale) => ({ ...sale, items: itemQuery.all(sale.id) }))
 }
@@ -591,7 +602,7 @@ export function createSale(sale, shouldSync = true) {
   if (database.prepare('SELECT id FROM sales WHERE id = ?').get(sale.id)) return { ...sale, syncStatus: 'synced' }
   database.exec('BEGIN')
   try {
-    database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.createdAt)
+    database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.staffId || '', sale.staffName || '', sale.createdAt)
     for (const item of sale.items) {
       const updatedAt = now()
       const product = database.prepare('SELECT stock, cost_price AS costPrice, name FROM products WHERE id = ? AND organization_id = ?').get(item.productId, organizationId)

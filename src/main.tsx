@@ -23,12 +23,12 @@ type AppSettings = {
   existingBusiness?: boolean
 }
 
-type User = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; organizationId: string }
-type SaleRecord = { id: string; total: number; paymentMethod: string; paymentReference: string; terminalProvider: string; createdAt: string; items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number }> }
+type User = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; organizationId: string }
+type SaleRecord = { id: string; total: number; paymentMethod: string; paymentReference: string; terminalProvider: string; staffName?: string; createdAt: string; items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number }> }
 type Movement = { id: string; productName: string; sku: string; quantity: number; reason: string; createdAt: string }
 type SyncStatus = { configured: boolean; pending: number; conflicts?: number; lastError: string; existingBusiness?: boolean }
 type SyncConflict = { id: string; entityType: string; entityId: string; reason: string; createdAt: string }
-type StaffUser = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; createdAt: string }
+type StaffUser = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; createdAt: string }
 type Reports = { daily: { total: number; count: number }; weekly: { total: number; count: number }; monthly: { total: number; count: number }; inventory: { value: number; products: number; lowStock: number }; profit: { revenue: number; cost: number; expenses: number; amount: number } }
 type Expense = { id: string; category: string; description: string; amount: number; incurredAt: string }
 
@@ -77,21 +77,23 @@ function App() {
   const [installerRequired, setInstallerRequired] = useState(true)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [installerMessage, setInstallerMessage] = useState('')
+  const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
 
   useEffect(() => { document.title = appName }, [appName])
   useEffect(() => localStorage.setItem('stockroom-products', JSON.stringify(products)), [products])
   useEffect(() => {
+    if (!authToken) return
     getCachedProducts().then((cached) => { if (cached.length) setProducts(cached) }).catch(() => undefined)
-    fetch('/api/products').then((response) => response.ok ? response.json() as Promise<{ products: Product[] }> : Promise.reject()).then((data) => {
+    fetch('/api/products', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ products: Product[] }> : Promise.reject()).then((data) => {
       setProducts(data.products)
       cacheProducts(data.products).catch(() => undefined)
     }).catch(() => undefined)
-  }, [])
-  useEffect(() => { fetch('/api/customers').then((response) => response.ok ? response.json() as Promise<{ customers: Customer[] }> : Promise.reject()).then((data) => setCustomers(data.customers)).catch(() => undefined) }, [])
-  useEffect(() => { fetch('/api/sales').then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => setSales(data.sales)).catch(() => undefined) }, [])
-  useEffect(() => { fetch('/api/movements').then((response) => response.ok ? response.json() as Promise<{ movements: Movement[] }> : Promise.reject()).then((data) => setMovements(data.movements)).catch(() => undefined) }, [])
+  }, [authToken])
+  useEffect(() => { if (canManageOperations) fetch('/api/customers', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ customers: Customer[] }> : Promise.reject()).then((data) => setCustomers(data.customers)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
+  useEffect(() => { if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => setSales(data.sales)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
+  useEffect(() => { if (canManageOperations) fetch('/api/movements', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ movements: Movement[] }> : Promise.reject()).then((data) => setMovements(data.movements)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
   useEffect(() => {
-    if (!authToken || user?.role !== 'owner') return
+    if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
     fetch('/api/users', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<{ users: StaffUser[] }> : Promise.reject()).then((data) => setStaff(data.users)).catch(() => undefined)
   }, [authToken, user?.role])
   useEffect(() => {
@@ -148,7 +150,7 @@ function App() {
     for (const operation of operations) {
       const endpoint = operation.type === 'stock' ? `/api/products/${operation.payload.productId}/stock` : operation.type === 'sale' ? '/api/sales' : operation.type === 'settings' ? '/api/settings' : '/api/products'
       const body = operation.type === 'stock' ? { amount: operation.payload.amount } : operation.payload
-      const response = await fetch(endpoint, { method: operation.type === 'settings' ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null)
+      const response = await fetch(endpoint, { method: operation.type === 'settings' ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(body) }).catch(() => null)
       if (!response?.ok || operation.id === undefined) continue
       if (operation.type === 'product') {
         const synced = await response.json() as Product
@@ -197,6 +199,9 @@ function App() {
       window.removeEventListener('offline', goOffline)
     }
   }, [])
+  useEffect(() => {
+    if (user?.role === 'cashier' && !user.operationalAccess) setActive('POS')
+  }, [user?.role, user?.operationalAccess])
 
   const lowStock = products.filter((product) => product.stock <= product.reorder)
   const totalValue = products.reduce((sum, product) => sum + product.stock * product.price, 0)
@@ -205,7 +210,7 @@ function App() {
   async function updateStock(id: string, amount: number) {
     if (!canManageInventory) return
     try {
-      const response = await fetch(`/api/products/${id}/stock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount }) })
+      const response = await fetch(`/api/products/${id}/stock`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ amount }) })
       if (!response.ok) throw new Error('Unable to update stock')
       const updated = await response.json() as Product
       setProducts((current) => current.map((product) => product.id === id ? updated : product))
@@ -227,7 +232,7 @@ function App() {
     const data = new FormData(event.currentTarget)
     const input = { name: String(data.get('name')), sku: String(data.get('sku')), category: String(data.get('category')), stock: Number(data.get('stock')), reorder: Number(data.get('reorder')), price: Number(data.get('price')), cost: Number(data.get('cost') || 0), unit: String(data.get('unit')) }
     try {
-      const response = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+      const response = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(input) })
       if (!response.ok) throw new Error('Unable to create product')
       const product = await response.json() as Product
       setProducts((current) => [product, ...current])
@@ -315,7 +320,7 @@ function App() {
     await saveSale(sale)
     await queueOperation({ type: 'sale', payload: sale as unknown as Record<string, unknown>, createdAt: sale.createdAt })
     await syncQueuedOperations().catch(() => undefined)
-    fetch('/api/sales').then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => setSales(data.sales)).catch(() => undefined)
+    if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => setSales(data.sales)).catch(() => undefined)
     setLastReceipt(sale)
     setCart({})
     setPaymentReference('')
@@ -325,12 +330,13 @@ function App() {
   const cartProducts = products.filter((product) => cart[product.id])
   const cartTotal = cartProducts.reduce((total, product) => total + product.price * cart[product.id], 0)
   useEffect(() => {
-    fetch('/api/customer-display', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ businessName: appName, currency, items: cartProducts.map((product) => ({ name: product.name, quantity: cart[product.id], price: product.price })), total: cartTotal, completed: false }) }).catch(() => undefined)
+    fetch('/api/customer-display', { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ businessName: appName, currency, items: cartProducts.map((product) => ({ name: product.name, quantity: cart[product.id], price: product.price })), total: cartTotal, completed: false }) }).catch(() => undefined)
   }, [appName, cart, cartProducts, cartTotal])
-  const canManageInventory = user?.role === 'owner' || user?.role === 'admin'
+  const canManageOperations = user?.role === 'owner' || user?.role === 'admin' || Boolean(user?.operationalAccess)
+  const canManageInventory = canManageOperations
   const formatMoney = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
   async function adjustWallet(customerId: string, amount: number) {
-    const response = await fetch(`/api/customers/${customerId}/wallet`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, reason: amount > 0 ? 'customer-credit' : 'customer-purchase' }) })
+    const response = await fetch(`/api/customers/${customerId}/wallet`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ amount, reason: amount > 0 ? 'customer-credit' : 'customer-purchase' }) })
     if (!response.ok) return
     const customer = await response.json() as Customer
     setCustomers((current) => current.map((item) => item.id === customer.id ? customer : item))
@@ -340,7 +346,7 @@ function App() {
     event.preventDefault()
     const name = newCustomerName.trim()
     if (!name) return
-    const response = await fetch('/api/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, phone: newCustomerPhone.trim() }) })
+    const response = await fetch('/api/customers', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ name, phone: newCustomerPhone.trim() }) })
     if (!response.ok) return
     const customer = await response.json() as Customer
     setCustomers((current) => [...current, customer].sort((a, b) => a.name.localeCompare(b.name)))
@@ -369,6 +375,14 @@ function App() {
     setStaff((current) => [...current, created])
     event.currentTarget.reset()
     setSettingsMessage(`${created.name} was added as ${created.role}.`)
+  }
+
+  async function setCashierAccess(id: string, enabled: boolean) {
+    const response = await fetch(`/api/users/${id}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ enabled }) })
+    if (!response.ok) return setSettingsMessage('Could not update cashier access.')
+    const updated = await response.json() as StaffUser
+    setStaff((current) => current.map((member) => member.id === updated.id ? updated : member))
+    setSettingsMessage(`${updated.name} can ${updated.operationalAccess ? 'now manage operations' : 'now only use POS'}.`)
   }
 
   async function exportSalesCsv() {
@@ -448,6 +462,7 @@ function App() {
     }
     setAuthToken(data.token)
     setUser(data.user)
+    setActive(data.user.role === 'cashier' && !data.user.operationalAccess ? 'POS' : 'Overview')
     setSetupRequired(false)
     localStorage.setItem('stockroom-token', data.token)
     localStorage.setItem('stockroom-user', JSON.stringify(data.user))
@@ -502,25 +517,25 @@ function App() {
       <div className="brand"><div className="brand-mark"><Boxes size={21} /></div><div><strong>{appName}</strong><span>Business operations</span></div></div>
       <div className="workspace"><Store size={16} /><span>{appName}</span><MoreHorizontal size={17} /></div>
       <nav>
-        <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>
-        <button className={active === 'Inventory' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Inventory')}><Boxes size={18} />Inventory <b>{products.length}</b></button>
+        {canManageOperations && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
+        {canManageOperations && <button className={active === 'Inventory' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Inventory')}><Boxes size={18} />Inventory <b>{products.length}</b></button>}
         {canManageInventory && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
         <button className={active === 'POS' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('POS')}><ShoppingCart size={18} />POS</button>
         <button className={active === 'Display' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Display')}><Store size={18} />Customer display</button>
-        <button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sales')}><ShoppingCart size={18} />Sales</button>
-        <button className={active === 'Movements' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Movements')}><ArrowDownToLine size={18} />Stock movements</button>
-        <button className={active === 'Wallet' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Wallet')}><WalletCards size={18} />Wallet</button>
-        {['owner', 'admin'].includes(user.role) && <button className={active === 'Owner' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Owner')}><LayoutDashboard size={18} />Owner dashboard</button>}
+        {canManageOperations && <button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sales')}><ShoppingCart size={18} />Sales</button>}
+        {canManageOperations && <button className={active === 'Movements' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Movements')}><ArrowDownToLine size={18} />Stock movements</button>}
+        {canManageOperations && <button className={active === 'Wallet' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Wallet')}><WalletCards size={18} />Wallet</button>}
+        {['owner', 'admin'].includes(user.role) && <button className={active === 'Owner' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Owner')}><LayoutDashboard size={18} />Business dashboard</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Reports' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Reports')}><BarChart3 size={18} />Reports</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Sync' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sync')}><RefreshCw size={18} />Sync issues {syncConflicts.length > 0 && <b>{syncConflicts.length}</b>}</button>}
-        {user.role === 'owner' && <button className={active === 'Team' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Team')}><UserRoundCog size={18} />Team management</button>}
+        {['owner', 'admin'].includes(user.role) && <button className={active === 'Team' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Team')}><UserRoundCog size={18} />Team management</button>}
         {user.role === 'owner' && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Settings')}><UserRoundCog size={18} />Business settings</button>}
       </nav>
       <div className="sidebar-foot"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` · ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline · saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
     </aside>
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">{user.name} · {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><button className="text-button logout-button" onClick={logout}>Log out</button></div></header>
-      {active === 'Overview' && <>
+      {active === 'Overview' && canManageOperations && <>
         <section className="hero-row"><div><h2>Business at a glance</h2><p>Keep your shelves moving and your team in the know.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}><Plus size={18} />Add product</button></section>
         <section className="metric-grid"><div className="metric-card"><span>Inventory value</span><strong>{formatMoney(totalValue)}</strong><small>Based on current local stock and unit prices</small></div><div className="metric-card"><span>Items in stock</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}</strong><small>Across {products.length} products</small></div><div className="metric-card alert-card"><span>Needs attention</span><strong>{lowStock.length}</strong><small>{lowStock.length ? 'Products below reorder point' : 'All stock levels healthy'}</small></div></section>
         <section className="content-grid"><div className="panel inventory-panel"><div className="panel-heading"><div><h3>Inventory snapshot</h3><p>Recent stock levels across your catalogue</p></div><button className="text-button" onClick={() => setActive('Inventory')}>View all <ArrowUpToLine size={15} /></button></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Stock level</th><th>Updated</th><th></th></tr></thead><tbody>{filteredProducts.slice(0, 5).map((product) => <ProductRow key={product.id} product={product} updateStock={updateStock} money={formatMoney} />)}</tbody></table></div></div><div className="panel attention-panel"><div className="panel-heading"><div><h3>Needs attention</h3><p>Reorder before you run out</p></div><AlertTriangle size={19} className="warning-icon" /></div>{lowStock.length === 0 ? <div className="empty-state">Everything is in good shape.</div> : lowStock.map((product) => <div className="alert-row" key={product.id}><div className="product-icon">{product.name.slice(0, 1)}</div><div><strong>{product.name}</strong><span>{product.stock} {product.unit}s left · reorder at {product.reorder}</span></div><button onClick={() => updateStock(product.id, product.reorder * 2)} title="Restock"><PackagePlus size={17} /></button></div>)}</div></section>
@@ -535,7 +550,7 @@ function App() {
       {active === 'Owner' && <OwnerDashboard token={authToken} currency={currency} />}
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
       {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} />}
-      {active === 'Team' && <TeamManagement staff={staff} addStaff={addStaff} message={settingsMessage} />}
+      {active === 'Team' && <TeamManagement staff={staff} addStaff={addStaff} setCashierAccess={setCashierAccess} canCreateStaff={user.role === 'owner'} message={settingsMessage} />}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><form className="settings-form" onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>External POS provider<span>Optional. Enter the provider used by this shop.</span><input value={posProvider} placeholder="Provider name" onChange={(event) => setPosProvider(event.target.value)} /></label><label>Terminal ID<span>The identifier printed on or shown by the terminal.</span><input value={posTerminalId} placeholder="Terminal ID" onChange={(event) => setPosTerminalId(event.target.value)} /></label><label>Connection mode<span>This records how the terminal will integrate with the app.</span><select value={posConnection} onChange={(event) => setPosConnection(event.target.value)}><option value="manual">Manual confirmation</option><option value="usb">USB</option><option value="bluetooth">Bluetooth</option><option value="network">Local network</option><option value="sdk">Provider SDK</option></select></label><button className="primary-button">Save business settings <ArrowUpToLine size={17} /></button>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</form><form className="settings-form" onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><button className="primary-button" type="submit">Update password</button>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</form></section>}
     </main>
     {showAdd && <div className="modal-backdrop" onMouseDown={() => setShowAdd(false)}><form className="modal" onSubmit={addProduct} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2>Add product</h2><p>It will be saved on this device immediately.</p></div><button type="button" className="icon-button" onClick={() => setShowAdd(false)}><X size={19} /></button></div><div className="form-grid"><label>Product name<input name="name" required placeholder="e.g. Espresso beans" /></label><label>SKU<input name="sku" required placeholder="COF-001" /></label><label>Category<input name="category" required placeholder="Beverages" /></label><label>Unit<input name="unit" required placeholder="bag" /></label><label>Starting stock<input name="stock" type="number" min="0" required defaultValue="0" /></label><label>Reorder point<input name="reorder" type="number" min="0" required defaultValue="10" /></label><label>Unit price<input name="price" type="number" min="0" step="0.01" required defaultValue="0" /></label></div><button className="primary-button submit-button">Save product <ArrowUpToLine size={17} /></button></form></div>}
@@ -594,8 +609,8 @@ function OwnerDashboard({ token, currency }: { token: string; currency: string }
   return <section className="owner-dashboard"><div className="metric-grid"><div className="metric-card"><span>Sales recorded</span><strong>{metrics ? money(metrics.salesToday) : '—'}</strong><small>Synced sales total</small></div><div className="metric-card"><span>Transactions</span><strong>{metrics?.saleCount ?? '—'}</strong><small>Completed receipts</small></div><div className="metric-card alert-card"><span>Low stock</span><strong>{metrics?.lowStock ?? '—'}</strong><small>Items needing attention</small></div></div><div className="panel owner-panel"><h2>Business monitoring</h2><p>Inventory value: <strong>{metrics ? money(metrics.inventoryValue) : '—'}</strong> across {metrics?.productCount ?? '—'} products.</p><p>Sales made offline are included after they synchronize.</p></div></section>
 }
 
-function TeamManagement({ staff, addStaff, message }: { staff: StaffUser[]; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; message: string }) {
-  return <section className="panel full-panel team-management"><div className="panel-heading"><div><h2>Team management</h2><p>Create the staff accounts that can sign in to this business.</p></div><UserRoundCog size={20} /></div><div className="team-grid"><section><h3>Current team</h3><div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th></tr></thead><tbody>{staff.length ? staff.map((member) => <tr key={member.id}><td><strong>{member.name}</strong></td><td>{member.email}</td><td><span className={`role-badge ${member.role}`}>{member.role}</span></td><td>{new Date(member.createdAt).toLocaleDateString()}</td></tr>) : <tr><td colSpan={4} className="empty-state">Loading team accounts…</td></tr>}</tbody></table></div></section><form className="settings-form team-form" onSubmit={addStaff}><h3>Add team member</h3><label>Full name<input name="name" required maxLength={100} placeholder="e.g. Ada Okafor" /></label><label>Email address<input name="email" type="email" required placeholder="ada@yourbusiness.com" /></label><label>Access role<select name="role" defaultValue="cashier"><option value="cashier">Cashier — make sales only</option><option value="admin">Admin — manage stock and operations</option></select></label><label>Temporary password<input name="password" type="password" minLength={8} required placeholder="At least 8 characters" /></label><button className="primary-button" type="submit">Create account <UserRoundCog size={17} /></button>{message && <p className="settings-message">{message}</p>}</form></div></section>
+function TeamManagement({ staff, addStaff, setCashierAccess, canCreateStaff, message }: { staff: StaffUser[]; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; setCashierAccess: (id: string, enabled: boolean) => Promise<void>; canCreateStaff: boolean; message: string }) {
+  return <section className="panel full-panel team-management"><div className="panel-heading"><div><h2>Team management</h2><p>Cashiers start with POS-only access. An admin or owner can grant operational access when needed.</p></div><UserRoundCog size={20} /></div><div className="team-grid"><section><h3>Current team</h3><div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th><th>Created</th></tr></thead><tbody>{staff.length ? staff.map((member) => <tr key={member.id}><td><strong>{member.name}</strong></td><td>{member.email}</td><td><span className={`role-badge ${member.role}`}>{member.role}</span></td><td>{member.role === 'cashier' ? <label><input type="checkbox" checked={Boolean(member.operationalAccess)} onChange={(event) => setCashierAccess(member.id, event.target.checked)} /> Operational</label> : 'Full role access'}</td><td>{new Date(member.createdAt).toLocaleDateString()}</td></tr>) : <tr><td colSpan={5} className="empty-state">Loading team accounts…</td></tr>}</tbody></table></div></section>{canCreateStaff && <form className="settings-form team-form" onSubmit={addStaff}><h3>Add team member</h3><label>Full name<input name="name" required maxLength={100} placeholder="e.g. Ada Okafor" /></label><label>Email address<input name="email" type="email" required placeholder="ada@yourbusiness.com" /></label><label>Access role<select name="role" defaultValue="cashier"><option value="cashier">Cashier — POS only by default</option><option value="admin">Admin — manage stock and operations</option></select></label><label>Temporary password<input name="password" type="password" minLength={8} required placeholder="At least 8 characters" /></label><button className="primary-button" type="submit">Create account <UserRoundCog size={17} /></button></form>}</div>{message && <p className="settings-message">{message}</p>}</section>
 }
 
 function ReportsDashboard({ reports, currency, expenses, exportCsv, addExpense }: { reports: Reports | null; currency: string; expenses: Expense[]; exportCsv: () => Promise<void>; addExpense: (event: React.FormEvent<HTMLFormElement>) => Promise<void> }) {

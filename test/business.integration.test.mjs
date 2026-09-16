@@ -37,13 +37,13 @@ async function stop(child) {
 }
 async function json(url, options) { const response = await fetch(url, options); return { response, body: await response.json() } }
 
-async function createOwner(baseUrl) {
-  const { body } = await json(`${baseUrl}/api/setup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appName: 'Test Shop', ownerName: 'Owner', email: `owner${Date.now()}@test.local`, password: 'long-test-password' }) })
+async function createOwner(baseUrl, email = `owner${Date.now()}@test.local`) {
+  const { body } = await json(`${baseUrl}/api/setup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appName: 'Test Shop', ownerName: 'Owner', email, password: 'long-test-password' }) })
   return body.token
 }
 
-async function product(baseUrl, stock = 5) {
-  const { body } = await json(`${baseUrl}/api/products`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Test Product', sku: `SKU-${Date.now()}-${Math.random()}`, category: 'Test', stock, reorder: 1, price: 10, cost: 4, unit: 'piece' }) })
+async function product(baseUrl, token, stock = 5) {
+  const { body } = await json(`${baseUrl}/api/products`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: 'Test Product', sku: `SKU-${Date.now()}-${Math.random()}`, category: 'Test', stock, reorder: 1, price: 10, cost: 4, unit: 'piece' }) })
   return body
 }
 
@@ -54,15 +54,19 @@ after(async () => {
 
 test('offline sale is committed locally and duplicate sale IDs do not reduce stock twice', async () => {
   const { baseUrl } = await startBusiness()
-  await createOwner(baseUrl)
-  const item = await product(baseUrl, 5)
+  const token = await createOwner(baseUrl)
+  const anonymousProducts = await json(`${baseUrl}/api/products`)
+  assert.equal(anonymousProducts.response.status, 401)
+  const secondSetup = await json(`${baseUrl}/api/setup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appName: 'Other Shop', ownerName: 'Intruder', email: `second${Date.now()}@test.local`, password: 'long-test-password' }) })
+  assert.equal(secondSetup.response.status, 403)
+  const item = await product(baseUrl, token, 5)
   const sale = { id: 'sale-idempotency-test', items: [{ productId: item.id, quantity: 2, price: 10 }], total: 20, createdAt: new Date().toISOString(), paymentMethod: 'cash' }
-  const first = await json(`${baseUrl}/api/sales`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sale) })
-  const second = await json(`${baseUrl}/api/sales`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sale) })
+  const first = await json(`${baseUrl}/api/sales`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(sale) })
+  const second = await json(`${baseUrl}/api/sales`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(sale) })
   assert.equal(first.response.status, 201); assert.equal(second.response.status, 201)
-  const products = await json(`${baseUrl}/api/products`)
+  const products = await json(`${baseUrl}/api/products`, { headers: { Authorization: `Bearer ${token}` } })
   assert.equal(products.body.products.find((value) => value.id === item.id).stock, 3)
-  const sales = await json(`${baseUrl}/api/sales`)
+  const sales = await json(`${baseUrl}/api/sales`, { headers: { Authorization: `Bearer ${token}` } })
   assert.equal(sales.body.sales.filter((value) => value.id === sale.id).length, 1)
 })
 
@@ -78,7 +82,7 @@ test('queued local changes synchronize after cloud service becomes reachable', a
   const cloudUrl = `http://127.0.0.1:${cloud.address().port}`
   const { baseUrl } = await startBusiness({ syncApiUrl: cloudUrl })
   const token = await createOwner(baseUrl)
-  await product(baseUrl)
+  await product(baseUrl, token)
   await json(`${baseUrl}/api/sync/now`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
   cloudOnline = true
   await json(`${baseUrl}/api/sync/now`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
@@ -97,14 +101,16 @@ test('concurrent mutable changes use latest timestamp while inventory events rem
 
 test('restart preserves installed business data, modeling an application upgrade', async () => {
   const first = await startBusiness()
-  await createOwner(first.baseUrl)
-  const item = await product(first.baseUrl, 7)
+  const ownerEmail = `owner-restart-${Date.now()}@test.local`
+  const token = await createOwner(first.baseUrl, ownerEmail)
+  const item = await product(first.baseUrl, token, 7)
   const running = processes.at(-1); await stop(running)
   const secondPort = ++port
   const restarted = spawn(globalThis.process.execPath, ['server/index.mjs'], { cwd: globalThis.process.cwd(), env: { ...globalThis.process.env, PORT: String(secondPort), CUSTOMER_DISPLAY_PORT: String(secondPort + 100), STOCKROOM_DATA_DIR: first.dataDirectory }, stdio: 'ignore' })
   processes.push(restarted)
   const baseUrl = `http://127.0.0.1:${secondPort}`
   for (let attempt = 0; attempt < 80; attempt++) { try { if ((await fetch(`${baseUrl}/api/health`)).ok) break } catch {}; await new Promise((resolve) => setTimeout(resolve, 50)) }
-  const products = await json(`${baseUrl}/api/products`)
+  const login = await json(`${baseUrl}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: ownerEmail, password: 'long-test-password' }) })
+  const products = await json(`${baseUrl}/api/products`, { headers: { Authorization: `Bearer ${login.body.token}` } })
   assert.equal(products.body.products.find((value) => value.id === item.id).stock, 7)
 })

@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, updateStocktakeCount } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, getUserById, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, setCashierOperationalAccess, updateStocktakeCount } from './repository.mjs'
 import { saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, getDefaultCloudApiUrl } from './cloud-auth.mjs'
@@ -31,6 +31,7 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'POST' && request.url === '/api/setup') {
     return readJson(request, response, async (input) => {
+      if ((await getSettings()).ownerConfigured) return sendJson(response, 403, { error: 'This installation already has an owner account.' })
       const result = await createOwnerSetup({
         appName: String(input.appName || '').trim(),
         ownerName: String(input.ownerName || '').trim(),
@@ -80,15 +81,25 @@ const server = createServer(async (request, response) => {
     return sendJson(response, 200, await getOwnerMetrics())
   }
 
-  if (request.method === 'GET' && request.url === '/api/customers') return sendJson(response, 200, { customers: await listCustomers() })
+  if (request.method === 'GET' && request.url === '/api/customers') {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return sendJson(response, 200, { customers: await listCustomers() })
+  }
   if (request.method === 'POST' && request.url === '/api/customers') return readJson(request, response, async (input) => {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
     try { return sendJson(response, 201, await createCustomer(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) }
   })
-  if (request.method === 'GET' && request.url === '/api/sales') return sendJson(response, 200, { sales: await listSales() })
-  if (request.method === 'GET' && request.url === '/api/expenses') return sendJson(response, 200, { expenses: await listExpenses() })
+  if (request.method === 'GET' && request.url === '/api/sales') {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return sendJson(response, 200, { sales: await listSales() })
+  }
+  if (request.method === 'GET' && request.url === '/api/expenses') {
+    if (!isManager(sessionUser(request))) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    return sendJson(response, 200, { expenses: await listExpenses() })
+  }
   if (request.method === 'POST' && request.url === '/api/expenses') {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    if (!isManager(user)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
     return readJson(request, response, async (input) => { try { return sendJson(response, 201, await createExpense(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) } })
   }
 
@@ -110,7 +121,10 @@ const server = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/auth/password-reset/confirm') return readJson(request, response, async (input) => {
     try { return sendJson(response, 200, await cloudPasswordResetConfirm(String(input.token || ''), String(input.password || ''))) } catch (error) { return sendJson(response, 400, { error: error.message }) }
   })
-  if (request.method === 'GET' && request.url === '/api/movements') return sendJson(response, 200, { movements: await listMovements() })
+  if (request.method === 'GET' && request.url === '/api/movements') {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return sendJson(response, 200, { movements: await listMovements() })
+  }
   if (request.method === 'POST' && request.url === '/api/backups') {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access is required.' })
@@ -127,8 +141,12 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-sales.csv"' })
     return response.end(await exportSalesCsv())
   }
-  if (request.method === 'GET' && request.url === '/api/customer-display') return sendJson(response, 200, getCustomerDisplay())
+  if (request.method === 'GET' && request.url === '/api/customer-display') {
+    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
+    return sendJson(response, 200, getCustomerDisplay())
+  }
   if (request.method === 'PUT' && request.url === '/api/customer-display') return readJson(request, response, async (input) => {
+    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, setCustomerDisplay(input))
   })
   if (request.method === 'POST' && request.url === '/api/customer-display/pair') {
@@ -139,7 +157,7 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'GET' && request.url === '/api/users') {
     const user = sessionUser(request)
-    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
+    if (!isManager(user)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
     return sendJson(response, 200, { users: await listUsers() })
   }
   if (request.method === 'POST' && request.url === '/api/users') {
@@ -150,6 +168,13 @@ const server = createServer(async (request, response) => {
         const cloud = await cloudCreateStaff(String(input.cloudAccessToken || ''), input)
         return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id }))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+  const cashierAccessMatch = request.url?.match(/^\/api\/users\/([^/]+)\/operational-access$/)
+  if (request.method === 'PUT' && cashierAccessMatch) {
+    if (!isManager(sessionUser(request))) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    return readJson(request, response, async (input) => {
+      try { return sendJson(response, 200, setCashierOperationalAccess(cashierAccessMatch[1], input.enabled === true)) } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
   if (request.method === 'POST' && request.url === '/api/installer/activate') {
@@ -188,6 +213,7 @@ const server = createServer(async (request, response) => {
   }
   const walletMatch = request.url?.match(/^\/api\/customers\/([^/]+)\/wallet$/)
   if (request.method === 'POST' && walletMatch) return readJson(request, response, async (input) => {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
     const amount = Number(input.amount)
     if (!Number.isFinite(amount) || amount === 0) return sendJson(response, 400, { error: 'Wallet amount must not be zero.' })
     try { return sendJson(response, 200, await adjustCustomerWallet(walletMatch[1], amount, String(input.reason || 'manual-adjustment'))) } catch (error) { return sendJson(response, 400, { error: error.message }) }
@@ -195,25 +221,25 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'POST' && request.url === '/api/stocktakes') {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access is required.' })
+    if (!canOperate(user)) return sendJson(response, 403, { error: 'Operational access is required.' })
     return sendJson(response, 201, await createStocktake())
   }
   const stocktakeCountMatch = request.url?.match(/^\/api\/stocktakes\/([^/]+)\/counts\/([^/]+)$/)
   if (request.method === 'PUT' && stocktakeCountMatch) {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access is required.' })
+    if (!canOperate(user)) return sendJson(response, 403, { error: 'Operational access is required.' })
     return readJson(request, response, async (input) => sendJson(response, 200, await updateStocktakeCount(stocktakeCountMatch[1], stocktakeCountMatch[2], input.counted)))
   }
   const stocktakeMatch = request.url?.match(/^\/api\/stocktakes\/([^/]+)$/)
   if (request.method === 'GET' && stocktakeMatch) {
     const user = sessionUser(request)
-    if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
+    if (!canOperate(user)) return sendJson(response, 403, { error: 'Operational access is required.' })
     return sendJson(response, 200, await getStocktake(stocktakeMatch[1]))
   }
   const approveMatch = request.url?.match(/^\/api\/stocktakes\/([^/]+)\/approve$/)
   if (request.method === 'POST' && approveMatch) {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin approval is required.' })
+    if (!canOperate(user)) return sendJson(response, 403, { error: 'Operational access is required.' })
     return readJson(request, response, async (input) => sendJson(response, 200, await approveStocktake(approveMatch[1], String(input.reason || 'Approved after physical count'))))
   }
 
@@ -250,14 +276,17 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && request.url === '/api/products') {
+    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, { products: await listProducts() })
   }
 
   if (request.method === 'POST' && request.url === '/api/sales') {
     return readJson(request, response, async (input) => {
+      const user = sessionUser(request)
+      if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
       if (!input?.id || !Array.isArray(input.items) || !Number.isFinite(Number(input.total))) return sendJson(response, 400, { error: 'Sale is invalid.' })
       try {
-        return sendJson(response, 201, await createSale(input))
+        return sendJson(response, 201, await createSale({ ...input, staffId: user.id, staffName: user.name }))
       } catch (error) {
         return sendJson(response, 400, { error: error.message })
       }
@@ -266,6 +295,7 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'POST' && request.url === '/api/products') {
     return readJson(request, response, async (input) => {
+      if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
       const product = validateProduct(input)
       return sendJson(response, 201, await createProduct(product))
     })
@@ -274,6 +304,7 @@ const server = createServer(async (request, response) => {
   const stockMatch = request.url?.match(/^\/api\/products\/([^/]+)\/stock$/)
   if (request.method === 'POST' && stockMatch) {
     return readJson(request, response, async (input) => {
+      if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
       const amount = Number(input.amount)
       if (!Number.isInteger(amount) || amount === 0) return sendJson(response, 400, { error: 'Stock amount must be a non-zero integer.' })
       try {
@@ -331,5 +362,9 @@ startCustomerDisplayGateway(customerDisplayPort)
 
 function sessionUser(request) {
   const token = request.headers.authorization?.replace('Bearer ', '')
-  return token ? sessions.get(token) : null
+  const session = token ? sessions.get(token) : null
+  return session ? getUserById(session.id) : null
 }
+
+function isManager(user) { return Boolean(user && ['owner', 'admin'].includes(user.role)) }
+function canOperate(user) { return isManager(user) || Boolean(user?.role === 'cashier' && user.operationalAccess) }
