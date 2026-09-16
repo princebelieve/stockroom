@@ -126,7 +126,7 @@ const server = createServer(async (request, response) => {
       const expiresInDays = Math.min(Math.max(Number(input.expiresInDays) || 365, 1), 730)
       await devices.updateOne({ businessId, deviceId }, { $set: { businessId, deviceId, label: String(input.label || deviceId), enrolledAt: new Date(), revokedAt: null } }, { upsert: true })
       const token = deviceToken(businessId, deviceId)
-      return send(response, 201, { deviceToken: token, expiresInDays })
+      return send(response, 201, { businessId, deviceId, deviceToken: token, expiresInDays })
     }
     const claims = verifyToken(request)
     if (!claims) return send(response, 401, { error: 'Unauthorized.' })
