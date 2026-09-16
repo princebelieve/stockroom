@@ -4,9 +4,9 @@ import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
 import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, updateStocktakeCount } from './repository.mjs'
-import { startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
+import { saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudCreateStaff, cloudLogin, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister } from './cloud-auth.mjs'
+import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const sessions = new Map()
@@ -152,6 +152,22 @@ const server = createServer(async (request, response) => {
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
+  if (request.method === 'POST' && request.url === '/api/installer/activate') {
+    if ((await getSettings()).ownerConfigured) return sendJson(response, 403, { error: 'This installation has already been handed over to its owner.' })
+    return readJson(request, response, async (input) => {
+      try {
+        const businessId = String(input.businessId || '').trim()
+        const existingBusiness = input.mode === 'existing'
+        const remote = existingBusiness ? await cloudLoginAt(String(input.syncApiUrl || ''), String(input.ownerEmail || ''), String(input.ownerPassword || '')) : null
+        if (remote && (remote.account?.role !== 'owner' || remote.account?.businessId !== businessId)) throw new Error('Use the matching owner account and business ID.')
+        const enrolled = existingBusiness
+          ? await cloudEnrollDevice(String(input.syncApiUrl || ''), remote.accessToken, { deviceId: input.deviceId, label: input.label })
+          : await cloudEnrollDeviceAsInstaller(String(input.syncApiUrl || ''), String(input.adminApiKey || ''), { businessId, deviceId: input.deviceId, label: input.label, expiresInDays: 365 })
+        const configuration = await saveCloudConfiguration({ syncApiUrl: input.syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken })
+        return sendJson(response, 201, { ...configuration, configured: true, existingBusiness })
+      } catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
   if (request.method === 'GET' && request.url === '/api/sync/status') return sendJson(response, 200, await syncConfigurationStatus())
   if (request.method === 'GET' && request.url === '/api/sync/conflicts') {
     const user = sessionUser(request)
@@ -201,10 +217,14 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && request.url === '/api/settings') {
-    return sendJson(response, 200, await getSettings())
+    const settings = await getSettings()
+    const cloud = await syncConfigurationStatus()
+    return sendJson(response, 200, { ...settings, cloudConfigured: cloud.configured })
   }
 
   if (request.method === 'PUT' && request.url === '/api/settings') {
+    const user = sessionUser(request)
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner can change business settings.' })
     let body = ''
     request.on('data', (chunk) => { body += chunk })
     request.on('end', async () => {
