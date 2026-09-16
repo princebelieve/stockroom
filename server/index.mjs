@@ -6,7 +6,7 @@ import { createProduct, adjustStock, createSale, getSettings, listProducts, upda
 import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, updateStocktakeCount } from './repository.mjs'
 import { saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister } from './cloud-auth.mjs'
+import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const sessions = new Map()
@@ -160,10 +160,11 @@ const server = createServer(async (request, response) => {
         const remote = existingBusiness ? await cloudLoginAt('', String(input.ownerEmail || ''), String(input.ownerPassword || '')) : null
         const businessId = existingBusiness ? String(remote?.account?.businessId || '') : String(input.businessId || '').trim()
         if (remote && remote.account?.role !== 'owner') throw new Error('Only a business owner can add another device.')
+        const syncApiUrl = existingBusiness ? remote.syncApiUrl : getDefaultCloudApiUrl()
         const enrolled = existingBusiness
-          ? await cloudEnrollDevice('', remote.accessToken, { deviceId: input.deviceId, label: input.label })
-          : await cloudEnrollDeviceAsInstaller(String(input.syncApiUrl || ''), String(input.adminApiKey || ''), { businessId, deviceId: input.deviceId, label: input.label, expiresInDays: 365 })
-        const configuration = await saveCloudConfiguration({ syncApiUrl: existingBusiness ? remote.syncApiUrl : input.syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken, existingBusiness })
+          ? await cloudEnrollDevice(syncApiUrl, remote.accessToken, { deviceId: input.deviceId, label: input.label })
+          : await cloudEnrollDeviceAsInstaller(syncApiUrl, String(input.adminApiKey || ''), { businessId, deviceId: input.deviceId, label: input.label, expiresInDays: 365 })
+        const configuration = await saveCloudConfiguration({ syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken, existingBusiness })
         return sendJson(response, 201, { ...configuration, configured: true, existingBusiness })
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })

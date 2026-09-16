@@ -75,6 +75,7 @@ function App() {
   const [stocktakeReason, setStocktakeReason] = useState('Approved after physical count')
   const [setupRequired, setSetupRequired] = useState(true)
   const [installerRequired, setInstallerRequired] = useState(true)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [installerMessage, setInstallerMessage] = useState('')
 
   useEffect(() => { document.title = appName }, [appName])
@@ -174,13 +175,16 @@ function App() {
       setPosProvider(settings.posProvider || '')
       setPosTerminalId(settings.posTerminalId || '')
       setPosConnection(settings.posConnection || 'manual')
-      setSetupRequired((settings.ownerConfigured === false || settings.ownerConfigured === undefined) && settings.existingBusiness !== true)
-      setInstallerRequired(settings.ownerConfigured === false && settings.cloudConfigured !== true)
+      setSetupRequired(settings.ownerConfigured === false && settings.existingBusiness !== true)
+      setInstallerRequired(settings.cloudConfigured !== true)
+      setSettingsLoaded(true)
       localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
       localStorage.setItem('stockroom-currency', settings.currency || 'USD')
       document.title = settings.appName || 'My Business'
     }).catch(() => {
       setSetupRequired(true)
+      setInstallerRequired(true)
+      setSettingsLoaded(true)
     })
   }, [])
   useEffect(() => {
@@ -490,6 +494,7 @@ function App() {
     setCloudAccessToken('')
   }
 
+  if (!settingsLoaded) return <main className="login-screen"><div className="login-card"><h1>Loading your business</h1></div></main>
   if (!user) return installerRequired ? <InstallerScreen onActivate={activateInstallation} message={installerMessage} /> : setupRequired || !authToken ? <SetupScreen onCreate={completeSetup} error={authError} setError={setAuthError} /> : <LoginScreen onLogin={login} error={authError} setError={setAuthError} />
 
   return <div className="app-shell">
@@ -609,7 +614,7 @@ function SyncIssues({ conflicts, resolveConflict }: { conflicts: SyncConflict[];
 
 function InstallerScreen({ onActivate, message }: { onActivate: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; message: string }) {
   const [mode, setMode] = useState<'new' | 'existing'>('existing')
-  return <main className="login-screen"><form className="login-card installer-card" onSubmit={onActivate}><input type="hidden" name="mode" value={mode} /><div className="brand-mark"><Boxes size={21} /></div><h1>{mode === 'new' ? 'New client activation' : 'Add another device'}</h1><p>{mode === 'new' ? 'Installer-only: activate this client device before handing over the app.' : 'For the business owner: add a second computer without any developer credentials.'}</p><div className="installer-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>New client</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Existing business</button></div>{mode === 'new' && <><label>Render API URL<input name="syncApiUrl" type="url" required placeholder="https://your-service.onrender.com" /></label><label>Client business ID<input name="businessId" required pattern="[a-z0-9][a-z0-9-]{2,80}" placeholder="client-business-001" /></label></>}<label>Device ID<input name="deviceId" required pattern="[a-z0-9][a-z0-9-]{2,100}" placeholder="client-business-main-pc" /></label><label>Device label<input name="label" required maxLength={100} placeholder="Main checkout computer" /></label>{mode === 'new' ? <><label>Installer Admin API key<input name="adminApiKey" type="password" required autoComplete="off" placeholder="Your private Render admin key" /></label><p className="installer-note">The key is sent only to Render to enrol this device and is never saved in the client app.</p></> : <><label>Owner email<input name="ownerEmail" type="email" required placeholder="owner@business.com" /></label><label>Owner password<input name="ownerPassword" type="password" minLength={10} required autoComplete="current-password" placeholder="Cloud owner password" /></label><p className="installer-note">Your business is identified from the owner account. The password is used only to enrol this device and is not stored.</p></>}{message && <div className={message.startsWith('Installation activated') ? 'settings-message' : 'auth-error'}>{message}</div>}<button className="primary-button login-button">{mode === 'new' ? 'Activate new client' : 'Add this device'}</button></form></main>
+  return <main className="login-screen"><form className="login-card installer-card" onSubmit={onActivate}><input type="hidden" name="mode" value={mode} /><div className="brand-mark"><Boxes size={21} /></div><h1>{mode === 'new' ? 'New client activation' : 'Add another device'}</h1><p>{mode === 'new' ? 'Installer-only: activate this client device before handing over the app.' : 'For the business owner: add a second computer without any developer credentials.'}</p><div className="installer-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>New client</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Existing business</button></div>{mode === 'new' && <label>Client business ID<input name="businessId" required pattern="[a-z0-9][a-z0-9-]{2,80}" placeholder="client-business-001" /></label>}<label>Device ID<input name="deviceId" required pattern="[a-z0-9][a-z0-9-]{2,100}" placeholder="client-business-main-pc" /></label><label>Device label<input name="label" required maxLength={100} placeholder="Main checkout computer" /></label>{mode === 'new' ? <><label>Installer Admin API key<input name="adminApiKey" type="password" required autoComplete="off" placeholder="Private installer key" /></label><p className="installer-note">The app connects to the configured cloud service automatically. This key is sent only to the cloud service and is never saved.</p></> : <><label>Owner email<input name="ownerEmail" type="email" required placeholder="owner@business.com" /></label><label>Owner password<input name="ownerPassword" type="password" minLength={10} required autoComplete="current-password" placeholder="Cloud owner password" /></label><p className="installer-note">Your business is identified from the owner account. The password is used only to enroll this device and is not stored.</p></>}{message && <div className={message.startsWith('Installation activated') ? 'settings-message' : 'auth-error'}>{message}</div>}<button className="primary-button login-button">{mode === 'new' ? 'Activate new client' : 'Add this device'}</button></form></main>
 }
 
 function CustomerDisplayPairing({ pairing, createPairing }: { pairing: { url: string; code: string; expiresAt: string } | null; createPairing: () => Promise<void> }) {

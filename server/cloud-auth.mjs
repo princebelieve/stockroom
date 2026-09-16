@@ -1,6 +1,7 @@
 import { getCloudConfiguration } from './sync.mjs'
 
 const defaultCloudApiUrl = process.env.STOCKROOM_CLOUD_API_URL || 'https://stockroom-0vm5.onrender.com'
+export function getDefaultCloudApiUrl() { return defaultCloudApiUrl }
 function cloudUrl(value) {
   const url = String(value || defaultCloudApiUrl).trim().replace(/\/$/, '')
   if (!/^https:\/\/[^\s]+$/i.test(url)) throw new Error('Cloud service URL is invalid.')
