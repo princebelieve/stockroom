@@ -163,7 +163,7 @@ const server = createServer(async (request, response) => {
         const enrolled = existingBusiness
           ? await cloudEnrollDevice('', remote.accessToken, { deviceId: input.deviceId, label: input.label })
           : await cloudEnrollDeviceAsInstaller(String(input.syncApiUrl || ''), String(input.adminApiKey || ''), { businessId, deviceId: input.deviceId, label: input.label, expiresInDays: 365 })
-        const configuration = await saveCloudConfiguration({ syncApiUrl: existingBusiness ? remote.syncApiUrl : input.syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken })
+        const configuration = await saveCloudConfiguration({ syncApiUrl: existingBusiness ? remote.syncApiUrl : input.syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken, existingBusiness })
         return sendJson(response, 201, { ...configuration, configured: true, existingBusiness })
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
@@ -219,7 +219,7 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/settings') {
     const settings = await getSettings()
     const cloud = await syncConfigurationStatus()
-    return sendJson(response, 200, { ...settings, cloudConfigured: cloud.configured })
+    return sendJson(response, 200, { ...settings, cloudConfigured: cloud.configured, existingBusiness: cloud.existingBusiness })
   }
 
   if (request.method === 'PUT' && request.url === '/api/settings') {
