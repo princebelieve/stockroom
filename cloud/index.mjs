@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
+import { sendPasswordReset, sendStaffInvite } from './mailer.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -40,8 +41,8 @@ function signToken(payload) {
 }
 function hashPassword(password) { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}` }
 function matchesPassword(password, stored) { const [salt, value] = String(stored).split(':'); if (!salt || !value) return false; const actual = scryptSync(password, salt, 64); const expected = Buffer.from(value, 'hex'); return actual.length === expected.length && timingSafeEqual(actual, expected) }
-function publicAccount(account) { return { businessId: account.businessId, ownerName: account.ownerName, email: account.email } }
-function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
+function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, role: account.role || 'owner' } }
+function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email, role: account.role || 'owner', exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
 function deviceToken(businessId, deviceId) { return signToken({ kind: 'device', businessId, deviceId, exp: Math.floor(Date.now() / 1000) + 365 * 86_400 }) }
 function isAccess(claims) { return claims?.kind === 'access' }
 function isDevice(claims) { return claims?.kind === 'device' }
@@ -75,7 +76,7 @@ const server = createServer(async (request, response) => {
       const email = String(input.email || '').trim().toLowerCase()
       const password = String(input.password || '')
       if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId) || !ownerName || !/^\S+@\S+\.\S+$/.test(email) || password.length < 10) return send(response, 400, { error: 'Provide a valid business ID, owner name, email, and password of at least 10 characters.' })
-      const account = { businessId, ownerName, email, passwordHash: hashPassword(password), createdAt: new Date() }
+      const account = { businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash: hashPassword(password), createdAt: new Date() }
       try { await accounts.insertOne(account) } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That business ID or email already exists.' }); throw error }
       return send(response, 201, { account: publicAccount(account), accessToken: accessToken(account) })
     }
@@ -84,6 +85,13 @@ const server = createServer(async (request, response) => {
       const account = await accounts.findOne({ email: String(input.email || '').trim().toLowerCase() })
       if (!account || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Email or password is incorrect.' })
       return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account) })
+    }
+    if (request.method === 'GET' && request.url === '/v1/auth/me') {
+      const claims = verifyToken(request)
+      if (!isAccess(claims)) return send(response, 401, { error: 'Owner or staff access token required.' })
+      const account = await accounts.findOne({ businessId: claims.businessId, email: claims.email })
+      if (!account) return send(response, 401, { error: 'Account not found.' })
+      return send(response, 200, { account: publicAccount(account) })
     }
     if (request.method === 'POST' && request.url === '/v1/auth/password-reset/request') {
       const input = await readJson(request)
@@ -94,7 +102,8 @@ const server = createServer(async (request, response) => {
       await passwordResets.insertOne({ accountId: account._id, tokenHash: createHmac('sha256', jwtSecret).update(rawToken).digest('hex'), expiresAt: new Date(Date.now() + 30 * 60_000), usedAt: null })
       // Configure an email provider webhook outside this code. In non-production
       // development only, return the token to permit end-to-end testing.
-      const responseBody = { ok: true, ...(process.env.NODE_ENV !== 'production' ? { resetToken: rawToken } : {}) }
+      const delivered = await sendPasswordReset({ to: account.email, token: rawToken }).catch(() => false)
+      const responseBody = { ok: true, delivered, ...(process.env.NODE_ENV !== 'production' ? { resetToken: rawToken } : {}) }
       return send(response, 202, responseBody)
     }
     if (request.method === 'POST' && request.url === '/v1/auth/password-reset/confirm') {
@@ -128,6 +137,16 @@ const server = createServer(async (request, response) => {
       if (!/^[a-z0-9][a-z0-9-]{2,100}$/i.test(deviceId)) return send(response, 400, { error: 'A valid device ID is required.' })
       await devices.updateOne({ businessId: claims.businessId, deviceId }, { $set: { businessId: claims.businessId, deviceId, label: String(input.label || deviceId), enrolledAt: new Date(), revokedAt: null, revokeReason: null } }, { upsert: true })
       return send(response, 201, { businessId: claims.businessId, deviceId, deviceToken: deviceToken(claims.businessId, deviceId) })
+    }
+    if (request.method === 'POST' && request.url === '/v1/staff') {
+      if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
+      const input = await readJson(request)
+      const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const password = String(input.password || ''); const role = String(input.role || '')
+      if (!name || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details and an 8-character password.' })
+      const staff = { businessId: claims.businessId, name, email, role, passwordHash: hashPassword(password), createdAt: new Date() }
+      try { await accounts.insertOne(staff) } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That email address is already in use.' }); throw error }
+      const delivered = await sendStaffInvite({ to: email, name, businessId: claims.businessId, password }).catch(() => false)
+      return send(response, 201, { account: publicAccount(staff), invitationDelivered: delivered })
     }
     if (request.method === 'GET' && request.url === '/v1/devices') {
       if (!isAccess(claims)) return send(response, 403, { error: 'Owner access token required.' })

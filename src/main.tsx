@@ -57,6 +57,7 @@ function App() {
   const [paymentReference, setPaymentReference] = useState('')
   const [user, setUser] = useState<User | null>(() => JSON.parse(localStorage.getItem('stockroom-user') || 'null'))
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('stockroom-token') || '')
+  const [cloudAccessToken, setCloudAccessToken] = useState(() => localStorage.getItem('stockroom-cloud-access-token') || '')
   const [authError, setAuthError] = useState('')
   const [customers, setCustomers] = useState<Customer[]>([])
   const [staff, setStaff] = useState<StaffUser[]>([])
@@ -335,7 +336,8 @@ function App() {
   async function addStaff(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), password: form.get('password'), role: form.get('role') }) })
+    if (!cloudAccessToken) { setSettingsMessage('Connect to the internet and sign in again before creating staff accounts.'); return }
+    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), password: form.get('password'), role: form.get('role'), cloudAccessToken }) })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Could not add user.' })) as { error?: string }
       setSettingsMessage(error.error || 'Could not add user.')
@@ -415,8 +417,13 @@ function App() {
 
   async function login(email: string, password: string) {
     const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
-    if (!response.ok) throw new Error('Email or password is incorrect.')
-    const data = await response.json() as { token: string; user: User }
+    const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).catch(() => null)
+    const cloudData = cloudResponse?.ok ? await cloudResponse.json() as { token: string; user: User; cloudAccessToken: string } : null
+    if (!response.ok && !cloudResponse?.ok) throw new Error('Email or password is incorrect.')
+    const data = response.ok ? await response.json() as { token: string; user: User } : cloudData!
+    if (cloudData) {
+      setCloudAccessToken(cloudData.cloudAccessToken); localStorage.setItem('stockroom-cloud-access-token', cloudData.cloudAccessToken)
+    }
     setAuthToken(data.token)
     setUser(data.user)
     setSetupRequired(false)
@@ -451,6 +458,8 @@ function App() {
     localStorage.setItem('stockroom-user', JSON.stringify(data.user))
     localStorage.setItem('stockroom-app-name', data.setup.appName)
     document.title = data.setup.appName
+    const cloud = await fetch('/api/auth/cloud-register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => null)
+    if (cloud?.ok) { const result = await cloud.json() as { accessToken: string }; setCloudAccessToken(result.accessToken); localStorage.setItem('stockroom-cloud-access-token', result.accessToken) }
   }
 
   async function logout() {
@@ -459,6 +468,8 @@ function App() {
     setUser(null)
     localStorage.removeItem('stockroom-token')
     localStorage.removeItem('stockroom-user')
+    localStorage.removeItem('stockroom-cloud-access-token')
+    setCloudAccessToken('')
   }
 
   if (!user) return setupRequired || !authToken ? <SetupScreen onCreate={completeSetup} error={authError} setError={setAuthError} /> : <LoginScreen onLogin={login} error={authError} setError={setAuthError} />
@@ -518,7 +529,35 @@ function LoginScreen({ onLogin, error, setError }: { onLogin: (email: string, pa
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  return <main className="login-screen"><form className="login-card" onSubmit={async (event) => { event.preventDefault(); try { await onLogin(email, password) } catch (loginError) { setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.') } }}><div className="brand-mark"><Boxes size={21} /></div><h1>Sign in to your shop</h1><p>Run your store online or offline.</p><label>Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@yourshop.com" /></label><label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /><button type="button" className="icon-button password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button login-button">Sign in</button></form></main>
+  const [mode, setMode] = useState<'login' | 'request' | 'confirm'>('login')
+  const [resetCode, setResetCode] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
+  const [message, setMessage] = useState('')
+  const resetView = () => { setError(''); setMessage('') }
+  const returnToLogin = () => { resetView(); setMode('login') }
+
+  if (mode === 'request') return <main className="login-screen"><form className="login-card" onSubmit={async (event) => {
+    event.preventDefault(); resetView()
+    try {
+      const response = await fetch('/api/auth/password-reset/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to request a reset email.')
+      setMessage('If this email has a cloud account, a reset code has been sent. Check your inbox and spam folder.')
+      setMode('confirm')
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to request a reset email.') }
+  }}><div className="brand-mark"><Boxes size={21} /></div><h1>Reset your password</h1><p>Enter the email used for this business. This needs an internet connection.</p><label>Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@yourshop.com" /></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button login-button">Send reset code</button><button type="button" className="text-button" onClick={returnToLogin}>Back to sign in</button></form></main>
+
+  if (mode === 'confirm') return <main className="login-screen"><form className="login-card" onSubmit={async (event) => {
+    event.preventDefault(); resetView()
+    try {
+      const response = await fetch('/api/auth/password-reset/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetCode, password: resetPassword }) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to reset the password.')
+      setResetCode(''); setResetPassword(''); setMessage('Password updated. You can now sign in with your new password.'); setMode('login')
+    } catch (confirmError) { setError(confirmError instanceof Error ? confirmError.message : 'Unable to reset the password.') }
+  }}><div className="brand-mark"><Boxes size={21} /></div><h1>Enter reset code</h1><p>{message || 'Use the reset code from your email, then choose a new password.'}</p><label>Reset code<input required value={resetCode} onChange={(event) => setResetCode(event.target.value)} autoComplete="one-time-code" placeholder="Code from your email" /></label><label>New password<input type="password" minLength={10} required value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} autoComplete="new-password" placeholder="At least 10 characters" /></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button login-button">Update password</button><button type="button" className="text-button" onClick={() => { resetView(); setMode('request') }}>Use a different email</button></form></main>
+
+  return <main className="login-screen"><form className="login-card" onSubmit={async (event) => { event.preventDefault(); try { await onLogin(email, password) } catch (loginError) { setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.') } }}><div className="brand-mark"><Boxes size={21} /></div><h1>Sign in to your shop</h1><p>Run your store online or offline.</p><label>Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@yourshop.com" /></label><label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /><button type="button" className="icon-button password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><button type="button" className="text-button forgot-password" onClick={() => { resetView(); setMode('request') }}>Forgot password?</button>{error && <div className="auth-error">{error}</div>}{message && <p className="settings-message">{message}</p>}<button className="primary-button login-button">Sign in</button></form></main>
 }
 
 function SetupScreen({ onCreate, error, setError }: { onCreate: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; error: string; setError: (value: string) => void }) {

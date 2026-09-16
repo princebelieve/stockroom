@@ -14,3 +14,11 @@ services:
         generateValue: true
       - key: MONGODB_DATABASE
         value: stockroom_sync
+      - key: SMTP_USER
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false

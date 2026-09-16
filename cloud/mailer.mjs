@@ -1,0 +1,25 @@
+import nodemailer from 'nodemailer'
+
+function configured() {
+  return Boolean(process.env.SMTP_USER && process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN)
+}
+
+function transport() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: { type: 'OAuth2', user: process.env.SMTP_USER, clientId: process.env.GMAIL_CLIENT_ID, clientSecret: process.env.GMAIL_CLIENT_SECRET, refreshToken: process.env.GMAIL_REFRESH_TOKEN },
+  })
+}
+
+export async function sendPasswordReset({ to, token }) {
+  if (!configured()) return false
+  const expires = '30 minutes'
+  await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Reset your Stockroom owner password', text: `Your Stockroom password-reset code is:\n\n${token}\n\nIt expires in ${expires}. If you did not request this, ignore this email.`, html: `<p>Your Stockroom password-reset code is:</p><h2>${token}</h2><p>It expires in ${expires}. If you did not request this, ignore this email.</p>` })
+  return true
+}
+
+export async function sendStaffInvite({ to, name, businessId, password }) {
+  if (!configured()) return false
+  await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Your Stockroom staff account', text: `Hello ${name},\n\nYou have been added to Stockroom business ${businessId}.\nEmail: ${to}\nTemporary password: ${password}\n\nSign in online once before using the app offline, then change your password.`, html: `<p>Hello ${name},</p><p>You have been added to Stockroom business <b>${businessId}</b>.</p><p>Email: ${to}<br>Temporary password: ${password}</p><p>Sign in online once before using the app offline, then change your password.</p>` })
+  return true
+}

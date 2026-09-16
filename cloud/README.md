@@ -8,6 +8,7 @@ Set these Render environment variables:
 - `JWT_SECRET`: a long random secret. Render can generate it from `render.yaml`.
 - `ADMIN_API_KEY`: a long random secret used only by you to enroll a device.
 - `MONGODB_DATABASE`: optional; defaults to `stockroom_sync`.
+- `SMTP_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: optional Gmail OAuth 2.0 SMTP transport. All four are required before reset and staff-invitation emails are delivered.
 
 After deployment, verify `https://YOUR-RENDER-URL/health` returns `{"ok":true}`.
 
@@ -31,6 +32,10 @@ Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/devices/enroll' 
 List devices with `GET /v1/devices`; revoke one with `POST /v1/devices/DEVICE_ID/revoke`. A revoked device can no longer push or pull data.
 
 Password recovery uses `POST /v1/auth/password-reset/request` and `POST /v1/auth/password-reset/confirm`. In production, connect the request endpoint to your transactional-email provider and email the reset token/link. Resetting an owner password revokes every enrolled device, requiring deliberate re-enrollment.
+
+### Gmail OAuth mail setup
+
+Create a Google Cloud project, configure the OAuth consent screen, create a **Web application** OAuth client, and obtain a refresh token for the Gmail account that will send Stockroom messages. Store only the resulting values in Render environment variables—never in the desktop app, `sync-config.json`, Git, or MongoDB. The service uses Gmail SMTP with OAuth 2.0, not a Gmail password or app password.
 
 The legacy admin-key enrollment endpoint remains for your operational setup only. For normal client onboarding, prefer the owner account flow above.
 

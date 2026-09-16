@@ -15,6 +15,11 @@ async function configuration() {
   }
 }
 
+export async function getCloudConfiguration() {
+  const { url, businessId } = await configuration()
+  return { url, businessId }
+}
+
 export async function syncConfigurationStatus() {
   const config = await configuration()
   return { ...getSyncStatus(), configured: Boolean(config.url && config.token && config.businessId && config.deviceId) }

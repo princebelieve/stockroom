@@ -339,7 +339,7 @@ export function createUser(input) {
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('A valid email address is required.')
   if (password.length < 8) throw new Error('Password must be at least 8 characters long.')
   if (!['admin', 'cashier'].includes(role)) throw new Error('New users can only be admins or cashiers.')
-  const id = crypto.randomUUID()
+  const id = String(input.id || crypto.randomUUID())
   try {
     database.prepare('INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, email, hashPassword(password), role, now())
   } catch (error) {
@@ -349,6 +349,19 @@ export function createUser(input) {
   const user = database.prepare('SELECT id, name, email, role, created_at AS createdAt FROM users WHERE id = ?').get(id)
   queueSync('user', id, 'upsert', user)
   return user
+}
+
+export function provisionCloudUser(input) {
+  const name = String(input.name || '').trim()
+  const email = String(input.email || '').trim().toLowerCase()
+  const role = String(input.role || 'cashier')
+  const password = String(input.password || '')
+  if (!name || !email || password.length < 8 || !['owner', 'admin', 'cashier'].includes(role)) throw new Error('Cloud user data is invalid.')
+  const existing = database.prepare('SELECT id FROM users WHERE email = ? AND organization_id = ?').get(email, organizationId)
+  const id = String(existing?.id || input.id || crypto.randomUUID())
+  database.prepare(`INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, password_hash = excluded.password_hash, role = excluded.role`).run(id, organizationId, name, email, hashPassword(password), role, now())
+  return authenticateUser(email, password)
 }
 
 export function listExpenses(limit = 200) {

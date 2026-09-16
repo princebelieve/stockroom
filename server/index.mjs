@@ -3,9 +3,10 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, resolveSyncConflict, updateStocktakeCount } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, updateStocktakeCount } from './repository.mjs'
 import { startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
+import { cloudCreateStaff, cloudLogin, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const sessions = new Map()
@@ -90,6 +91,25 @@ const server = createServer(async (request, response) => {
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
     return readJson(request, response, async (input) => { try { return sendJson(response, 201, await createExpense(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) } })
   }
+
+  if (request.method === 'POST' && request.url === '/api/auth/cloud-session') return readJson(request, response, async (input) => {
+    try {
+      const password = String(input.password || '')
+      const remote = await cloudLogin(String(input.email || ''), password)
+      const user = provisionCloudUser({ ...remote.account, password })
+      const token = crypto.randomUUID(); sessions.set(token, user)
+      return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken })
+    } catch (error) { return sendJson(response, 400, { error: error.message }) }
+  })
+  if (request.method === 'POST' && request.url === '/api/auth/cloud-register') return readJson(request, response, async (input) => {
+    try { return sendJson(response, 201, await cloudRegister(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) }
+  })
+  if (request.method === 'POST' && request.url === '/api/auth/password-reset/request') return readJson(request, response, async (input) => {
+    try { return sendJson(response, 202, await cloudPasswordResetRequest(String(input.email || ''))) } catch (error) { return sendJson(response, 400, { error: error.message }) }
+  })
+  if (request.method === 'POST' && request.url === '/api/auth/password-reset/confirm') return readJson(request, response, async (input) => {
+    try { return sendJson(response, 200, await cloudPasswordResetConfirm(String(input.token || ''), String(input.password || ''))) } catch (error) { return sendJson(response, 400, { error: error.message }) }
+  })
   if (request.method === 'GET' && request.url === '/api/movements') return sendJson(response, 200, { movements: await listMovements() })
   if (request.method === 'POST' && request.url === '/api/backups') {
     const user = sessionUser(request)
@@ -126,7 +146,10 @@ const server = createServer(async (request, response) => {
     const user = sessionUser(request)
     if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
     return readJson(request, response, async (input) => {
-      try { return sendJson(response, 201, await createUser(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) }
+      try {
+        const cloud = await cloudCreateStaff(String(input.cloudAccessToken || ''), input)
+        return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id }))
+      } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
   if (request.method === 'GET' && request.url === '/api/sync/status') return sendJson(response, 200, await syncConfigurationStatus())

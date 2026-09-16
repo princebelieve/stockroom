@@ -19,6 +19,7 @@
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
     "mongodb": "latest",
+    "nodemailer": "^10.0.10",
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",
@@ -35,9 +36,29 @@
     "appId": "com.stockroom.business",
     "productName": "Stockroom Business",
     "asar": true,
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "server/**/*", "!server/data/**/*", "desktop/**/*", "package.json"],
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "server/**/*",
+      "!server/data/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }
