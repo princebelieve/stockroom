@@ -1,7 +1,7 @@
 {
   "name": "stockroom-business-app",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Offline-first stock and inventory management app",
   "type": "module",
   "scripts": {
@@ -58,7 +58,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Stockroom Business"
     }
   }
 }
