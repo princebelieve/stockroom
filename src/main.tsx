@@ -5,7 +5,7 @@ import type { Customer, Product, Sale, Stocktake } from './types'
 import { cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, removeQueuedOperation, replaceQueuedProductId, saveSale, upsertCachedProducts } from './lib/offlineStore'
 import './styles.css'
 
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && !navigator.userAgent.includes('Electron')) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => undefined)
   })

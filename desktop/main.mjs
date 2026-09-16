@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, session } from 'electron'
 import { join } from 'node:path'
 
 const port = Number(process.env.PORT || 8787)
@@ -18,7 +18,8 @@ function waitForLocalServer() {
   })
 }
 
-function createWindow() {
+async function createWindow() {
+  await session.defaultSession.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] })
   const window = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1024, minHeight: 700, autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
