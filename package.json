@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "desktop": "npm run build && electron .",
     "desktop:package": "npm run build && electron-builder --win nsis",
-    "sync-api": "node cloud/index.mjs"
+    "sync-api": "node cloud/index.mjs",
+    "test": "node --test test/**/*.test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

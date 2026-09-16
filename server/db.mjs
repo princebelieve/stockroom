@@ -153,6 +153,17 @@ database.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS sync_conflicts (
+    id TEXT PRIMARY KEY,
+    operation_id TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    local_payload TEXT NOT NULL,
+    remote_payload TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+  );
 `)
 
 const organizationId = 'local-shop-organization'
@@ -208,6 +219,20 @@ export function markSyncOperationsSynced(operationIds) {
   for (const operationId of operationIds) update.run(now(), operationId)
 }
 
+export function recordSyncConflicts(conflicts) {
+  if (!Array.isArray(conflicts)) return
+  const insert = database.prepare('INSERT OR IGNORE INTO sync_conflicts (id, operation_id, entity_type, entity_id, reason, local_payload, remote_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+  for (const conflict of conflicts) insert.run(crypto.randomUUID(), conflict.operationId, conflict.entityType || 'unknown', conflict.entityId || '', conflict.reason || 'A newer change exists on another device.', JSON.stringify(conflict.localPayload || {}), JSON.stringify(conflict.remotePayload || {}), now())
+}
+
+export function listSyncConflicts() {
+  return database.prepare('SELECT id, operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, reason, created_at AS createdAt, resolved_at AS resolvedAt FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY created_at DESC').all()
+}
+
+export function resolveSyncConflict(id) {
+  database.prepare('UPDATE sync_conflicts SET resolved_at = ? WHERE id = ?').run(now(), id)
+}
+
 export function markSyncFailure(message) {
   database.prepare('UPDATE sync_outbox SET attempts = attempts + 1, last_error = ? WHERE synced_at IS NULL').run(String(message || 'Sync failed').slice(0, 500))
 }
@@ -217,7 +242,8 @@ export function setSyncCursor(cursor) { database.prepare("INSERT INTO sync_state
 export function getSyncStatus() {
   const pending = database.prepare('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL').get().count
   const lastError = database.prepare('SELECT last_error AS value FROM sync_outbox WHERE synced_at IS NULL AND last_error <> \'\' ORDER BY id DESC LIMIT 1').get()?.value || ''
-  return { configured: Boolean(process.env.SYNC_API_URL && process.env.SYNC_DEVICE_TOKEN && process.env.BUSINESS_ID), pending, lastError }
+  const conflicts = database.prepare('SELECT COUNT(*) AS count FROM sync_conflicts WHERE resolved_at IS NULL').get().count
+  return { configured: Boolean(process.env.SYNC_API_URL && process.env.SYNC_DEVICE_TOKEN && process.env.BUSINESS_ID), pending, conflicts, lastError }
 }
 export async function getSettings() {
   const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)
@@ -475,7 +501,7 @@ export function updateStocktakeCount(stocktakeId, countId, counted) {
   if (expected === undefined) throw new Error('Stocktake item not found.')
   database.prepare('UPDATE stocktake_counts SET counted_quantity = ?, variance = ? WHERE id = ? AND stocktake_id = ?').run(numericCount, numericCount - expected, countId, stocktakeId)
   const updatedStocktake = getStocktake(stocktakeId)
-  queueSync('stocktake', stocktakeId, 'count-update', { stocktakeId, countId, counted: numericCount })
+  queueSync('stocktake', stocktakeId, 'count-update', { stocktakeId, countId, counted: numericCount, updatedAt: now() })
   return updatedStocktake
 }
 

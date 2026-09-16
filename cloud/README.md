@@ -11,6 +11,29 @@ Set these Render environment variables:
 
 After deployment, verify `https://YOUR-RENDER-URL/health` returns `{"ok":true}`.
 
+## Owner accounts and device management
+
+Register each client owner once. Store the returned `accessToken` securely; it is an eight-hour owner-management token, not a device token.
+
+```powershell
+$body = @{ businessId = 'client-001'; ownerName = 'Client Owner'; email = 'owner@client.com'; password = 'Use-a-long-unique-password' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/auth/register' -ContentType 'application/json' -Body $body
+```
+
+Owners sign in with `POST /v1/auth/login`. Use their returned `accessToken` to enroll, list, or revoke devices. Enroll a device:
+
+```powershell
+$headers = @{ Authorization = 'Bearer OWNER_ACCESS_TOKEN'; 'Content-Type' = 'application/json' }
+$body = @{ deviceId = 'client-001-pc-01'; label = 'Main checkout computer' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/devices/enroll' -Headers $headers -Body $body
+```
+
+List devices with `GET /v1/devices`; revoke one with `POST /v1/devices/DEVICE_ID/revoke`. A revoked device can no longer push or pull data.
+
+Password recovery uses `POST /v1/auth/password-reset/request` and `POST /v1/auth/password-reset/confirm`. In production, connect the request endpoint to your transactional-email provider and email the reset token/link. Resetting an owner password revokes every enrolled device, requiring deliberate re-enrollment.
+
+The legacy admin-key enrollment endpoint remains for your operational setup only. For normal client onboarding, prefer the owner account flow above.
+
 For each installed client device, create a unique business ID and device ID, then issue its JWT from a secure terminal (replace all example values):
 
 ```powershell

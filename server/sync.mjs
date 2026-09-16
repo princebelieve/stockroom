@@ -1,4 +1,4 @@
-import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markSyncFailure, markSyncOperationsSynced, setSyncCursor } from './repository.mjs'
+import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markSyncFailure, markSyncOperationsSynced, recordSyncConflicts, setSyncCursor } from './repository.mjs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,7 +32,8 @@ export async function syncNow() {
       const pushed = await fetch(`${url}/v1/sync/push`, { method: 'POST', headers, body: JSON.stringify({ businessId, deviceId, operations: pending }) })
       if (!pushed.ok) throw new Error(`Cloud push failed (${pushed.status}).`)
       const result = await pushed.json()
-      markSyncOperationsSynced(result.acceptedOperationIds || pending.map((operation) => operation.operationId))
+      markSyncOperationsSynced([...(result.acceptedOperationIds || []), ...(result.conflicts || []).map((conflict) => conflict.operationId)])
+      recordSyncConflicts(result.conflicts)
     }
     const cursor = getSyncCursor()
     const pulled = await fetch(`${url}/v1/sync/pull?businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers })

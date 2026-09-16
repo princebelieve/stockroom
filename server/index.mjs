@@ -3,12 +3,13 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listUsers, updateStocktakeCount } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, resolveSyncConflict, updateStocktakeCount } from './repository.mjs'
 import { startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
+import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const sessions = new Map()
-let customerDisplayState = { businessName: 'My Business', currency: 'USD', items: [], total: 0, completed: false, updatedAt: new Date().toISOString() }
+const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
 const distDirectory = join(fileURLToPath(new URL('..', import.meta.url)), 'dist')
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' }
 
@@ -106,11 +107,15 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-sales.csv"' })
     return response.end(await exportSalesCsv())
   }
-  if (request.method === 'GET' && request.url === '/api/customer-display') return sendJson(response, 200, customerDisplayState)
+  if (request.method === 'GET' && request.url === '/api/customer-display') return sendJson(response, 200, getCustomerDisplay())
   if (request.method === 'PUT' && request.url === '/api/customer-display') return readJson(request, response, async (input) => {
-    customerDisplayState = { businessName: String(input.businessName || 'My Business'), currency: String(input.currency || 'USD'), items: Array.isArray(input.items) ? input.items.slice(0, 100) : [], total: Number(input.total) || 0, completed: Boolean(input.completed), updatedAt: new Date().toISOString() }
-    return sendJson(response, 200, customerDisplayState)
+    return sendJson(response, 200, setCustomerDisplay(input))
   })
+  if (request.method === 'POST' && request.url === '/api/customer-display/pair') {
+    const user = sessionUser(request)
+    if (!user || !['owner', 'admin', 'cashier'].includes(user.role)) return sendJson(response, 403, { error: 'Authenticated staff access required.' })
+    return sendJson(response, 201, createDisplayPairing(customerDisplayPort))
+  }
 
   if (request.method === 'GET' && request.url === '/api/users') {
     const user = sessionUser(request)
@@ -125,6 +130,17 @@ const server = createServer(async (request, response) => {
     })
   }
   if (request.method === 'GET' && request.url === '/api/sync/status') return sendJson(response, 200, await syncConfigurationStatus())
+  if (request.method === 'GET' && request.url === '/api/sync/conflicts') {
+    const user = sessionUser(request)
+    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    return sendJson(response, 200, { conflicts: listSyncConflicts() })
+  }
+  const conflictMatch = request.url?.match(/^\/api\/sync\/conflicts\/([^/]+)\/resolve$/)
+  if (request.method === 'POST' && conflictMatch) {
+    const user = sessionUser(request)
+    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    resolveSyncConflict(conflictMatch[1]); return sendJson(response, 200, { ok: true })
+  }
   if (request.method === 'POST' && request.url === '/api/sync/now') {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access is required.' })
@@ -267,6 +283,7 @@ function validateProduct(input) {
 const listenHost = process.env.STOCKROOM_LOCAL_ONLY === 'true' ? '127.0.0.1' : undefined
 server.listen(port, listenHost, () => console.log(`API listening at http://${listenHost || 'localhost'}:${port} using ${storageName}`))
 startSyncWorker()
+startCustomerDisplayGateway(customerDisplayPort)
 
 function sessionUser(request) {
   const token = request.headers.authorization?.replace('Bearer ', '')
