@@ -156,14 +156,14 @@ const server = createServer(async (request, response) => {
     if ((await getSettings()).ownerConfigured) return sendJson(response, 403, { error: 'This installation has already been handed over to its owner.' })
     return readJson(request, response, async (input) => {
       try {
-        const businessId = String(input.businessId || '').trim()
         const existingBusiness = input.mode === 'existing'
-        const remote = existingBusiness ? await cloudLoginAt(String(input.syncApiUrl || ''), String(input.ownerEmail || ''), String(input.ownerPassword || '')) : null
-        if (remote && (remote.account?.role !== 'owner' || remote.account?.businessId !== businessId)) throw new Error('Use the matching owner account and business ID.')
+        const remote = existingBusiness ? await cloudLoginAt('', String(input.ownerEmail || ''), String(input.ownerPassword || '')) : null
+        const businessId = existingBusiness ? String(remote?.account?.businessId || '') : String(input.businessId || '').trim()
+        if (remote && remote.account?.role !== 'owner') throw new Error('Only a business owner can add another device.')
         const enrolled = existingBusiness
-          ? await cloudEnrollDevice(String(input.syncApiUrl || ''), remote.accessToken, { deviceId: input.deviceId, label: input.label })
+          ? await cloudEnrollDevice('', remote.accessToken, { deviceId: input.deviceId, label: input.label })
           : await cloudEnrollDeviceAsInstaller(String(input.syncApiUrl || ''), String(input.adminApiKey || ''), { businessId, deviceId: input.deviceId, label: input.label, expiresInDays: 365 })
-        const configuration = await saveCloudConfiguration({ syncApiUrl: input.syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken })
+        const configuration = await saveCloudConfiguration({ syncApiUrl: existingBusiness ? remote.syncApiUrl : input.syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken })
         return sendJson(response, 201, { ...configuration, configured: true, existingBusiness })
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
