@@ -3,6 +3,7 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
 import { sendPasswordReset, sendStaffInvite } from './mailer.mjs'
+import { corsHeadersFor } from './cors.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -33,13 +34,7 @@ await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
 // Capacitor's Android WebView is served from this local HTTPS origin. Keep the
 // cloud API usable from the installed app without opening it to arbitrary sites.
-const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://localhost',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Key',
-  Vary: 'Origin',
-}
-function send(response, status, payload) { response.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders }); response.end(JSON.stringify(payload)) }
+function send(response, status, payload) { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(payload)) }
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
 function signToken(payload) {
   const header = encode({ alg: 'HS256', typ: 'JWT' })
@@ -75,6 +70,8 @@ function readJson(request) {
 }
 
 const server = createServer(async (request, response) => {
+  const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
+  for (const [name, value] of Object.entries(corsHeaders)) response.setHeader(name, value)
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   try {

@@ -48,3 +48,5 @@ Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/admin/devices' -
 ```
 
 Copy the returned `deviceToken` into the installed app's `%APPDATA%\Stockroom Business\sync-config.json`, together with the Render URL, business ID, and device ID. Do not put `MONGODB_URI`, `JWT_SECRET`, or `ADMIN_API_KEY` into the installed application.
+
+For the Vercel/iPhone PWA, set PWA_ALLOWED_ORIGINS to the exact HTTPS origin(s), separated by commas. Android's https://localhost remains allowed. See [PWA-DEPLOYMENT.md](../PWA-DEPLOYMENT.md).

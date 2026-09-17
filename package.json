@@ -9,6 +9,7 @@
     "api": "node server/index.mjs",
     "start": "node server/index.mjs",
     "build": "tsc -b && vite build",
+    "build:pwa": "tsc -b && vite build --mode pwa",
     "preview": "vite preview",
     "desktop": "npm run build && electron .",
     "desktop:package": "npm run build && electron-builder --win nsis",
@@ -27,13 +28,16 @@
     "nodemailer": "^10.0.10",
     "react": "latest",
     "react-dom": "latest",
+    "sql.js": "^1.14.2",
     "typescript": "latest",
     "vite": "latest"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
+    "@playwright/test": "^1.63.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/sql.js": "^1.4.11",
     "electron": "^44.3.0",
     "electron-builder": "^26.15.3"
   },

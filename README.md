@@ -18,11 +18,9 @@ npm run desktop:package
 
 When packaging succeeds, give clients the `Setup.exe` file in the `release` folder. Their business data is stored separately at `%APPDATA%\Stockroom Business\data`, so it survives application upgrades and uninstall/reinstall choices that preserve user data. Back up `stockroom.sqlite` from that directory regularly.
 
-## Mobile installation
+## iPhone PWA
 
-The browser app is a PWA: users can install it from Chrome/Edge on Android or **Share → Add to Home Screen** in Safari on iPhone. It must be served from an HTTPS address (not `localhost`) for service-worker installation to work on a phone.
-
-This PWA caches the interface and local product/sale queue. It is not yet a complete native mobile app because phones cannot run this Node/SQLite server. A full Android/iOS release needs the next phase: a hosted, authenticated sync API and a Capacitor app with native SQLite.
+The separate PWA build runs in the browser with a persistent local database and cloud synchronization. See [PWA deployment instructions](PWA-DEPLOYMENT.md) for Vercel, Render configuration, installation, supported features, and testing. Windows and Android retain their existing native storage paths.
 
 ## Android debug APK
 

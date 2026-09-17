@@ -28,3 +28,4 @@ Thumbs.db
 # TypeScript/Vite temporary files
 *.tsbuildinfo
 node_modules/.tmp/
+!/.env.pwa

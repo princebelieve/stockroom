@@ -5,6 +5,7 @@ import type { Customer, Product, Sale, Stocktake } from './types'
 import { cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, removeQueuedOperation, replaceQueuedProductId, saveSale, upsertCachedProducts } from './lib/offlineStore'
 import { installMobileApi } from './lib/mobileApi'
 import { isNativeMobile } from './lib/mobileDatabase'
+import { isBrowserPwa } from './lib/platform'
 import './styles.css'
 
 function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
@@ -47,11 +48,15 @@ declare global {
 }
 
 installMobileApi()
+if (import.meta.env.VITE_APP_MODE === 'pwa' && isBrowserPwa()) {
+  const { installBrowserApi } = await import('./lib/installBrowserApi')
+  installBrowserApi()
+}
 
 if ('serviceWorker' in navigator && !navigator.userAgent.includes('Electron')) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => undefined)
-  })
+  const register = () => { navigator.serviceWorker.register('/sw.js').catch(() => undefined) }
+  if (document.readyState === 'complete') register()
+  else window.addEventListener('load', register, { once: true })
 }
 
 type AppSettings = {
@@ -120,6 +125,7 @@ function App() {
   const [setupRequired, setSetupRequired] = useState(true)
   const [installerRequired, setInstallerRequired] = useState(true)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const [startupError, setStartupError] = useState('')
   const [installerMessage, setInstallerMessage] = useState('')
   const [mobilePullDistance, setMobilePullDistance] = useState(0)
   const [refreshingView, setRefreshingView] = useState(false)
@@ -129,7 +135,7 @@ function App() {
   useEffect(() => localStorage.setItem('stockroom-products', JSON.stringify(products)), [products])
   useEffect(() => {
     if (!authToken) return
-    getCachedProducts().then((cached) => { if (cached.length) setProducts(cached) }).catch(() => undefined)
+    if (!isBrowserPwa()) getCachedProducts().then((cached) => { if (cached.length) setProducts(cached) }).catch(() => undefined)
     fetch('/api/products', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ products: Product[] }> : Promise.reject()).then((data) => {
       setProducts(data.products)
       cacheProducts(data.products).catch(() => undefined)
@@ -177,6 +183,10 @@ function App() {
       const response = await fetch('/api/sync/now', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
       if (response.ok) setSyncStatus(await response.json() as SyncStatus)
       await refreshBusinessSettings()
+      if (isBrowserPwa()) {
+        const productsResponse = await fetch('/api/products', { headers: authHeaders })
+        if (productsResponse.ok) setProducts((await productsResponse.json()).products)
+      }
     } finally { setSyncing(false) }
   }
   async function pullLatest() {
@@ -201,10 +211,21 @@ function App() {
     // uploading this phone's queued work.
     fetch('/api/sync/pull', { method: 'POST', headers: authHeaders })
       .catch(() => undefined)
-      .finally(() => window.setTimeout(() => window.location.reload(), 120))
+      .finally(async () => {
+        if (isBrowserPwa() && 'serviceWorker' in navigator) {
+          const registration = await navigator.serviceWorker.getRegistration()
+          await registration?.update().catch(() => undefined)
+          if (registration?.waiting) {
+            navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true })
+            registration.waiting.postMessage('ACTIVATE_UPDATE')
+            return
+          }
+        }
+        window.setTimeout(() => window.location.reload(), 120)
+      })
   }
   useEffect(() => {
-    if (!isNativeMobile()) return
+    if (!isNativeMobile() && !isBrowserPwa()) return
     let startY = 0
     let startX = 0
     let distance = 0
@@ -290,6 +311,7 @@ function App() {
     return () => window.clearInterval(interval)
   }, [])
   async function syncQueuedOperations() {
+    if (isBrowserPwa()) return
     if (!navigator.onLine) return
     const operations = await getQueuedOperations()
     for (const operation of operations) {
@@ -329,6 +351,7 @@ function App() {
       localStorage.setItem('stockroom-currency', settings.currency || 'USD')
       document.title = settings.appName || 'My Business'
     }).catch(() => {
+      if (isBrowserPwa()) { setStartupError('Unable to open local storage. Please update your browser, allow website storage, and try again.'); return }
       setSetupRequired(true)
       setInstallerRequired(true)
       setSettingsLoaded(true)
@@ -361,6 +384,7 @@ function App() {
       setProducts((current) => current.map((product) => product.id === id ? updated : product))
       upsertCachedProducts([updated]).catch(() => undefined)
     } catch {
+      if (isBrowserPwa()) { window.alert('Stock could not be saved. Check available device storage and try again.'); return }
       const cachedProduct = products.find((product) => product.id === id)
       if (cachedProduct) {
         const updated = { ...cachedProduct, stock: Math.max(0, cachedProduct.stock + amount), updated: 'Saved offline' }
@@ -383,6 +407,7 @@ function App() {
       setProducts((current) => [product, ...current])
       await upsertCachedProducts([product])
     } catch {
+      if (isBrowserPwa()) { window.alert('Product could not be saved. Check its details and available device storage.'); return }
       const product = { ...input, id: crypto.randomUUID(), updated: 'Saved offline' }
       setProducts((current) => [product, ...current])
       await upsertCachedProducts([product])
@@ -403,6 +428,7 @@ function App() {
       localStorage.setItem('stockroom-currency', currency)
       setSettingsMessage('Saved to the business account.')
     } catch {
+      if (isBrowserPwa()) { setSettingsMessage('Settings could not be saved. Check available device storage and try again.'); return }
       await queueOperation({ type: 'settings', payload: { appName: nextName, currency, posProvider, posTerminalId, posConnection }, createdAt: new Date().toISOString() })
       setSettingsMessage('Saved on this device. It will sync when the server is available.')
     }
@@ -459,11 +485,17 @@ function App() {
   async function completeSale() {
     if (paymentMethod === 'external-pos' && (!terminalProvider.trim() || !paymentReference.trim())) return
     const sale: Sale = { id: crypto.randomUUID(), items: cartProducts.map((product) => ({ productId: product.id, quantity: cart[product.id], price: product.price })), total: cartTotal, createdAt: new Date().toISOString(), syncStatus: 'pending', paymentMethod, terminalProvider: terminalProvider.trim(), paymentReference: paymentReference.trim() }
+    if (isBrowserPwa()) {
+      const response = await fetch('/api/sales', { method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(sale) })
+      if (!response.ok) { const result = await response.json(); window.alert(result.error || 'Sale could not be saved.'); return }
+    }
     const updatedProducts = products.map((product) => cart[product.id] ? { ...product, stock: Math.max(0, product.stock - cart[product.id]), updated: 'Sold offline' } : product)
     setProducts(updatedProducts)
     await cacheProducts(updatedProducts)
-    await saveSale(sale)
-    await queueOperation({ type: 'sale', payload: sale as unknown as Record<string, unknown>, createdAt: sale.createdAt })
+    if (!isBrowserPwa()) {
+      await saveSale(sale)
+      await queueOperation({ type: 'sale', payload: sale as unknown as Record<string, unknown>, createdAt: sale.createdAt })
+    }
     await syncQueuedOperations().catch(() => undefined)
     if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => setSales(data.sales)).catch(() => undefined)
     setLastReceipt(sale)
@@ -604,7 +636,13 @@ function App() {
     const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
     const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).catch(() => null)
     const cloudData = cloudResponse?.ok ? await cloudResponse.json() as { token: string; user: User; cloudAccessToken: string } : null
-    if (!response.ok && !cloudResponse?.ok) throw new Error('Email or password is incorrect.')
+    if (!response.ok && !cloudResponse?.ok) {
+      if (isBrowserPwa()) {
+        const failure = await cloudResponse?.json().catch(() => null)
+        throw new Error(failure?.error || 'Connect to the internet to sign in. An existing signed-in session can work offline.')
+      }
+      throw new Error('Email or password is incorrect.')
+    }
     const data = response.ok ? await response.json() as { token: string; user: User } : cloudData!
     if (cloudData) {
       setCloudAccessToken(cloudData.cloudAccessToken); localStorage.setItem('stockroom-cloud-access-token', cloudData.cloudAccessToken)
@@ -650,7 +688,8 @@ function App() {
   }
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } }).catch(() => undefined)
+    const response = await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } }).catch(() => undefined)
+    if (isBrowserPwa() && !response?.ok) { window.alert('Could not clear the saved session. Check available device storage and try logging out again.'); return }
     // Ending an active session does not undo device enrollment or shop setup.
     setInstallerRequired(false)
     setSetupRequired(false)
@@ -663,30 +702,30 @@ function App() {
     setCloudAccessToken('')
   }
 
-  if (!settingsLoaded) return <main className="login-screen"><div className="login-card"><h1>Loading your business</h1></div></main>
+  if (!settingsLoaded) return <main className="login-screen"><div className="login-card"><h1>{startupError ? 'Cannot open your business' : 'Loading your business'}</h1>{startupError && <><p>{startupError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></>}</div></main>
   if (!user) return installerRequired ? <InstallerScreen onActivate={activateInstallation} message={installerMessage} /> : setupRequired ? <SetupScreen onCreate={completeSetup} error={authError} setError={setAuthError} /> : <LoginScreen onLogin={login} error={authError} setError={setAuthError} />
 
   return <div className="app-shell">
-    {isNativeMobile() && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
+    {(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><Boxes size={21} /></div><div><strong>{appName}</strong><span>Business operations</span></div></div>
       <div className="workspace"><Store size={16} /><span>{appName}</span><MoreHorizontal size={17} /></div>
       <nav>
         {canManageOperations && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
         {canManageOperations && <button className={active === 'Inventory' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Inventory')}><Boxes size={18} />Inventory <b>{products.length}</b></button>}
-        {canManageInventory && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
+        {canManageInventory && !isBrowserPwa() && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
         <button className={active === 'POS' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('POS')}><ShoppingCart size={18} />POS</button>
-        <button className={active === 'Display' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Display')}><Store size={18} />Customer display</button>
+        {!isBrowserPwa() && <button className={active === 'Display' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Display')}><Store size={18} />Customer display</button>}
         {canManageOperations && <button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sales')}><ShoppingCart size={18} />Sales</button>}
         {canManageOperations && <button className={active === 'Movements' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Movements')}><ArrowDownToLine size={18} />Stock movements</button>}
         {canManageOperations && <button className={active === 'Wallet' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Wallet')}><WalletCards size={18} />Wallet</button>}
-        {['owner', 'admin'].includes(user.role) && <button className={active === 'Owner' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Owner')}><LayoutDashboard size={18} />Business dashboard</button>}
+        {!isBrowserPwa() && ['owner', 'admin'].includes(user.role) && <button className={active === 'Owner' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Owner')}><LayoutDashboard size={18} />Business dashboard</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Reports' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Reports')}><BarChart3 size={18} />Reports</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Sync' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sync')}><RefreshCw size={18} />Sync issues {syncConflicts.length > 0 && <b>{syncConflicts.length}</b>}</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Team' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Team')}><UserRoundCog size={18} />Team management</button>}
         {user.role === 'owner' && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Settings')}><UserRoundCog size={18} />Business settings</button>}
       </nav>
-      <div className="sidebar-foot"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` · ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline · saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
+      <div className={isBrowserPwa() ? "sidebar-foot pwa-sync-controls" : "sidebar-foot"}><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` · ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline · saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
     </aside>
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">{user.name} · {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><button className="text-button logout-button" onClick={logout}>Log out</button></div></header>
@@ -697,7 +736,7 @@ function App() {
       </>}
       {active === 'Inventory' && <section className="panel full-panel"><div className="panel-heading"><div><h2>All inventory</h2><p>Adjust counts as stock comes in or goes out.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}><Plus size={18} />Add product</button></div><div className="search-row"><div className="search-box"><Search size={17} /><input placeholder="Search or scan barcode" value={query} onChange={(event) => setQuery(event.target.value)} /></div><button className="filter-button" onClick={scanBarcode}><ScanLine size={16} />Scan</button></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Unit price</th><th>Updated</th><th></th></tr></thead><tbody>{filteredProducts.map((product) => <ProductRow key={product.id} product={product} updateStock={updateStock} money={formatMoney} detailed />)}</tbody></table></div></section>}
       {active === 'Stocktake' && <section className="panel full-panel"><div className="panel-heading"><div><h2>Physical stock take</h2><p>Count what is physically on the shelf and approve the variance.</p></div>{!stocktake || stocktake.status === 'approved' ? <button className="primary-button" onClick={startStocktake}><CheckSquare size={17} />Start stock take</button> : <button className="primary-button" onClick={approveStocktakeSession}>Approve adjustments</button>}</div>{!stocktake ? <div className="empty-state">Start a session to compare expected stock with physical counts.</div> : <><div className="search-row"><label className="settings-form" style={{ width: '100%' }}><span>Approval reason</span><input value={stocktakeReason} onChange={(event) => setStocktakeReason(event.target.value)} disabled={stocktake.status === 'approved'} /></label></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>Expected</th><th>Counted</th><th>Variance</th></tr></thead><tbody>{stocktake.counts.map((count) => <tr key={count.id}><td><strong>{count.name}</strong><span className="table-subtext">{count.sku}</span></td><td>{count.expected}</td><td><input className="count-input" type="number" min="0" value={count.counted} disabled={stocktake.status === 'approved'} onChange={(event) => updateCount(count.id, Number(event.target.value))} /></td><td className={count.variance === 0 ? 'muted' : count.variance < 0 ? 'low-stock' : 'positive'}>{count.variance > 0 ? '+' : ''}{count.variance}</td></tr>)}</tbody></table></div>{stocktake.history && stocktake.history.length > 0 && <div className="panel"><div className="panel-heading"><div><h3>Audit history</h3><p>Recorded adjustments from this stock-take session.</p></div></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>Expected</th><th>Counted</th><th>Variance</th><th>Reason</th></tr></thead><tbody>{stocktake.history.map((entry) => <tr key={entry.id}><td><strong>{entry.name}</strong><span className="table-subtext">{entry.sku}</span></td><td>{entry.expected}</td><td>{entry.counted}</td><td className={entry.variance === 0 ? 'muted' : entry.variance < 0 ? 'low-stock' : 'positive'}>{entry.variance > 0 ? '+' : ''}{entry.variance}</td><td>{entry.reason}</td></tr>)}</tbody></table></div></div>}</>}</section>}
-      {active === 'POS' && <section className="pos-layout"><div className="panel"><div className="panel-heading"><div><h2>Sell products</h2><p>Search or scan a barcode to add an item.</p></div><button className="icon-button" onClick={scanBarcode} title="Scan barcode"><ScanLine size={20} /></button></div><div className="search-box pos-search"><Search size={17} /><input autoFocus placeholder="Search or scan barcode" value={query} onChange={(event) => setQuery(event.target.value)} /></div><div className="pos-products">{filteredProducts.map((product) => <button className="pos-product" key={product.id} onClick={() => addToCart(product)}><div className="product-icon">{product.name.slice(0, 1)}</div><span><strong>{product.name}</strong><small>{product.stock} {product.unit}s available</small></span><b>{formatMoney(product.price)}</b></button>)}</div></div><div className="panel cart-panel"><div className="panel-heading"><div><h2>Current sale</h2><p>{cartProducts.length} products</p></div><ShoppingCart size={20} /></div>{cartProducts.length === 0 ? <div className="empty-state">Scan or select a product to begin.</div> : cartProducts.map((product) => <div className="cart-row" key={product.id}><div><strong>{product.name}</strong><span>{cart[product.id]} × {formatMoney(product.price)}</span></div><button onClick={() => removeFromCart(product.id)}><X size={15} /></button></div>)}<div className="payment-options"><label>Payment method<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as Sale['paymentMethod'])}><option value="external-pos">External POS terminal</option><option value="cash">Cash</option><option value="wallet">Customer wallet</option></select></label>{paymentMethod === 'external-pos' && <><label>Terminal provider<input placeholder="Your provider name" value={terminalProvider} onChange={(event) => setTerminalProvider(event.target.value)} /></label><label>Terminal reference<input placeholder="Approval/reference number" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} /></label></> }</div><div className="cart-total"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div><button className="primary-button checkout-button" disabled={!cartProducts.length || (paymentMethod === 'external-pos' && (!terminalProvider || !paymentReference))} onClick={completeSale}>Complete sale & print</button></div></section>}
+      {active === 'POS' && <section className="pos-layout"><div className="panel"><div className="panel-heading"><div><h2>Sell products</h2><p>Search or scan a barcode to add an item.</p></div><button className="icon-button" onClick={scanBarcode} title="Scan barcode"><ScanLine size={20} /></button></div><div className="search-box pos-search"><Search size={17} /><input autoFocus placeholder="Search or scan barcode" value={query} onChange={(event) => setQuery(event.target.value)} /></div><div className="pos-products">{filteredProducts.map((product) => <button className="pos-product" key={product.id} onClick={() => addToCart(product)}><div className="product-icon">{product.name.slice(0, 1)}</div><span><strong>{product.name}</strong><small>{product.stock} {product.unit}s available</small></span><b>{formatMoney(product.price)}</b></button>)}</div></div><div className="panel cart-panel"><div className="panel-heading"><div><h2>Current sale</h2><p>{cartProducts.length} products</p></div><ShoppingCart size={20} /></div>{cartProducts.length === 0 ? <div className="empty-state">Scan or select a product to begin.</div> : cartProducts.map((product) => <div className="cart-row" key={product.id}><div><strong>{product.name}</strong><span>{cart[product.id]} × {formatMoney(product.price)}</span></div><button onClick={() => removeFromCart(product.id)}><X size={15} /></button></div>)}<div className="payment-options"><label>Payment method<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as Sale['paymentMethod'])}><option value="external-pos">External POS terminal</option><option value="cash">Cash</option>{!isBrowserPwa() && <option value="wallet">Customer wallet</option>}</select></label>{paymentMethod === 'external-pos' && <><label>Terminal provider<input placeholder="Your provider name" value={terminalProvider} onChange={(event) => setTerminalProvider(event.target.value)} /></label><label>Terminal reference<input placeholder="Approval/reference number" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} /></label></> }</div><div className="cart-total"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div><button className="primary-button checkout-button" disabled={!cartProducts.length || (paymentMethod === 'external-pos' && (!terminalProvider || !paymentReference))} onClick={completeSale}>Complete sale & print</button></div></section>}
       {active === 'Display' && <CustomerDisplayPairing pairing={displayPairing} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} />}
       {active === 'Sales' && <section className="panel full-panel"><div className="panel-heading"><div><h2>Sales history</h2><p>Completed sales saved on this device.</p></div></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Items</th><th>Payment</th><th>Total</th></tr></thead><tbody>{sales.length ? sales.map((sale) => <tr key={sale.id}><td>{new Date(sale.createdAt).toLocaleString()}</td><td>{sale.items.map((item) => `${item.quantity} × ${item.productName}`).join(', ') || 'Legacy sale'}</td><td>{sale.paymentMethod}{sale.paymentReference ? ` · ${sale.paymentReference}` : ''}</td><td>{formatMoney(sale.total)}</td></tr>) : <tr><td colSpan={4} className="empty-state">No completed sales yet.</td></tr>}</tbody></table></div></section>}
       {active === 'Movements' && <section className="panel full-panel"><div className="panel-heading"><div><h2>Stock movements</h2><p>Every sale, adjustment, and approved stock-take is recorded here.</p></div></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Product</th><th>Change</th><th>Reason</th></tr></thead><tbody>{movements.length ? movements.map((movement) => <tr key={movement.id}><td>{new Date(movement.createdAt).toLocaleString()}</td><td><strong>{movement.productName}</strong><span className="table-subtext">{movement.sku}</span></td><td className={movement.quantity < 0 ? 'low-stock' : 'positive'}>{movement.quantity > 0 ? '+' : ''}{movement.quantity}</td><td>{movement.reason}</td></tr>) : <tr><td colSpan={4} className="empty-state">No stock movements yet.</td></tr>}</tbody></table></div></section>}
@@ -706,7 +745,7 @@ function App() {
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
       {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} />}
       {active === 'Team' && <TeamManagement staff={staff} addStaff={addStaff} setCashierAccess={setCashierAccess} canCreateStaff={user.role === 'owner'} message={settingsMessage} />}
-      {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><form className="settings-form" onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>External POS provider<span>Optional. Enter the provider used by this shop.</span><input value={posProvider} placeholder="Provider name" onChange={(event) => setPosProvider(event.target.value)} /></label><label>Terminal ID<span>The identifier printed on or shown by the terminal.</span><input value={posTerminalId} placeholder="Terminal ID" onChange={(event) => setPosTerminalId(event.target.value)} /></label><label>Connection mode<span>This records how the terminal will integrate with the app.</span><select value={posConnection} onChange={(event) => setPosConnection(event.target.value)}><option value="manual">Manual confirmation</option><option value="usb">USB</option><option value="bluetooth">Bluetooth</option><option value="network">Local network</option><option value="sdk">Provider SDK</option></select></label><button className="primary-button">Save business settings <ArrowUpToLine size={17} /></button>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</form><form className="settings-form" onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><button className="primary-button" type="submit">Update password</button>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</form></section>}
+      {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><form className="settings-form" onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>External POS provider<span>Optional. Enter the provider used by this shop.</span><input value={posProvider} placeholder="Provider name" onChange={(event) => setPosProvider(event.target.value)} /></label><label>Terminal ID<span>The identifier printed on or shown by the terminal.</span><input value={posTerminalId} placeholder="Terminal ID" onChange={(event) => setPosTerminalId(event.target.value)} /></label><label>Connection mode<span>This records how the terminal will integrate with the app.</span><select value={posConnection} onChange={(event) => setPosConnection(event.target.value)}><option value="manual">Manual confirmation</option><option value="usb">USB</option><option value="bluetooth">Bluetooth</option><option value="network">Local network</option><option value="sdk">Provider SDK</option></select></label><button className="primary-button">Save business settings <ArrowUpToLine size={17} /></button>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</form>{!isBrowserPwa() && <form className="settings-form" onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><button className="primary-button" type="submit">Update password</button>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</form>}{isBrowserPwa() && <p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p>}</section>}
     </main>
     {showAdd && <div className="modal-backdrop" onMouseDown={() => setShowAdd(false)}><form className="modal" onSubmit={addProduct} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2>Add product</h2><p>It will be saved on this device immediately.</p></div><button type="button" className="icon-button" onClick={() => setShowAdd(false)}><X size={19} /></button></div><div className="form-grid"><label>Product name<input name="name" required placeholder="e.g. Espresso beans" /></label><label>SKU<input name="sku" required placeholder="COF-001" /></label><label>Category<input name="category" required placeholder="Beverages" /></label><label>Unit<input name="unit" required placeholder="bag" /></label><label>Starting stock<input name="stock" type="number" min="0" required defaultValue="0" /></label><label>Reorder point<input name="reorder" type="number" min="0" required defaultValue="10" /></label><label>Unit price<input name="price" type="number" min="0" step="0.01" required defaultValue="0" /></label></div><button className="primary-button submit-button">Save product <ArrowUpToLine size={17} /></button></form></div>}
     {lastReceipt && <div className="print-receipt"><h2>{appName}</h2><p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>{lastReceipt.items.map((item) => <p key={item.productId}>{item.quantity} × {formatMoney(item.price)}</p>)}<strong>Total: {formatMoney(lastReceipt.total)}</strong></div>}
@@ -784,7 +823,7 @@ function SyncIssues({ conflicts, resolveConflict }: { conflicts: SyncConflict[];
 
 function InstallerScreen({ onActivate, message }: { onActivate: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; message: string }) {
   const [mode, setMode] = useState<'new' | 'existing'>('existing')
-  return <main className="login-screen"><form className="login-card installer-card" onSubmit={onActivate}><input type="hidden" name="mode" value={mode} /><div className="brand-mark"><Boxes size={21} /></div><h1>{mode === 'new' ? 'New client activation' : 'Add another device'}</h1><p>{mode === 'new' ? 'Installer-only: activate this client device before handing over the app.' : 'For the business owner: add a second computer without any developer credentials.'}</p><div className="installer-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>New client</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Existing business</button></div>{mode === 'new' && <label>Client business ID<input name="businessId" required pattern="[a-z0-9][a-z0-9-]{2,80}" placeholder="client-business-001" /></label>}<label>Device ID<input name="deviceId" required pattern="[a-z0-9][a-z0-9-]{2,100}" placeholder="client-business-main-pc" /></label><label>Device label<input name="label" required maxLength={100} placeholder="Main checkout computer" /></label>{mode === 'new' ? <><label>Installer Admin API key<input name="adminApiKey" type="password" required autoComplete="off" placeholder="Private installer key" /></label><p className="installer-note">The app connects to the configured cloud service automatically. This key is sent only to the cloud service and is never saved.</p></> : <><label>Owner email<input name="ownerEmail" type="email" required placeholder="owner@business.com" /></label><label>Owner password<input name="ownerPassword" type="password" minLength={10} required autoComplete="current-password" placeholder="Cloud owner password" /></label><p className="installer-note">Your business is identified from the owner account. The password is used only to enroll this device and is not stored.</p></>}{message && <div className={message.startsWith('Installation activated') ? 'settings-message' : 'auth-error'}>{message}</div>}<button className="primary-button login-button">{mode === 'new' ? 'Activate new client' : 'Add this device'}</button></form></main>
+  return <main className="login-screen"><form className="login-card installer-card" onSubmit={onActivate}><input type="hidden" name="mode" value={mode} /><div className="brand-mark"><Boxes size={21} /></div><h1>{mode === 'new' ? 'New client activation' : 'Add another device'}</h1><p>{mode === 'new' ? 'Installer-only: activate this client device before handing over the app.' : 'For the business owner: add this device to your existing business.'}</p>{!isBrowserPwa() && <div className="installer-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>New client</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Existing business</button></div>}{mode === 'new' && <label>Client business ID<input name="businessId" required pattern="[a-z0-9][a-z0-9-]{2,80}" placeholder="client-business-001" /></label>}<label>Device ID<input name="deviceId" required pattern="[a-z0-9][a-z0-9-]{2,100}" placeholder="client-business-main-pc" /></label><label>Device label<input name="label" required maxLength={100} placeholder="Main checkout computer" /></label>{mode === 'new' ? <><label>Installer Admin API key<input name="adminApiKey" type="password" required autoComplete="off" placeholder="Private installer key" /></label><p className="installer-note">The app connects to the configured cloud service automatically. This key is sent only to the cloud service and is never saved.</p></> : <><label>Owner email<input name="ownerEmail" type="email" required placeholder="owner@business.com" /></label><label>Owner password<input name="ownerPassword" type="password" minLength={10} required autoComplete="current-password" placeholder="Cloud owner password" /></label><p className="installer-note">Your business is identified from the owner account. The password is used only to enroll this device and is not stored.</p></>}{message && <div className={message.startsWith('Installation activated') ? 'settings-message' : 'auth-error'}>{message}</div>}<button className="primary-button login-button">{mode === 'new' ? 'Activate new client' : 'Add this device'}</button></form></main>
 }
 
 function CustomerDisplayPairing({ pairing, createPairing, openSecondMonitor }: { pairing: { url: string; code: string; expiresAt: string } | null; createPairing: () => Promise<void>; openSecondMonitor: () => Promise<void> }) {

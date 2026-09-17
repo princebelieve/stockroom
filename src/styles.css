@@ -64,3 +64,4 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .login-card { min-width: 0; padding: 24px; }
   .full-panel .settings-form .primary-button { font-size: 13px; }
 }
+.sidebar-foot.pwa-sync-controls { display: block; }
