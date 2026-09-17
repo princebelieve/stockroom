@@ -131,7 +131,7 @@ async function pullLatest(configInput?: MobileSyncConfiguration | null) {
 async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) {
   const db = await openMobileDatabase()
   const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
-  if (current?.appName && current?.currency) return current
+  if (current?.appName && current?.currency && !(current.appName === 'My Business' && current.currency === 'USD')) return current
   if (config) {
     await pullLatest(config)
     const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]

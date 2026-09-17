@@ -373,7 +373,18 @@ function App() {
       localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
       localStorage.setItem('stockroom-currency', settings.currency || 'USD')
       document.title = settings.appName || 'My Business'
-    }).catch(() => {
+    }).catch(async () => {
+      try {
+        const response = await fetch('/api/sync/status')
+        const status = response.ok ? await response.json() as { configured?: boolean; existingBusiness?: boolean } : {}
+        const startupState = resolveStartupState({ cloudConfigured: status.configured, existingBusiness: status.existingBusiness })
+        if (startupState.hasExistingDevice) {
+          setSetupRequired(false)
+          setInstallerRequired(false)
+          setSettingsLoaded(true)
+          return
+        }
+      } catch { }
       if (isBrowserPwa()) { setStartupError('Unable to open local storage. Please update your browser, allow website storage, and try again.'); return }
       setSetupRequired(true)
       setInstallerRequired(true)
