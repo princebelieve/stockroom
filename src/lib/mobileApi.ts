@@ -1,4 +1,4 @@
-import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, saveMobileSyncConfiguration } from './mobileDatabase'
+import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, saveMobileSyncConfiguration, type MobileSyncConfiguration } from './mobileDatabase'
 
 type MobileUser = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
 type Operation = { operationId: string; entityType: string; entityId: string; action: string; payload: Record<string, unknown>; createdAt: string }
@@ -66,6 +66,8 @@ async function applyOperation(operation: Operation) {
     }
   } else if (operation.entityType === 'expense' && operation.action === 'create') {
     await db.run('INSERT OR IGNORE INTO expenses (id, category, description, amount, incurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?)', [payload.id, payload.category, payload.description, Number(payload.amount) || 0, payload.incurredAt || operation.createdAt, payload.createdAt || operation.createdAt])
+  } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
+    await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, updated_at=excluded.updated_at', [payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.updatedAt || operation.createdAt])
   }
   await db.run('INSERT INTO sync_inbox (operation_id, received_at) VALUES (?, ?)', [operation.operationId, now()])
 }
@@ -83,17 +85,39 @@ async function syncNow() {
       if (!response.ok) throw new Error(result.error || 'Cloud push failed.')
       for (const operationId of [...(result.acceptedOperationIds || []), ...(result.conflicts || []).map((item: { operationId: string }) => item.operationId)]) await db.run('UPDATE sync_outbox SET synced_at = ? WHERE operation_id = ?', [now(), operationId])
     }
+    return await pullLatest(config)
+  } catch (caught) {
+    const pending = await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')
+    return { configured: true, pending: Number(pending.values?.[0]?.count || 0), lastError: caught instanceof Error ? caught.message : 'Sync failed.' }
+  }
+}
+
+// Pull-to-refresh uses this path. It never uploads this device's outbox; it
+// only applies newer cloud changes to native SQLite.
+async function pullLatest(configInput?: MobileSyncConfiguration | null) {
+  const config = configInput || await getMobileSyncConfiguration()
+  if (!config) return { configured: false, pending: 0, lastError: 'This phone has not been enrolled.' }
+  const db = await openMobileDatabase()
+  try {
     const cursor = await setting('syncCursor')
     const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) await applyOperation(operation)
     if (result.cursor) await setSetting('syncCursor', result.cursor)
-    return { configured: true, pending: 0, conflicts: 0, lastError: '' }
+    const pending = await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')
+    return { configured: true, pending: Number(pending.values?.[0]?.count || 0), conflicts: 0, lastError: '' }
   } catch (caught) {
     const pending = await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')
-    return { configured: true, pending: Number(pending.values?.[0]?.count || 0), lastError: caught instanceof Error ? caught.message : 'Sync failed.' }
+    return { configured: true, pending: Number(pending.values?.[0]?.count || 0), lastError: caught instanceof Error ? caught.message : 'Cloud refresh failed.' }
   }
+}
+
+async function localSyncStatus() {
+  const config = await getMobileSyncConfiguration()
+  const db = await openMobileDatabase()
+  const pending = await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')
+  return { configured: Boolean(config), pending: Number(pending.values?.[0]?.count || 0), conflicts: 0, lastError: config ? '' : 'This phone has not been enrolled.' }
 }
 
 async function cloudRequest(path: string, init: RequestInit = {}) {
@@ -141,11 +165,13 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     const stored = (await db.query('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE email = ?', [localUser.email])).values?.[0]
     await setSetting('sessionUserId', String(stored.id))
     await setSetting('cloudAccessToken', String(result.accessToken))
+    await pullLatest(config)
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' }, cloudAccessToken: result.accessToken })
   }
   if (!user) return error('Authentication required.', 401)
   if (path === '/api/auth/logout' && method === 'POST') { await setSetting('sessionUserId', ''); await setSetting('cloudAccessToken', ''); return json({}) }
-  if (path === '/api/sync/status') return json(await syncNow())
+  if (path === '/api/sync/status') return json(await localSyncStatus())
+  if (path === '/api/sync/pull' && method === 'POST') return json(await pullLatest())
   if (path === '/api/sync/now' && method === 'POST') return json(await syncNow())
   if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products ORDER BY updated_at DESC')).values || [] })
   if (path === '/api/products' && method === 'POST') {
@@ -232,7 +258,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     if (user.role !== 'owner') return error('Only the owner can change business settings.', 403)
     const input = await body(init); const appName = String(input.appName || '').trim(); const currency = String(input.currency || '').toUpperCase(); const posConnection = String(input.posConnection || 'manual')
     if (!appName || appName.length > 60 || !/^[A-Z]{3}$/.test(currency) || !['manual', 'usb', 'bluetooth', 'network', 'sdk'].includes(posConnection)) return error('Business settings are invalid.')
-    const updatedAt = now(); await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, updated_at=excluded.updated_at', [appName, currency, String(input.posProvider || ''), String(input.posTerminalId || ''), posConnection, updatedAt]); return json({ appName, currency, posProvider: String(input.posProvider || ''), posTerminalId: String(input.posTerminalId || ''), posConnection, updatedAt })
+    const updatedAt = now(); const settings = { appName, currency, posProvider: String(input.posProvider || ''), posTerminalId: String(input.posTerminalId || ''), posConnection, updatedAt }; await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, updated_at=excluded.updated_at', [appName, currency, settings.posProvider, settings.posTerminalId, posConnection, updatedAt]); await queue('settings', 'business', 'upsert', settings); return json(settings)
   }
   return error('This mobile action is not available yet.', 501)
 }

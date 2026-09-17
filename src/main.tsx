@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, BarChart3, Boxes, CheckS
 import type { Customer, Product, Sale, Stocktake } from './types'
 import { cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, removeQueuedOperation, replaceQueuedProductId, saveSale, upsertCachedProducts } from './lib/offlineStore'
 import { installMobileApi } from './lib/mobileApi'
+import { isNativeMobile } from './lib/mobileDatabase'
 import './styles.css'
 
 installMobileApi()
@@ -80,6 +81,8 @@ function App() {
   const [installerRequired, setInstallerRequired] = useState(true)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [installerMessage, setInstallerMessage] = useState('')
+  const [mobilePullDistance, setMobilePullDistance] = useState(0)
+  const [refreshingView, setRefreshingView] = useState(false)
   const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
 
   useEffect(() => { document.title = appName }, [appName])
@@ -111,17 +114,91 @@ function App() {
     if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
     fetch('/api/reports', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<Reports> : Promise.reject()).then(setReports).catch(() => undefined)
   }, [authToken, user?.role])
+  async function refreshBusinessSettings() {
+    const response = await fetch('/api/settings').catch(() => null)
+    if (!response?.ok) return
+    const settings = await response.json() as AppSettings
+    setAppName(settings.appName || 'My Business')
+    setCurrency(settings.currency || 'USD')
+    setPosProvider(settings.posProvider || '')
+    setPosTerminalId(settings.posTerminalId || '')
+    setPosConnection(settings.posConnection || 'manual')
+    localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
+    localStorage.setItem('stockroom-currency', settings.currency || 'USD')
+  }
   async function refreshSyncStatus() {
     const response = await fetch('/api/sync/status').catch(() => null)
     if (response?.ok) setSyncStatus(await response.json() as SyncStatus)
+    await refreshBusinessSettings()
   }
   async function syncNow() {
     setSyncing(true)
     try {
       const response = await fetch('/api/sync/now', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
       if (response.ok) setSyncStatus(await response.json() as SyncStatus)
+      await refreshBusinessSettings()
     } finally { setSyncing(false) }
   }
+  async function pullLatest() {
+    setSyncing(true)
+    try {
+      const response = await fetch('/api/sync/pull', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
+      if (!response.ok) return
+      setSyncStatus(await response.json() as SyncStatus)
+      await refreshBusinessSettings()
+      window.location.reload()
+    } finally { setSyncing(false) }
+  }
+  useEffect(() => {
+    if (isNativeMobile()) return
+    const handleDesktopReload = (event: KeyboardEvent) => {
+      const reloadShortcut = event.key === 'F5' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r')
+      if (!reloadShortcut || syncing || !online || !syncStatus.configured) return
+      event.preventDefault()
+      void pullLatest()
+    }
+    window.addEventListener('keydown', handleDesktopReload)
+    return () => window.removeEventListener('keydown', handleDesktopReload)
+  }, [online, syncStatus.configured, syncing, authToken])
+  function refreshLocalView() {
+    if (refreshingView) return
+    setRefreshingView(true)
+    // Pull remote changes only. Deliberate "Sync now" remains responsible for
+    // uploading this phone's queued work.
+    fetch('/api/sync/pull', { method: 'POST', headers: authHeaders })
+      .catch(() => undefined)
+      .finally(() => window.setTimeout(() => window.location.reload(), 120))
+  }
+  useEffect(() => {
+    if (!isNativeMobile()) return
+    let startY = 0
+    let tracking = false
+    const start = (event: TouchEvent) => {
+      if (window.scrollY > 0 || syncing) return
+      startY = event.touches[0]?.clientY || 0
+      tracking = true
+    }
+    const move = (event: TouchEvent) => {
+      if (!tracking) return
+      const distance = Math.max(0, Math.min(96, (event.touches[0]?.clientY || 0) - startY))
+      if (distance > 0) event.preventDefault()
+      setMobilePullDistance(distance)
+    }
+    const end = () => {
+      const shouldRefresh = mobilePullDistance >= 64 && !refreshingView
+      tracking = false
+      setMobilePullDistance(0)
+      if (shouldRefresh) refreshLocalView()
+    }
+    document.addEventListener('touchstart', start, { passive: true })
+    document.addEventListener('touchmove', move, { passive: false })
+    document.addEventListener('touchend', end, { passive: true })
+    return () => {
+      document.removeEventListener('touchstart', start)
+      document.removeEventListener('touchmove', move)
+      document.removeEventListener('touchend', end)
+    }
+  }, [mobilePullDistance, refreshingView, syncing])
   async function activateInstallation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setInstallerMessage('')
@@ -135,7 +212,9 @@ function App() {
     // enrolled existing-business device must always proceed to sign-in,
     // even if an older cloud response omits the convenience flag.
     if (form.get('mode') === 'existing' || data.existingBusiness) setSetupRequired(false)
+    if (isNativeMobile() && data.existingBusiness) await fetch('/api/sync/now', { method: 'POST' }).catch(() => undefined)
     await refreshSyncStatus()
+    await refreshBusinessSettings()
   }
   async function resolveConflict(id: string) {
     const response = await fetch(`/api/sync/conflicts/${id}/resolve`, { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
@@ -520,6 +599,7 @@ function App() {
   if (!user) return installerRequired ? <InstallerScreen onActivate={activateInstallation} message={installerMessage} /> : setupRequired ? <SetupScreen onCreate={completeSetup} error={authError} setError={setAuthError} /> : <LoginScreen onLogin={login} error={authError} setError={setAuthError} />
 
   return <div className="app-shell">
+    {isNativeMobile() && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><Boxes size={21} /></div><div><strong>{appName}</strong><span>Business operations</span></div></div>
       <div className="workspace"><Store size={16} /><span>{appName}</span><MoreHorizontal size={17} /></div>

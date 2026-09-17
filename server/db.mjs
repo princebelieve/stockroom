@@ -566,6 +566,17 @@ export async function updateSettings(appName, currency = 'USD', posProvider = ''
   return settings
 }
 
+// Older installations created their initial local settings before cloud sync
+// existed. Publish that first snapshot once, so newly enrolled phones inherit
+// the actual shop name, currency, and POS configuration.
+export async function queueInitialSettingsSnapshot() {
+  const alreadyPublished = database.prepare("SELECT 1 FROM sync_outbox WHERE entity_type = 'settings' LIMIT 1").get()
+  if (alreadyPublished) return false
+  const settings = await getSettings()
+  queueSync('settings', organizationId, 'upsert', settings)
+  return true
+}
+
 export function listProducts() {
   return database.prepare(`SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE organization_id = ? ORDER BY name`).all(organizationId)
 }
