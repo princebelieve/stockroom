@@ -76,9 +76,16 @@ Owner sign-in renews the same device's token without deleting its database/outbo
 - A failed write is not acknowledged as saved. Browser storage remains subject to
   the operating system and user clearing website data; sync regularly and do not
   clear the site's data while changes are queued.
-- Local-server features (stocktake editing, customer-display pairing, owner
+- Local-server features (customer-display pairing, owner
   metrics dashboard, filesystem backups) are not offered by this PWA. Approved
   stocktake changes from Windows still update PWA inventory through sync.
+- Stock take supports offline counting, restoring the latest draft after reopening,
+  approval reasons, and audit history. Drafts remain on the originating browser;
+  approval queues the completed session and adjustments for Sync now. Approval
+  applies the variance to current stock, preserving sales recorded since counting
+  began, and refuses any adjustment that would make local stock negative.
+  Update the Android APK before relying on it to receive stocktake approvals;
+  this change adds the missing Android reader for those sync operations.
 - Customer balance adjustments are supported; wallet-funded checkout is not yet
   offered in the PWA. Physical terminal and printer support depends on the browser;
   external-terminal payments use manual references and receipts use browser print.

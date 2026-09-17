@@ -1,5 +1,10 @@
 // Browser schema is isolated from the native Android database.
 export const browserSchema = `
+    CREATE TABLE IF NOT EXISTS pwa_stocktakes (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
     PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS mobile_settings (
       key TEXT PRIMARY KEY,

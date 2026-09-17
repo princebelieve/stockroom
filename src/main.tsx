@@ -122,6 +122,19 @@ function App() {
   const [completedCustomerSale, setCompletedCustomerSale] = useState<{ items: Array<{ name: string; quantity: number; price: number }>; total: number } | null>(null)
   const [stocktake, setStocktake] = useState<Stocktake | null>(null)
   const [stocktakeReason, setStocktakeReason] = useState('Approved after physical count')
+  useEffect(() => {
+    if (!isBrowserPwa() || !authToken || active !== 'Stocktake') return
+    let cancelled = false
+    fetch('/api/stocktakes', { headers: { Authorization: `Bearer ${authToken}` } }).then(async response => {
+      if (!response.ok) throw new Error((await response.json()).error)
+      const data = await response.json()
+      if (!cancelled) {
+        setStocktake(data.stocktake)
+        setStocktakeReason(data.stocktake?.approvalReason || 'Approved after physical count')
+      }
+    }).catch(error => { if (!cancelled) window.alert(error.message || 'Could not restore stocktake.') })
+    return () => { cancelled = true }
+  }, [authToken, active])
   const [setupRequired, setSetupRequired] = useState(true)
   const [installerRequired, setInstallerRequired] = useState(true)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
@@ -610,12 +623,14 @@ function App() {
   async function startStocktake() {
     const response = await fetch('/api/stocktakes', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
     if (response.ok) { setStocktake(await response.json() as Stocktake); setActive('Stocktake') }
+    else if (isBrowserPwa()) window.alert((await response.json()).error || 'Could not start stocktake.')
   }
 
   async function updateCount(countId: string, counted: number) {
     if (!stocktake) return
     const response = await fetch(`/api/stocktakes/${stocktake.id}/counts/${countId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ counted }) })
     if (response.ok) setStocktake(await response.json() as Stocktake)
+    else if (isBrowserPwa()) window.alert((await response.json()).error || 'Could not save count.')
   }
 
   async function approveStocktakeSession() {
@@ -629,7 +644,7 @@ function App() {
       const next = await response.json() as Stocktake
       setStocktake(next)
       fetch('/api/products').then((result) => result.json()).then((data: { products: Product[] }) => setProducts(data.products))
-    }
+    } else if (isBrowserPwa()) window.alert((await response.json()).error || 'Could not approve stocktake.')
   }
 
   async function login(email: string, password: string) {
@@ -713,7 +728,7 @@ function App() {
       <nav>
         {canManageOperations && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
         {canManageOperations && <button className={active === 'Inventory' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Inventory')}><Boxes size={18} />Inventory <b>{products.length}</b></button>}
-        {canManageInventory && !isBrowserPwa() && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
+        {canManageInventory && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
         <button className={active === 'POS' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('POS')}><ShoppingCart size={18} />POS</button>
         {!isBrowserPwa() && <button className={active === 'Display' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Display')}><Store size={18} />Customer display</button>}
         {canManageOperations && <button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sales')}><ShoppingCart size={18} />Sales</button>}

@@ -1,4 +1,5 @@
 // Browser API: separate from native Android so PWA changes cannot alter its storage path.
+import { browserStocktake } from './browserStocktake'
 import { getBrowserSyncConfiguration as getMobileSyncConfiguration, openBrowserDatabase as openMobileDatabase, saveBrowserSyncConfiguration as saveMobileSyncConfiguration, type BrowserSyncConfiguration as MobileSyncConfiguration } from './browserDatabase'
 
 type MobileUser = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
@@ -90,7 +91,7 @@ async function syncNow() {
   if (!config) return { configured: false, pending: 0, lastError: 'This browser has not been enrolled.' }
   const db = await openMobileDatabase()
   try {
-    const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at LIMIT 500')
+    const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
     if (operations.length) {
       const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
@@ -221,6 +222,8 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken })
   }
   if (!user) return error('Authentication required.', 401)
+  const stocktakeResponse = await browserStocktake(path, init, canOperate(user), queue)
+  if (stocktakeResponse) return stocktakeResponse
   if (path === '/api/sync/conflicts' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
     return json({ conflicts: (await db.query('SELECT id, entity_type AS entityType, reason, created_at AS createdAt FROM sync_conflicts WHERE resolved_at IS NULL')).values })

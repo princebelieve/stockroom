@@ -40,6 +40,21 @@ async function applyOperation(operation: Operation) {
   const seen = await db.query('SELECT operation_id FROM sync_inbox WHERE operation_id = ?', [operation.operationId])
   if (seen.values?.length) return
   const payload = operation.payload
+  if (operation.entityType === 'stocktake' && operation.action === 'approved') {
+    await db.beginTransaction()
+    try {
+      for (const count of (payload.counts || []) as Array<Record<string, unknown>>) {
+        const amount = Number(count.variance) || 0
+        if (!amount) continue
+        if (!(await db.query('SELECT id FROM products WHERE id = ?', [count.productId])).values?.length) throw new Error('A stocktake references a missing product.')
+        await db.run('UPDATE products SET stock = MAX(0, stock + ?), updated_at = ? WHERE id = ?', [amount, operation.createdAt, count.productId])
+        await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), count.productId, amount, `Stocktake: ${payload.approvalReason || 'approved'}`, operation.createdAt])
+      }
+      await db.run('INSERT INTO sync_inbox (operation_id, received_at) VALUES (?, ?)', [operation.operationId, now()])
+      await db.commitTransaction()
+    } catch (error) { await db.rollbackTransaction(); throw error }
+    return
+  }
   if (operation.entityType === 'product' && operation.action === 'upsert') {
     await db.run(`INSERT INTO products (id, name, sku, category, stock, reorder_point, price, cost_price, unit, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sku=excluded.sku, category=excluded.category, reorder_point=excluded.reorder_point, price=excluded.price, cost_price=excluded.cost_price, unit=excluded.unit, updated_at=excluded.updated_at`,
