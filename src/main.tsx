@@ -612,6 +612,7 @@ function App() {
     setAuthToken(data.token)
     setUser(data.user)
     setActive(data.user.role === 'cashier' && !data.user.operationalAccess ? 'POS' : 'Overview')
+    setInstallerRequired(false)
     setSetupRequired(false)
     localStorage.setItem('stockroom-token', data.token)
     localStorage.setItem('stockroom-user', JSON.stringify(data.user))
@@ -650,6 +651,10 @@ function App() {
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } }).catch(() => undefined)
+    // Ending an active session does not undo device enrollment or shop setup.
+    setInstallerRequired(false)
+    setSetupRequired(false)
+    setAuthError('')
     setAuthToken('')
     setUser(null)
     localStorage.removeItem('stockroom-token')

@@ -137,6 +137,13 @@ function reportWindow(sales: Array<Record<string, unknown>>, since: number) {
 
 async function handle(path: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase()
+  // Logout must also clear stale sessions whose user record no longer exists.
+  // Device enrollment lives in separate settings and is preserved.
+  if (path === '/api/auth/logout' && method === 'POST') {
+    await setSetting('sessionUserId', '')
+    await setSetting('cloudAccessToken', '')
+    return json({})
+  }
   const user = await sessionUser()
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Native SQLite' })
@@ -169,7 +176,6 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' }, cloudAccessToken: result.accessToken })
   }
   if (!user) return error('Authentication required.', 401)
-  if (path === '/api/auth/logout' && method === 'POST') { await setSetting('sessionUserId', ''); await setSetting('cloudAccessToken', ''); return json({}) }
   if (path === '/api/sync/status') return json(await localSyncStatus())
   if (path === '/api/sync/pull' && method === 'POST') return json(await pullLatest())
   if (path === '/api/sync/now' && method === 'POST') return json(await syncNow())
