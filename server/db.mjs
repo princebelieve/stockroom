@@ -183,6 +183,7 @@ try { database.exec("ALTER TABLE app_settings ADD COLUMN currency TEXT NOT NULL 
 try { database.exec("ALTER TABLE app_settings ADD COLUMN pos_provider TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE app_settings ADD COLUMN pos_terminal_id TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE app_settings ADD COLUMN pos_connection TEXT NOT NULL DEFAULT 'manual'") } catch {}
+try { database.exec("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'external-pos'") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_reference TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN terminal_provider TEXT NOT NULL DEFAULT ''") } catch {}
@@ -249,10 +250,10 @@ export function getSyncStatus() {
   return { configured: Boolean(process.env.SYNC_API_URL && process.env.SYNC_DEVICE_TOKEN && process.env.BUSINESS_ID), pending, conflicts, lastError }
 }
 export async function getSettings() {
-  const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)
+  const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)
   const ownerCount = database.prepare('SELECT COUNT(*) AS count FROM users WHERE organization_id = ?').get(organizationId).count
   return {
-    ...(row || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', updatedAt: now() }),
+    ...(row || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', logoData: '', updatedAt: now() }),
     ownerConfigured: ownerCount > 0,
   }
 }
@@ -556,9 +557,9 @@ export function approveStocktake(id, reason = '') {
   } catch (error) { database.exec('ROLLBACK'); throw error }
 }
 
-export async function updateSettings(appName, currency = 'USD', posProvider = '', posTerminalId = '', posConnection = 'manual', mongoUri = '', mongoDatabase = 'stockroom') {
+export async function updateSettings(appName, currency = 'USD', posProvider = '', posTerminalId = '', posConnection = 'manual', mongoUri = '', mongoDatabase = 'stockroom', logoData = '') {
   const updatedAt = now()
-  database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, updated_at = ? WHERE organization_id = ?').run(appName, currency, posProvider, posTerminalId, posConnection, updatedAt, organizationId)
+  database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?').run(appName, currency, posProvider, posTerminalId, posConnection, logoData, updatedAt, organizationId)
   const config = { appName, shopName: appName, mongoUri, mongoDatabase, updatedAt }
   await writeShopConfig({ ...(await readShopConfig().catch(() => ({}))), ...config })
   const settings = await getSettings()

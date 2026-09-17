@@ -74,6 +74,7 @@ type AppSettings = {
   posProvider: string
   posTerminalId: string
   posConnection: string
+  logoData?: string
   updatedAt: string
   ownerConfigured?: boolean
   cloudConfigured?: boolean
@@ -109,6 +110,7 @@ function App() {
   const [posProvider, setPosProvider] = useState('')
   const [posTerminalId, setPosTerminalId] = useState('')
   const [posConnection, setPosConnection] = useState('manual')
+  const [logoData, setLogoData] = useState('')
   const [settingsMessage, setSettingsMessage] = useState('')
   const [passwordMessage, setPasswordMessage] = useState('')
   const [cart, setCart] = useState<Record<string, number>>({})
@@ -243,7 +245,7 @@ function App() {
             return
           }
         }
-      })
+          })
   }
   useEffect(() => {
     if (!isNativeMobile() && !isBrowserPwa()) return
@@ -369,6 +371,8 @@ function App() {
       setPosProvider(settings.posProvider || '')
       setPosTerminalId(settings.posTerminalId || '')
       setPosConnection(settings.posConnection || 'manual')
+      setLogoData(settings.logoData || '')
+      setLogoData(settings.logoData || '')
       setSetupRequired(browserStartupState.setupRequired)
       setInstallerRequired(browserStartupState.installerRequired)
       setSettingsLoaded(true)
@@ -458,16 +462,29 @@ function App() {
     if (!nextName) return setSettingsMessage('Enter an app name.')
     localStorage.setItem('stockroom-app-name', nextName)
     try {
-      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ appName: nextName, currency, posProvider, posTerminalId, posConnection }) })
+      const response = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ appName: nextName, currency, posProvider, posTerminalId, posConnection, logoData }) })
       if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'Unable to save') }
       document.title = nextName
       localStorage.setItem('stockroom-currency', currency)
       setSettingsMessage('Saved to the business account.')
     } catch {
       if (isBrowserPwa()) { setSettingsMessage('Settings could not be saved. Check available device storage and try again.'); return }
-      await queueOperation({ type: 'settings', payload: { appName: nextName, currency, posProvider, posTerminalId, posConnection }, createdAt: new Date().toISOString() })
+      await queueOperation({ type: 'settings', payload: { appName: nextName, currency, posProvider, posTerminalId, posConnection, logoData }, createdAt: new Date().toISOString() })
       setSettingsMessage('Saved on this device. It will sync when the server is available.')
     }
+  }
+
+  function chooseLogo(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 1_000_000) {
+      setSettingsMessage('Logo must be a PNG, JPEG, or WebP image smaller than 1 MB.')
+      event.target.value = ''
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => setLogoData(String(reader.result || ''))
+    reader.readAsDataURL(file)
   }
 
   async function changePassword(event: React.FormEvent<HTMLFormElement>) {
@@ -746,7 +763,7 @@ function App() {
   return <div className="app-shell">
     {(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
     <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><Boxes size={21} /></div><div><strong>{appName}</strong><span>Business operations</span></div></div>
+      <div className="brand"><div className="brand-mark">{logoData ? <img src={logoData} alt="" className="brand-logo" /> : <Boxes size={21} />}</div><div><strong>{appName}</strong><span>Business operations</span></div></div>
       <div className="workspace"><Store size={16} /><span>{appName}</span><MoreHorizontal size={17} /></div>
       <nav>
         {canManageOperations && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
@@ -783,6 +800,7 @@ function App() {
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
       {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} />}
       {active === 'Team' && <TeamManagement staff={staff} addStaff={addStaff} setCashierAccess={setCashierAccess} canCreateStaff={user.role === 'owner'} message={settingsMessage} />}
+      {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel logo-settings"><h3>Business logo</h3><p>PNG, JPEG, or WebP up to 1 MB. It syncs to enrolled devices when you save business settings.</p>{logoData && <img src={logoData} alt="Business logo preview" className="settings-logo-preview" />}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseLogo} /></section>}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><form className="settings-form" onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>External POS provider<span>Optional. Enter the provider used by this shop.</span><input value={posProvider} placeholder="Provider name" onChange={(event) => setPosProvider(event.target.value)} /></label><label>Terminal ID<span>The identifier printed on or shown by the terminal.</span><input value={posTerminalId} placeholder="Terminal ID" onChange={(event) => setPosTerminalId(event.target.value)} /></label><label>Connection mode<span>This records how the terminal will integrate with the app.</span><select value={posConnection} onChange={(event) => setPosConnection(event.target.value)}><option value="manual">Manual confirmation</option><option value="usb">USB</option><option value="bluetooth">Bluetooth</option><option value="network">Local network</option><option value="sdk">Provider SDK</option></select></label><button className="primary-button">Save business settings <ArrowUpToLine size={17} /></button>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</form>{!isBrowserPwa() && <form className="settings-form" onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><button className="primary-button" type="submit">Update password</button>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</form>}{isBrowserPwa() && <p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p>}</section>}
     </main>
     {showAdd && <div className="modal-backdrop" onMouseDown={() => setShowAdd(false)}><form className="modal" onSubmit={addProduct} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2>Add product</h2><p>It will be saved on this device immediately.</p></div><button type="button" className="icon-button" onClick={() => setShowAdd(false)}><X size={19} /></button></div><div className="form-grid"><label>Product name<input name="name" required placeholder="e.g. Espresso beans" /></label><label>SKU<input name="sku" required placeholder="COF-001" /></label><label>Category<input name="category" required placeholder="Beverages" /></label><label>Unit<input name="unit" required placeholder="bag" /></label><label>Starting stock<input name="stock" type="number" min="0" required defaultValue="0" /></label><label>Reorder point<input name="reorder" type="number" min="0" required defaultValue="10" /></label><label>Unit price<input name="price" type="number" min="0" step="0.01" required defaultValue="0" /></label></div><button className="primary-button submit-button">Save product <ArrowUpToLine size={17} /></button></form></div>}
@@ -803,28 +821,29 @@ function LoginScreen({ onLogin, error, setError }: { onLogin: (email: string, pa
   const [resetCode, setResetCode] = useState('')
   const [resetPassword, setResetPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const resetView = () => { setError(''); setMessage('') }
   const returnToLogin = () => { resetView(); setMode('login') }
 
   if (mode === 'request') return <main className="login-screen"><form className="login-card" onSubmit={async (event) => {
-    event.preventDefault(); resetView()
+    event.preventDefault(); if (submitting) return; setSubmitting(true); resetView()
     try {
       const response = await fetch('/api/auth/password-reset/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to request a reset email.')
       setMessage('If this email has a cloud account, a reset code has been sent. Check your inbox and spam folder.')
       setMode('confirm')
-    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to request a reset email.') }
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to request a reset email.') } finally { setSubmitting(false) }
   }}><div className="brand-mark"><Boxes size={21} /></div><h1>Reset your password</h1><p>Enter the email used for this business. This needs an internet connection.</p><label>Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@yourshop.com" /></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button login-button">Send reset code</button><button type="button" className="text-button" onClick={returnToLogin}>Back to sign in</button></form></main>
 
   if (mode === 'confirm') return <main className="login-screen"><form className="login-card" onSubmit={async (event) => {
-    event.preventDefault(); resetView()
+    event.preventDefault(); if (submitting) return; setSubmitting(true); resetView()
     try {
       const response = await fetch('/api/auth/password-reset/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetCode, password: resetPassword }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to reset the password.')
       setResetCode(''); setResetPassword(''); setMessage('Password updated. You can now sign in with your new password.'); setMode('login')
-    } catch (confirmError) { setError(confirmError instanceof Error ? confirmError.message : 'Unable to reset the password.') }
+    } catch (confirmError) { setError(confirmError instanceof Error ? confirmError.message : 'Unable to reset the password.') } finally { setSubmitting(false) }
   }}><div className="brand-mark"><Boxes size={21} /></div><h1>Enter reset code</h1><p>{message || 'Use the reset code from your email, then choose a new password.'}</p><label>Reset code<input required value={resetCode} onChange={(event) => setResetCode(event.target.value)} autoComplete="one-time-code" placeholder="Code from your email" /></label><label>New password<input type="password" minLength={10} required value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} autoComplete="new-password" placeholder="At least 10 characters" /></label>{error && <div className="auth-error">{error}</div>}<button className="primary-button login-button">Update password</button><button type="button" className="text-button" onClick={() => { resetView(); setMode('request') }}>Use a different email</button></form></main>
 
   return <main className="login-screen"><form className="login-card" onSubmit={async (event) => { event.preventDefault(); try { await onLogin(email, password) } catch (loginError) { setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.') } }}><div className="brand-mark"><Boxes size={21} /></div><h1>Sign in to your shop</h1><p>Run your store online or offline.</p><label>Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@yourshop.com" /></label><label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /><button type="button" className="icon-button password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><button type="button" className="text-button forgot-password" onClick={() => { resetView(); setMode('request') }}>Forgot password?</button>{error && <div className="auth-error">{error}</div>}{message && <p className="settings-message">{message}</p>}<button className="primary-button login-button">Sign in</button></form></main>

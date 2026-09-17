@@ -270,12 +270,14 @@ const server = createServer(async (request, response) => {
         const posProvider = String(input.posProvider || '').trim()
         const posTerminalId = String(input.posTerminalId || '').trim()
         const posConnection = String(input.posConnection || 'manual')
+        const logoData = String(input.logoData || '')
         const mongoUri = String(input.mongoUri || '').trim()
         const mongoDatabase = String(input.mongoDatabase || 'stockroom').trim() || 'stockroom'
         if (!appName || appName.length > 60) return sendJson(response, 400, { error: 'App name must be between 1 and 60 characters.' })
         if (!/^[A-Z]{3}$/.test(currency)) return sendJson(response, 400, { error: 'Currency must be a three-letter code.' })
+        if (logoData && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(logoData) || logoData.length > 1_400_000)) return sendJson(response, 400, { error: 'Logo must be a PNG, JPEG, or WebP image smaller than 1 MB.' })
         if (!['manual', 'usb', 'bluetooth', 'network', 'sdk'].includes(posConnection)) return sendJson(response, 400, { error: 'POS connection mode is invalid.' })
-        return sendJson(response, 200, await updateSettings(appName, currency, posProvider, posTerminalId, posConnection, mongoUri, mongoDatabase))
+        return sendJson(response, 200, await updateSettings(appName, currency, posProvider, posTerminalId, posConnection, mongoUri, mongoDatabase, logoData))
       } catch {
         return sendJson(response, 400, { error: 'Request body must be valid JSON.' })
       }

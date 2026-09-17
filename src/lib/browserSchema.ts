@@ -51,6 +51,7 @@ export const browserSchema = `
       pos_provider TEXT NOT NULL DEFAULT '',
       pos_terminal_id TEXT NOT NULL DEFAULT '',
       pos_connection TEXT NOT NULL DEFAULT 'manual',
+      logo_data TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS products (

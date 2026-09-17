@@ -42,6 +42,7 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
       const SQL = await (sql ||= engine())
       current = new SQL.Database(await snapshot())
       current.run(browserSchema)
+      try { current.run("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
       dirty = false
       current.run('BEGIN')
       try {

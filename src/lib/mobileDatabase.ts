@@ -76,6 +76,7 @@ export async function openMobileDatabase() {
       pos_provider TEXT NOT NULL DEFAULT '',
       pos_terminal_id TEXT NOT NULL DEFAULT '',
       pos_connection TEXT NOT NULL DEFAULT 'manual',
+      logo_data TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS products (
@@ -138,6 +139,7 @@ export async function openMobileDatabase() {
       created_at TEXT NOT NULL
     );
   `)
+  try { await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
   return connection
 }
 
