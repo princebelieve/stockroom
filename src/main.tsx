@@ -351,14 +351,15 @@ function App() {
     return () => window.clearInterval(interval)
   }, [online])
   useEffect(() => {
-    fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean }> : Promise.reject()).then((settings) => {
+    fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }> : Promise.reject()).then((settings) => {
+      const hasExistingDevice = settings.cloudConfigured === true || settings.existingBusiness === true
       setAppName(settings.appName || 'My Business')
       setCurrency(settings.currency || 'USD')
       setPosProvider(settings.posProvider || '')
       setPosTerminalId(settings.posTerminalId || '')
       setPosConnection(settings.posConnection || 'manual')
-      setSetupRequired(settings.ownerConfigured === false && settings.existingBusiness !== true)
-      setInstallerRequired(settings.cloudConfigured !== true)
+      setSetupRequired(!hasExistingDevice && settings.ownerConfigured === false)
+      setInstallerRequired(!hasExistingDevice)
       setSettingsLoaded(true)
       localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
       localStorage.setItem('stockroom-currency', settings.currency || 'USD')
