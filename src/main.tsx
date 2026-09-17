@@ -131,7 +131,10 @@ function App() {
     if (!response.ok) { setInstallerMessage(data.error || 'Installation could not be activated.'); return }
     setInstallerMessage(data.existingBusiness ? 'Device enrolled. Sign in with the existing owner account.' : 'Installation activated. You can now create the client owner account.')
     setInstallerRequired(false)
-    if (data.existingBusiness) setSetupRequired(false)
+    // The selected installer mode is authoritative here. A successfully
+    // enrolled existing-business device must always proceed to sign-in,
+    // even if an older cloud response omits the convenience flag.
+    if (form.get('mode') === 'existing' || data.existingBusiness) setSetupRequired(false)
     await refreshSyncStatus()
   }
   async function resolveConflict(id: string) {
