@@ -1,7 +1,9 @@
-import { app, BrowserWindow, dialog, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, session } from 'electron'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const port = Number(process.env.PORT || 8787)
+let customerDisplayWindow = null
 
 function waitForLocalServer() {
   return new Promise((resolve, reject) => {
@@ -22,9 +24,28 @@ async function createWindow() {
   await session.defaultSession.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] })
   const window = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1024, minHeight: 700, autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: fileURLToPath(new URL('./preload.mjs', import.meta.url)) },
   })
   window.loadURL(`http://127.0.0.1:${port}`)
+}
+
+async function openCustomerDisplay(pairingUrl) {
+  const url = new URL(String(pairingUrl || ''))
+  if (url.protocol !== 'http:' || url.port !== String(Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)) || url.pathname !== '/pair') throw new Error('Invalid customer display link.')
+  const displays = screen.getAllDisplays()
+  const primary = screen.getPrimaryDisplay()
+  const target = displays.find((display) => display.id !== primary.id) || primary
+  if (!customerDisplayWindow || customerDisplayWindow.isDestroyed()) {
+    customerDisplayWindow = new BrowserWindow({
+      x: target.bounds.x, y: target.bounds.y, width: target.bounds.width, height: target.bounds.height,
+      title: 'Customer Display', autoHideMenuBar: true, fullscreen: target.id !== primary.id,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    })
+    customerDisplayWindow.on('closed', () => { customerDisplayWindow = null })
+  }
+  await customerDisplayWindow.loadURL(url.toString())
+  customerDisplayWindow.show()
+  customerDisplayWindow.focus()
 }
 
 app.whenReady().then(async () => {
@@ -34,6 +55,7 @@ app.whenReady().then(async () => {
   process.env.STOCKROOM_LOCAL_ONLY = 'true'
   process.env.PORT = String(port)
   try {
+    ipcMain.handle('customer-display:open', (_event, pairingUrl) => openCustomerDisplay(pairingUrl))
     await import('../server/index.mjs')
     await waitForLocalServer()
     createWindow()
