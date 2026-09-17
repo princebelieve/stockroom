@@ -354,7 +354,7 @@ function readJson(request, response, callback) {
 
 function validateProduct(input) {
   const product = {
-    name: String(input.name || '').trim(), sku: String(input.sku || '').trim() || `${String(input.name || '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, category: String(input.category || '').trim(),
+    name: String(input.name || '').trim(), sku: String(input.sku || '').trim() || `${String(input.name || '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(),
     stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(),
   }
   if (!product.name || !product.sku || !product.category || !product.unit || [product.stock, product.reorder, product.price, product.cost].some((value) => !Number.isFinite(value) || value < 0)) throw new Error('Product fields are invalid.')

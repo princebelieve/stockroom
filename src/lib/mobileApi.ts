@@ -56,9 +56,9 @@ async function applyOperation(operation: Operation) {
     return
   }
   if (operation.entityType === 'product' && operation.action === 'upsert') {
-    await db.run(`INSERT INTO products (id, name, sku, category, stock, reorder_point, price, cost_price, unit, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sku=excluded.sku, category=excluded.category, reorder_point=excluded.reorder_point, price=excluded.price, cost_price=excluded.cost_price, unit=excluded.unit, updated_at=excluded.updated_at`,
-    [payload.id, payload.name, payload.sku, payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, Number(payload.cost) || 0, payload.unit, payload.updated || operation.createdAt])
+    await db.run(`INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sku=excluded.sku, barcode=excluded.barcode, category=excluded.category, reorder_point=excluded.reorder_point, price=excluded.price, cost_price=excluded.cost_price, unit=excluded.unit, updated_at=excluded.updated_at`,
+    [payload.id, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, Number(payload.cost) || 0, payload.unit, payload.updated || operation.createdAt])
   } else if (operation.entityType === 'stock' && operation.action === 'adjust') {
     await db.run('UPDATE products SET stock = MAX(0, stock + ?), updated_at = ? WHERE id = ?', [Number(payload.amount) || 0, operation.createdAt, payload.productId])
   } else if (operation.entityType === 'sale' && operation.action === 'create') {
@@ -208,12 +208,12 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   if (path === '/api/sync/status') return json(await localSyncStatus())
   if (path === '/api/sync/pull' && method === 'POST') return json(await pullLatest())
   if (path === '/api/sync/now' && method === 'POST') return json(await syncNow())
-  if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products ORDER BY updated_at DESC')).values || [] })
+  if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT id, name, sku, barcode, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products ORDER BY updated_at DESC')).values || [] })
   if (path === '/api/products' && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const input = await body(init); const name = String(input.name || '').trim(); const product = { id: id(), name, sku: String(input.sku || '').trim() || `${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, category: String(input.category || '').trim(), stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(), updated: now() }
+    const input = await body(init); const name = String(input.name || '').trim(); const product = { id: id(), name, sku: String(input.sku || '').trim() || `${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(), stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(), updated: now() }
     if (!product.name || !product.sku || !product.category || !product.unit || [product.stock, product.reorder, product.price, product.cost].some((value) => !Number.isFinite(value) || value < 0)) return error('Product fields are invalid.')
-    await db.run('INSERT INTO products (id, name, sku, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [product.id, product.name, product.sku, product.category, product.stock, product.reorder, product.price, product.cost, product.unit, product.updated])
+    await db.run('INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [product.id, product.name, product.sku, product.barcode, product.category, product.stock, product.reorder, product.price, product.cost, product.unit, product.updated])
     await queue('product', product.id, 'upsert', product)
     return json(product, 201)
   }

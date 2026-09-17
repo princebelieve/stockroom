@@ -83,6 +83,7 @@ export async function openMobileDatabase() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       sku TEXT NOT NULL UNIQUE,
+      barcode TEXT NOT NULL DEFAULT '',
       category TEXT NOT NULL,
       stock INTEGER NOT NULL DEFAULT 0 CHECK(stock >= 0),
       reorder_point INTEGER NOT NULL DEFAULT 0 CHECK(reorder_point >= 0),

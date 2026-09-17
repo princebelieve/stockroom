@@ -27,10 +27,10 @@ function openDatabase(): Promise<IDBDatabase> {
 async function transaction<T>(storeName: string, mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest | void): Promise<T | undefined> {
   const database = await openDatabase()
   return new Promise((resolve, reject) => {
-    const request = action(database.transaction(storeName, mode).objectStore(storeName)) as IDBRequest | undefined
-    if (!request) return resolve(undefined)
-    request.onsuccess = () => resolve(request.result as T)
-    request.onerror = () => reject(request.error)
+    const tx = database.transaction(storeName, mode)
+    const request = action(tx.objectStore(storeName)) as IDBRequest | undefined
+    tx.oncomplete = () => { database.close(); resolve(request?.result as T | undefined) }
+    tx.onabort = () => { database.close(); reject(tx.error || new Error('Local storage transaction failed.')) }
   })
 }
 
@@ -96,4 +96,25 @@ export async function replaceQueuedProductId(localId: string, syncedId: string) 
 
 export async function saveSale(sale: Sale) {
   await transaction('sales', 'readwrite', (store) => store.put(sale))
+}
+
+
+export async function getReceiptHistory(organizationId: string) {
+  const sales = await transaction<Sale[]>('sales', 'readonly', store => store.getAll())
+  return (sales || []).filter(sale => sale.organizationId === organizationId)
+}
+
+// Commit the receipt, stock cache and outbound operation together before printing.
+export async function commitOfflineSale(sale: Sale, products: Product[]) {
+  const database = await openDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = database.transaction(['sales', 'products', 'operations'], 'readwrite')
+    tx.oncomplete = () => { database.close(); resolve() }
+    tx.onabort = () => { database.close(); reject(tx.error || new Error('Sale could not be saved.')) }
+    tx.objectStore('sales').put(sale)
+    const stock = tx.objectStore('products')
+    stock.clear()
+    products.forEach(product => stock.put(product))
+    tx.objectStore('operations').add({ type: 'sale', payload: sale, createdAt: sale.createdAt })
+  })
 }

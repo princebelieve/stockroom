@@ -184,6 +184,7 @@ try { database.exec("ALTER TABLE app_settings ADD COLUMN pos_provider TEXT NOT N
 try { database.exec("ALTER TABLE app_settings ADD COLUMN pos_terminal_id TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE app_settings ADD COLUMN pos_connection TEXT NOT NULL DEFAULT 'manual'") } catch {}
 try { database.exec("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+try { database.exec("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'external-pos'") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_reference TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN terminal_provider TEXT NOT NULL DEFAULT ''") } catch {}
@@ -448,9 +449,9 @@ export function applyRemoteOperations(operations) {
     const payload = operation.payload || {}
     try {
       if (operation.entityType === 'product' && operation.action === 'upsert') {
-        database.prepare(`INSERT INTO products (id, organization_id, name, sku, category, stock, reorder_point, price, unit, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sku = excluded.sku, category = excluded.category, reorder_point = excluded.reorder_point, price = excluded.price, unit = excluded.unit, updated_at = excluded.updated_at`)
-          .run(payload.id, organizationId, payload.name, payload.sku, payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, payload.unit, payload.updated || now())
+        database.prepare(`INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, unit, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sku = excluded.sku, barcode = excluded.barcode, category = excluded.category, reorder_point = excluded.reorder_point, price = excluded.price, unit = excluded.unit, updated_at = excluded.updated_at`)
+          .run(payload.id, organizationId, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, payload.unit, payload.updated || now())
       } else if (operation.entityType === 'stock' && operation.action === 'adjust') {
         adjustStock(payload.productId, Number(payload.amount), payload.reason || 'remote-adjustment', false)
       } else if (operation.entityType === 'sale' && operation.action === 'create') {
@@ -579,13 +580,13 @@ export async function queueInitialSettingsSnapshot() {
 }
 
 export function listProducts() {
-  return database.prepare(`SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE organization_id = ? ORDER BY name`).all(organizationId)
+  return database.prepare(`SELECT id, name, sku, barcode, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE organization_id = ? ORDER BY name`).all(organizationId)
 }
 
 export function createProduct(input) {
   const product = { id: crypto.randomUUID(), updated: now() }
-  database.prepare('INSERT INTO products (id, organization_id, name, sku, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(product.id, organizationId, input.name, input.sku, input.category, input.stock, input.reorder, input.price, input.cost || 0, input.unit, product.updated)
-  const saved = database.prepare('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(product.id)
+  database.prepare('INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(product.id, organizationId, input.name, input.sku, input.barcode || '', input.category, input.stock, input.reorder, input.price, input.cost || 0, input.unit, product.updated)
+  const saved = database.prepare('SELECT id, name, sku, barcode, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(product.id)
   queueSync('product', saved.id, 'upsert', saved)
   return saved
 }

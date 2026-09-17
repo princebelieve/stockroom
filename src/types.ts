@@ -2,6 +2,7 @@ export type Product = {
   id: string
   name: string
   sku: string
+  barcode?: string
   category: string
   stock: number
   reorder: number
@@ -12,8 +13,11 @@ export type Product = {
 }
 
 export type Sale = {
+  organizationId?: string
+  businessName?: string
+  currency?: string
   id: string
-  items: Array<{ productId: string; quantity: number; price: number }>
+  items: Array<{ productId: string; productName?: string; quantity: number; price: number }>
   total: number
   createdAt: string
   syncStatus: 'pending' | 'synced'
