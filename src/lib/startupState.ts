@@ -1,4 +1,10 @@
-export function resolveStartupState(settings = {}) {
+export type StartupSettings = {
+  ownerConfigured?: boolean
+  cloudConfigured?: boolean
+  existingBusiness?: boolean
+}
+
+export function resolveStartupState(settings: StartupSettings = {}) {
   const ownerConfigured = settings.ownerConfigured === true
   const cloudConfigured = settings.cloudConfigured === true
   const existingBusiness = settings.existingBusiness === true

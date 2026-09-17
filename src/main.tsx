@@ -6,7 +6,7 @@ import { cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, 
 import { installMobileApi } from './lib/mobileApi'
 import { isNativeMobile } from './lib/mobileDatabase'
 import { isBrowserPwa } from './lib/platform'
-import { resolveStartupState } from './lib/startupState.mjs'
+import { resolveStartupState } from './lib/startupState'
 import './styles.css'
 
 function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
