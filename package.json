@@ -12,10 +12,15 @@
     "preview": "vite preview",
     "desktop": "npm run build && electron .",
     "desktop:package": "npm run build && electron-builder --win nsis",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug && if not exist ..\\release\\android mkdir ..\\release\\android && copy /Y app\\build\\outputs\\apk\\debug\\app-debug.apk ..\\release\\android\\Stockroom-debug.apk",
     "sync-api": "node cloud/index.mjs",
     "test": "node --test test/**/*.test.mjs"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
     "mongodb": "latest",
@@ -26,6 +31,7 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "electron": "^44.3.0",

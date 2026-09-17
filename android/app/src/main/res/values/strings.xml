@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Stockroom Business</string>
+    <string name="title_activity_main">Stockroom Business</string>
+    <string name="package_name">com.stockroom.business</string>
+    <string name="custom_url_scheme">com.stockroom.business</string>
+</resources>

@@ -11,6 +11,7 @@ server/data/
 *.sqlite-wal
 backups/
 sync-config.json
+android/local.properties
 
 # Environment secrets
 .env

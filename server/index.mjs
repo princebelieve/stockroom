@@ -6,7 +6,7 @@ import { createProduct, adjustStock, createSale, getSettings, listProducts, upda
 import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, getUserById, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, setCashierOperationalAccess, updateStocktakeCount } from './repository.mjs'
 import { saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const sessions = new Map()
@@ -174,7 +174,10 @@ const server = createServer(async (request, response) => {
   if (request.method === 'PUT' && cashierAccessMatch) {
     if (!isManager(sessionUser(request))) return sendJson(response, 403, { error: 'Owner or admin access required.' })
     return readJson(request, response, async (input) => {
-      try { return sendJson(response, 200, setCashierOperationalAccess(cashierAccessMatch[1], input.enabled === true)) } catch (error) { return sendJson(response, 400, { error: error.message }) }
+      try {
+        const cloud = await cloudSetCashierOperationalAccess(String(input.cloudAccessToken || ''), cashierAccessMatch[1], input.enabled === true)
+        return sendJson(response, 200, setCashierOperationalAccess(cashierAccessMatch[1], cloud.account.operationalAccess === true))
+      } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
   if (request.method === 'POST' && request.url === '/api/installer/activate') {

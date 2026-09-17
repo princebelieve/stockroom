@@ -24,6 +24,24 @@ The browser app is a PWA: users can install it from Chrome/Edge on Android or **
 
 This PWA caches the interface and local product/sale queue. It is not yet a complete native mobile app because phones cannot run this Node/SQLite server. A full Android/iOS release needs the next phase: a hosted, authenticated sync API and a Capacitor app with native SQLite.
 
+## Android debug APK
+
+Capacitor and the Android project are included. The desktop application is unchanged; Android will use its own device-local SQLite database and synchronize through the existing Render sync API.
+
+Install Android SDK Platform 36 and Build-Tools 36 from Android Studio or the Android command-line tools, then set `android/local.properties` (this file is deliberately ignored by Git):
+
+```properties
+sdk.dir=C:\\Users\\YOUR-WINDOWS-USER\\AppData\\Local\\Android\\Sdk
+```
+
+Build an installable debug APK with:
+
+```powershell
+npm run android:debug
+```
+
+The APK is copied to `release\android\Stockroom-debug.apk`. Transfer that file to the phone and approve installation from the file manager. Debug APKs are for testing and are not suitable for Play Store distribution.
+
 ## MongoDB sync (next phase)
 
 MongoDB must be connected only by a hosted sync API. Do not put a MongoDB URI or database password in the desktop/mobile application or its settings page. The sync API needs server-owned credentials, user authentication, operation IDs for idempotency, conflict rules, and backups.

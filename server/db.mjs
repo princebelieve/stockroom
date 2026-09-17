@@ -370,8 +370,9 @@ export function provisionCloudUser(input) {
   if (!name || !email || password.length < 8 || !['owner', 'admin', 'cashier'].includes(role)) throw new Error('Cloud user data is invalid.')
   const existing = database.prepare('SELECT id FROM users WHERE email = ? AND organization_id = ?').get(email, organizationId)
   const id = String(existing?.id || input.id || crypto.randomUUID())
-  database.prepare(`INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, password_hash = excluded.password_hash, role = excluded.role`).run(id, organizationId, name, email, hashPassword(password), role, now())
+  const operationalAccess = input.operationalAccess === true ? 1 : 0
+  database.prepare(`INSERT INTO users (id, organization_id, name, email, password_hash, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, password_hash = excluded.password_hash, role = excluded.role, operational_access = excluded.operational_access`).run(id, organizationId, name, email, hashPassword(password), role, operationalAccess, now())
   return authenticateUser(email, password)
 }
 

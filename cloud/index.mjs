@@ -41,8 +41,8 @@ function signToken(payload) {
 }
 function hashPassword(password) { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}` }
 function matchesPassword(password, stored) { const [salt, value] = String(stored).split(':'); if (!salt || !value) return false; const actual = scryptSync(password, salt, 64); const expected = Buffer.from(value, 'hex'); return actual.length === expected.length && timingSafeEqual(actual, expected) }
-function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, role: account.role || 'owner' } }
-function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email, role: account.role || 'owner', exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
+function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess) } }
+function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email, role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
 function deviceToken(businessId, deviceId) { return signToken({ kind: 'device', businessId, deviceId, exp: Math.floor(Date.now() / 1000) + 365 * 86_400 }) }
 function isAccess(claims) { return claims?.kind === 'access' }
 function isDevice(claims) { return claims?.kind === 'device' }
@@ -77,7 +77,7 @@ const server = createServer(async (request, response) => {
       const password = String(input.password || '')
       if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId) || !ownerName || !/^\S+@\S+\.\S+$/.test(email) || password.length < 10) return send(response, 400, { error: 'Provide a valid business ID, owner name, email, and password of at least 10 characters.' })
       const account = { businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash: hashPassword(password), createdAt: new Date() }
-      try { await accounts.insertOne(account) } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That business ID or email already exists.' }); throw error }
+      try { const created = await accounts.insertOne(account); account._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That business ID or email already exists.' }); throw error }
       return send(response, 201, { account: publicAccount(account), accessToken: accessToken(account) })
     }
     if (request.method === 'POST' && request.url === '/v1/auth/login') {
@@ -144,9 +144,23 @@ const server = createServer(async (request, response) => {
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const password = String(input.password || ''); const role = String(input.role || '')
       if (!name || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details and an 8-character password.' })
       const staff = { businessId: claims.businessId, name, email, role, passwordHash: hashPassword(password), createdAt: new Date() }
-      try { await accounts.insertOne(staff) } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That email address is already in use.' }); throw error }
+      try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That email address is already in use.' }); throw error }
       const delivered = await sendStaffInvite({ to: email, name, businessId: claims.businessId, password }).catch(() => false)
       return send(response, 201, { account: publicAccount(staff), invitationDelivered: delivered })
+    }
+    if (request.method === 'GET' && request.url === '/v1/staff') {
+      if (!isAccess(claims) || !['owner', 'admin'].includes(claims.role)) return send(response, 403, { error: 'Owner or admin access token required.' })
+      const staff = await accounts.find({ businessId: claims.businessId }).sort({ createdAt: 1 }).toArray()
+      return send(response, 200, { users: staff.map((account) => ({ ...publicAccount(account), createdAt: account.createdAt })) })
+    }
+    const accessMatch = request.url?.match(/^\/v1\/staff\/([^/]+)\/operational-access$/)
+    if (request.method === 'PUT' && accessMatch) {
+      if (!isAccess(claims) || !['owner', 'admin'].includes(claims.role)) return send(response, 403, { error: 'Owner or admin access token required.' })
+      if (!ObjectId.isValid(accessMatch[1])) return send(response, 400, { error: 'Invalid staff account.' })
+      const input = await readJson(request)
+      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(accessMatch[1]), businessId: claims.businessId, role: 'cashier' }, { $set: { operationalAccess: input.enabled === true } }, { returnDocument: 'after' })
+      if (!updated) return send(response, 404, { error: 'Cashier account not found.' })
+      return send(response, 200, { account: publicAccount(updated) })
     }
     if (request.method === 'GET' && request.url === '/v1/devices') {
       if (!isAccess(claims)) return send(response, 403, { error: 'Owner access token required.' })

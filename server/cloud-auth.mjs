@@ -45,6 +45,14 @@ export async function cloudCreateStaff(accessToken, input) {
   if (!response.ok) throw new Error(body.error || 'Could not create cloud staff account.')
   return body
 }
+export async function cloudSetCashierOperationalAccess(accessToken, userId, enabled) {
+  const { url } = await getCloudConfiguration()
+  if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before changing staff access.')
+  const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ enabled: enabled === true }) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Could not update cloud staff access.')
+  return body
+}
 export async function cloudEnrollDevice(syncApiUrl, accessToken, input) {
   const url = cloudUrl(syncApiUrl)
   if (!accessToken) throw new Error('Sign in online again before enrolling this device.')

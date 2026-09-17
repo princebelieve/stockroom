@@ -3,7 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, BarChart3, Boxes, CheckSquare, CloudOff, Download, Eye, EyeOff, LayoutDashboard, MoreHorizontal, PackagePlus, Plus, Printer, RefreshCw, Search, ScanLine, Settings2, ShoppingCart, SlidersHorizontal, Store, UserRoundCog, WalletCards, Wifi, X } from 'lucide-react'
 import type { Customer, Product, Sale, Stocktake } from './types'
 import { cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, removeQueuedOperation, replaceQueuedProductId, saveSale, upsertCachedProducts } from './lib/offlineStore'
+import { installMobileApi } from './lib/mobileApi'
 import './styles.css'
+
+installMobileApi()
 
 if ('serviceWorker' in navigator && !navigator.userAgent.includes('Electron')) {
   window.addEventListener('load', () => {
@@ -378,7 +381,8 @@ function App() {
   }
 
   async function setCashierAccess(id: string, enabled: boolean) {
-    const response = await fetch(`/api/users/${id}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ enabled }) })
+    if (!cloudAccessToken) return setSettingsMessage('Connect to the internet and sign in again before changing cashier access.')
+    const response = await fetch(`/api/users/${id}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ enabled, cloudAccessToken }) })
     if (!response.ok) return setSettingsMessage('Could not update cashier access.')
     const updated = await response.json() as StaffUser
     setStaff((current) => current.map((member) => member.id === updated.id ? updated : member))
