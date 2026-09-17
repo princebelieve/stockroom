@@ -128,6 +128,18 @@ async function pullLatest(configInput?: MobileSyncConfiguration | null) {
   }
 }
 
+async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) {
+  const db = await openMobileDatabase()
+  const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
+  if (current?.appName && current?.currency) return current
+  if (config) {
+    await pullLatest(config)
+    const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
+    if (synced?.appName && synced?.currency) return synced
+  }
+  return current || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', updatedAt: now() }
+}
+
 async function localSyncStatus() {
   const config = await getMobileSyncConfiguration()
   const db = await openMobileDatabase()
@@ -163,9 +175,9 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Native SQLite' })
   if (path === '/api/settings' && method === 'GET') {
-    const row = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
     const config = await getMobileSyncConfiguration()
-    return json({ ...(row || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', updatedAt: now() }), ownerConfigured: Boolean((await db.query('SELECT id FROM users LIMIT 1')).values?.length), cloudConfigured: Boolean(config), existingBusiness: Boolean(config) })
+    const row = await hydrateBusinessSettings(config)
+    return json({ ...row, ownerConfigured: Boolean((await db.query('SELECT id FROM users LIMIT 1')).values?.length), cloudConfigured: Boolean(config), existingBusiness: Boolean(config) })
   }
   if (path === '/api/installer/activate' && method === 'POST') {
     const input = await body(init)
@@ -188,6 +200,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     await setSetting('sessionUserId', String(stored.id))
     await setSetting('cloudAccessToken', String(result.accessToken))
     await pullLatest(config)
+    const initialized = await hydrateBusinessSettings(config)
+    await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, updated_at=excluded.updated_at', [initialized.appName || 'My Business', initialized.currency || 'USD', initialized.posProvider || '', initialized.posTerminalId || '', initialized.posConnection || 'manual', initialized.updatedAt || now()])
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' }, cloudAccessToken: result.accessToken })
   }
   if (!user) return error('Authentication required.', 401)
