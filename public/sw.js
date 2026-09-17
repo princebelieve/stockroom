@@ -1,5 +1,5 @@
-// The production build replaces these values with its exact asset list/hash.
-const CACHE_NAME = 'stockroom-shell-dev'
+// Bump this value whenever the browser shell changes so stale PWA clients discard the old shell.
+const CACHE_NAME = 'stockroom-shell-v2'
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg']
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)))

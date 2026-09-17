@@ -53,10 +53,18 @@ if (import.meta.env.VITE_APP_MODE === 'pwa' && isBrowserPwa()) {
   installBrowserApi()
 }
 
-if ('serviceWorker' in navigator && !navigator.userAgent.includes('Electron')) {
-  const register = () => { navigator.serviceWorker.register('/sw.js').catch(() => undefined) }
-  if (document.readyState === 'complete') register()
-  else window.addEventListener('load', register, { once: true })
+if (isBrowserPwa() && 'serviceWorker' in navigator) {
+  const register = async () => {
+    try {
+      const existing = await navigator.serviceWorker.getRegistration('/sw.js')
+      if (existing) return
+      await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    } catch {
+      // Ignore registration failures; app can still operate without the PWA shell cache.
+    }
+  }
+  if (document.readyState === 'complete') void register()
+  else window.addEventListener('load', () => { void register() }, { once: true })
 }
 
 type AppSettings = {
