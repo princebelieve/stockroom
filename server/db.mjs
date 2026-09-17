@@ -478,8 +478,8 @@ export function applyRemoteOperations(operations) {
           if (Number(count.variance)) adjustStock(count.productId, Number(count.variance), `Remote stocktake: ${payload.approvalReason || 'approved'}`, false)
         }
       } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
-        database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, updated_at = ? WHERE organization_id = ?')
-          .run(payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.updatedAt || now(), organizationId)
+        database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?')
+          .run(payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.logoData || '', payload.updatedAt || now(), organizationId)
       }
       database.prepare('INSERT INTO sync_inbox (operation_id, received_at) VALUES (?, ?)').run(operation.operationId, now())
     } catch (error) {

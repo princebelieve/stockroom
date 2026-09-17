@@ -193,6 +193,7 @@ function App() {
     setPosProvider(settings.posProvider || '')
     setPosTerminalId(settings.posTerminalId || '')
     setPosConnection(settings.posConnection || 'manual')
+    setLogoData(settings.logoData || '')
     localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
     localStorage.setItem('stockroom-currency', settings.currency || 'USD')
   }
@@ -242,10 +243,11 @@ function App() {
           if (registration?.waiting) {
             navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true })
             registration.waiting.postMessage('ACTIVATE_UPDATE')
-            return
           }
         }
-          })
+        await refreshBusinessSettings()
+        setRefreshingView(false)
+      })
   }
   useEffect(() => {
     if (!isNativeMobile() && !isBrowserPwa()) return
