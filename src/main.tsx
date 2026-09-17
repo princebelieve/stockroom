@@ -6,6 +6,7 @@ import { cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, 
 import { installMobileApi } from './lib/mobileApi'
 import { isNativeMobile } from './lib/mobileDatabase'
 import { isBrowserPwa } from './lib/platform'
+import { resolveStartupState } from './lib/startupState.mjs'
 import './styles.css'
 
 function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
@@ -352,14 +353,14 @@ function App() {
   }, [online])
   useEffect(() => {
     fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }> : Promise.reject()).then((settings) => {
-      const hasExistingDevice = settings.cloudConfigured === true || settings.existingBusiness === true
+      const startupState = resolveStartupState(settings)
       setAppName(settings.appName || 'My Business')
       setCurrency(settings.currency || 'USD')
       setPosProvider(settings.posProvider || '')
       setPosTerminalId(settings.posTerminalId || '')
       setPosConnection(settings.posConnection || 'manual')
-      setSetupRequired(!hasExistingDevice && settings.ownerConfigured === false)
-      setInstallerRequired(!hasExistingDevice)
+      setSetupRequired(startupState.setupRequired)
+      setInstallerRequired(startupState.installerRequired)
       setSettingsLoaded(true)
       localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
       localStorage.setItem('stockroom-currency', settings.currency || 'USD')
