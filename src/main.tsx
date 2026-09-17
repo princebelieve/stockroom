@@ -49,7 +49,7 @@ declare global {
 }
 
 installMobileApi()
-if (import.meta.env.VITE_APP_MODE === 'pwa' && isBrowserPwa()) {
+if (isBrowserPwa()) {
   const { installBrowserApi } = await import('./lib/installBrowserApi')
   installBrowserApi()
 }
@@ -243,7 +243,6 @@ function App() {
             return
           }
         }
-        window.setTimeout(() => window.location.reload(), 120)
       })
   }
   useEffect(() => {
@@ -362,13 +361,16 @@ function App() {
   useEffect(() => {
     fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }> : Promise.reject()).then((settings) => {
       const startupState = resolveStartupState(settings)
+      const browserStartupState = isBrowserPwa() && !settings.cloudConfigured
+        ? { ...startupState, installerRequired: false, setupRequired: false }
+        : startupState
       setAppName(settings.appName || 'My Business')
       setCurrency(settings.currency || 'USD')
       setPosProvider(settings.posProvider || '')
       setPosTerminalId(settings.posTerminalId || '')
       setPosConnection(settings.posConnection || 'manual')
-      setSetupRequired(startupState.setupRequired)
-      setInstallerRequired(startupState.installerRequired)
+      setSetupRequired(browserStartupState.setupRequired)
+      setInstallerRequired(browserStartupState.installerRequired)
       setSettingsLoaded(true)
       localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
       localStorage.setItem('stockroom-currency', settings.currency || 'USD')
@@ -378,7 +380,7 @@ function App() {
         const response = await fetch('/api/sync/status')
         const status = response.ok ? await response.json() as { configured?: boolean; existingBusiness?: boolean } : {}
         const startupState = resolveStartupState({ cloudConfigured: status.configured, existingBusiness: status.existingBusiness })
-        if (startupState.hasExistingDevice) {
+        if (startupState.hasExistingDevice || isBrowserPwa()) {
           setSetupRequired(false)
           setInstallerRequired(false)
           setSettingsLoaded(true)

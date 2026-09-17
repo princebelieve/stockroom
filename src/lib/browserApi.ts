@@ -22,6 +22,13 @@ async function setSetting(key: string, value: string) {
   const db = await openMobileDatabase()
   await db.run('INSERT INTO mobile_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value])
 }
+async function browserDeviceId() {
+  const existing = await setting('browserDeviceId')
+  if (existing) return existing
+  const generated = `pwa-${crypto.randomUUID()}`
+  await setSetting('browserDeviceId', generated)
+  return generated
+}
 async function sessionUser(): Promise<MobileUser | null> {
   const userId = await setting('sessionUserId')
   if (!userId) return null
@@ -210,11 +217,22 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return json({ configured: true, existingBusiness: true }, 201)
   }
   if (path === '/api/auth/cloud-session' && method === 'POST') {
-    const input = await body(init); const config = await getMobileSyncConfiguration(); if (!config) return error('Enroll this browser before signing in.', 400)
-    const response = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.email, password: input.password }) })
+    const input = await body(init); let config = await getMobileSyncConfiguration()
+    const syncApiUrl = config?.syncApiUrl || cloudUrl
+    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.email, password: input.password }) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
     const account = result.account
-    if (account.businessId !== config.businessId) return error('This account belongs to a different business.', 403)
+    if (!config && account.role !== 'owner') return error('An owner must sign in on this browser once before staff can use it.', 403)
+    if (config && account.businessId !== config.businessId) return error('This account belongs to a different business.', 403)
+    if (!config) {
+      const deviceId = await browserDeviceId()
+      const enrolled = await originalFetch(`${syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ deviceId, label: `PWA ${deviceId.slice(-8)}` }) })
+      const device = await enrolled.json()
+      if (!enrolled.ok) return error(device.error || 'Could not enroll this browser.', enrolled.status)
+      config = { syncApiUrl, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken }
+      await saveMobileSyncConfiguration(config)
+      await navigator.storage?.persist?.().catch(() => false)
+    }
     // Explicit owner sign-in renews this device after token expiry/password reset.
     // Keep the same device ID, cursor and outbox so queued work is preserved.
     if (account.role === 'owner') {
