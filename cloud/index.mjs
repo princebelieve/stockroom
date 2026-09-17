@@ -31,7 +31,15 @@ await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 // records use a cloud entity head and newer `updatedAt` wins; the losing device
 // receives a reviewable conflict instead of silently overwriting data.
 
-function send(response, status, payload) { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(payload)) }
+// Capacitor's Android WebView is served from this local HTTPS origin. Keep the
+// cloud API usable from the installed app without opening it to arbitrary sites.
+const corsHeaders = {
+  'Access-Control-Allow-Origin': 'https://localhost',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Key',
+  Vary: 'Origin',
+}
+function send(response, status, payload) { response.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders }); response.end(JSON.stringify(payload)) }
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
 function signToken(payload) {
   const header = encode({ alg: 'HS256', typ: 'JWT' })
@@ -67,6 +75,7 @@ function readJson(request) {
 }
 
 const server = createServer(async (request, response) => {
+  if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   try {
     if (request.method === 'POST' && request.url === '/v1/auth/register') {
