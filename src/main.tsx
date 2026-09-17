@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState } from 'react'
+import { StrictMode, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, BarChart3, Boxes, CheckSquare, CloudOff, Download, Eye, EyeOff, LayoutDashboard, MoreHorizontal, PackagePlus, Plus, Printer, RefreshCw, Search, ScanLine, Settings2, ShoppingCart, SlidersHorizontal, Store, UserRoundCog, WalletCards, Wifi, X } from 'lucide-react'
 import type { Customer, Product, Sale, Stocktake } from './types'
@@ -6,6 +6,41 @@ import { cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, 
 import { installMobileApi } from './lib/mobileApi'
 import { isNativeMobile } from './lib/mobileDatabase'
 import './styles.css'
+
+function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
+  const menu = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (menu.current && !menu.current.contains(event.target as Node)) menu.current.open = false
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && menu.current?.open) {
+        menu.current.open = false
+        menu.current.querySelector('summary')?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [])
+  return <details className="page-options" ref={menu} onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node)) event.currentTarget.open = false
+  }}>
+    <summary className="icon-button" aria-label="Page options" title="Page options"><MoreHorizontal size={19} /></summary>
+    <div className="page-options-panel">
+      <button type="button" disabled={busy} onClick={() => {
+        if (menu.current) {
+          menu.current.open = false
+          menu.current.querySelector('summary')?.focus()
+        }
+        onRefresh()
+      }}><RefreshCw size={16} />Refresh</button>
+    </div>
+  </details>
+}
 
 declare global {
   interface Window { stockroomDesktop?: { openCustomerDisplay: (pairingUrl: string) => Promise<void> } }
@@ -145,28 +180,22 @@ function App() {
     } finally { setSyncing(false) }
   }
   async function pullLatest() {
-    setSyncing(true)
-    try {
-      const response = await fetch('/api/sync/pull', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
-      if (!response.ok) return
-      setSyncStatus(await response.json() as SyncStatus)
-      await refreshBusinessSettings()
-      window.location.reload()
-    } finally { setSyncing(false) }
+    refreshLocalView()
   }
   useEffect(() => {
     if (isNativeMobile()) return
     const handleDesktopReload = (event: KeyboardEvent) => {
       const reloadShortcut = event.key === 'F5' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r')
-      if (!reloadShortcut || syncing || !online || !syncStatus.configured) return
+      if (!reloadShortcut) return
       event.preventDefault()
+      if (syncing || refreshingView) return
       void pullLatest()
     }
     window.addEventListener('keydown', handleDesktopReload)
     return () => window.removeEventListener('keydown', handleDesktopReload)
-  }, [online, syncStatus.configured, syncing, authToken])
+  }, [online, syncStatus.configured, syncing, refreshingView, authToken])
   function refreshLocalView() {
-    if (refreshingView) return
+    if (refreshingView || syncing) return
     setRefreshingView(true)
     // Pull remote changes only. Deliberate "Sync now" remains responsible for
     // uploading this phone's queued work.
@@ -177,33 +206,52 @@ function App() {
   useEffect(() => {
     if (!isNativeMobile()) return
     let startY = 0
+    let startX = 0
+    let distance = 0
     let tracking = false
+    const cancel = () => {
+      tracking = false
+      distance = 0
+      setMobilePullDistance(0)
+    }
     const start = (event: TouchEvent) => {
-      if (window.scrollY > 0 || syncing) return
+      cancel()
+      if (!authToken || window.scrollY > 0 || syncing || refreshingView || event.touches.length !== 1) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest('input, textarea, select, [contenteditable], .modal-backdrop')) return
+      for (let element = target; element; element = element.parentElement) {
+        if (element.scrollTop > 0) return
+      }
       startY = event.touches[0]?.clientY || 0
+      startX = event.touches[0]?.clientX || 0
       tracking = true
     }
     const move = (event: TouchEvent) => {
       if (!tracking) return
-      const distance = Math.max(0, Math.min(96, (event.touches[0]?.clientY || 0) - startY))
-      if (distance > 0) event.preventDefault()
+      if (event.touches.length !== 1) return cancel()
+      const deltaY = event.touches[0].clientY - startY
+      const deltaX = event.touches[0].clientX - startX
+      if (deltaY < 0 || Math.abs(deltaX) > Math.abs(deltaY)) return cancel()
+      distance = Math.max(0, Math.min(96, deltaY))
+      if (distance > 0 && event.cancelable) event.preventDefault()
       setMobilePullDistance(distance)
     }
     const end = () => {
-      const shouldRefresh = mobilePullDistance >= 64 && !refreshingView
-      tracking = false
-      setMobilePullDistance(0)
+      const shouldRefresh = tracking && distance >= 64
+      cancel()
       if (shouldRefresh) refreshLocalView()
     }
     document.addEventListener('touchstart', start, { passive: true })
     document.addEventListener('touchmove', move, { passive: false })
     document.addEventListener('touchend', end, { passive: true })
+    document.addEventListener('touchcancel', cancel, { passive: true })
     return () => {
       document.removeEventListener('touchstart', start)
       document.removeEventListener('touchmove', move)
       document.removeEventListener('touchend', end)
+      document.removeEventListener('touchcancel', cancel)
     }
-  }, [mobilePullDistance, refreshingView, syncing])
+  }, [refreshingView, syncing, authToken])
   async function activateInstallation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setInstallerMessage('')
@@ -636,7 +684,7 @@ function App() {
       <div className="sidebar-foot"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` · ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline · saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
     </aside>
     <main className="main-content">
-      <header className="topbar"><div><p className="eyebrow">{user.name} · {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><button className="text-button logout-button" onClick={logout}>Log out</button></div></header>
+      <header className="topbar"><div><p className="eyebrow">{user.name} · {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><button className="text-button logout-button" onClick={logout}>Log out</button></div></header>
       {active === 'Overview' && canManageOperations && <>
         <section className="hero-row"><div><h2>Business at a glance</h2><p>Keep your shelves moving and your team in the know.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}><Plus size={18} />Add product</button></section>
         <section className="metric-grid"><div className="metric-card"><span>Inventory value</span><strong>{formatMoney(totalValue)}</strong><small>Based on current local stock and unit prices</small></div><div className="metric-card"><span>Items in stock</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}</strong><small>Across {products.length} products</small></div><div className="metric-card alert-card"><span>Needs attention</span><strong>{lowStock.length}</strong><small>{lowStock.length ? 'Products below reorder point' : 'All stock levels healthy'}</small></div></section>
