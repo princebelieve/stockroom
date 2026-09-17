@@ -11,6 +11,7 @@ PWA build. The existing packaging scripts rebuild in standard mode.
 Deploy the updated `cloud` code. Keep the existing MongoDB and secrets.
 Add this environment variable, replacing the example with your production URL:
 
+
 ```text
 PWA_ALLOWED_ORIGINS=https://your-app.vercel.app
 ```
