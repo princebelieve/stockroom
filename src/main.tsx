@@ -91,6 +91,7 @@ type Reports = { daily: { total: number; count: number }; weekly: { total: numbe
 type Expense = { id: string; category: string; description: string; amount: number; incurredAt: string }
 
 function App() {
+  const deriveSku = (name: string) => `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('stockroom-products')
     return saved ? JSON.parse(saved) : []
@@ -111,6 +112,17 @@ function App() {
   const [posTerminalId, setPosTerminalId] = useState('')
   const [posConnection, setPosConnection] = useState('manual')
   const [logoData, setLogoData] = useState('')
+  useEffect(() => {
+    if (!showAdd) return
+    const nameInput = document.querySelector('form.modal input[name="name"]') as HTMLInputElement | null
+    const skuInput = document.querySelector('form.modal input[name="sku"]') as HTMLInputElement | null
+    if (!nameInput || !skuInput) return
+    skuInput.readOnly = true
+    const derive = () => { skuInput.value = deriveSku(nameInput.value) }
+    nameInput.addEventListener('input', derive)
+    derive()
+    return () => nameInput.removeEventListener('input', derive)
+  }, [showAdd])
   const [settingsMessage, setSettingsMessage] = useState('')
   const [passwordMessage, setPasswordMessage] = useState('')
   const [cart, setCart] = useState<Record<string, number>>({})
@@ -441,7 +453,8 @@ function App() {
     event.preventDefault()
     if (!canManageInventory) return
     const data = new FormData(event.currentTarget)
-    const input = { name: String(data.get('name')), sku: String(data.get('sku')), category: String(data.get('category')), stock: Number(data.get('stock')), reorder: Number(data.get('reorder')), price: Number(data.get('price')), cost: Number(data.get('cost') || 0), unit: String(data.get('unit')) }
+    const name = String(data.get('name')).trim()
+    const input = { name, sku: String(data.get('sku')).trim() || deriveSku(name), category: String(data.get('category')), stock: Number(data.get('stock')), reorder: Number(data.get('reorder')), price: Number(data.get('price')), cost: Number(data.get('cost') || 0), unit: String(data.get('unit')) }
     try {
       const response = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(input) })
       if (!response.ok) throw new Error('Unable to create product')
