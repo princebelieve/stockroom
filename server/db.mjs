@@ -278,7 +278,6 @@ export async function createOwnerSetup(input) {
   if (configured) throw new Error('This installation already has an owner account.')
   database.prepare('INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, ownerName, email, hashPassword(password), 'owner', now())
   database.prepare('UPDATE app_settings SET app_name = ?, updated_at = ? WHERE organization_id = ?').run(appName, now(), organizationId)
-  if (policy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(policy)), organizationId)
   const config = { appName, shopName: appName, ownerName, ownerEmail: email, ownerConfigured: true, mongoUri, mongoDatabase }
   await writeShopConfig(config)
   return { appName, ownerEmail: email, ownerName, mongoUri, mongoDatabase }
