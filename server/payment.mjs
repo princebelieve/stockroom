@@ -12,11 +12,27 @@ function cents(value, label) {
 }
 export function recordPayment(sale, policyInput, legacy = false) {
   const policy = paymentPolicy(policyInput)
-  if (!['cash', 'external-pos', 'wallet'].includes(sale.paymentMethod)) throw new Error('Select a supported payment method.')
+  if (!['cash', 'external-pos', 'bank-transfer', 'multiple', 'wallet'].includes(sale.paymentMethod)) throw new Error('Select a supported payment method.')
   if (legacy && !sale.paymentDetails) return sale
   const input = sale.paymentDetails || {}
   const total = Math.round(Number(sale.total) * 100)
   if (!Number.isSafeInteger(total) || total < 0) throw new Error('Invalid sale total.')
+  if (sale.paymentMethod === 'multiple') {
+    const allocations = Array.isArray(input.allocations) ? input.allocations : []
+    if (allocations.length < 2) throw new Error('Record at least two payment parts.')
+    const parts = allocations.map((allocation) => {
+      const method = String(allocation?.method || '')
+      if (!['cash', 'external-pos', 'bank-transfer'].includes(method)) throw new Error('A split payment may use cash, terminal, or bank transfer.')
+      const amount = cents(allocation?.amount, 'Each payment amount')
+      if (!amount) throw new Error('Each payment amount must be greater than zero.')
+      const provider = String(allocation?.provider || '').trim().slice(0, 200)
+      const reference = String(allocation?.reference || '').trim().slice(0, 200)
+      if (method !== 'cash' && (!provider || !reference)) throw new Error('Record the provider and reference for every terminal or bank-transfer part.')
+      return { method, amount, provider, reference }
+    })
+    if (parts.reduce((sum, part) => sum + part.amount, 0) !== total) throw new Error('Split payment amounts must equal the sale total exactly.')
+    return { ...sale, cashReceived: null, changeGiven: null, paymentDetails: { version: 1, amountReceived: total / 100, changeGiven: 0, extraKept: 0, reason: '', note: '', printExtraDetails: false, allocations: parts.map(part => ({ ...part, amount: part.amount / 100 })), policy } }
+  }
   if (sale.paymentMethod === 'wallet') {
     if (!input.customerId) throw new Error('Select the customer wallet.')
     if (Number(input.extraKept || 0)) throw new Error('Wallet purchases must equal the sale total.')
@@ -26,14 +42,14 @@ export function recordPayment(sale, policyInput, legacy = false) {
   const extra = cents(input.extraKept ?? 0, 'Extra retained')
   if (paid < total) throw new Error('Amount received is less than the sale total.')
   if (extra > paid - total) throw new Error('Extra retained cannot exceed the amount above the sale total.')
-  if (sale.paymentMethod === 'external-pos' && paid - total !== extra) throw new Error('Account for the entire extra terminal payment. Refunds must be handled before recording the corrected payment.')
+  if (['external-pos', 'bank-transfer'].includes(sale.paymentMethod) && paid - total !== extra) throw new Error('Account for the entire extra non-cash payment. Refunds must be handled before recording the corrected payment.')
   const reason = String(input.reason || '')
   const note = String(input.note || '').trim().slice(0, 500)
   if (extra && !policy.allowExtras) throw new Error('The owner has not enabled extra payments.')
   if (extra && (!policy.reasons.includes(reason) || !Object.hasOwn(extraReasons, reason))) throw new Error('Select an owner-approved reason for the extra payment.')
   if (extra && reason === 'other' && !note) throw new Error('Explain the extra payment.')
   if (!extra && paid > total && policy.reasonForChange && reason !== 'change-returned') throw new Error('Select Change returned to account for the amount above the total.')
-  if (sale.paymentMethod === 'external-pos' && (!String(sale.paymentReference || '').trim() || !String(sale.terminalProvider || '').trim())) throw new Error('Record the terminal provider and payment reference.')
+  if (['external-pos', 'bank-transfer'].includes(sale.paymentMethod) && (!String(sale.paymentReference || '').trim() || !String(sale.terminalProvider || '').trim())) throw new Error(`Record the ${sale.paymentMethod === 'bank-transfer' ? 'bank or transfer provider' : 'terminal provider'} and payment reference.`)
   const change = (paid - total - extra) / 100
   return { ...sale, cashReceived: sale.paymentMethod === 'cash' ? paid / 100 : null, changeGiven: sale.paymentMethod === 'cash' ? change : null, paymentDetails: { version: 1, amountReceived: paid / 100, changeGiven: change, extraKept: extra / 100, reason: extra ? reason : paid > total ? 'change-returned' : '', note: extra ? note : '', printExtraDetails: policy.printExtraDetails, policy } }
 }

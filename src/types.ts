@@ -21,7 +21,7 @@ export type Sale = {
   total: number
   createdAt: string
   syncStatus: 'pending' | 'synced'
-  paymentMethod: 'external-pos' | 'cash' | 'wallet'
+  paymentMethod: 'external-pos' | 'bank-transfer' | 'multiple' | 'cash' | 'wallet'
   paymentReference?: string
   terminalProvider?: string
   cashReceived?: number | null

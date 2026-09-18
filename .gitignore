@@ -12,6 +12,7 @@ server/data/
 backups/
 sync-config.json
 android/local.properties
+.gradle/
 
 # Environment secrets
 .env
