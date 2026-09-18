@@ -41,9 +41,9 @@ try {
   const page = await context.newPage()
   page.setDefaultTimeout(15000)
   const errors = []
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', error => { errors.push(error.message); console.error(error.message) })
   await page.goto(`http://127.0.0.1:${server.address().port}`)
-  await page.getByRole('heading', { name: 'Add another device' }).waitFor()
+  await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   console.log('PWA loaded')
   const api = (path, body) => page.evaluate(async ({ path, body }) => {
     const response = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined)
@@ -63,7 +63,7 @@ try {
   console.log('Offline shell ready')
   await context.setOffline(true)
   cloudOffline = true
-  const sale = { id: 'sale-test', total: 10, items: [{ productId: created.data.id, quantity: 2, price: 5 }], paymentMethod: 'cash' }
+  const sale = { id: 'sale-test', total: 10, items: [{ productId: created.data.id, quantity: 2, price: 5 }], paymentMethod: 'cash', cashReceived: 20, changeGiven: 999 }
   assert.equal((await api('/api/sales', sale)).status, 201)
   assert.equal((await api('/api/sales', sale)).status, 200)
   assert.equal((await api('/api/products')).data.products[0].stock, 8)
@@ -76,6 +76,9 @@ try {
   assert.equal((await api('/api/products')).data.products[0].stock, 8)
   await page.reload()
   await page.getByRole('button', { name: 'Log out' }).waitFor()
+  const savedCash = (await api('/api/sales')).data.sales.find(row => row.id === sale.id)
+  assert.equal(savedCash.cashReceived, 20)
+  assert.equal(savedCash.changeGiven, 10)
   assert.equal((await api('/api/products')).data.products[0].stock, 8)
   assert.equal((await api('/api/sync/status')).data.pending, 2)
   // A storage failure must not acknowledge a write or retain an in-memory edit.
@@ -157,6 +160,19 @@ try {
   assert.deepEqual(stocktakeOps.map(item => item.action), ['create', 'approved'])
   assert.equal(stocktakeOps[0].payload.status, 'approved')
   assert.equal(stocktakeOps[1].payload.counts.find(item => item.id === coffeeCount.id).variance, -2)
+  await page.getByRole('button', { name: 'POS', exact: true }).click()
+  await page.locator('.pos-product').filter({ hasText: 'Coffee' }).click()
+  await page.getByLabel('Payment method').selectOption('cash')
+  assert.equal(await page.getByRole('button', { name: 'Complete sale', exact: true }).isDisabled(), true)
+  await page.getByLabel('Cash received').fill('0.01')
+  assert.equal(await page.getByRole('button', { name: 'Complete sale', exact: true }).isDisabled(), true)
+  await page.getByLabel('Cash received').fill('100')
+  await page.getByRole('button', { name: 'Complete sale', exact: true }).click()
+  await page.getByText('Scan or select a product to begin.', { exact: true }).waitFor()
+  const cashSale = (await api('/api/sales')).data.sales.find(row => row.cashReceived === 100)
+  assert.ok(cashSale)
+  assert.equal(cashSale.changeGiven, 100 - cashSale.total)
+  assert.match(await page.locator('.print-receipt').textContent(), /Cash received:.*Change given:/)
   await page.getByRole('button', { name: 'Log out' }).click()
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   assert.equal((await api('/api/settings')).data.existingBusiness, true)

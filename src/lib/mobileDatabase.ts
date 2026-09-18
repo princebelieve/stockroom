@@ -70,6 +70,7 @@ export async function openMobileDatabase() {
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS app_settings (
+      payment_policy TEXT NOT NULL DEFAULT '{}',
       id INTEGER PRIMARY KEY CHECK(id = 1),
       app_name TEXT NOT NULL DEFAULT 'My Business',
       currency TEXT NOT NULL DEFAULT 'USD',
@@ -104,6 +105,9 @@ export async function openMobileDatabase() {
       total REAL NOT NULL,
       payment_method TEXT NOT NULL,
       payment_reference TEXT NOT NULL DEFAULT '',
+      payment_details TEXT,
+      cash_received REAL,
+      change_given REAL,
       terminal_provider TEXT NOT NULL DEFAULT '',
       staff_id TEXT NOT NULL DEFAULT '',
       staff_name TEXT NOT NULL DEFAULT '',
@@ -141,6 +145,14 @@ export async function openMobileDatabase() {
     );
   `)
   try { await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+  const policyColumns = await connection.query('PRAGMA table_info(app_settings)')
+  if (!policyColumns.values?.some(row => row.name === 'payment_policy')) await connection.execute("ALTER TABLE app_settings ADD COLUMN payment_policy TEXT NOT NULL DEFAULT '{}'")
+  const saleColumns = await connection.query('PRAGMA table_info(sales)')
+  if (!saleColumns.values?.some(row => row.name === 'payment_details')) await connection.execute('ALTER TABLE sales ADD COLUMN payment_details TEXT')
+  for (const column of ['cash_received', 'change_given']) {
+    const columns = await connection.query('PRAGMA table_info(sales)')
+    if (!columns.values?.some(row => row.name === column)) await connection.execute(`ALTER TABLE sales ADD COLUMN ${column} REAL`)
+  }
   return connection
 }
 

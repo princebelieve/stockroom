@@ -94,3 +94,8 @@ button[aria-busy="true"] { cursor: progress; }
 .button-spinner { display: inline-block; width: 14px; height: 14px; flex-shrink: 0; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: button-spin .75s linear infinite; }
 @keyframes button-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .button-spinner { animation: none; } }
+.device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.device-grid button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 14px; }
+.device-grid button span { font-weight: normal; font-size: 12px; }
+.device-setup h4 { margin: 16px 0 8px; }
+.device-setup .report-actions { margin-top: 16px; flex-wrap: wrap; }

@@ -21,7 +21,7 @@ export function TerminalSettings({ businessId, defaultProvider, onSaved }: { bus
     </select></label>
     {settings.connection === 'network' && <>{field('host', 'Terminal hostname / IP address', 'e.g. 192.168.1.50')}{field('port', 'Terminal port', 'Provided by the terminal vendor')}</>}
     {settings.connection !== 'manual' && <label className="checkbox-label"><input type="checkbox" checked={settings.manualFallback} onChange={event => { setSettings({ ...settings, manualFallback: event.target.checked }); setMessage('Unsaved changes') }} />Allow manual payment confirmation while integration is unavailable</label>}
-    <p role="status">{settings.connection === 'manual' ? 'Manual mode: the cashier must confirm payment on the terminal and enter its reference.' : 'Integration unavailable. This profile cannot send payments or verify approvals.'}</p>
+    <p role="status">{settings.connection === 'manual' ? 'Receipt confirmation: scan the receipt barcode/QR, read a photo, or enter its reference. Check approval, amount and currency before recording the sale.' : 'Integration unavailable. This profile cannot send payments or verify approvals.'}</p>
     <button type="button" className="filter-button" disabled title="A supported provider adapter must be installed first">Test connection (unavailable)</button>
     <p>API credentials belong in the secure payment backend. Do not enter keys or passwords in these fields.</p>
     <SubmitButton className="primary-button">Save terminal profile</SubmitButton><p role="status">{message}</p>

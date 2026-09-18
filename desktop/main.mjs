@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, session } from 'electron'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { sendHardwareCommand } from './hardware.mjs'
 
 const port = Number(process.env.PORT || 8787)
 let customerDisplayWindow = null
@@ -61,6 +62,10 @@ app.whenReady().then(async () => {
     ipcMain.handle('printers:list', async (event) => {
       trustedSender(event)
       return (await event.sender.getPrintersAsync()).map(({ name, displayName }) => ({ name, displayName }))
+    })
+    ipcMain.handle('printers:control', async (event, options) => {
+      trustedSender(event)
+      await sendHardwareCommand(options)
     })
     ipcMain.handle('printers:print', async (event, options) => {
       trustedSender(event)

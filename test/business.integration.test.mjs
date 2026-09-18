@@ -60,7 +60,9 @@ test('offline sale is committed locally and duplicate sale IDs do not reduce sto
   const secondSetup = await json(`${baseUrl}/api/setup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appName: 'Other Shop', ownerName: 'Intruder', email: `second${Date.now()}@test.local`, password: 'long-test-password' }) })
   assert.equal(secondSetup.response.status, 403)
   const item = await product(baseUrl, token, 5)
-  const sale = { id: 'sale-idempotency-test', items: [{ productId: item.id, quantity: 2, price: 10 }], total: 20, createdAt: new Date().toISOString(), paymentMethod: 'cash' }
+  const sale = { id: 'sale-idempotency-test', items: [{ productId: item.id, quantity: 2, price: 10 }], total: 20, createdAt: new Date().toISOString(), paymentMethod: 'cash', cashReceived: 50, changeGiven: 999 }
+  const invalidCash = await json(`${baseUrl}/api/sales`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ ...sale, cashReceived: 10 }) })
+  assert.equal(invalidCash.response.status, 400)
   const first = await json(`${baseUrl}/api/sales`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(sale) })
   const second = await json(`${baseUrl}/api/sales`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(sale) })
   assert.equal(first.response.status, 201); assert.equal(second.response.status, 201)
@@ -68,6 +70,8 @@ test('offline sale is committed locally and duplicate sale IDs do not reduce sto
   assert.equal(products.body.products.find((value) => value.id === item.id).stock, 3)
   const sales = await json(`${baseUrl}/api/sales`, { headers: { Authorization: `Bearer ${token}` } })
   assert.equal(sales.body.sales.filter((value) => value.id === sale.id).length, 1)
+  assert.equal(sales.body.sales.find(value => value.id === sale.id).cashReceived, 50)
+  assert.equal(sales.body.sales.find(value => value.id === sale.id).changeGiven, 30)
 })
 
 test('queued local changes synchronize after cloud service becomes reachable', async () => {

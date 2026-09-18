@@ -277,7 +277,7 @@ const server = createServer(async (request, response) => {
         if (!/^[A-Z]{3}$/.test(currency)) return sendJson(response, 400, { error: 'Currency must be a three-letter code.' })
         if (logoData && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(logoData) || logoData.length > 1_400_000)) return sendJson(response, 400, { error: 'Logo must be a PNG, JPEG, or WebP image smaller than 1 MB.' })
         if (!['manual', 'usb', 'bluetooth', 'network', 'sdk'].includes(posConnection)) return sendJson(response, 400, { error: 'POS connection mode is invalid.' })
-        return sendJson(response, 200, await updateSettings(appName, currency, posProvider, posTerminalId, posConnection, mongoUri, mongoDatabase, logoData))
+        return sendJson(response, 200, await updateSettings(appName, currency, posProvider, posTerminalId, posConnection, mongoUri, mongoDatabase, logoData, input.paymentPolicy))
       } catch {
         return sendJson(response, 400, { error: 'Request body must be valid JSON.' })
       }

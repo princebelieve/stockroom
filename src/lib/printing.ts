@@ -7,6 +7,7 @@ declare global {
     openCustomerDisplay: (url: string) => Promise<void>
     listPrinters: () => Promise<InstalledPrinter[]>
     print: (options: { kind: 'receipt' | 'report'; deviceName: string; width: number }) => Promise<void>
+    control: (options: import('./nativePrinting').HardwareCommand) => Promise<void>
   } }
 }
 export function printerSettings(): PrinterSettings {
@@ -18,7 +19,6 @@ export function printerSettings(): PrinterSettings {
 let printing = false
 export async function printDocument(kind: 'receipt' | 'report', settings = printerSettings(), test = false) {
   if (printing) throw new Error('A print job is already in progress.')
-  if (isNativeMobile()) throw new Error('Printing is available in the Windows app or a browser.')
   printing = true
   document.body.dataset.printKind = test ? 'test' : kind
   document.documentElement.style.setProperty('--receipt-width', test && kind === 'report' ? '190mm' : `${settings.width}mm`)
@@ -26,7 +26,10 @@ export async function printDocument(kind: 'receipt' | 'report', settings = print
   if (sample) { sample.className = 'printer-test'; sample.textContent = `Stockroom ${kind === 'receipt' ? `${settings.width} mm receipt` : 'A4 report'} test print — ${new Date().toLocaleString()}`; document.body.append(sample) }
   try {
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-    if (window.stockroomDesktop) await window.stockroomDesktop.print({ kind, deviceName: settings[kind], width: settings.width })
+    if (isNativeMobile()) {
+      const { NativePrinting, printHtml } = await import('./nativePrinting')
+      await NativePrinting.print({ html: printHtml(kind, settings.width, test), kind, width: settings.width })
+    } else if (window.stockroomDesktop) await window.stockroomDesktop.print({ kind, deviceName: settings[kind], width: settings.width })
     else window.print()
   } finally {
     sample?.remove()

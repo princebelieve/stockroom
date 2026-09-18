@@ -34,6 +34,20 @@ try {
   assert.equal(result.calls[1].reportVisible, true)
   assert.equal(result.error, 'Printer offline')
   assert.equal(result.cleaned, true)
+  const nativeSource = (await readFile('src/lib/nativePrinting.ts', 'utf8')).replace("import { registerPlugin } from '@capacitor/core'", 'const registerPlugin = () => ({})').replaceAll('export ', '')
+  await page.addScriptTag({ content: stripTypeScriptTypes(nativeSource) })
+  const snapshots = await page.evaluate(() => {
+    const receipt = document.querySelector('.print-receipt')
+    receipt.innerHTML = '<h2>Shop &amp; Co</h2><p>Rice × 2 — ₦500</p>'
+    const saved = printHtml('receipt', 58, false)
+    receipt.textContent = 'Next sale'
+    return { saved, report: printHtml('report', 80, false) }
+  })
+  assert.match(snapshots.saved, /Rice × 2 — ₦500/)
+  assert.match(snapshots.saved, /max-width:52mm/)
+  assert.ok(!snapshots.saved.includes('Next sale'))
+  assert.ok(!snapshots.report.includes('<form'))
+  assert.ok(!snapshots.report.includes('Navigation'))
   const offlineSource = (await readFile('src/lib/offlineStore.ts', 'utf8')).replace(/import type[^\n]+/g, '').replaceAll('export ', '')
   await page.addScriptTag({ content: stripTypeScriptTypes(offlineSource) })
   await page.evaluate(async () => {
@@ -47,5 +61,5 @@ try {
   assert.equal(archive.otherShop.length, 0)
   assert.equal(archive.pending.length, 1)
   assert.equal(archive.products[0].stock, 2)
-  console.log('PASS: printer routing, layouts, failure cleanup, durable receipt/stock/queue commit and business isolation')
+  console.log('PASS: printer routing, layouts, failure cleanup, Android document snapshots, durable receipt/stock/queue commit and business isolation')
 } finally { await browser.close() }

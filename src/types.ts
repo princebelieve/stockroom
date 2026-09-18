@@ -24,6 +24,11 @@ export type Sale = {
   paymentMethod: 'external-pos' | 'cash' | 'wallet'
   paymentReference?: string
   terminalProvider?: string
+  cashReceived?: number | null
+  changeGiven?: number | null
+  paymentDetails?: import('../server/payment.mjs').PaymentDetails
+  staffId?: string
+  staffName?: string
 }
 
 export type Customer = { id: string; name: string; phone: string; balance: number }

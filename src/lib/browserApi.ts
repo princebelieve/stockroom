@@ -1,3 +1,5 @@
+import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
+import { normalizeCashSale } from '../../server/cash.mjs'
 // Browser API: separate from native Android so PWA changes cannot alter its storage path.
 import { browserStocktake } from './browserStocktake'
 import { getBrowserSyncConfiguration as getMobileSyncConfiguration, openBrowserDatabase as openMobileDatabase, saveBrowserSyncConfiguration as saveMobileSyncConfiguration, type BrowserSyncConfiguration as MobileSyncConfiguration } from './browserDatabase'
@@ -62,7 +64,8 @@ async function applyOperation(operation: Operation) {
   } else if (operation.entityType === 'sale' && operation.action === 'create') {
     const existing = await db.query('SELECT id FROM sales WHERE id = ?', [payload.id])
     if (!existing.values?.length) {
-      await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, Number(payload.total), payload.paymentMethod || 'cash', payload.paymentReference || '', payload.terminalProvider || '', payload.staffId || '', payload.staffName || '', payload.createdAt || operation.createdAt])
+      if (payload.paymentMethod === 'wallet') await debitSaleWallet(db, payload)
+      await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, Number(payload.total), payload.paymentMethod || 'cash', payload.paymentReference || '', payload.terminalProvider || '', payload.staffId || '', payload.staffName || '', payload.createdAt || operation.createdAt, normalizeCashSale(payload).cashReceived, (payload.paymentDetails as { changeGiven?: unknown } | undefined)?.changeGiven ?? normalizeCashSale(payload).changeGiven, payload.paymentDetails ? JSON.stringify(payload.paymentDetails) : null])
       for (const item of Array.isArray(payload.items) ? payload.items as Array<Record<string, unknown>> : []) {
         const product = await db.query('SELECT name, cost_price AS cost FROM products WHERE id = ?', [item.productId])
         await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), payload.id, item.productId, product.values?.[0]?.name || 'Product', Number(item.quantity), Number(item.price), Number(product.values?.[0]?.cost) || 0])
@@ -88,6 +91,7 @@ async function applyOperation(operation: Operation) {
       await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), count.productId, amount, `Stocktake: ${payload.approvalReason || 'approved'}`, operation.createdAt])
     }
   } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
+    if (payload.paymentPolicy !== undefined) await db.run('UPDATE app_settings SET payment_policy = ? WHERE id = 1', [JSON.stringify(paymentPolicy(payload.paymentPolicy))])
     await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.logoData || '', payload.updatedAt || operation.createdAt])
   }
   await db.run('INSERT INTO sync_inbox (operation_id, received_at) VALUES (?, ?)', [operation.operationId, now()])
@@ -149,11 +153,11 @@ async function pullLatest(configInput?: MobileSyncConfiguration | null) {
 
 async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) {
   const db = await openMobileDatabase()
-  const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
+  const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
   if (current?.appName && current?.currency && !(current.appName === 'My Business' && current.currency === 'USD')) return current
   if (config) {
     await pullLatest(config)
-    const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
+    const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
     if (synced?.appName && synced?.currency) return synced
   }
   return current || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', logoData: '', updatedAt: now() }
@@ -201,7 +205,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   if (path === '/api/settings' && method === 'GET') {
     const config = await getMobileSyncConfiguration()
     const row = await hydrateBusinessSettings(config)
-    return json({ ...row, ownerConfigured: Boolean((await db.query('SELECT id FROM users LIMIT 1')).values?.length), cloudConfigured: Boolean(config), existingBusiness: Boolean(config) })
+    return json({ ...row, paymentPolicy: paymentPolicy(row?.paymentPolicy), ownerConfigured: Boolean((await db.query('SELECT id FROM users LIMIT 1')).values?.length), cloudConfigured: Boolean(config), existingBusiness: Boolean(config) })
   }
   if (path === '/api/installer/activate' && method === 'POST') {
     const input = await body(init)
@@ -290,17 +294,20 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return json((await db.query('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?', [stock[1]])).values?.[0])
   }
   if (path === '/api/sales' && method === 'POST') {
-    const sale = await body(init); if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
+    let sale = await body(init); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
     if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'pending' })
     if (!sale.items.length || sale.items.some((item: Record<string, unknown>) => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) <= 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) return error('Sale quantities and prices are invalid.')
     const total = sale.items.reduce((sum: number, item: Record<string, unknown>) => sum + Number(item.quantity) * Number(item.price), 0)
     if (Math.abs(total - Number(sale.total)) > 0.01) return error('Sale total does not match its items.')
-    await db.beginTransaction(); try { await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now()]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT name, stock, cost_price AS cost FROM products WHERE id = ?', [item.productId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); await db.run('UPDATE products SET stock = stock - ? WHERE id = ?', [Number(item.quantity), item.productId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
+    if (sale.paymentMethod === 'wallet' && !(sale.paymentDetails as { customerId?: unknown } | undefined)?.customerId) return error('Select the customer wallet.')
+    if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'synced' })
+    await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT name, stock, cost_price AS cost FROM products WHERE id = ?', [item.productId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); await db.run('UPDATE products SET stock = stock - ? WHERE id = ?', [Number(item.quantity), item.productId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
     const payload = { ...sale, staffId: user.id, staffName: user.name }; await queue('sale', String(sale.id), 'create', payload); return json({ ...payload, syncStatus: 'pending' }, 201)
   }
   if (path === '/api/sales' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const sales = (await db.query('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, staff_name AS staffName, created_at AS createdAt FROM sales ORDER BY created_at DESC')).values || []
+    const sales = (await db.query('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_name AS staffName, created_at AS createdAt FROM sales ORDER BY created_at DESC')).values || []
+    for (const sale of sales) sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
     for (const sale of sales) sale.items = (await db.query('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?', [sale.id])).values || []
     return json({ sales })
   }
@@ -368,7 +375,16 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (user.role !== 'owner') return error('Only the owner can change business settings.', 403)
     const input = await body(init); const appName = String(input.appName || '').trim(); const currency = String(input.currency || '').toUpperCase(); const posConnection = String(input.posConnection || 'manual'); const logoData = String(input.logoData || '')
     if (!appName || appName.length > 60 || !/^[A-Z]{3}$/.test(currency) || !['manual', 'usb', 'bluetooth', 'network', 'sdk'].includes(posConnection) || (logoData && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(logoData) || logoData.length > 1_400_000))) return error('Business settings are invalid.')
-    const updatedAt = now(); const settings = { appName, currency, posProvider: String(input.posProvider || ''), posTerminalId: String(input.posTerminalId || ''), posConnection, logoData, updatedAt }; await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [appName, currency, settings.posProvider, settings.posTerminalId, posConnection, logoData, updatedAt]); await queue('settings', 'business', 'upsert', settings); return json(settings)
+    const updatedAt = now(); const settings = { appName, currency, posProvider: String(input.posProvider || ''), posTerminalId: String(input.posTerminalId || ''), posConnection, logoData, updatedAt }; await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [appName, currency, settings.posProvider, settings.posTerminalId, posConnection, logoData, updatedAt]); const policy = paymentPolicy(input.paymentPolicy ?? (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy); await db.run('UPDATE app_settings SET payment_policy = ? WHERE id = 1', [JSON.stringify(policy)]); await queue('settings', 'business', 'upsert', { ...settings, paymentPolicy: policy }); return json({ ...settings, paymentPolicy: policy })
   }
   return error('This action is available in the installed desktop app.', 501)
+}
+
+async function debitSaleWallet(db: Awaited<ReturnType<typeof openMobileDatabase>>, sale: Record<string, any>) {
+  const customerId = sale.paymentDetails?.customerId
+  if (!customerId) throw new Error('Wallet sale is missing its customer.')
+  const customer = (await db.query('SELECT balance FROM customers WHERE id = ?', [customerId])).values?.[0]
+  if (!customer || Number(customer.balance) < Number(sale.total)) throw new Error('Customer wallet has insufficient funds.')
+  await db.run('UPDATE customers SET balance = ROUND(balance - ?, 2) WHERE id = ?', [sale.total, customerId])
+  await db.run('INSERT INTO wallet_transactions (id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), customerId, -Number(sale.total), `Sale ${sale.id}`, sale.createdAt || now()])
 }

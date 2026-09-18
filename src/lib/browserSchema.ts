@@ -45,6 +45,7 @@ export const browserSchema = `
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS app_settings (
+      payment_policy TEXT NOT NULL DEFAULT '{}',
       id INTEGER PRIMARY KEY CHECK(id = 1),
       app_name TEXT NOT NULL DEFAULT 'My Business',
       currency TEXT NOT NULL DEFAULT 'USD',
@@ -79,6 +80,9 @@ export const browserSchema = `
       total REAL NOT NULL,
       payment_method TEXT NOT NULL,
       payment_reference TEXT NOT NULL DEFAULT '',
+      payment_details TEXT,
+      cash_received REAL,
+      change_given REAL,
       terminal_provider TEXT NOT NULL DEFAULT '',
       staff_id TEXT NOT NULL DEFAULT '',
       staff_name TEXT NOT NULL DEFAULT '',

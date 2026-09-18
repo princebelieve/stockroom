@@ -22,6 +22,7 @@
     "@capacitor-community/sqlite": "^8.1.1",
     "@capacitor/android": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "@tesseract.js-data/eng": "^1.0.0",
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
     "mongodb": "latest",
@@ -29,6 +30,7 @@
     "react": "latest",
     "react-dom": "latest",
     "sql.js": "^1.14.2",
+    "tesseract.js": "^6.0.1",
     "typescript": "latest",
     "vite": "latest"
   },

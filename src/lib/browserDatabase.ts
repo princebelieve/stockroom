@@ -44,6 +44,12 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
       current.run(browserSchema)
       try { current.run("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
       try { current.run("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''") } catch {}
+      if (!current.exec('PRAGMA table_info(app_settings)')[0].values.some(row => row[1] === 'payment_policy')) current.run("ALTER TABLE app_settings ADD COLUMN payment_policy TEXT NOT NULL DEFAULT '{}'")
+      if (!current.exec('PRAGMA table_info(sales)')[0].values.some(row => row[1] === 'payment_details')) current.run('ALTER TABLE sales ADD COLUMN payment_details TEXT')
+      for (const column of ['cash_received', 'change_given']) {
+        const info = current.exec('PRAGMA table_info(sales)')[0]
+        if (!info.values.some(row => row[1] === column)) current.run(`ALTER TABLE sales ADD COLUMN ${column} REAL`)
+      }
       dirty = false
       current.run('BEGIN')
       try {

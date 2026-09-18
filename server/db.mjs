@@ -1,3 +1,5 @@
+import { paymentPolicy, recordPayment } from './payment.mjs'
+import { normalizeCashSale } from './cash.mjs'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -188,6 +190,10 @@ try { database.exec("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAU
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'external-pos'") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_reference TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN terminal_provider TEXT NOT NULL DEFAULT ''") } catch {}
+try { database.exec("ALTER TABLE app_settings ADD COLUMN payment_policy TEXT NOT NULL DEFAULT '{}'") } catch {}
+try { database.exec("ALTER TABLE sales ADD COLUMN payment_details TEXT") } catch {}
+try { database.exec("ALTER TABLE sales ADD COLUMN cash_received REAL") } catch {}
+try { database.exec("ALTER TABLE sales ADD COLUMN change_given REAL") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN staff_id TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN staff_name TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE stocktakes ADD COLUMN approval_reason TEXT NOT NULL DEFAULT ''") } catch {}
@@ -251,10 +257,11 @@ export function getSyncStatus() {
   return { configured: Boolean(process.env.SYNC_API_URL && process.env.SYNC_DEVICE_TOKEN && process.env.BUSINESS_ID), pending, conflicts, lastError }
 }
 export async function getSettings() {
-  const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)
+  const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)
   const ownerCount = database.prepare('SELECT COUNT(*) AS count FROM users WHERE organization_id = ?').get(organizationId).count
   return {
     ...(row || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', logoData: '', updatedAt: now() }),
+    paymentPolicy: paymentPolicy(row?.paymentPolicy),
     ownerConfigured: ownerCount > 0,
   }
 }
@@ -271,6 +278,7 @@ export async function createOwnerSetup(input) {
   if (configured) throw new Error('This installation already has an owner account.')
   database.prepare('INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, ownerName, email, hashPassword(password), 'owner', now())
   database.prepare('UPDATE app_settings SET app_name = ?, updated_at = ? WHERE organization_id = ?').run(appName, now(), organizationId)
+  if (policy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(policy)), organizationId)
   const config = { appName, shopName: appName, ownerName, ownerEmail: email, ownerConfigured: true, mongoUri, mongoDatabase }
   await writeShopConfig(config)
   return { appName, ownerEmail: email, ownerName, mongoUri, mongoDatabase }
@@ -406,9 +414,9 @@ export function createCustomer(input) {
 }
 
 export function listSales(limit = 100) {
-  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, Math.min(Math.max(Number(limit) || 100, 1), 500))
+  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, Math.min(Math.max(Number(limit) || 100, 1), 500))
   const itemQuery = database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?')
-  return sales.map((sale) => ({ ...sale, items: itemQuery.all(sale.id) }))
+  return sales.map((sale) => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: itemQuery.all(sale.id) }))
 }
 
 export function listMovements(limit = 200) {
@@ -479,6 +487,7 @@ export function applyRemoteOperations(operations) {
           if (Number(count.variance)) adjustStock(count.productId, Number(count.variance), `Remote stocktake: ${payload.approvalReason || 'approved'}`, false)
         }
       } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
+        if (payload.paymentPolicy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(payload.paymentPolicy)), organizationId)
         database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?')
           .run(payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.logoData || '', payload.updatedAt || now(), organizationId)
       }
@@ -558,9 +567,10 @@ export function approveStocktake(id, reason = '') {
   } catch (error) { database.exec('ROLLBACK'); throw error }
 }
 
-export async function updateSettings(appName, currency = 'USD', posProvider = '', posTerminalId = '', posConnection = 'manual', mongoUri = '', mongoDatabase = 'stockroom', logoData = '') {
+export async function updateSettings(appName, currency = 'USD', posProvider = '', posTerminalId = '', posConnection = 'manual', mongoUri = '', mongoDatabase = 'stockroom', logoData = '', policy) {
   const updatedAt = now()
   database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?').run(appName, currency, posProvider, posTerminalId, posConnection, logoData, updatedAt, organizationId)
+  if (policy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(policy)), organizationId)
   const config = { appName, shopName: appName, mongoUri, mongoDatabase, updatedAt }
   await writeShopConfig({ ...(await readShopConfig().catch(() => ({}))), ...config })
   const settings = await getSettings()
@@ -613,10 +623,18 @@ export function adjustStock(productId, amount, reason = 'manual-adjustment', sho
 }
 
 export function createSale(sale, shouldSync = true) {
+  sale = sale.paymentDetails ? recordPayment(sale, shouldSync ? database.prepare('SELECT payment_policy FROM app_settings WHERE organization_id = ?').get(organizationId)?.payment_policy : sale.paymentDetails.policy, true) : normalizeCashSale(sale)
+  if (sale.paymentMethod === 'wallet' && !sale.paymentDetails?.customerId) throw new Error('A wallet sale requires a selected customer.')
   if (database.prepare('SELECT id FROM sales WHERE id = ?').get(sale.id)) return { ...sale, syncStatus: 'synced' }
   database.exec('BEGIN')
   try {
-    database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.staffId || '', sale.staffName || '', sale.createdAt)
+    database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.staffId || '', sale.staffName || '', sale.createdAt, sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null)
+    if (sale.paymentMethod === 'wallet') {
+      const customerId = sale.paymentDetails.customerId
+      const changed = database.prepare('UPDATE customers SET balance = ROUND(balance - ?, 2) WHERE id = ? AND organization_id = ? AND balance >= ?').run(sale.total, customerId, organizationId, sale.total)
+      if (!changed.changes) throw new Error('Customer wallet does not exist or has insufficient funds.')
+      database.prepare('INSERT INTO wallet_transactions (id, organization_id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, customerId, -sale.total, `Sale ${sale.id}`, sale.createdAt)
+    }
     for (const item of sale.items) {
       const updatedAt = now()
       const product = database.prepare('SELECT stock, cost_price AS costPrice, name FROM products WHERE id = ? AND organization_id = ?').get(item.productId, organizationId)

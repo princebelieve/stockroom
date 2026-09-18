@@ -1,3 +1,4 @@
+import { normalizeCashSale } from './cash.mjs'
 import { MongoClient, ObjectId } from 'mongodb'
 import { scryptSync, timingSafeEqual } from 'node:crypto'
 
@@ -73,12 +74,13 @@ export async function adjustStock(productId, amount) {
 }
 
 export async function createSale(sale) {
+  sale = normalizeCashSale(sale)
   const existing = await database.collection('sales').findOne({ _id: sale.id, organizationId })
   if (existing) return { ...sale, syncStatus: 'synced' }
   const session = client.startSession()
   try {
     await session.withTransaction(async () => {
-      await database.collection('sales').insertOne({ _id: sale.id, organizationId, total: sale.total, paymentMethod: sale.paymentMethod || 'external-pos', paymentReference: sale.paymentReference || '', terminalProvider: sale.terminalProvider || '', createdAt: new Date(sale.createdAt) }, { session })
+      await database.collection('sales').insertOne({ _id: sale.id, organizationId, total: sale.total, paymentMethod: sale.paymentMethod || 'external-pos', paymentReference: sale.paymentReference || '', terminalProvider: sale.terminalProvider || '', cashReceived: sale.cashReceived, changeGiven: sale.changeGiven, createdAt: new Date(sale.createdAt) }, { session })
       for (const item of sale.items) {
         const updatedAt = new Date()
         const result = await products.updateOne({ _id: new ObjectId(item.productId), organizationId, stock: { $gte: item.quantity } }, { $inc: { stock: -item.quantity }, $set: { updatedAt } }, { session })
