@@ -28,7 +28,10 @@ export default defineConfig({
     writeBundle(options, bundle) {
       const assets = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', ...Object.keys(bundle).filter(name => name !== 'index.html').map(name => `/${name}`)]
       const hash = createHash('sha256').update(JSON.stringify(assets)).update(readFileSync(resolve(options.dir || 'dist', 'index.html'))).digest('hex').slice(0, 16)
-      const source = readFileSync('public/sw.js', 'utf8').replace("'stockroom-shell-dev'", JSON.stringify(`stockroom-shell-${hash}`)).replace(/const APP_SHELL = .*\n/, `const APP_SHELL = ${JSON.stringify(assets)}\n`)
+      // A unique shell name lets a newly deployed worker discard every older
+      // app shell. Keep this in sync with the declaration in public/sw.js,
+      // rather than relying on a historical hard-coded cache name.
+      const source = readFileSync('public/sw.js', 'utf8').replace(/const CACHE_NAME = .*\n/, `const CACHE_NAME = ${JSON.stringify(`stockroom-shell-${hash}`)}\n`).replace(/const APP_SHELL = .*\n/, `const APP_SHELL = ${JSON.stringify(assets)}\n`)
       writeFileSync(resolve(options.dir || 'dist', 'sw.js'), source)
     },
   }],

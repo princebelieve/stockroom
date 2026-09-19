@@ -134,6 +134,73 @@ button[aria-busy="true"] { cursor: progress; }
 body { color: var(--ink); }
 .brand-mark { background: var(--brand-accent); }
 .primary-button:hover, .workspace, .nav-item:hover, .nav-item.active, .sync-button, .mobile-pull-refresh.refreshing { background: var(--brand-hover); }
+
+/* Clear, tactile business controls: colour indicates the purpose of an action,
+   while the compact outlined treatment keeps dense mobile screens readable. */
+:root { --action-green: #237a56; --action-green-soft: #e5f5ec; --action-blue: #356fa6; --action-blue-soft: #e9f2fb; --action-amber: #b87325; --action-amber-soft: #fff3df; --action-red: #bc5848; --action-red-soft: #fff0ec; }
+button, .pos-product, .panel, .metric-card { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background-color .16s ease; }
+button:not(:disabled):active { transform: translateY(1px) scale(.985); }
+.primary-button { border: 1px solid color-mix(in srgb, var(--brand-hover) 80%, #000); background: linear-gradient(135deg, var(--ink), var(--brand-hover)); box-shadow: 0 3px 0 color-mix(in srgb, var(--ink) 32%, transparent), 0 8px 18px color-mix(in srgb, var(--ink) 15%, transparent); }
+.primary-button:hover { transform: translateY(-1px); box-shadow: 0 4px 0 color-mix(in srgb, var(--ink) 32%, transparent), 0 12px 23px color-mix(in srgb, var(--ink) 19%, transparent); }
+.filter-button, .row-actions button { border: 1px solid #b9dbca; background: var(--action-green-soft); color: var(--action-green); font-weight: 700; }
+.filter-button:hover, .row-actions button:hover { border-color: #6fae8e; background: #d5efdf; transform: translateY(-1px); }
+.text-button:not(.logout-button) { width: fit-content; margin: 0; padding: 7px 10px; border: 1px solid #b9dbca; border-radius: 999px; background: var(--action-green-soft); color: var(--action-green); }
+.text-button:not(.logout-button):hover { background: #d5efdf; text-decoration: none; transform: translateX(2px); }
+.icon-button { border-color: #c8ddd1; background: #f7fbf7; }
+.icon-button:hover { border-color: #79af92; background: var(--action-green-soft); color: var(--action-green); }
+.metric-card { position: relative; overflow: hidden; border-color: #d6e7dc; background: linear-gradient(145deg, #fffdf8 0%, #f1faf4 100%); }
+.metric-card::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--action-green); }
+.metric-card:nth-child(2)::before { background: var(--action-blue); }.metric-card:nth-child(3)::before { background: var(--action-amber); }
+.metric-card:hover, .panel:hover { border-color: #bed9c9; box-shadow: 0 10px 25px rgba(23, 53, 45, .07); }
+.alert-card { background: linear-gradient(145deg, #fff8eb, #fff0e8); border-color: #efd4b9; }.alert-card::before { background: var(--coral) !important; }
+.pos-product { border-left: 4px solid #b9dbca; background: linear-gradient(90deg, #fbfefb, #fffdf8); }.pos-product:hover { border-left-color: var(--action-green); box-shadow: 0 8px 18px rgba(23, 53, 45, .08); transform: translateX(2px); }
+.product-icon { border: 1px solid #badbc8; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8); }
+.cart-row { border-left: 3px solid transparent; }.cart-row:focus-within { border-left-color: var(--action-green); padding-left: 8px; }
+.cart-quantity-controls { gap: 7px; }.cart-quantity-controls button { border: 1px solid #bdd8c8; background: #f7fcf8; color: var(--action-green); box-shadow: 0 1px 0 rgba(23, 53, 45, .07); }
+.cart-quantity-controls .quantity-decrease, .cart-quantity-controls .quantity-cancel { border-color: #f1c8bf; background: var(--action-red-soft); color: var(--action-red); }
+.cart-quantity-controls .quantity-increase, .cart-quantity-controls .quantity-save { border-color: #a8d9bd; background: var(--action-green-soft); color: var(--action-green); }
+.cart-quantity-controls .quantity-edit { border-color: #bfd7ef; background: var(--action-blue-soft); color: var(--action-blue); }
+.cart-quantity-controls button:not(:disabled):hover { transform: translateY(-1px) scale(1.04); box-shadow: 0 4px 10px rgba(23, 53, 45, .12); }
+.cart-quantity-controls output { min-width: 34px; padding: 7px 8px; border: 1px solid #d8e5dc; border-radius: 7px; background: #fff; color: var(--ink); }
+.cart-row > button[aria-label^="Remove"] { width: 34px; height: 34px; border: 1px solid #f1c8bf; border-radius: 8px; background: var(--action-red-soft); color: var(--action-red); }.cart-row > button[aria-label^="Remove"]:hover { background: #fee1d9; }
+tbody tr { transition: background-color .14s ease; }tbody tr:hover { background: #f1faf4; }
+input:focus, select:focus, textarea:focus { border-color: #6aa887 !important; box-shadow: 0 0 0 3px rgba(73, 151, 107, .16); }
+@media (max-width: 650px) {
+  .main-content { background: radial-gradient(circle at 100% 0, #e3f4e9 0, transparent 28%), #eef4ef; }
+  .metric-card { min-height: 118px; }.metric-card strong { font-size: 28px; }
+  .panel { border-color: #d4e4da; }.panel-heading h2, .panel-heading h3 { color: var(--ink); }
+  .pos-product { padding: 13px 11px; border-radius: 12px; }.cart-quantity-controls button { width: 38px; height: 38px; border-radius: 9px; }
+  .filter-button { border-radius: 9px; }.primary-button { border-radius: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { button, .pos-product, .panel, .metric-card, tbody tr { transition: none; } button:not(:disabled):active, .primary-button:hover, .filter-button:hover, .row-actions button:hover, .pos-product:hover, .text-button:not(.logout-button):hover, .cart-quantity-controls button:not(:disabled):hover { transform: none; } }
+
+/* Desktop data workspaces: enough structure to scan quickly without turning
+   every record into a large card. These apply to inventory, sales, movements,
+   staff and owner/admin management tables alike. */
+@media (min-width: 651px) {
+  .full-panel { border-top: 3px solid #9fcdb0; }
+  .table-wrap { margin-top: 18px; border: 1px solid #d5e5da; border-radius: 12px; background: #fff; box-shadow: inset 0 1px 0 #fff; }
+  .table-wrap table { margin: 0; min-width: 640px; }
+  .table-wrap thead { background: linear-gradient(90deg, #eaf6ee, #f8fbf8); }
+  .table-wrap th { padding: 13px 14px; color: #527164; font-size: 10px; }
+  .table-wrap td { padding: 14px; border-top-color: #e5efe8; }
+  .table-wrap tbody tr:nth-child(even) { background: #fcfefc; }
+  .table-wrap tbody tr:hover { background: #eaf7ee; box-shadow: inset 3px 0 0 var(--action-green); }
+  .product-row-low { background: #fffaf4 !important; }.product-row-low:hover { background: #fff4e9 !important; box-shadow: inset 3px 0 0 var(--coral) !important; }
+  .product-cell { gap: 12px; }.product-cell .product-icon { width: 35px; height: 35px; border-radius: 10px; }
+  .stock-cell strong { display: inline-flex; min-width: 34px; justify-content: center; padding: 4px 7px; border-radius: 999px; background: #e6f5eb; color: var(--action-green); }
+  .stock-cell strong.low-stock { background: #fff0e8; color: var(--action-red); }
+  .row-actions { gap: 7px; }.row-actions button { width: 32px; height: 32px; border-radius: 8px; }
+  .row-actions .stock-remove { border-color: #efc9c1; background: var(--action-red-soft); color: var(--action-red); }.row-actions .stock-add { border-color: #add7bd; background: var(--action-green-soft); color: var(--action-green); }
+  .team-management { border-top-color: #8cb8df; }.team-management .team-grid > section:first-child { padding: 17px; border: 1px solid #d8e7f4; border-radius: 12px; background: linear-gradient(145deg, #fbfdff, #f2f7fc); }
+  .team-management .table-wrap { border-color: #d2e3f1; }.team-management .table-wrap thead { background: linear-gradient(90deg, #eaf3fb, #f9fcff); }.team-management .table-wrap tbody tr:hover { background: #edf6fd; box-shadow: inset 3px 0 0 var(--action-blue); }
+  .team-management td:first-child strong, .staff-activity td:first-child strong { display: block; }.team-management td:first-child::before, .staff-activity td:first-child::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 50%; background: var(--action-green); box-shadow: 0 0 0 4px #dff2e7; }
+  .team-management input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--action-green); vertical-align: middle; }
+  .staff-activity { border-top-color: #8cb8df; }.staff-activity .table-wrap { border-color: #d2e3f1; }.staff-activity td:nth-child(4) { color: var(--action-green); font-weight: 700; }
+  .cashier-password-control { max-width: 760px; border-top-color: #e7b469; background: linear-gradient(145deg, #fffdf8, #fff7e9); }.cashier-password-control > label { display: grid; gap: 7px; max-width: 420px; color: #6f552d; font-weight: 700; }.cashier-password-control select { padding: 11px; border: 1px solid #e8c783; border-radius: 8px; background: #fff; color: var(--ink); }.cashier-password-control .primary-button { margin-top: 14px; }
+  .owner-dashboard .metric-grid { margin-top: 22px; }.owner-panel { border-left: 4px solid var(--action-blue); background: linear-gradient(135deg, #f5faff, #fffdf8); }.owner-panel p + p { padding-top: 10px; border-top: 1px dashed #c8ddec; }
+  .reports-dashboard .metric-card:nth-child(2)::before, .owner-dashboard .metric-card:nth-child(2)::before { background: var(--action-blue); }
+}
 @media (max-width: 650px) {
   /* Action labels are essential on touch devices—never collapse them to icons. */
   .hero-row .primary-button, .full-panel .primary-button { font-size: 12px; padding: 10px 12px; }
