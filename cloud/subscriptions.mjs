@@ -4,8 +4,14 @@ import { mailConfigured, sendSubscriptionReminder } from './mailer.mjs'
 import { subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
 
 export function validatePlan(input) {
-  const plan = { amount: Number(input.amount), currency: String(input.currency || '').toUpperCase(), days: Number(input.days), reminderDays: Number(input.reminderDays) }
-  if (!Number.isSafeInteger(plan.amount) || plan.amount < 1 || plan.amount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(plan.currency) || !Number.isInteger(plan.days) || plan.days < 1 || plan.days > 730 || !Number.isInteger(plan.reminderDays) || plan.reminderDays < 1 || plan.reminderDays > 30) throw new Error('Enter a valid amount in minor units, currency, duration (1–730 days), and reminder window (1–30 days).')
+  const plan = {
+    amount: Number(input.amount),
+    currency: String(input.currency || '').toUpperCase(),
+    days: Number(input.days),
+    reminderDays: Number(input.reminderDays),
+    freeTrialDays: Number(input.freeTrialDays ?? 0),
+  }
+  if (!Number.isSafeInteger(plan.amount) || plan.amount < 1 || plan.amount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(plan.currency) || !Number.isInteger(plan.days) || plan.days < 1 || plan.days > 730 || !Number.isInteger(plan.reminderDays) || plan.reminderDays < 1 || plan.reminderDays > 30 || !Number.isInteger(plan.freeTrialDays) || plan.freeTrialDays < 0 || plan.freeTrialDays > 365) throw new Error('Enter a valid amount in minor units, currency, duration (1–730 days), reminder window (1–30 days), and free-trial days (0–365).')
   return plan
 }
 export function validSignature(raw, signature, secret) {
@@ -38,8 +44,14 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
   await settings.updateOne({ _id: 'control' }, { $setOnInsert: { testMode: true } }, { upsert: true })
   const getControl = () => settings.findOne({ _id: 'control' })
   async function access(businessId) {
-    const [control, subscription] = await Promise.all([getControl(), subscriptions.findOne({ _id: businessId })])
-    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: subscription?.expiresAt || null, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? portal() : '' })
+    const [control, subscription, plan, owner] = await Promise.all([getControl(), subscriptions.findOne({ _id: businessId }), getPlan(), accounts.findOne({ businessId, role: 'owner' })])
+    const trialDays = Number(plan?.freeTrialDays ?? 0)
+    const createdAtTime = owner?.createdAt ? new Date(owner.createdAt).getTime() : 0
+    const trialEndsAt = trialDays > 0 && Number.isFinite(createdAtTime) && createdAtTime > 0
+      ? new Date(createdAtTime + trialDays * 86400000).toISOString()
+      : null
+    const effectiveExpiresAt = subscription?.expiresAt || (trialEndsAt && new Date(trialEndsAt) > new Date() ? trialEndsAt : null)
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? portal() : '' })
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
@@ -49,6 +61,10 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
     const referral = await referrals.findOne({ _id: businessId })
     const rows = await commissions.find({ referrerId: businessId }).sort({ createdAt: -1 }).limit(100).toArray()
     return { link: `${portal()}?ref=${encodeURIComponent(referral.code)}`, commissions: rows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amount, currency, percent, kind, createdAt })) }
+  }
+  async function listBusinesses(limit = 10, skip = 0) {
+    const rows = await accounts.find({ role: 'owner' }).sort({ createdAt: -1 }).skip(Number(skip) || 0).limit(Number(limit) || 10).toArray()
+    return rows.map((account) => ({ businessId: account.businessId, ownerName: account.ownerName || account.name || '', email: account.email || '', createdAt: account.createdAt }))
   }
   const portal = () => { const url = new URL(process.env.SUBSCRIPTION_PUBLIC_URL); if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('Configure an HTTPS SUBSCRIPTION_PUBLIC_URL.'); return new URL('/subscriptions', url).href }
   async function paystack(path, input) {
@@ -123,6 +139,13 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+      }
+      if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
+        if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })
+        const params = new URL(request.url, 'http://localhost').searchParams
+        const limit = Number(params.get('limit') || '10')
+        const skip = Number(params.get('skip') || '0')
+        return reply(200, { businesses: await listBusinesses(Math.min(Math.max(limit, 1), 10), Math.max(skip, 0)) })
       }
       if (url.pathname === '/v1/subscriptions/test-mode' && request.method === 'PUT') {
         if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })

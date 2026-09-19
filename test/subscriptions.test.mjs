@@ -59,10 +59,10 @@ test('disabling test mode replaces cached bypass and revoked credentials clear i
   assert.equal(await revoked.read(), 'null')
 })
 
-test('plan accepts integer minor units and rejects unsafe amounts and periods', () => {
-  const plan = { amount: 500000, currency: 'NGN', days: 30, reminderDays: 7 }
+test('plan accepts integer minor units, free-trial days, and rejects unsafe amounts and periods', () => {
+  const plan = { amount: 500000, currency: 'NGN', days: 30, reminderDays: 7, freeTrialDays: 14 }
   assert.deepEqual(validatePlan(plan), plan)
-  for (const patch of [{ amount: -1 }, { amount: 1.5 }, { days: 0 }, { days: 731 }, { reminderDays: 0 }, { currency: 'BAD' }]) assert.throws(() => validatePlan({ ...plan, ...patch }))
+  for (const patch of [{ amount: -1 }, { amount: 1.5 }, { days: 0 }, { days: 731 }, { reminderDays: 0 }, { freeTrialDays: -1 }, { freeTrialDays: 366 }, { currency: 'BAD' }]) assert.throws(() => validatePlan({ ...plan, ...patch }))
 })
 test('webhook requires a signature over the exact raw bytes', () => {
   const raw = Buffer.from('{"event":"charge.success"}')

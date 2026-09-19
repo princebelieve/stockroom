@@ -30,7 +30,7 @@ import { BusinessProfileSettings, businessModes, type BusinessMode } from './Bus
 import { applyLogoTheme } from './lib/logoTheme'
 import { resolveCloudAccessToken } from './lib/cloudSession'
 
-function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
+function PageOptions({ onRefresh, busy, subscriptionStatus, subscriptionPortalUrl, ownerMode }: { onRefresh: () => void; busy: boolean; subscriptionStatus: string; subscriptionPortalUrl: string; ownerMode: boolean }) {
   const menu = useRef<HTMLDetailsElement>(null)
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -61,6 +61,8 @@ function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean
         }
         onRefresh()
       }}><RefreshCw size={16} />Refresh</button>
+      <button type="button" onClick={() => window.open(subscriptionPortalUrl, '_blank', 'noopener,noreferrer')}><ShoppingCart size={16} />{subscriptionStatus}</button>
+      {ownerMode && <button type="button" onClick={() => window.open(subscriptionPortalUrl, '_blank', 'noopener,noreferrer')}><CheckSquare size={16} />Refer & earn</button>}
     </div>
   </details>
 }
@@ -339,6 +341,9 @@ function App() {
   const [mobilePullDistance, setMobilePullDistance] = useState(0)
   const [refreshingView, setRefreshingView] = useState(false)
   const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+  const subscriptionPortalUrl = posAccess.portalUrl || `${(import.meta.env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com').replace(/\/$/, '')}/subscriptions`
+  const subscriptionButtonLabel = posAccess.status === 'active' ? 'Subscribed' : posAccess.status === 'grace' ? 'Grace period' : 'Subscribe'
+  const subscriptionButtonClass = posAccess.status === 'active' ? 'subscription-cta success' : posAccess.status === 'grace' ? 'subscription-cta warning' : 'subscription-cta'
 
   // Notices acknowledge an action; they are not permanent page content. Keep
   // unresolved sync work visible, but clear routine success/failure banners so
@@ -1213,10 +1218,19 @@ function App() {
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Settings')}><UserRoundCog size={18} />Business settings</button>}
       </nav>
       <div className="sidebar-foot pwa-sync-controls"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` Â· ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline Â· saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncingâ€¦' : 'Sync now'}</button><p className="sync-feedback" role="status" aria-live="polite">{syncFeedback}</p><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
+      <div className="sidebar-subscription-actions">
+        <button type="button" className={subscriptionButtonClass} onClick={() => window.open(subscriptionPortalUrl, '_blank', 'noopener,noreferrer')} aria-label={subscriptionButtonLabel}>
+          {posAccess.status === 'active' ? <CheckSquare size={15} /> : posAccess.status === 'grace' ? <AlertTriangle size={15} /> : <ShoppingCart size={15} />}
+          <span>{subscriptionButtonLabel}</span>
+        </button>
+        {user.role === 'owner' && <button type="button" className="subscription-referral-button" onClick={() => window.open(subscriptionPortalUrl, '_blank', 'noopener,noreferrer')} aria-label="Refer and earn">
+          <span>Refer & earn</span>
+        </button>}
+      </div>
     </aside>
     {isBrowserPwa() && <div className="mobile-pwa-sync"><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button>{syncFeedback && <p className="mobile-sync-feedback" role="status" aria-live="polite">{syncFeedback}</p>}</div>}
     <main className="main-content">
-      <header className="topbar"><div><p className="eyebrow">{user.name} Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><button type="button" className="icon-button" title="Back" onClick={goBackInApp} disabled={active === 'Overview'} aria-label="Go back"><ArrowLeft size={18} /></button><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
+      <header className="topbar"><div><p className="eyebrow">{user.name} Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><button type="button" className="icon-button" title="Back" onClick={goBackInApp} disabled={active === 'Overview'} aria-label="Go back"><ArrowLeft size={18} /></button><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} subscriptionStatus={subscriptionButtonLabel} subscriptionPortalUrl={subscriptionPortalUrl} ownerMode={user.role === 'owner'} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
       {active === 'Overview' && canManageOperations && <>
         <section className="hero-row"><div><h2>Business at a glance</h2><p>Keep your shelves moving and your team in the know.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}><Plus size={18} />Add product</button></section>
         <section className="metric-grid"><div className="metric-card"><span>Inventory value</span><strong>{formatMoney(totalValue)}</strong><small>Based on current local stock and unit prices</small></div><div className="metric-card"><span>Items in stock</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}</strong><small>Across {products.length} products</small></div><div className="metric-card alert-card"><span>Needs attention</span><strong>{lowStock.length}</strong><small>{lowStock.length ? 'Products below reorder point' : 'All stock levels healthy'}</small></div></section>
