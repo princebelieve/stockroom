@@ -28,7 +28,11 @@ await businessSettings.createIndex({ businessId: 1 }, { unique: true })
 // index once so several staff accounts can omit it.
 await accounts.dropIndex('email_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
 await accounts.createIndex({ email: 1 }, { unique: true, partialFilterExpression: { email: { $type: 'string' } } })
-await accounts.createIndex({ businessId: 1 }, { unique: true })
+// A business has one owner and can have many staff. Older deployments created
+// this index as unique, which silently limited every business to one account
+// and surfaced as a misleading email/username collision on staff creation.
+await accounts.dropIndex('businessId_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
+await accounts.createIndex({ businessId: 1 })
 await accounts.createIndex({ businessId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } })
 await devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true })
 await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
@@ -185,7 +189,13 @@ const server = createServer(async (request, response) => {
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
       if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 10 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3–32 character username, and a 10-character password.' })
       const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, passwordHash: hashPassword(password), createdAt: new Date() }
-      try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That contact email or username is already in use.' }); throw error }
+      try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) {
+        if (error?.code === 11000) {
+          const duplicate = error.keyPattern?.username ? 'username' : error.keyPattern?.email ? 'contact email' : 'staff account'
+          return send(response, 409, { error: `That ${duplicate} is already in use.` })
+        }
+        throw error
+      }
       // Credentials are deliberately never emailed. The owner gives the staff
       // member their username and temporary password through a private channel.
       return send(response, 201, { account: publicAccount(staff), invitationDelivered: false })
