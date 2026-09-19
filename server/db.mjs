@@ -332,6 +332,20 @@ export function changePassword(userId, currentPassword, newPassword) {
   return { success: true }
 }
 
+// Cloud password resets are authorized by the owner, but each installed
+// desktop keeps its own offline credential verifier. Update that verifier and
+// revoke the cashier's local sessions at the same time so an old password
+// cannot continue to work on this device.
+export function resetCashierPassword(userId, newPassword) {
+  const password = String(newPassword || '').trim()
+  if (password.length < 10) throw new Error('New password must be at least 10 characters long.')
+  const user = database.prepare("SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND role = 'cashier'").get(userId, organizationId)
+  if (!user) throw new Error('Cashier account not found on this device.')
+  database.prepare('UPDATE users SET password_hash = ? WHERE id = ? AND organization_id = ?').run(hashPassword(password), user.id, organizationId)
+  database.prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(user.id)
+  return { ...user, operationalAccess: Boolean(user.operationalAccess) }
+}
+
 export function getOwnerMetrics() {
   const sales = database.prepare('SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count FROM sales WHERE organization_id = ?').get(organizationId)
   const stock = database.prepare('SELECT COALESCE(SUM(stock * price), 0) AS value, COUNT(*) AS products, SUM(CASE WHEN stock <= reorder_point THEN 1 ELSE 0 END) AS lowStock FROM products WHERE organization_id = ?').get(organizationId)
@@ -408,7 +422,13 @@ export function provisionCloudUser(input) {
   const role = String(input.role || 'cashier')
   const password = String(input.password || '')
   if (!name || (role === 'owner' && !email) || (role !== 'owner' && !/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) || password.length < 8 || !['owner', 'admin', 'cashier'].includes(role)) throw new Error('Cloud user data is invalid.')
-  const existing = input.id ? database.prepare('SELECT id FROM users WHERE id = ? AND organization_id = ?').get(String(input.id), organizationId) : database.prepare('SELECT id FROM users WHERE email = ? AND organization_id = ?').get(email, organizationId)
+  // Owners are initially created locally, then registered in the cloud. Their
+  // cloud account ID is therefore different from the existing local ID. Match
+  // the owner email first so cloud sign-in updates that account instead of
+  // colliding with the local unique email constraint.
+  const existing = database.prepare(`SELECT id FROM users
+    WHERE organization_id = ? AND (id = ? OR (role = 'owner' AND email = ?))
+    LIMIT 1`).get(organizationId, String(input.id || ''), email)
   const id = String(existing?.id || input.id || crypto.randomUUID())
   const operationalAccess = input.operationalAccess === true ? 1 : 0
   const storedEmail = email || `${id}@staff.local.invalid`

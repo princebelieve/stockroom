@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount } from './repository.mjs'
 import { pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
@@ -184,8 +184,9 @@ const server = createServer(async (request, response) => {
     if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner can reset a cashier password.' })
     return readJson(request, response, async (input) => {
       try {
-        const cloud = await cloudResetCashierPassword(String(input.cloudAccessToken || ''), cashierPasswordMatch[1], String(input.password || ''))
-        return sendJson(response, 200, cloud.account)
+        const password = String(input.password || '')
+        await cloudResetCashierPassword(String(input.cloudAccessToken || ''), cashierPasswordMatch[1], password)
+        return sendJson(response, 200, resetCashierPassword(cashierPasswordMatch[1], password))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }

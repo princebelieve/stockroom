@@ -92,6 +92,16 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .provider-add .filter-button { width: 100%; justify-content: center; }
 }
 .sidebar-foot.pwa-sync-controls { display: block; }
+.mobile-pwa-sync { display: none; }
+@media (max-width: 650px) {
+  /* The navigation drawer is normally closed on a phone. Keep PWA sync
+     reachable without opening it, rather than leaving the only Sync button
+     off-screen inside that drawer. */
+  .sidebar-foot.pwa-sync-controls { display: none; }
+  .mobile-pwa-sync { position: fixed; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 21; display: grid; justify-items: end; gap: 6px; }
+  .mobile-pwa-sync .sync-button { min-height: 44px; padding: 10px 13px; box-shadow: 0 5px 18px rgba(14, 40, 33, .22); }
+  .mobile-pwa-sync .mobile-sync-feedback { max-width: min(300px, calc(100vw - 24px)); margin: 0; padding: 8px 10px; border-radius: 8px; color: var(--ink); background: var(--paper); box-shadow: 0 4px 15px rgba(14, 40, 33, .14); font-size: 11px; }
+}
 
 .printer-test { display: none; }
 @media print {

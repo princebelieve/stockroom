@@ -71,9 +71,10 @@ if (isBrowserPwa()) {
 if (isBrowserPwa() && 'serviceWorker' in navigator) {
   const register = async () => {
     try {
-      const existing = await navigator.serviceWorker.getRegistration('/sw.js')
-      if (existing) return
-      await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      // Calling register on every launch makes the browser check the deployed
+      // worker instead of leaving an existing PWA shell untouched forever.
+      const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      await registration.update()
     } catch {
       // Ignore registration failures; app can still operate without the PWA shell cache.
     }
@@ -350,7 +351,10 @@ function App() {
     refreshLocalView()
   }
   useEffect(() => {
-    if (!authToken || !online || !['owner', 'admin'].includes(user?.role || '')) return
+    // A PWA's local database is intentionally serialized. Its explicit Refresh
+    // and Sync actions may use the network, but a background pull must not hold
+    // that database lock and delay an offline action such as Start Count.
+    if (isBrowserPwa() || !authToken || !online || !['owner', 'admin'].includes(user?.role || '')) return
     let cancelled = false
     let busy = false
     const download = async () => {
@@ -1092,6 +1096,7 @@ function App() {
       </nav>
       <div className="sidebar-foot pwa-sync-controls"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` Â· ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline Â· saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncingâ€¦' : 'Sync now'}</button><p className="sync-feedback" role="status" aria-live="polite">{syncFeedback}</p><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
     </aside>
+    {isBrowserPwa() && <div className="mobile-pwa-sync"><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button>{syncFeedback && <p className="mobile-sync-feedback" role="status" aria-live="polite">{syncFeedback}</p>}</div>}
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">{user.name} Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
       {active === 'Overview' && canManageOperations && <>
