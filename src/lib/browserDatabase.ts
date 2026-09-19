@@ -43,6 +43,7 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
       current = new SQL.Database(await snapshot())
       current.run(browserSchema)
       try { current.run("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+      if (!current.exec('PRAGMA table_info(users)')[0].values.some(row => row[1] === 'username')) current.run("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
       try { current.run("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''") } catch {}
       if (!current.exec('PRAGMA table_info(app_settings)')[0].values.some(row => row[1] === 'payment_policy')) current.run("ALTER TABLE app_settings ADD COLUMN payment_policy TEXT NOT NULL DEFAULT '{}'")
       if (!current.exec('PRAGMA table_info(sales)')[0].values.some(row => row[1] === 'payment_details')) current.run('ALTER TABLE sales ADD COLUMN payment_details TEXT')

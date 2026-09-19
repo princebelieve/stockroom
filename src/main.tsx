@@ -194,9 +194,26 @@ function App() {
   const manualTerminalAllowed = canRecordTerminalPayment(deviceTerminal)
   useEffect(() => { setTerminalProvider(deviceTerminal.provider || posProvider) }, [deviceTerminal.provider, posProvider])
   useEffect(() => {
-    const inputs = document.querySelectorAll<HTMLInputElement>('.payment-options input[placeholder*="provider"], .payment-options input[placeholder*="Bank name"]')
-    inputs.forEach(input => input.setAttribute('list', 'approved-payment-providers'))
-  }, [active, paymentMethod, extraPaymentPolicy.providers])
+    const providers = [...new Set([posProvider, ...extraPaymentPolicy.providers, terminalProvider, transferProvider].map(value => value.trim()).filter(Boolean))]
+    const replaceWithSelector = (field: HTMLLabelElement | undefined, value: string, onChange: (value: string) => void) => {
+      if (!field || !field.parentElement) return
+      field.style.display = 'none'
+      field.parentElement.querySelectorAll('.provider-selector').forEach(selector => selector.remove())
+      const selector = document.createElement('label')
+      selector.className = 'provider-selector'
+      selector.textContent = String(field.childNodes[0]?.textContent || 'Provider').trim()
+      const select = document.createElement('select')
+      select.setAttribute('aria-label', selector.textContent)
+      select.innerHTML = `<option value="">Choose provider</option>${providers.map(provider => `<option value="${provider.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;')}">${provider.replaceAll('&', '&amp;').replaceAll('<', '&lt;')}</option>`).join('')}`
+      select.value = value
+      select.addEventListener('change', () => onChange(select.value))
+      selector.append(select)
+      field.after(selector)
+    }
+    const paymentFields = Array.from(document.querySelectorAll<HTMLLabelElement>('.payment-options > label'))
+    replaceWithSelector(paymentFields.find(field => field.textContent?.trim().startsWith('Terminal provider')), terminalProvider, setTerminalProvider)
+    paymentFields.filter(field => field.textContent?.trim().startsWith('Bank or transfer provider')).forEach(field => replaceWithSelector(field, transferProvider, setTransferProvider))
+  }, [active, paymentMethod, extraPaymentPolicy.providers, posProvider, terminalProvider, transferProvider])
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('stockroom-token') || '')
   useEffect(() => { setCashReceived('') }, [authToken])
   const [cloudAccessToken, setCloudAccessToken] = useState(() => localStorage.getItem('stockroom-cloud-access-token') || '')
@@ -230,12 +247,19 @@ function App() {
   const [stocktake, setStocktake] = useState<Stocktake | null>(null)
   const [stocktakeReason, setStocktakeReason] = useState('Approved after physical count')
   useEffect(() => {
-    if (active !== 'Stocktake') return
-    for (const button of document.querySelectorAll<HTMLButtonElement>('button')) {
+    if (active !== 'Stocktake' || (stocktake && stocktake.status !== 'approved')) return
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.full-panel .panel-heading .primary-button')).find(candidate => candidate.textContent?.includes('Start stock take') || candidate.textContent?.includes('Starting stocktake'))
+    if (!button) return
+    const rename = () => {
+      button.setAttribute('aria-label', 'Start count')
       for (const node of Array.from(button.childNodes)) {
-        if (node.nodeType === Node.TEXT_NODE && node.textContent?.includes('Start stock take')) node.textContent = node.textContent.replace('Start stock take', 'Start count')
+        if (node.nodeType === Node.TEXT_NODE && node.textContent) node.textContent = node.textContent.replace('Start stock take', 'Start count').replace('Starting stocktake...', 'Starting count...')
       }
     }
+    rename()
+    const observer = new MutationObserver(rename)
+    observer.observe(button, { childList: true, characterData: true, subtree: true })
+    return () => observer.disconnect()
   }, [active, stocktake])
   useEffect(() => {
     if (!isBrowserPwa() || !authToken || active !== 'Stocktake') return

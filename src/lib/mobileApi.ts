@@ -2,7 +2,7 @@ import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
 import { normalizeCashSale } from '../../server/cash.mjs'
 import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, saveMobileSyncConfiguration, type MobileSyncConfiguration } from './mobileDatabase'
 
-type MobileUser = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
+type MobileUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
 type Operation = { operationId: string; entityType: string; entityId: string; action: string; payload: Record<string, unknown>; createdAt: string }
 
 const originalFetch = window.fetch.bind(window)
@@ -24,7 +24,7 @@ async function sessionUser(): Promise<MobileUser | null> {
   const userId = await setting('sessionUserId')
   if (!userId) return null
   const db = await openMobileDatabase()
-  const result = await db.query('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE id = ?', [userId])
+  const result = await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [userId])
   const user = result.values?.[0]
   return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId: 'mobile-shop' } as MobileUser : null
 }
@@ -36,13 +36,22 @@ async function restoreCloudSession(): Promise<MobileUser | null> {
   const result = await response.json().catch(() => ({}))
   if (!response.ok || !result.account?.id) return null
   const account = result.account
-  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: 'mobile-shop' }
+  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: 'mobile-shop' }
   const db = await openMobileDatabase()
-  await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET id=excluded.id, name=excluded.name, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.role, localUser.operationalAccess ? 1 : 0, now()])
-  const stored = (await db.query('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE email = ?', [localUser.email])).values?.[0]
+  await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
+  const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
   if (!stored) return null
   await setSetting('sessionUserId', String(stored.id))
   return { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' } as MobileUser
+}
+async function restoreSavedSession(): Promise<MobileUser | null> {
+  const saved = JSON.parse(localStorage.getItem('stockroom-user') || 'null') as Partial<MobileUser> | null
+  if (!saved?.id) return null
+  const localUser: MobileUser = { id: saved.id, name: String(saved.name || ''), email: String(saved.email || `${saved.id}@staff.local.invalid`), username: String(saved.username || ''), role: saved.role || 'cashier', operationalAccess: Boolean(saved.operationalAccess), organizationId: 'mobile-shop' }
+  const db = await openMobileDatabase()
+  await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
+  await setSetting('sessionUserId', localUser.id)
+  return localUser
 }
 function isManager(user: MobileUser | null) { return Boolean(user && ['owner', 'admin'].includes(user.role)) }
 function canOperate(user: MobileUser | null) { return isManager(user) || Boolean(user?.role === 'cashier' && user.operationalAccess) }
@@ -219,7 +228,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     await setSetting('cloudAccessToken', '')
     return json({})
   }
-  const user = await sessionUser() || await restoreCloudSession()
+  const user = await sessionUser() || await restoreSavedSession() || await restoreCloudSession()
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Native SQLite' })
   if (path === '/api/settings' && method === 'GET') {
@@ -243,9 +252,9 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     const identifier = String(input.identifier || input.email || '').trim()
     const response = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password }) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
-    const account = result.account; const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: 'mobile-shop' }
-    await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET id=excluded.id, name=excluded.name, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.role, localUser.operationalAccess ? 1 : 0, now()])
-    const stored = (await db.query('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE email = ?', [localUser.email])).values?.[0]
+    const account = result.account; const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: 'mobile-shop' }
+    await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
+    const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
     await setSetting('sessionUserId', String(stored.id))
     await setSetting('cloudAccessToken', String(result.accessToken))
     await pullLatest(config)
@@ -338,11 +347,11 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === '/api/users' && method === 'GET') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    try { const result = await cloudRequest('/v1/staff'); for (const account of result.users || []) await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email, account.role, account.operationalAccess ? 1 : 0, String(account.createdAt || now())]); return json({ users: result.users || [] }) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not load staff.', 503) }
+    try { const result = await cloudRequest('/v1/staff'); for (const account of result.users || []) await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, String(account.createdAt || now())]); return json({ users: result.users || [] }) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not load staff.', 503) }
   }
   if (path === '/api/users' && method === 'POST') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    try { const input = await body(init); const result = await cloudRequest('/v1/staff', { method: 'POST', body: JSON.stringify(input) }); const account = result.account; await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?)', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.role, account.operationalAccess ? 1 : 0, now()]); return json(account, 201) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not create staff.', 400) }
+    try { const input = await body(init); const result = await cloudRequest('/v1/staff', { method: 'POST', body: JSON.stringify(input) }); const account = result.account; await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, now()]); return json(account, 201) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not create staff.', 400) }
   }
   const staffAccess = path.match(/^\/api\/users\/([^/]+)\/operational-access$/)
   if (staffAccess && method === 'PUT') {

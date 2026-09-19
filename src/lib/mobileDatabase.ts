@@ -65,6 +65,7 @@ export async function openMobileDatabase() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
+      username TEXT NOT NULL DEFAULT '',
       role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'cashier')),
       operational_access INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
@@ -145,6 +146,8 @@ export async function openMobileDatabase() {
     );
   `)
   try { await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+  const userColumns = await connection.query('PRAGMA table_info(users)')
+  if (!userColumns.values?.some(row => row.name === 'username')) await connection.execute("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
   const policyColumns = await connection.query('PRAGMA table_info(app_settings)')
   if (!policyColumns.values?.some(row => row.name === 'payment_policy')) await connection.execute("ALTER TABLE app_settings ADD COLUMN payment_policy TEXT NOT NULL DEFAULT '{}'")
   const saleColumns = await connection.query('PRAGMA table_info(sales)')
