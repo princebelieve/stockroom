@@ -41,18 +41,20 @@ export function recordPayment(sale, policyInput, legacy = false) {
     return { ...sale, cashReceived: null, changeGiven: null, paymentDetails: { version: 1, amountReceived: total / 100, changeGiven: 0, extraKept: 0, reason: '', note: '', customerId: String(input.customerId), creditApproved: input.creditApproved === true, printExtraDetails: false, policy } }
   }
   const paid = cents(input.amountReceived ?? sale.cashReceived ?? (legacy ? sale.total : undefined), 'Amount received')
-  const extra = cents(input.extraKept ?? 0, 'Extra retained')
+  const rawExtra = cents(input.extraKept ?? 0, 'Extra retained')
+  const isCashPayment = sale.paymentMethod === 'cash'
+  const extra = isCashPayment ? 0 : rawExtra
   if (paid < total) throw new Error('Amount received is less than the sale total.')
   if (extra > paid - total) throw new Error('Extra retained cannot exceed the amount above the sale total.')
   if (sale.paymentMethod === 'external-pos' && paid - total !== extra) throw new Error('Account for the entire extra terminal payment before recording the sale.')
   if (sale.paymentMethod === 'bank-transfer' && extra && extra !== paid - total) throw new Error('A transfer overpayment must be returned or retained in full.')
-  const reason = String(input.reason || '')
-  const note = String(input.note || '').trim().slice(0, 500)
+  const reason = isCashPayment ? '' : String(input.reason || '')
+  const note = isCashPayment ? '' : String(input.note || '').trim().slice(0, 500)
   if (extra && !policy.allowExtras) throw new Error('The owner has not enabled extra payments.')
   if (extra && (!policy.reasons.includes(reason) || !Object.hasOwn(extraReasons, reason))) throw new Error('Select an owner-approved reason for the extra payment.')
   if (extra && reason === 'other' && !note) throw new Error('Explain the extra payment.')
   if (sale.paymentMethod === 'bank-transfer' && !extra && paid > total && policy.reasonForChange && reason !== 'change-returned') throw new Error('Confirm that the transfer overpayment was returned to the customer.')
   if (['external-pos', 'bank-transfer'].includes(sale.paymentMethod) && (!String(sale.paymentReference || '').trim() || !String(sale.terminalProvider || '').trim())) throw new Error(`Record the ${sale.paymentMethod === 'bank-transfer' ? 'bank or transfer provider' : 'terminal provider'} and payment reference.`)
   const change = (paid - total - extra) / 100
-  return { ...sale, cashReceived: sale.paymentMethod === 'cash' ? paid / 100 : null, changeGiven: sale.paymentMethod === 'cash' ? change : null, paymentDetails: { version: 1, amountReceived: paid / 100, changeGiven: change, extraKept: extra / 100, reason: extra ? reason : sale.paymentMethod === 'bank-transfer' && paid > total ? 'change-returned' : '', note: extra ? note : '', printExtraDetails: policy.printExtraDetails, policy } }
+  return { ...sale, cashReceived: isCashPayment ? paid / 100 : null, changeGiven: isCashPayment ? change : null, paymentDetails: { version: 1, amountReceived: paid / 100, changeGiven: change, extraKept: extra / 100, reason: extra ? reason : sale.paymentMethod === 'bank-transfer' && paid > total ? 'change-returned' : '', note: extra ? note : '', printExtraDetails: policy.printExtraDetails, policy } }
 }
