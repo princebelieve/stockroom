@@ -6,6 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
 import { isNewerMutableOperation, mutableEntities } from '../cloud/conflict-policy.mjs'
 
 const tempDirectories = []
@@ -72,6 +73,44 @@ test('offline sale is committed locally and duplicate sale IDs do not reduce sto
   assert.equal(sales.body.sales.filter((value) => value.id === sale.id).length, 1)
   assert.equal(sales.body.sales.find(value => value.id === sale.id).cashReceived, 50)
   assert.equal(sales.body.sales.find(value => value.id === sale.id).changeGiven, 30)
+})
+
+test('wallet payments require owner settings, debit once, allow approved debt and record repayments', async () => {
+  const { baseUrl, dataDirectory } = await startBusiness()
+  const token = await createOwner(baseUrl)
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const request = (path, body, method = 'POST') => json(`${baseUrl}${path}`, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const item = await product(baseUrl, token, 10)
+  const customer = (await request('/api/customers', { name: 'Wallet customer' })).body
+  const sale = { id: 'wallet-prepaid', items: [{ productId: item.id, quantity: 1, price: 10 }], total: 10, createdAt: new Date().toISOString(), paymentMethod: 'wallet', paymentDetails: { customerId: customer.id } }
+  assert.equal((await request('/api/sales', sale)).response.status, 400)
+  const settings = (await request('/api/settings', undefined, 'GET')).body
+  assert.equal((await request('/api/settings', { ...settings, paymentPolicy: { allowWallet: true } }, 'PUT')).response.status, 200)
+  assert.equal((await request(`/api/customers/${customer.id}/wallet`, { amount: 15, reason: 'Deposit' })).response.status, 200)
+  assert.equal((await request('/api/sales', sale)).response.status, 201)
+  assert.equal((await request('/api/sales', sale)).response.status, 201)
+  const balance = async () => (await request('/api/customers', undefined, 'GET')).body.customers.find(c => c.id === customer.id)
+  assert.equal((await balance()).balance, 5)
+  const creditSale = { ...sale, id: 'wallet-credit', paymentDetails: { customerId: customer.id, creditApproved: true } }
+  assert.equal((await request('/api/sales', creditSale)).response.status, 400)
+  await request('/api/settings', { ...settings, paymentPolicy: { allowWallet: true, allowWalletCredit: true } }, 'PUT')
+  const db = new DatabaseSync(join(dataDirectory, 'stockroom.sqlite'))
+  try {
+    db.prepare("UPDATE users SET role = 'admin' WHERE role = 'owner'").run()
+    assert.equal((await request('/api/sales', creditSale)).response.status, 403)
+    db.prepare("UPDATE users SET role = 'owner' WHERE role = 'admin'").run()
+  } finally { db.close() }
+  assert.equal((await request('/api/sales', { ...sale, id: 'underfunded' })).response.status, 400)
+  assert.equal((await request('/api/sales', creditSale)).response.status, 201)
+  assert.equal((await balance()).balance, -5)
+  assert.equal((await request(`/api/customers/${customer.id}/wallet`, { amount: -1, reason: 'Withdrawal' })).response.status, 400)
+  assert.equal((await request(`/api/customers/${customer.id}/wallet`, { amount: 2, reason: 'Partial repayment' })).response.status, 200)
+  assert.equal((await balance()).balance, -3)
+  await request(`/api/customers/${customer.id}/wallet`, { amount: 3, reason: 'Final repayment' })
+  const final = await balance()
+  assert.equal(final.balance, 0)
+  assert.equal(final.transactions.length, 5)
+  assert.equal(final.transactions.reduce((sum, entry) => sum + entry.amount, 0), final.balance)
 })
 
 test('queued local changes synchronize after cloud service becomes reachable', async () => {

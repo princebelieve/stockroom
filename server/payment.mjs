@@ -2,7 +2,7 @@ export const extraReasons = { tip: 'Voluntary tip', rounding: 'Agreed rounding',
 export function paymentPolicy(value) {
   if (typeof value === 'string') { try { value = JSON.parse(value) } catch { value = {} } }
   const p = value || {}
-  return { allowExtras: p.allowExtras === true, reasonForChange: p.reasonForChange === true, printExtraDetails: p.printExtraDetails === true, reasons: Array.isArray(p.reasons) ? [...new Set(p.reasons.filter(r => Object.hasOwn(extraReasons, r)))] : ['tip', 'rounding', 'other'] }
+  return { allowWallet: p.allowWallet === true, allowWalletCredit: p.allowWalletCredit === true, allowExtras: p.allowExtras === true, reasonForChange: p.reasonForChange === true, printExtraDetails: p.printExtraDetails === true, reasons: Array.isArray(p.reasons) ? [...new Set(p.reasons.filter(r => Object.hasOwn(extraReasons, r)))] : ['tip', 'rounding', 'other'] }
 }
 function cents(value, label) {
   if (!/^\d+(?:\.\d{1,2})?$/.test(String(value ?? '').trim())) throw new Error(`${label} must be a non-negative amount with at most two decimals.`)
@@ -34,9 +34,11 @@ export function recordPayment(sale, policyInput, legacy = false) {
     return { ...sale, cashReceived: null, changeGiven: null, paymentDetails: { version: 1, amountReceived: total / 100, changeGiven: 0, extraKept: 0, reason: '', note: '', printExtraDetails: false, allocations: parts.map(part => ({ ...part, amount: part.amount / 100 })), policy } }
   }
   if (sale.paymentMethod === 'wallet') {
+    if (!policy.allowWallet) throw new Error('The owner has not enabled wallet payments.')
+    if (input.creditApproved && !policy.allowWalletCredit) throw new Error('The owner has not enabled purchases on credit.')
     if (!input.customerId) throw new Error('Select the customer wallet.')
     if (Number(input.extraKept || 0)) throw new Error('Wallet purchases must equal the sale total.')
-    return { ...sale, cashReceived: null, changeGiven: null, paymentDetails: { version: 1, amountReceived: total / 100, changeGiven: 0, extraKept: 0, reason: '', note: '', customerId: String(input.customerId), printExtraDetails: false } }
+    return { ...sale, cashReceived: null, changeGiven: null, paymentDetails: { version: 1, amountReceived: total / 100, changeGiven: 0, extraKept: 0, reason: '', note: '', customerId: String(input.customerId), creditApproved: input.creditApproved === true, printExtraDetails: false, policy } }
   }
   const paid = cents(input.amountReceived ?? sale.cashReceived ?? (legacy ? sale.total : undefined), 'Amount received')
   const extra = cents(input.extraKept ?? 0, 'Extra retained')

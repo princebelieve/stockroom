@@ -294,6 +294,7 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       const user = sessionUser(request)
       if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
+      if (input.paymentMethod === 'wallet' && input.paymentDetails?.creditApproved && user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner may approve credit purchases.' })
       if (!input?.id || !Array.isArray(input.items) || !Number.isFinite(Number(input.total))) return sendJson(response, 400, { error: 'Sale is invalid.' })
       try {
         return sendJson(response, 201, await createSale({ ...input, staffId: user.id, staffName: user.name }))

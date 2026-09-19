@@ -31,7 +31,7 @@ export type Sale = {
   staffName?: string
 }
 
-export type Customer = { id: string; name: string; phone: string; balance: number }
+export type Customer = { id: string; name: string; phone: string; balance: number; transactions?: Array<{ id: string; amount: number; reason: string; createdAt: string }> }
 
 export type Stocktake = {
   id: string

@@ -99,3 +99,8 @@ button[aria-busy="true"] { cursor: progress; }
 .device-grid button span { font-weight: normal; font-size: 12px; }
 .device-setup h4 { margin: 16px 0 8px; }
 .device-setup .report-actions { margin-top: 16px; flex-wrap: wrap; }
+.cart-quantity-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.cart-quantity-controls button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); }
+.cart-quantity-controls button:disabled { opacity: .45; cursor: not-allowed; }
+.cart-quantity-controls output { min-width: 28px; text-align: center; font-weight: 600; }
+.cart-quantity-controls input { width: 90px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }

@@ -314,7 +314,7 @@ export function getOwnerMetrics() {
 }
 
 export function listCustomers() {
-  return database.prepare('SELECT id, name, phone, balance FROM customers WHERE organization_id = ? ORDER BY name').all(organizationId)
+  return database.prepare('SELECT id, name, phone, balance FROM customers WHERE organization_id = ? ORDER BY name').all(organizationId).map(customer => ({ ...customer, transactions: database.prepare('SELECT id, amount, reason, created_at AS createdAt FROM wallet_transactions WHERE customer_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT 50').all(customer.id, organizationId) }))
 }
 
 export function getReports() {
@@ -435,12 +435,13 @@ export async function createBackup() {
 
 export function adjustCustomerWallet(customerId, amount, reason = 'manual-adjustment', shouldSync = true) {
   const customer = database.prepare('SELECT id, name, phone, balance FROM customers WHERE id = ? AND organization_id = ?').get(customerId, organizationId)
-  if (!customer) return null
-  if (customer.balance + amount < 0) throw new Error('Wallet balance cannot go below zero.')
+  if (!customer) throw new Error('Customer not found.')
+  if (!Number.isSafeInteger(Math.round(amount * 100)) || amount === 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) throw new Error('Enter a non-zero amount with at most two decimals.')
+  if (amount < 0 && customer.balance + amount < 0) throw new Error('Wallet balance cannot go below zero.')
   const createdAt = now()
   database.exec('BEGIN')
   try {
-    database.prepare('UPDATE customers SET balance = balance + ? WHERE id = ? AND organization_id = ?').run(amount, customerId, organizationId)
+    database.prepare('UPDATE customers SET balance = ROUND(balance + ?, 2) WHERE id = ? AND organization_id = ?').run(amount, customerId, organizationId)
     database.prepare('INSERT INTO wallet_transactions (id, organization_id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, customerId, amount, reason, createdAt)
     database.exec('COMMIT')
   } catch (error) { database.exec('ROLLBACK'); throw error }
@@ -630,7 +631,7 @@ export function createSale(sale, shouldSync = true) {
     database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.staffId || '', sale.staffName || '', sale.createdAt, sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null)
     if (sale.paymentMethod === 'wallet') {
       const customerId = sale.paymentDetails.customerId
-      const changed = database.prepare('UPDATE customers SET balance = ROUND(balance - ?, 2) WHERE id = ? AND organization_id = ? AND balance >= ?').run(sale.total, customerId, organizationId, sale.total)
+      const changed = database.prepare('UPDATE customers SET balance = ROUND(balance - ?, 2) WHERE id = ? AND organization_id = ? AND (balance >= ? OR ? = 1)').run(sale.total, customerId, organizationId, sale.total, sale.paymentDetails.creditApproved === true ? 1 : 0)
       if (!changed.changes) throw new Error('Customer wallet does not exist or has insufficient funds.')
       database.prepare('INSERT INTO wallet_transactions (id, organization_id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, customerId, -sale.total, `Sale ${sale.id}`, sale.createdAt)
     }

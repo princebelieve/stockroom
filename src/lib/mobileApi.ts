@@ -230,7 +230,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return json((await db.query('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?', [stock[1]])).values?.[0])
   }
   if (path === '/api/sales' && method === 'POST') {
-    let sale = await body(init); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
+    let sale = await body(init); if (sale.paymentMethod === 'wallet' && (sale.paymentDetails as { creditApproved?: boolean } | undefined)?.creditApproved && user.role !== 'owner') return error('Only the owner may approve credit purchases.', 403); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
     if (sale.paymentMethod === 'wallet' && !(sale.paymentDetails as { customerId?: unknown } | undefined)?.customerId) return error('Select the customer wallet.')
     if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'synced' })
     await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT name, stock, cost_price AS cost FROM products WHERE id = ?', [item.productId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); await db.run('UPDATE products SET stock = stock - ? WHERE id = ?', [Number(item.quantity), item.productId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
@@ -249,7 +249,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === '/api/customers' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    return json({ customers: (await db.query('SELECT id, name, phone, balance FROM customers ORDER BY name')).values || [] })
+    const customers = (await db.query('SELECT id, name, phone, balance FROM customers ORDER BY name')).values || []
+    return json({ customers: await Promise.all(customers.map(async customer => ({ ...customer, transactions: (await db.query('SELECT id, amount, reason, created_at AS createdAt FROM wallet_transactions WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50', [customer.id])).values || [] }))) })
   }
   if (path === '/api/customers' && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
@@ -261,9 +262,16 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   const wallet = path.match(/^\/api\/customers\/([^/]+)\/wallet$/)
   if (wallet && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const input = await body(init); const amount = Number(input.amount); if (!Number.isFinite(amount) || amount === 0) return error('Wallet amount must not be zero.')
-    const customer = (await db.query('SELECT id, name, phone, balance FROM customers WHERE id = ?', [wallet[1]])).values?.[0]; if (!customer || Number(customer.balance) + amount < 0) return error('Customer wallet cannot be negative.')
-    const createdAt = now(); await db.run('UPDATE customers SET balance = balance + ? WHERE id = ?', [amount, wallet[1]]); await db.run('INSERT INTO wallet_transactions (id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), wallet[1], amount, String(input.reason || 'manual-adjustment'), createdAt]); await queue('wallet', wallet[1], 'adjust', { customerId: wallet[1], amount, reason: String(input.reason || 'manual-adjustment'), createdAt })
+    const input = await body(init); const amount = Number(input.amount); if (!Number.isSafeInteger(Math.round(amount * 100)) || amount === 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) return error('Enter a non-zero amount with at most two decimals.')
+    const customer = (await db.query('SELECT id, name, phone, balance FROM customers WHERE id = ?', [wallet[1]])).values?.[0]; if (!customer || (amount < 0 && Number(customer.balance) + amount < 0)) return error('Customer wallet cannot be negative.')
+    const createdAt = now()
+    await db.beginTransaction()
+    try {
+      await db.run('UPDATE customers SET balance = ROUND(balance + ?, 2) WHERE id = ?', [amount, wallet[1]])
+      await db.run('INSERT INTO wallet_transactions (id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), wallet[1], amount, String(input.reason || 'manual-adjustment'), createdAt])
+      await db.commitTransaction()
+    } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Wallet adjustment failed.') }
+    await queue('wallet', wallet[1], 'adjust', { customerId: wallet[1], amount, reason: String(input.reason || 'manual-adjustment'), createdAt })
     return json({ ...customer, balance: Number(customer.balance) + amount })
   }
   if (path === '/api/expenses' && method === 'GET') {
@@ -317,7 +325,7 @@ async function debitSaleWallet(db: Awaited<ReturnType<typeof openMobileDatabase>
   const customerId = sale.paymentDetails?.customerId
   if (!customerId) throw new Error('Wallet sale is missing its customer.')
   const customer = (await db.query('SELECT balance FROM customers WHERE id = ?', [customerId])).values?.[0]
-  if (!customer || Number(customer.balance) < Number(sale.total)) throw new Error('Customer wallet has insufficient funds.')
+  if (!customer || (Number(customer.balance) < Number(sale.total) && sale.paymentDetails?.creditApproved !== true)) throw new Error('Customer wallet has insufficient funds.')
   await db.run('UPDATE customers SET balance = ROUND(balance - ?, 2) WHERE id = ?', [sale.total, customerId])
   await db.run('INSERT INTO wallet_transactions (id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), customerId, -Number(sale.total), `Sale ${sale.id}`, sale.createdAt || now()])
 }

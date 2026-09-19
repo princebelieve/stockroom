@@ -173,6 +173,26 @@ try {
   assert.ok(cashSale)
   assert.equal(cashSale.changeGiven, 100 - cashSale.total)
   assert.match(await page.locator('.print-receipt').textContent(), /Cash received:.*Change given:/)
+  // Exercise wallet checkout through the PWA UI and its local database.
+  const walletSettings = (await api('/api/settings')).data
+  await page.evaluate(async settings => {
+    const result = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, paymentPolicy: { allowWallet: true, allowWalletCredit: true } }) })
+    if (!result.ok) throw new Error('Could not enable wallets')
+  }, walletSettings)
+  const walletCustomer = (await api('/api/customers', { name: 'Wallet browser customer' })).data
+  assert.equal((await api('/api/customers/' + walletCustomer.id + '/wallet', { amount: 20, reason: 'Deposit' })).status, 200)
+  await page.reload()
+  await page.getByRole('button', { name: 'POS', exact: true }).click()
+  await page.locator('.pos-product').first().click()
+  await page.getByRole('combobox', { name: /^Payment method/ }).selectOption('wallet')
+  await page.getByRole('combobox', { name: /^Customer wallet/ }).selectOption(walletCustomer.id)
+  await page.getByRole('button', { name: 'Complete sale', exact: true }).click()
+  await page.getByText('Scan or select a product to begin.', { exact: true }).waitFor()
+  const walletAfterSale = (await api('/api/customers')).data.customers.find(c => c.id === walletCustomer.id)
+  assert.ok(walletAfterSale.balance < 20)
+  assert.equal(walletAfterSale.transactions.length, 2)
+  await page.getByRole('button', { name: 'Wallet', exact: true }).click()
+  await page.getByRole('heading', { name: 'Wallet browser customer' }).waitFor()
   await page.getByRole('button', { name: 'Log out' }).click()
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   assert.equal((await api('/api/settings')).data.existingBusiness, true)
