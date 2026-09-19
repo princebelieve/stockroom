@@ -265,12 +265,13 @@ const server = createServer(async (request, response) => {
     request.on('end', async () => {
       try {
         const input = JSON.parse(body)
-        const appName = String(input.appName || '').trim()
-        const currency = String(input.currency || 'USD').toUpperCase()
-        const posProvider = String(input.posProvider || '').trim()
-        const posTerminalId = String(input.posTerminalId || '').trim()
-        const posConnection = String(input.posConnection || 'manual')
-        const logoData = String(input.logoData || '')
+        const current = await getSettings()
+        const appName = String(input.appName ?? current.appName).trim() || current.appName
+        const currency = String(input.currency ?? current.currency).trim().toUpperCase() || current.currency
+        const posProvider = input.posProvider === undefined ? current.posProvider : String(input.posProvider).trim()
+        const posTerminalId = input.posTerminalId === undefined ? current.posTerminalId : String(input.posTerminalId).trim()
+        const posConnection = input.posConnection === undefined ? current.posConnection : String(input.posConnection)
+        const logoData = input.logoData === undefined ? (current.logoData || '') : String(input.logoData)
         const mongoUri = String(input.mongoUri || '').trim()
         const mongoDatabase = String(input.mongoDatabase || 'stockroom').trim() || 'stockroom'
         if (!appName || appName.length > 60) return sendJson(response, 400, { error: 'App name must be between 1 and 60 characters.' })

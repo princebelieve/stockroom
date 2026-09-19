@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
-import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, BarChart3, Boxes, CheckSquare, CloudOff, Download, Eye, EyeOff, LayoutDashboard, MoreHorizontal, PackagePlus, Plus, Printer, RefreshCw, Search, ScanLine, Settings2, ShoppingCart, SlidersHorizontal, Store, UserRoundCog, WalletCards, Wifi, X } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, BarChart3, Boxes, CheckSquare, CloudOff, Download, Eye, EyeOff, LayoutDashboard, Menu, MoreHorizontal, PackagePlus, Plus, Printer, RefreshCw, Search, ScanLine, Settings2, ShoppingCart, SlidersHorizontal, Store, UserRoundCog, WalletCards, Wifi, X } from 'lucide-react'
 import type { Customer, Product, Sale, Stocktake } from './types'
 import { commitOfflineSale, getReceiptHistory, cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, removeQueuedOperation, replaceQueuedProductId, saveSale, upsertCachedProducts } from './lib/offlineStore'
 import { installMobileApi } from './lib/mobileApi'
@@ -112,6 +112,7 @@ function App() {
   })
   const [query, setQuery] = useState('')
   const [active, setActive] = useState('Overview')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ configured: false, pending: 0, lastError: '' })
@@ -130,6 +131,23 @@ function App() {
   const [businessMode, setBusinessMode] = useState<BusinessMode>(() => (localStorage.getItem('stockroom-business-mode') as BusinessMode) || 'general')
   const defaultUnit = businessModes[businessMode].unit
   const [extraPaymentPolicy, setExtraPaymentPolicy] = useState<PaymentPolicy>(() => paymentPolicy())
+  const settingsDraftDirty = useRef(false)
+  useEffect(() => {
+    const closeMobileMenu = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileMenuOpen(false) }
+    window.addEventListener('keydown', closeMobileMenu)
+    return () => window.removeEventListener('keydown', closeMobileMenu)
+  }, [])
+  useEffect(() => {
+    const markSettingsDraftDirty = (event: Event) => {
+      if ((event.target as HTMLElement | null)?.closest('form.settings-form')) settingsDraftDirty.current = true
+    }
+    document.addEventListener('input', markSettingsDraftDirty)
+    document.addEventListener('change', markSettingsDraftDirty)
+    return () => {
+      document.removeEventListener('input', markSettingsDraftDirty)
+      document.removeEventListener('change', markSettingsDraftDirty)
+    }
+  }, [])
   useEffect(() => {
     if (!showAdd) return
     const nameInput = document.querySelector('form.modal input[name="name"]') as HTMLInputElement | null
@@ -254,6 +272,7 @@ function App() {
     const response = await fetch('/api/settings').catch(() => null)
     if (!response?.ok) return
     const settings = await response.json() as AppSettings
+    if (settingsDraftDirty.current) return
     setAppName(settings.appName || 'My Business')
     setCurrency(settings.currency || 'USD')
     setPosProvider(settings.posProvider || '')
@@ -267,7 +286,6 @@ function App() {
   async function refreshSyncStatus() {
     const response = await fetch('/api/sync/status').catch(() => null)
     if (response?.ok) setSyncStatus(await response.json() as SyncStatus)
-    await refreshBusinessSettings()
   }
   async function syncNow() {
     setSyncing(true)
@@ -595,6 +613,7 @@ function App() {
     try {
       const response = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ appName: nextName, currency, posProvider, posTerminalId, posConnection, logoData, paymentPolicy: extraPaymentPolicy }) })
       if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'Unable to save') }
+      settingsDraftDirty.current = false
       document.title = nextName
       localStorage.setItem('stockroom-currency', currency)
       setSettingsMessage('Saved to the business account.')
@@ -987,10 +1006,11 @@ function App() {
 
   return <div className="app-shell">
     {(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshingâ€¦' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
-    <aside className="sidebar">
+    <button className="mobile-nav-toggle" type="button" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}><Menu size={22} /></button>
+    {mobileMenuOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />}
+    <aside className={`sidebar${mobileMenuOpen ? ' mobile-menu-open' : ''}`}>
       <div className="brand"><div className="brand-mark">{logoData ? <img src={logoData} alt="" className="brand-logo" /> : <Boxes size={21} />}</div><div><strong>{appName}</strong><span>Business operations</span></div></div>
-      <div className="workspace"><Store size={16} /><span>{appName}</span><MoreHorizontal size={17} /></div>
-      <nav>
+      <nav onClick={() => setMobileMenuOpen(false)}>
         {canManageOperations && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
         {canManageOperations && <button className={active === 'Inventory' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Inventory')}><Boxes size={18} />Inventory <b>{products.length}</b></button>}
         {canManageInventory && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
