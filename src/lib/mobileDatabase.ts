@@ -31,6 +31,11 @@ export async function openMobileDatabase() {
   await connection.open()
   await connection.execute(`
     PRAGMA foreign_keys = ON;
+    CREATE TABLE IF NOT EXISTS mobile_stocktakes (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS mobile_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL

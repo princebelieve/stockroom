@@ -1,6 +1,7 @@
 import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
 import { normalizeCashSale } from '../../server/cash.mjs'
 import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, saveMobileSyncConfiguration, type MobileSyncConfiguration } from './mobileDatabase'
+import { mobileStocktake } from './mobileStocktake'
 
 type MobileUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
 type Operation = { operationId: string; entityType: string; entityId: string; action: string; payload: Record<string, unknown>; createdAt: string }
@@ -263,6 +264,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' }, cloudAccessToken: result.accessToken })
   }
   if (!user) return error('Authentication required.', 401)
+  const stocktakeResponse = await mobileStocktake(path, init, canOperate(user), queue)
+  if (stocktakeResponse) return stocktakeResponse
   if (path === '/api/sync/status') return json(await localSyncStatus())
   if (path === '/api/sync/pull' && method === 'POST') return json(await pullLatest())
   if (path === '/api/sync/now' && method === 'POST') return json(await syncNow())

@@ -248,21 +248,6 @@ function App() {
   const [stocktake, setStocktake] = useState<Stocktake | null>(null)
   const [stocktakeReason, setStocktakeReason] = useState('Approved after physical count')
   useEffect(() => {
-    if (active !== 'Stocktake' || (stocktake && stocktake.status !== 'approved')) return
-    const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.full-panel .panel-heading .primary-button')).find(candidate => candidate.textContent?.includes('Start stock take') || candidate.textContent?.includes('Starting stocktake'))
-    if (!button) return
-    const rename = () => {
-      button.setAttribute('aria-label', 'Start count')
-      for (const node of Array.from(button.childNodes)) {
-        if (node.nodeType === Node.TEXT_NODE && node.textContent) node.textContent = node.textContent.replace('Start stock take', 'Start count').replace('Starting stocktake...', 'Starting count...')
-      }
-    }
-    rename()
-    const observer = new MutationObserver(rename)
-    observer.observe(button, { childList: true, characterData: true, subtree: true })
-    return () => observer.disconnect()
-  }, [active, stocktake])
-  useEffect(() => {
     if (!isBrowserPwa() || !authToken || active !== 'Stocktake') return
     let cancelled = false
     fetch('/api/stocktakes', { headers: { Authorization: `Bearer ${authToken}` } }).then(async response => {
@@ -983,8 +968,10 @@ function App() {
 
   async function startStocktake() {
     const response = await fetch('/api/stocktakes', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
-    if (response.ok) { setStocktake(await response.json() as Stocktake); setActive('Stocktake') }
-    else if (isBrowserPwa()) window.alert((await response.json()).error || 'Could not start stocktake.')
+    const result = await response.json().catch(() => ({})) as Stocktake & { error?: string }
+    if (!response.ok) throw new Error(result.error || 'Could not start stocktake.')
+    setStocktake(result)
+    setActive('Stocktake')
   }
 
   async function updateCount(countId: string, counted: number) {

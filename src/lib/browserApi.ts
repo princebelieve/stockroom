@@ -59,7 +59,7 @@ async function restoreCloudSession(): Promise<MobileUser | null> {
 async function restoreSavedSession(): Promise<MobileUser | null> {
   const config = await getMobileSyncConfiguration()
   const saved = JSON.parse(localStorage.getItem('stockroom-user') || 'null') as Partial<MobileUser> | null
-  if (!config || !saved?.id || saved.organizationId !== config.businessId) return null
+  if (!config || !saved?.id || !['owner', 'admin', 'cashier'].includes(String(saved.role))) return null
   const localUser: MobileUser = { id: saved.id, name: String(saved.name || ''), email: String(saved.email || `${saved.id}@staff.local.invalid`), username: String(saved.username || ''), role: saved.role || 'cashier', operationalAccess: Boolean(saved.operationalAccess), organizationId: config.businessId }
   const db = await openMobileDatabase()
   await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
