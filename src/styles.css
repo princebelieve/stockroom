@@ -120,6 +120,10 @@ button[aria-busy="true"] { cursor: progress; }
 .button-spinner { display: inline-block; width: 14px; height: 14px; flex-shrink: 0; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: button-spin .75s linear infinite; }
 @keyframes button-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .button-spinner { animation: none; } }
+:root { --brand-hover: #286052; --brand-accent: #d5e95c; }
+body { color: var(--ink); }
+.brand-mark { background: var(--brand-accent); }
+.primary-button:hover, .workspace, .nav-item:hover, .nav-item.active, .sync-button, .mobile-pull-refresh.refreshing { background: var(--brand-hover); }
 @media (max-width: 650px) {
   /* Action labels are essential on touch devices—never collapse them to icons. */
   .hero-row .primary-button, .full-panel .primary-button { font-size: 12px; padding: 10px 12px; }

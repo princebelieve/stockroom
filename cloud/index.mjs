@@ -16,12 +16,14 @@ await client.connect()
 const database = client.db(process.env.MONGODB_DATABASE || 'stockroom_sync')
 const operations = database.collection('sync_operations')
 const entityHeads = database.collection('sync_entity_heads')
+const businessSettings = database.collection('business_settings')
 const accounts = database.collection('accounts')
 const devices = database.collection('devices')
 const passwordResets = database.collection('password_resets')
 await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
+await businessSettings.createIndex({ businessId: 1 }, { unique: true })
 // Staff email is optional contact data. Convert the original mandatory unique
 // index once so several staff accounts can omit it.
 await accounts.dropIndex('email_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
@@ -164,6 +166,8 @@ const server = createServer(async (request, response) => {
       const query = new URL(request.url, `http://${request.headers.host}`).searchParams
       const businessId = query.get('businessId') || ''
       if (!businessId || claims.businessId !== businessId) return send(response, 403, { error: 'Token does not authorize this business.' })
+      const current = await businessSettings.findOne({ businessId })
+      if (current?.settings) return send(response, 200, { settings: current.settings })
       const latest = await operations.find({ businessId, entityType: 'settings', action: 'upsert' }).sort({ createdAt: -1, _id: -1 }).limit(1).next()
       return send(response, 200, { settings: latest?.payload || null })
     }
@@ -251,6 +255,9 @@ const server = createServer(async (request, response) => {
           await entityHeads.updateOne(filter, { $set: { updatedAt: operationUpdatedAt(document), payload: document.payload, operationId: document.operationId, deviceId, receivedAt: new Date() } }, { upsert: true })
         }
         await operations.updateOne({ businessId, operationId: document.operationId }, { $setOnInsert: document }, { upsert: true })
+        if (document.entityType === 'settings' && document.action === 'upsert' && document.payload?.appName && document.payload?.currency) {
+          await businessSettings.updateOne({ businessId }, { $set: { businessId, settings: document.payload, updatedAt: operationUpdatedAt(document), receivedAt: new Date() } }, { upsert: true })
+        }
         acceptedOperationIds.push(document.operationId)
       }
       return send(response, 200, { acceptedOperationIds, conflicts })

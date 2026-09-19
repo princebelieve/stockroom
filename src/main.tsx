@@ -25,6 +25,7 @@ import { PaymentPolicySettings } from './PaymentPolicySettings'
 import { PaymentEvidence } from './PaymentEvidence'
 import { ProductIntake } from './ProductIntake'
 import { BusinessProfileSettings, businessModes, type BusinessMode } from './BusinessProfileSettings'
+import { applyLogoTheme } from './lib/logoTheme'
 
 function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
   const menu = useRef<HTMLDetailsElement>(null)
@@ -284,6 +285,7 @@ function App() {
   const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
 
   useEffect(() => { document.title = appName }, [appName])
+  useEffect(() => { void applyLogoTheme(logoData) }, [logoData])
   useEffect(() => localStorage.setItem('stockroom-products', JSON.stringify(products)), [products])
   useEffect(() => {
     if (!authToken) return
@@ -317,15 +319,21 @@ function App() {
     if (!response?.ok) return
     const settings = await response.json() as AppSettings
     if (settingsDraftDirty.current) return
-    setAppName(settings.appName || 'My Business')
-    setCurrency(settings.currency || 'USD')
+    const cachedName = localStorage.getItem('stockroom-app-name') || ''
+    const cachedCurrency = localStorage.getItem('stockroom-currency') || ''
+    const isPlaceholder = settings.appName === 'My Business' && settings.currency === 'USD'
+    const keepCachedIdentity = isPlaceholder && cachedName && cachedName !== 'My Business'
+    const displayedName = keepCachedIdentity ? cachedName : settings.appName || 'My Business'
+    const displayedCurrency = keepCachedIdentity ? cachedCurrency || 'USD' : settings.currency || 'USD'
+    setAppName(displayedName)
+    setCurrency(displayedCurrency)
     setPosProvider(settings.posProvider || '')
     setPosTerminalId(settings.posTerminalId || '')
     setPosConnection(settings.posConnection || 'manual')
     setLogoData(settings.logoData || '')
     setExtraPaymentPolicy(paymentPolicy(settings.paymentPolicy))
-    localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
-    localStorage.setItem('stockroom-currency', settings.currency || 'USD')
+    localStorage.setItem('stockroom-app-name', displayedName)
+    localStorage.setItem('stockroom-currency', displayedCurrency)
   }
   async function refreshSyncStatus() {
     const response = await fetch('/api/sync/status').catch(() => null)
@@ -549,8 +557,14 @@ function App() {
       const browserStartupState = isBrowserPwa() && !settings.cloudConfigured
         ? { ...startupState, installerRequired: false, setupRequired: false }
         : startupState
-      setAppName(settings.appName || 'My Business')
-      setCurrency(settings.currency || 'USD')
+      const cachedName = localStorage.getItem('stockroom-app-name') || ''
+      const cachedCurrency = localStorage.getItem('stockroom-currency') || ''
+      const isPlaceholder = settings.appName === 'My Business' && settings.currency === 'USD'
+      const keepCachedIdentity = isPlaceholder && cachedName && cachedName !== 'My Business'
+      const displayedName = keepCachedIdentity ? cachedName : settings.appName || 'My Business'
+      const displayedCurrency = keepCachedIdentity ? cachedCurrency || 'USD' : settings.currency || 'USD'
+      setAppName(displayedName)
+      setCurrency(displayedCurrency)
       setPosProvider(settings.posProvider || '')
       setPosTerminalId(settings.posTerminalId || '')
       setPosConnection(settings.posConnection || 'manual')
@@ -560,9 +574,9 @@ function App() {
       setSetupRequired(browserStartupState.setupRequired)
       setInstallerRequired(browserStartupState.installerRequired)
       setSettingsLoaded(true)
-      localStorage.setItem('stockroom-app-name', settings.appName || 'My Business')
-      localStorage.setItem('stockroom-currency', settings.currency || 'USD')
-      document.title = settings.appName || 'My Business'
+      localStorage.setItem('stockroom-app-name', displayedName)
+      localStorage.setItem('stockroom-currency', displayedCurrency)
+      document.title = displayedName
     }).catch(async () => {
       try {
         const response = await fetch('/api/sync/status')
@@ -660,6 +674,10 @@ function App() {
       settingsDraftDirty.current = false
       document.title = nextName
       localStorage.setItem('stockroom-currency', currency)
+      if (isBrowserPwa() && navigator.onLine) {
+        const sync = await fetch('/api/sync/now', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } }).catch(() => null)
+        if (!sync?.ok) { setSettingsMessage('Saved on this device. It will sync when internet is available.'); return }
+      }
       setSettingsMessage('Saved to the business account.')
     } catch {
       if (isBrowserPwa()) { setSettingsMessage('Settings could not be saved. Check available device storage and try again.'); return }
@@ -807,11 +825,6 @@ function App() {
   const canManageOperations = user?.role === 'owner' || user?.role === 'admin' || Boolean(user?.operationalAccess)
   const canManageInventory = canManageOperations
   const canManageDeviceSetup = user?.role === 'owner' || user?.role === 'admin'
-  useEffect(() => {
-    if (!canManageDeviceSetup || printerSettings().receipt) return
-    setDeviceSetupKind('receipt')
-    setActive('Device')
-  }, [canManageDeviceSetup, user?.organizationId])
   const allReceipts: Sale[] = [...receiptHistory, ...sales.filter(row => !receiptHistory.some(receipt => receipt.id === row.id)).map(row => ({ ...row, paymentMethod: row.paymentMethod as Sale['paymentMethod'], syncStatus: 'synced' as const, items: row.items.map(item => ({ productId: item.productId, productName: item.productName, quantity: item.quantity, price: item.unitPrice })) }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const formatMoney = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
   async function refreshWallets() {
