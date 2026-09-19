@@ -116,6 +116,7 @@ function App() {
   const [online, setOnline] = useState(navigator.onLine)
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ configured: false, pending: 0, lastError: '' })
   const [syncing, setSyncing] = useState(false)
+  const [syncFeedback, setSyncFeedback] = useState('')
   const [syncConflicts, setSyncConflicts] = useState<SyncConflict[]>([])
   const [displayPairing, setDisplayPairing] = useState<{ url: string; code: string; expiresAt: string } | null>(null)
   const [appName, setAppName] = useState(() => localStorage.getItem('stockroom-app-name') || 'My Business')
@@ -159,6 +160,8 @@ function App() {
   const [splitTransfer, setSplitTransfer] = useState('')
   const [transferProvider, setTransferProvider] = useState('')
   const [transferReference, setTransferReference] = useState('')
+  const [transferAmountReceived, setTransferAmountReceived] = useState('')
+  const [transferOverpayment, setTransferOverpayment] = useState<'returned' | 'retained' | ''>('')
   useEffect(() => {
     const select = document.querySelector<HTMLSelectElement>('.cart-panel .payment-options select')
     if (!select) return
@@ -268,19 +271,57 @@ function App() {
   }
   async function syncNow() {
     setSyncing(true)
+    setSyncFeedback('Uploading changes to the cloud…')
     try {
+      await syncQueuedOperations()
       const response = await fetch('/api/sync/now', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
-      if (response.ok) setSyncStatus(await response.json() as SyncStatus)
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || `Sync request failed (${response.status}).`)
+      const status = result as SyncStatus
+      setSyncStatus(status)
+      if (!status.configured) throw new Error('Cloud sync is not configured for this device.')
+      if (status.lastError) throw new Error(status.lastError)
+      const pending = status.pending + (isBrowserPwa() ? 0 : (await getQueuedOperations()).length)
+      setSyncFeedback(status.conflicts ? `Sync needs review: ${status.conflicts} conflicting change(s), ${pending} still queued.` : pending ? `Sync incomplete: ${pending} change(s) still queued. Press Sync now to retry.` : `Sync complete at ${new Date().toLocaleTimeString()}. All changes uploaded; 0 queued.`)
       await refreshBusinessSettings()
-      if (isBrowserPwa()) {
-        const productsResponse = await fetch('/api/products', { headers: authHeaders })
-        if (productsResponse.ok) setProducts((await productsResponse.json()).products)
-      }
+      if (!isBrowserPwa() && (await getQueuedOperations()).length) return
+      const productsResponse = await fetch('/api/products', { headers: authHeaders })
+      if (productsResponse.ok) setProducts((await productsResponse.json()).products)
+    } catch (error) {
+      setSyncFeedback(`Sync failed: ${error instanceof Error ? error.message : 'Could not reach the cloud.'} Check the queued count and retry.`)
     } finally { setSyncing(false) }
   }
   async function pullLatest() {
     refreshLocalView()
   }
+  useEffect(() => {
+    if (!authToken || !online || !['owner', 'admin'].includes(user?.role || '')) return
+    let cancelled = false
+    let busy = false
+    const download = async () => {
+      if (busy) return
+      busy = true
+      try {
+        const response = await fetch('/api/sync/pull', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
+        if (!response.ok || cancelled) return
+        const status = await response.json() as SyncStatus
+        if (cancelled) return
+        setSyncStatus(status)
+        // Desktop/Android may still have local edits waiting for their API.
+        // Do not replace those edits with an older database snapshot.
+        if (!isBrowserPwa() && (await getQueuedOperations()).length) return
+        const productsResponse = await fetch('/api/products', { headers: { Authorization: `Bearer ${authToken}` } })
+        if (productsResponse.ok) {
+          const result = await productsResponse.json() as { products: Product[] }
+          if (!cancelled) setProducts(result.products)
+        }
+      } catch { /* Keep the local catalogue available while offline. */ }
+      finally { busy = false }
+    }
+    void download()
+    const interval = window.setInterval(() => { void download() }, 30_000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [authToken, online, user?.role])
   useEffect(() => {
     if (isNativeMobile()) return
     const handleDesktopReload = (event: KeyboardEvent) => {
@@ -293,14 +334,26 @@ function App() {
     window.addEventListener('keydown', handleDesktopReload)
     return () => window.removeEventListener('keydown', handleDesktopReload)
   }, [online, syncStatus.configured, syncing, refreshingView, authToken])
-  function refreshLocalView() {
+  async function refreshLocalView() {
     if (refreshingView || syncing) return
     setRefreshingView(true)
-    // Pull remote changes only. Deliberate "Sync now" remains responsible for
-    // uploading this phone's queued work.
-    fetch('/api/sync/pull', { method: 'POST', headers: authHeaders })
-      .catch(() => undefined)
-      .finally(async () => {
+    setSyncFeedback('Downloading changes from the cloud…')
+    try {
+        const response = await fetch('/api/sync/pull', { method: 'POST', headers: authHeaders })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || `Refresh failed (${response.status}).`)
+        setSyncStatus(result as SyncStatus)
+        if (result.lastError) throw new Error(result.lastError)
+        if (!result.configured) throw new Error('Cloud sync is not configured for this device.')
+        if (!isBrowserPwa() && (await getQueuedOperations()).length) {
+          setSyncFeedback('Download complete. Sync local edits before reloading the catalogue.')
+          return
+        }
+        const productsResponse = await fetch('/api/products', { headers: authHeaders })
+        if (!productsResponse.ok) throw new Error('Changes downloaded, but the product list could not be loaded. Refresh again.')
+        const catalogue = await productsResponse.json() as { products: Product[] }
+        setProducts(catalogue.products)
+        setSyncFeedback(`Refresh complete. ${catalogue.products.length} product(s) loaded. No local changes uploaded.`)
         if (isBrowserPwa() && 'serviceWorker' in navigator) {
           const registration = await navigator.serviceWorker.getRegistration()
           await registration?.update().catch(() => undefined)
@@ -310,8 +363,9 @@ function App() {
           }
         }
         await refreshBusinessSettings()
-        setRefreshingView(false)
-      })
+    } catch (error) {
+      setSyncFeedback(`Refresh failed: ${error instanceof Error ? error.message : 'Could not download changes.'}`)
+    } finally { setRefreshingView(false) }
   }
   useEffect(() => {
     if (!isNativeMobile() && !isBrowserPwa()) return
@@ -617,12 +671,14 @@ function App() {
 
   async function completeSale() {
     if (!cartProducts.length) return
+    const unavailable = cartProducts.find(product => cart[product.id] > product.stock)
+    if (unavailable) { window.alert(`Insufficient stock for ${unavailable.name}. Only ${unavailable.stock} available.`); return }
     if (paymentMethod === 'wallet' && (!extraPaymentPolicy.allowWallet || !walletCustomer || (walletCustomer.balance < cartTotal && !(extraPaymentPolicy.allowWalletCredit && user?.role === 'owner' && walletCreditApproved)))) { window.alert('Select a customer with enough wallet balance. Wallet payments must be enabled by the owner.'); return }
     if ((paymentMethod === 'external-pos' || (paymentMethod === 'multiple' && Number(splitTerminal) > 0)) && !manualTerminalAllowed) { window.alert('Terminal integration is unavailable and manual confirmation is disabled. Update the terminal profile in Admin Settings.'); return }
     if (paymentMethod === 'external-pos' && (!terminalProvider.trim() || !paymentReference.trim())) return
     let sale: Sale
     try {
-      sale = recordPayment({ organizationId: user!.organizationId, businessName: appName, currency, id: crypto.randomUUID(), items: cartProducts.map((product) => ({ productId: product.id, productName: product.name, quantity: cart[product.id], price: product.price })), total: cartTotal, createdAt: new Date().toISOString(), syncStatus: 'pending', paymentMethod, terminalProvider: paymentMethod === 'bank-transfer' ? transferProvider.trim() : terminalProvider.trim(), paymentReference: paymentMethod === 'bank-transfer' ? transferReference.trim() : paymentReference.trim(), paymentDetails: paymentMethod === 'wallet' ? { customerId: walletCustomerId, creditApproved: walletCreditApproved } : paymentMethod === 'multiple' ? { allocations: [{ method: 'cash', amount: splitCash }, ...(Number(splitTerminal) > 0 ? [{ method: 'external-pos', amount: splitTerminal, provider: terminalProvider, reference: splitTerminalReference }] : []), ...(Number(splitTransfer) > 0 ? [{ method: 'bank-transfer', amount: splitTransfer, provider: transferProvider, reference: transferReference }] : [])].filter(part => Number(part.amount) > 0) } : { amountReceived: paymentMethod === 'cash' ? cashReceived : cartTotal + Number(extraKept || 0), extraKept, reason: extraReason, note: extraNote } }, extraPaymentPolicy) as Sale
+      sale = recordPayment({ organizationId: user!.organizationId, businessName: appName, currency, id: crypto.randomUUID(), items: cartProducts.map((product) => ({ productId: product.id, productName: product.name, quantity: cart[product.id], price: product.price })), total: cartTotal, createdAt: new Date().toISOString(), syncStatus: 'pending', paymentMethod, terminalProvider: paymentMethod === 'bank-transfer' ? transferProvider.trim() : terminalProvider.trim(), paymentReference: paymentMethod === 'bank-transfer' ? transferReference.trim() : paymentReference.trim(), paymentDetails: paymentMethod === 'wallet' ? { customerId: walletCustomerId, creditApproved: walletCreditApproved } : paymentMethod === 'multiple' ? { allocations: [{ method: 'cash', amount: splitCash }, ...(Number(splitTerminal) > 0 ? [{ method: 'external-pos', amount: splitTerminal, provider: terminalProvider, reference: splitTerminalReference }] : []), ...(Number(splitTransfer) > 0 ? [{ method: 'bank-transfer', amount: splitTransfer, provider: transferProvider, reference: transferReference }] : [])].filter(part => Number(part.amount) > 0) } : { amountReceived: paymentMethod === 'cash' ? cashReceived : paymentMethod === 'bank-transfer' ? transferAmountReceived : cartTotal + Number(extraKept || 0), extraKept, reason: paymentMethod === 'bank-transfer' && transferOverpayment === 'returned' ? 'change-returned' : extraReason, note: extraNote } }, extraPaymentPolicy) as Sale
     } catch (error) { window.alert(error instanceof Error ? error.message : 'Payment details are invalid.'); return }
     if (isBrowserPwa() || paymentMethod === 'wallet') {
       const response = await fetch('/api/sales', { method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(sale) })
@@ -630,7 +686,7 @@ function App() {
       sale = { ...sale, syncStatus: 'synced' }
       if (paymentMethod === 'wallet') setCustomers(current => current.map(customer => customer.id === walletCustomerId ? { ...customer, balance: Math.round((customer.balance - cartTotal) * 100) / 100 } : customer))
     }
-    const updatedProducts = products.map((product) => cart[product.id] ? { ...product, stock: Math.max(0, product.stock - cart[product.id]), updated: 'Sold offline' } : product)
+    const updatedProducts = products.map((product) => cart[product.id] ? { ...product, stock: product.stock - cart[product.id], updated: 'Sold offline' } : product)
     if (!isBrowserPwa() && paymentMethod !== 'wallet') await commitOfflineSale(sale, updatedProducts)
     else await saveSale(sale).catch(() => setReceiptError('Sale saved, but its receipt snapshot could not be archived locally.'))
     setProducts(updatedProducts)
@@ -641,6 +697,8 @@ function App() {
     setWalletCreditApproved(false)
     setCashReceived('')
     setPaymentReference('')
+    setTransferAmountReceived('')
+    setTransferOverpayment('')
     setExtraKept('0')
     setExtraReason('')
     setExtraNote('')
@@ -947,7 +1005,7 @@ function App() {
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Team' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Team')}><UserRoundCog size={18} />Team management</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Settings')}><UserRoundCog size={18} />Business settings</button>}
       </nav>
-      <div className={isBrowserPwa() ? "sidebar-foot pwa-sync-controls" : "sidebar-foot"}><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` Â· ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline Â· saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncingâ€¦' : 'Sync now'}</button><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
+      <div className="sidebar-foot pwa-sync-controls"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` Â· ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline Â· saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncingâ€¦' : 'Sync now'}</button><p className="sync-feedback" role="status" aria-live="polite">{syncFeedback}</p><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
     </aside>
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">{user.name} Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
@@ -959,7 +1017,7 @@ function App() {
       {active === 'Inventory' && <section className="panel full-panel"><div className="panel-heading"><div><h2>All inventory</h2><p>Adjust counts as stock comes in or goes out.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}><Plus size={18} />Add product</button></div><div className="search-row"><div className="search-box"><Search size={17} /><input placeholder="Search or scan barcode" value={query} onChange={(event) => setQuery(event.target.value)} /></div><button className="filter-button" onClick={() => scanBarcode()}><ScanLine size={16} />Scan</button></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Unit price</th><th>Updated</th><th></th></tr></thead><tbody>{filteredProducts.map((product) => <ProductRow key={product.id} product={product} updateStock={updateStock} money={formatMoney} detailed />)}</tbody></table></div></section>}
       {active === 'Stocktake' && <section className="panel full-panel"><div className="panel-heading"><div><h2>Physical stock take</h2><p>Count what is physically on the shelf and approve the variance.</p></div>{!stocktake || stocktake.status === 'approved' ? <AsyncButton busyLabel="Starting stocktake..." className="primary-button" onClick={startStocktake}><CheckSquare size={17} />Start stock take</AsyncButton> : <AsyncButton busyLabel="Approving..." className="primary-button" onClick={approveStocktakeSession}>Approve adjustments</AsyncButton>}</div>{!stocktake ? <div className="empty-state">Start a session to compare expected stock with physical counts.</div> : <><div className="search-row"><label className="settings-form" style={{ width: '100%' }}><span>Approval reason</span><input value={stocktakeReason} onChange={(event) => setStocktakeReason(event.target.value)} disabled={stocktake.status === 'approved'} /></label></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>Expected</th><th>Counted</th><th>Variance</th></tr></thead><tbody>{stocktake.counts.map((count) => <tr key={count.id}><td><strong>{count.name}</strong><span className="table-subtext">{count.sku}</span></td><td>{count.expected}</td><td><input className="count-input" type="number" min="0" value={count.counted} disabled={stocktake.status === 'approved'} onChange={(event) => updateCount(count.id, Number(event.target.value))} /></td><td className={count.variance === 0 ? 'muted' : count.variance < 0 ? 'low-stock' : 'positive'}>{count.variance > 0 ? '+' : ''}{count.variance}</td></tr>)}</tbody></table></div>{stocktake.history && stocktake.history.length > 0 && <div className="panel"><div className="panel-heading"><div><h3>Audit history</h3><p>Recorded adjustments from this stock-take session.</p></div></div><div className="table-wrap"><table><thead><tr><th>Product</th><th>Expected</th><th>Counted</th><th>Variance</th><th>Reason</th></tr></thead><tbody>{stocktake.history.map((entry) => <tr key={entry.id}><td><strong>{entry.name}</strong><span className="table-subtext">{entry.sku}</span></td><td>{entry.expected}</td><td>{entry.counted}</td><td className={entry.variance === 0 ? 'muted' : entry.variance < 0 ? 'low-stock' : 'positive'}>{entry.variance > 0 ? '+' : ''}{entry.variance}</td><td>{entry.reason}</td></tr>)}</tbody></table></div></div>}</>}</section>}
       {active === 'POS' && <section className="pos-layout"><div className="panel"><div className="panel-heading"><div><h2>Sell products</h2><p>Search or scan a barcode to add an item.</p></div><button className="icon-button" onClick={() => scanBarcode()} title="Scan barcode"><ScanLine size={20} /></button></div><div className="search-box pos-search"><Search size={17} /><input autoFocus onKeyDown={event => { if (event.key === scannerSettings().suffix) { event.preventDefault(); acceptBarcode(query) } }} placeholder="Search or scan barcode" value={query} onChange={(event) => setQuery(event.target.value)} /></div><div className="pos-products">{filteredProducts.map((product) => <button className="pos-product" key={product.id} onClick={() => addToCart(product)}><div className="product-icon">{product.name.slice(0, 1)}</div><span><strong>{product.name}</strong><small>{product.stock} {product.unit}s available</small></span><b>{formatMoney(product.price)}</b></button>)}</div></div><div className="panel cart-panel"><div className="panel-heading"><div><h2>Current sale</h2><p>{cartProducts.length} products</p></div><ShoppingCart size={20} /></div>{cartProducts.length === 0 ? <div className="empty-state">Scan or select a product to begin.</div> : cartProducts.map((product) => <CartItem key={product.id} product={product} quantity={cart[product.id]} money={formatMoney} onChange={quantity => setCartQuantity(product.id, quantity)} />)}<div className="payment-options"><label>Payment method<select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value as Sale['paymentMethod']); setCashReceived(''); setPaymentReference(''); setExtraKept('0'); setExtraReason(''); setExtraNote('') }}><option value="external-pos">External POS terminal</option><option value="cash">Cash</option>{extraPaymentPolicy.allowWallet && <option value="wallet">Customer wallet</option>}</select></label>{paymentMethod === 'wallet' && <><label>Customer wallet<select value={walletCustomerId} onChange={e => setWalletCustomerId(e.target.value)}><option value="">Select customer</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name} — {customer.balance < 0 ? 'Owes ' + formatMoney(-customer.balance) : formatMoney(customer.balance) + ' available'}</option>)}</select></label>{walletCustomer && <p>After purchase: {walletCustomer.balance - cartTotal < 0 ? 'Owes ' + formatMoney(cartTotal - walletCustomer.balance) : formatMoney(walletCustomer.balance - cartTotal) + ' available'}</p>}{walletCustomer && walletCustomer.balance < cartTotal && (extraPaymentPolicy.allowWalletCredit && user.role === 'owner' ? <label className="checkbox-label"><input type="checkbox" checked={walletCreditApproved} onChange={e => setWalletCreditApproved(e.target.checked)} />I approve this purchase on credit</label> : <p role="status">Insufficient prepaid balance. An owner must approve credit when enabled.</p>)}</>}{paymentMethod === 'cash' && <><label>Cash received<input type="number" inputMode="decimal" min="0" step="0.01" value={cashReceived} onChange={event => setCashReceived(event.target.value)} placeholder="Amount handed over by customer" /></label><p role="status">{cashError || `Change to give: ${formatMoney(changeDue)}`}</p></>}{paymentMethod === 'external-pos' && <><p className="settings-message">{manualTerminalAllowed ? 'Manual confirmation: verify payment on the terminal before recording this sale.' : 'Terminal integration unavailable. Manual confirmation is disabled in Admin Settings.'}</p><label>Terminal provider<input placeholder="Your provider name" value={terminalProvider} onChange={(event) => setTerminalProvider(event.target.value)} /></label><label>Terminal reference<input onKeyDown={event => { if (event.key === scannerSettings().suffix) { event.preventDefault(); acceptPaymentReference(event.currentTarget.value) } }} placeholder="Approval/reference number" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} /></label><button type="button" className="filter-button" onClick={() => scanBarcode('payment')}>Scan payment reference</button><small>Scan the receipt barcode/QR, or type its reference. Check the approved status, amount and currency before completing the sale.</small><ReceiptPhoto total={cartTotal} onReference={setPaymentReference} /></>}{paymentMethod !== 'wallet' && extraPaymentPolicy.allowExtras && <><label>Extra amount retained<input type="number" inputMode="decimal" min="0" step="0.01" value={extraKept} onChange={event => setExtraKept(event.target.value)} /></label>{Number(extraKept || 0) > 0 && <><label>Reason<select value={extraReason} onChange={event => setExtraReason(event.target.value)}><option value="">Select a reason</option>{extraPaymentPolicy.reasons.map(reason => <option key={reason} value={reason}>{reason === 'tip' ? 'Voluntary tip' : reason === 'rounding' ? 'Agreed rounding' : reason === 'donation' ? 'Voluntary donation' : 'Other'}</option>)}</select></label>{extraReason === 'other' && <label>Explanation<input maxLength={500} value={extraNote} onChange={event => setExtraNote(event.target.value)} required /></label>}</>}</>}</div><div className="cart-total"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div><AsyncButton busyLabel="Completing sale..." className="primary-button checkout-button" disabled={!cartProducts.length || (paymentMethod === 'cash' && Boolean(cashError)) || (paymentMethod === 'external-pos' && (!manualTerminalAllowed || !terminalProvider.trim() || !paymentReference.trim()))} onClick={completeSale}>Complete sale</AsyncButton></div></section>}
-      {active === 'POS' && <section className="panel full-panel"><h3>More payment options</h3><p>Use these options for bank transfers or a sale paid with more than one method.</p><div className="report-actions"><button type="button" className="filter-button" onClick={() => setPaymentMethod('bank-transfer')}>Bank transfer</button><button type="button" className="filter-button" onClick={() => setPaymentMethod('multiple')}>Split payment</button></div>{paymentMethod === 'bank-transfer' && <div className="payment-options"><label>Bank or transfer provider<input value={transferProvider} onChange={event => setTransferProvider(event.target.value)} placeholder="e.g. Bank name" /></label><label>Transfer reference<input value={transferReference} onChange={event => setTransferReference(event.target.value)} placeholder="Approved transfer reference" /></label><small>Confirm the transfer amount and status before completing the sale.</small></div>}{paymentMethod === 'multiple' && <div className="payment-options"><p>Split amounts must add up to the sale total exactly. Cash change and retained extras are not available on split sales.</p><label>Cash portion<input type="number" min="0" step="0.01" value={splitCash} onChange={event => setSplitCash(event.target.value)} /></label><label>Terminal portion<input type="number" min="0" step="0.01" value={splitTerminal} onChange={event => setSplitTerminal(event.target.value)} /></label>{Number(splitTerminal) > 0 && <label>Terminal reference<input value={splitTerminalReference} onChange={event => setSplitTerminalReference(event.target.value)} /></label>}<label>Bank-transfer portion<input type="number" min="0" step="0.01" value={splitTransfer} onChange={event => setSplitTransfer(event.target.value)} /></label>{Number(splitTransfer) > 0 && <><label>Bank or transfer provider<input value={transferProvider} onChange={event => setTransferProvider(event.target.value)} /></label><label>Transfer reference<input value={transferReference} onChange={event => setTransferReference(event.target.value)} /></label></>}<p role="status">Split total: {formatMoney(Number(splitCash || 0) + Number(splitTerminal || 0) + Number(splitTransfer || 0))} / {formatMoney(cartTotal)}</p></div>}</section>}
+      {active === 'POS' && <section className="panel full-panel"><h3>More payment options</h3><p>Use these options for bank transfers or a sale paid with more than one method.</p><div className="report-actions"><button type="button" className="filter-button" onClick={() => setPaymentMethod('bank-transfer')}>Bank transfer</button><button type="button" className="filter-button" onClick={() => setPaymentMethod('multiple')}>Split payment</button></div>{paymentMethod === 'bank-transfer' && <div className="payment-options"><label>Bank or transfer provider<input value={transferProvider} onChange={event => setTransferProvider(event.target.value)} placeholder="e.g. Bank name" /></label><label>Transfer reference<input value={transferReference} onChange={event => setTransferReference(event.target.value)} placeholder="Approved transfer reference" /></label><label>Amount received by transfer<input type="number" inputMode="decimal" min="0" step="0.01" value={transferAmountReceived} onChange={event => { setTransferAmountReceived(event.target.value); setTransferOverpayment(''); setExtraKept('0'); setExtraReason(''); setExtraNote('') }} placeholder={String(cartTotal)} /></label>{Number(transferAmountReceived) > cartTotal && <><label>Transfer overpayment<select value={transferOverpayment} onChange={event => { const choice = event.target.value as 'returned' | 'retained' | ''; setTransferOverpayment(choice); setExtraKept(choice === 'retained' ? String(Math.round((Number(transferAmountReceived) - cartTotal) * 100) / 100) : '0'); setExtraReason(''); setExtraNote('') }}><option value="">Select how it was handled</option><option value="returned">Returned to customer</option>{extraPaymentPolicy.allowExtras && <option value="retained">Retained under owner rules</option>}</select></label>{transferOverpayment === 'retained' && <><label>Reason<select value={extraReason} onChange={event => setExtraReason(event.target.value)}><option value="">Select a reason</option>{extraPaymentPolicy.reasons.map(reason => <option key={reason} value={reason}>{reason === 'tip' ? 'Voluntary tip' : reason === 'rounding' ? 'Agreed rounding' : reason === 'donation' ? 'Voluntary donation' : 'Other'}</option>)}</select></label>{extraReason === 'other' && <label>Explanation<input maxLength={500} value={extraNote} onChange={event => setExtraNote(event.target.value)} required /></label>}</>}</>}<small>Confirm the transfer amount and status before completing the sale.</small></div>}{paymentMethod === 'multiple' && <div className="payment-options"><p>Split amounts must add up to the sale total exactly. Cash change and retained extras are not available on split sales.</p><label>Cash portion<input type="number" min="0" step="0.01" value={splitCash} onChange={event => setSplitCash(event.target.value)} /></label><label>Terminal portion<input type="number" min="0" step="0.01" value={splitTerminal} onChange={event => setSplitTerminal(event.target.value)} /></label>{Number(splitTerminal) > 0 && <label>Terminal reference<input value={splitTerminalReference} onChange={event => setSplitTerminalReference(event.target.value)} /></label>}<label>Bank-transfer portion<input type="number" min="0" step="0.01" value={splitTransfer} onChange={event => setSplitTransfer(event.target.value)} /></label>{Number(splitTransfer) > 0 && <><label>Bank or transfer provider<input value={transferProvider} onChange={event => setTransferProvider(event.target.value)} /></label><label>Transfer reference<input value={transferReference} onChange={event => setTransferReference(event.target.value)} /></label></>}<p role="status">Split total: {formatMoney(Number(splitCash || 0) + Number(splitTerminal || 0) + Number(splitTransfer || 0))} / {formatMoney(cartTotal)}</p></div>}</section>}
       {active === 'Inventory' && <ProductIntake create={importProduct} products={products} defaultUnit={defaultUnit} scan={() => scanBarcode('intake')} />}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel"><h3>Business type</h3><p>Choose the kind of goods you primarily sell. It only sets the default unit for new products and imports; existing records stay unchanged.</p><div className="settings-form"><BusinessProfileSettings value={businessMode} onChange={value => { setBusinessMode(value); localStorage.setItem('stockroom-business-mode', value); setSettingsMessage('Business type saved on this device.') }} /></div></section>}
       {active === 'Display' && <CustomerDisplayPairing pairing={displayPairing} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} />}

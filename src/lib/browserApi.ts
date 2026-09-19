@@ -77,7 +77,7 @@ async function applyOperation(operation: Operation) {
   } else if (operation.entityType === 'wallet' && operation.action === 'adjust') {
     const customer = await db.query('SELECT id FROM customers WHERE id = ?', [payload.customerId])
     if (customer.values?.length) {
-      await db.run('UPDATE customers SET balance = MAX(0, balance + ?) WHERE id = ?', [Number(payload.amount) || 0, payload.customerId])
+      await db.run('UPDATE customers SET balance = ROUND(balance + ?, 2) WHERE id = ?', [Number(payload.amount) || 0, payload.customerId])
       await db.run('INSERT INTO wallet_transactions (id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), payload.customerId, Number(payload.amount) || 0, payload.reason || 'remote-wallet', payload.createdAt || operation.createdAt])
     } else throw new Error('A wallet change references a missing customer.')
   } else if (operation.entityType === 'expense' && operation.action === 'create') {
@@ -97,14 +97,26 @@ async function applyOperation(operation: Operation) {
   await db.run('INSERT INTO sync_inbox (operation_id, received_at) VALUES (?, ?)', [operation.operationId, now()])
 }
 
-async function syncNow() {
+// Serialize network sync jobs so refresh and background downloads cannot
+// apply the same operation in overlapping database transactions.
+let syncTail: Promise<unknown> = Promise.resolve()
+function serializeSync<T>(job: () => Promise<T>): Promise<T> {
+  const next = syncTail.then(job, job)
+  syncTail = next.catch(() => undefined)
+  return next
+}
+function syncNow() { return serializeSync(syncNowImpl) }
+function pullLatest(config?: MobileSyncConfiguration | null) { return serializeSync(() => pullLatestImpl(config)) }
+async function syncNowImpl() {
   const config = await getMobileSyncConfiguration()
   if (!config) return { configured: false, pending: 0, lastError: 'This browser has not been enrolled.' }
   const db = await openMobileDatabase()
   try {
+    while (true) {
     const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
-    if (operations.length) {
+    if (!operations.length) break
+    {
       const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Cloud push failed.')
@@ -112,9 +124,12 @@ async function syncNow() {
         const operation = operations.find(item => item.operationId === conflict.operationId)
         if (operation) await db.run('INSERT OR IGNORE INTO sync_conflicts (id, operation_id, entity_type, entity_id, reason, local_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [conflict.operationId, conflict.operationId, operation.entityType, operation.entityId, conflict.reason || 'Concurrent edit', JSON.stringify(operation.payload), now()])
       }
-      for (const operationId of [...(result.acceptedOperationIds || []), ...(result.conflicts || []).map((item: { operationId: string }) => item.operationId)]) await db.run('UPDATE sync_outbox SET synced_at = ? WHERE operation_id = ?', [now(), operationId])
+      const acknowledged = [...(result.acceptedOperationIds || []), ...(result.conflicts || []).map((item: { operationId: string }) => item.operationId)].filter((operationId: string) => operations.some(operation => operation.operationId === operationId))
+      if (!acknowledged.length) throw new Error('Cloud did not acknowledge any queued changes. Retry sync.')
+      for (const operationId of acknowledged) await db.run('UPDATE sync_outbox SET synced_at = ? WHERE operation_id = ?', [now(), operationId])
     }
-    return await pullLatest(config)
+    }
+    return await pullLatestImpl(config)
   } catch (caught) {
     const pending = await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')
     return { configured: true, pending: Number(pending.values?.[0]?.count || 0), lastError: caught instanceof Error ? caught.message : 'Sync failed.' }
@@ -123,7 +138,7 @@ async function syncNow() {
 
 // Pull-to-refresh uses this path. It never uploads this device's outbox; it
 // only applies newer cloud changes to native SQLite.
-async function pullLatest(configInput?: MobileSyncConfiguration | null) {
+async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
   const config = configInput || await getMobileSyncConfiguration()
   if (!config) return { configured: false, pending: 0, lastError: 'This browser has not been enrolled.' }
   const db = await openMobileDatabase()

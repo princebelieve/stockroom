@@ -20,7 +20,7 @@ test('Android stocktake sync applies once and rolls back a partially failed appr
     rollbackTransaction: async () => sqlite.exec('ROLLBACK'),
   }
   const source = readFileSync('src/lib/mobileApi.ts', 'utf8')
-  const code = source.slice(source.indexOf('async function applyOperation('), source.indexOf('\nasync function syncNow('))
+  const code = source.slice(source.indexOf('async function applyOperation('), source.indexOf('\n// Serialize network sync jobs'))
   const apply = vm.runInNewContext(stripTypeScriptTypes(`(${code})`), { openMobileDatabase: async () => db, id: randomUUID, now: () => new Date().toISOString() })
   const operation = { operationId: 'approval', entityType: 'stocktake', action: 'approved', createdAt: new Date().toISOString(), payload: { approvalReason: 'Shelf count', counts: [{ productId: 'coffee', variance: -2 }] } }
   try {

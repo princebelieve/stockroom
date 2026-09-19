@@ -49,12 +49,16 @@ export async function syncConfigurationStatus() {
 
 async function pullRemoteChanges({ url, token, businessId, deviceId }) {
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-  const cursor = getSyncCursor()
+  let cursor = getSyncCursor()
+  while (true) {
   const pulled = await fetch(`${url}/v1/sync/pull?businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers })
   if (!pulled.ok) throw new Error(`Cloud pull failed (${pulled.status}).`)
   const result = await pulled.json()
   applyRemoteOperations(result.operations || [])
   if (result.cursor) setSyncCursor(result.cursor)
+  if ((result.operations || []).length < 500 || !result.cursor || result.cursor === cursor) break
+  cursor = result.cursor
+  }
 }
 
 export async function pullLatest() {
@@ -74,13 +78,18 @@ export async function syncNow() {
   try {
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
     if (!existingBusiness) await queueInitialSettingsSnapshot()
+    while (true) {
     const pending = getPendingSyncOperations()
+    if (!pending.length) break
     if (pending.length) {
       const pushed = await fetch(`${url}/v1/sync/push`, { method: 'POST', headers, body: JSON.stringify({ businessId, deviceId, operations: pending }) })
       if (!pushed.ok) throw new Error(`Cloud push failed (${pushed.status}).`)
       const result = await pushed.json()
-      markSyncOperationsSynced([...(result.acceptedOperationIds || []), ...(result.conflicts || []).map((conflict) => conflict.operationId)])
+      const acknowledged = [...(result.acceptedOperationIds || []), ...(result.conflicts || []).map((conflict) => conflict.operationId)].filter(id => pending.some(operation => operation.operationId === id))
+      if (!acknowledged.length) throw new Error('Cloud did not acknowledge any queued changes. Retry sync.')
+      markSyncOperationsSynced(acknowledged)
       recordSyncConflicts(result.conflicts)
+    }
     }
     await pullRemoteChanges({ url, token, businessId, deviceId })
   } catch (error) {

@@ -133,6 +133,34 @@ test('queued local changes synchronize after cloud service becomes reachable', a
   cloud.close()
 })
 
+test('a new device downloads every product page and retries without duplicating stock', async () => {
+  const operations = Array.from({ length: 501 }, (_, index) => ({ operationId: `catalogue-${index}`, entityType: 'product', entityId: `product-${index}`, action: 'upsert', createdAt: '2026-01-01T00:00:00.000Z', payload: { id: `product-${index}`, name: `Product ${index}`, sku: `SYNC-${index}`, category: 'Test', unit: 'piece', stock: 5, reorder: 1, price: 300 } }))
+  const cloud = createServer(async (request, response) => {
+    if (request.url === '/v1/sync/push') {
+      let body = ''; for await (const chunk of request) body += chunk
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      return response.end(JSON.stringify({ acceptedOperationIds: JSON.parse(body).operations.map(operation => operation.operationId) }))
+    }
+    const cursor = Number(new URL(request.url, 'http://localhost').searchParams.get('cursor') || 0)
+    const page = operations.slice(cursor, cursor + 500)
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ operations: page, cursor: String(cursor + page.length) }))
+  })
+  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening')
+  try {
+    const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
+    const token = await createOwner(baseUrl)
+    const headers = { Authorization: `Bearer ${token}` }
+    const pull = await json(`${baseUrl}/api/sync/pull`, { method: 'POST', headers })
+    assert.equal(pull.body.lastError, '')
+    const products = (await json(`${baseUrl}/api/products`, { headers })).body.products
+    assert.equal(products.length, 501)
+    assert.equal(products.find(p => p.id === 'product-500').price, 300)
+    await json(`${baseUrl}/api/sync/pull`, { method: 'POST', headers })
+    assert.equal((await json(`${baseUrl}/api/products`, { headers })).body.products.find(p => p.id === 'product-500').stock, 5)
+  } finally { cloud.close() }
+})
+
 test('concurrent mutable changes use latest timestamp while inventory events remain append-only', () => {
   assert.ok(mutableEntities.has('product'))
   const current = { updatedAt: '2026-01-01T12:00:00.000Z' }

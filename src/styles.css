@@ -104,3 +104,5 @@ button[aria-busy="true"] { cursor: progress; }
 .cart-quantity-controls button:disabled { opacity: .45; cursor: not-allowed; }
 .cart-quantity-controls output { min-width: 28px; text-align: center; font-weight: 600; }
 .cart-quantity-controls input { width: 90px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }
+.sync-feedback { color: #e4f5e8; font-size: 12px; line-height: 1.5; margin: 8px 0 0; overflow-wrap: anywhere; }
+.sync-feedback:empty { display: none; }

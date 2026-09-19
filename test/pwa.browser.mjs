@@ -22,7 +22,7 @@ try {
   let pushed = []
   let remoteOperations = []
   let cloudOffline = false
-  await context.route('https://stockroom-0vm5.onrender.com/**', async route => {
+  const cloudRoute = async route => {
     if (cloudOffline) return route.abort('internetdisconnected')
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
@@ -37,7 +37,8 @@ try {
     if (path === '/v1/sync/push') { pushed.push(...body.operations); result = { acceptedOperationIds: body.operations.map(item => item.operationId), conflicts: [] } }
     if (path === '/v1/staff') result = { users: [] }
     await route.fulfill({ json: result })
-  })
+  }
+  await context.route('https://stockroom-0vm5.onrender.com/**', cloudRoute)
   const page = await context.newPage()
   page.setDefaultTimeout(15000)
   const errors = []
@@ -112,6 +113,36 @@ try {
   await api('/api/sync/pull', {})
   assert.equal((await api('/api/products')).data.products.find(item => item.id === 'remote').stock, 5)
   assert.equal(pushed.filter(item => item.entityType === 'sale').length, 1)
+  // A genuinely new device has no local products, cursor, or enrollment.
+  const newDevice = await browser.newContext()
+  await newDevice.route('https://stockroom-0vm5.onrender.com/**', cloudRoute)
+  const newPage = await newDevice.newPage()
+  await newPage.goto(page.url())
+  await newPage.getByLabel('Email', { exact: true }).fill('owner@test.com')
+  await newPage.getByLabel('Password', { exact: true }).fill('test-password')
+  await newPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await newPage.getByRole('button', { name: 'Log out' }).waitFor()
+  await newPage.getByRole('button', { name: 'POS', exact: true }).click()
+  await newPage.locator('.pos-product').filter({ hasText: 'Tea' }).waitFor()
+  assert.equal(await newPage.evaluate(async () => (await (await fetch('/api/products')).json()).products.find(p => p.id === 'remote').stock), 5)
+  // Upload one real product on device A, then download it via Refresh on B.
+  const milo = (await api('/api/products', { name: 'Milo', sku: 'MILO-SYNC', category: 'Drink', unit: 'tin', stock: 1, reorder: 0, price: 300 })).data
+  await page.getByRole('button', { name: 'Sync now', exact: true }).click()
+  await page.locator('.sync-feedback').filter({ hasText: 'All changes uploaded; 0 queued.' }).waitFor()
+  const uploadedMilo = pushed.find(operation => operation.entityType === 'product' && operation.payload.id === milo.id)
+  assert.ok(uploadedMilo, 'Sync must upload Milo before another browser can download it')
+  remoteOperations.push(uploadedMilo)
+  const uploadCount = pushed.length
+  await newPage.getByLabel('Page options').click()
+  await newPage.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await newPage.locator('.sync-feedback').filter({ hasText: 'Refresh complete.' }).waitFor({ timeout: 5000 })
+  await newPage.locator('.pos-product').filter({ hasText: 'Milo' }).waitFor({ timeout: 5000 })
+  assert.equal(pushed.length, uploadCount, 'Refresh must never upload')
+  cloudOffline = true
+  await page.getByRole('button', { name: 'Sync now', exact: true }).click()
+  await page.locator('.sync-feedback').filter({ hasText: 'Sync failed:' }).waitFor()
+  cloudOffline = false
+  await newDevice.close()
   const secondTab = await context.newPage()
   await secondTab.goto(page.url())
   await secondTab.getByRole('button', { name: 'Log out' }).waitFor()
@@ -167,6 +198,16 @@ try {
   await page.getByLabel('Cash received').fill('0.01')
   assert.equal(await page.getByRole('button', { name: 'Complete sale', exact: true }).isDisabled(), true)
   await page.getByLabel('Cash received').fill('100')
+  await page.getByRole('button', { name: 'Edit quantity of Coffee', exact: true }).click()
+  await page.getByRole('spinbutton', { name: 'Quantity for Coffee', exact: true }).fill('11')
+  await page.getByRole('button', { name: 'Save quantity for Coffee', exact: true }).click()
+  const stockWarning = page.waitForEvent('dialog').then(async dialog => { const message = dialog.message(); await dialog.accept(); return message })
+  await page.getByRole('button', { name: 'Complete sale', exact: true }).click()
+  assert.match(await stockWarning, /Insufficient stock for Coffee/)
+  assert.equal((await api('/api/products')).data.products.find(item => item.id === created.data.id).stock, 8)
+  await page.getByRole('button', { name: 'Edit quantity of Coffee', exact: true }).click()
+  await page.getByRole('spinbutton', { name: 'Quantity for Coffee', exact: true }).fill('1')
+  await page.getByRole('button', { name: 'Save quantity for Coffee', exact: true }).click()
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click()
   await page.getByText('Scan or select a product to begin.', { exact: true }).waitFor()
   const cashSale = (await api('/api/sales')).data.sales.find(row => row.cashReceived === 100)
