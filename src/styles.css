@@ -219,6 +219,42 @@ input:focus, select:focus, textarea:focus { border-color: #6aa887 !important; bo
 .sync-feedback { color: #e4f5e8; font-size: 12px; line-height: 1.5; margin: 8px 0 0; overflow-wrap: anywhere; }
 .sync-feedback:empty { display: none; }
 
+/* Business surfaces should carry hierarchy even before the user reads a
+   heading. Use soft, purposeful colour families instead of a field of white
+   cards on cream: green for operations, blue for data/setup, amber for money
+   and attention, and coral only for warnings. */
+body { background: #dfece5; }
+.app-shell { background: linear-gradient(135deg, #dcece4 0%, #eef4ed 46%, #dfeaf0 100%); }
+.main-content { background: radial-gradient(circle at 92% 5%, rgba(167, 211, 194, .45), transparent 27%), radial-gradient(circle at 5% 90%, rgba(184, 211, 235, .34), transparent 30%); }
+.panel { border-color: #c7ddd0; background: linear-gradient(145deg, #f9fdf9, #edf7f0); box-shadow: 0 8px 24px rgba(23, 53, 45, .06); }
+.content-grid .inventory-panel { border-color: #b9d9c4; background: linear-gradient(145deg, #f8fdf8, #e4f4e9); }
+.attention-panel { border-color: #edcf9a; background: linear-gradient(145deg, #fffaf0, #ffefd7); }
+.pos-layout > .panel:first-child { border-color: #bfd6e8; background: linear-gradient(145deg, #f8fcff, #e7f2fa); }
+.pos-layout .cart-panel { border-color: #b8ddc7; background: linear-gradient(145deg, #fbfefb, #e4f4e9); }
+.wallet-grid > .panel:first-child, .customer-wallet-panel { border-color: #c9c1e8; background: linear-gradient(145deg, #fbfaff, #eeeafd); }
+.team-management { border-color: #bdd5e8; background: linear-gradient(145deg, #fbfdff, #eaf4fb); }
+.staff-activity { border-color: #c2d8e8; background: linear-gradient(145deg, #fbfdff, #edf6fb); }
+.settings-panel { border-color: #c2d9cf; background: linear-gradient(145deg, #fbfefc, #e8f4ed); }
+.logo-settings { border-color: #e4c993; background: linear-gradient(145deg, #fffdf8, #fff3dc); }
+.cashier-password-control { border-color: #e8c782; background: linear-gradient(145deg, #fffdf7, #fff0d4); }
+.reports-dashboard .metric-card { background: linear-gradient(145deg, #f8fcff, #e9f3fb); border-color: #c5dbea; }
+.reports-dashboard .metric-card:nth-child(2) { background: linear-gradient(145deg, #f9fdf9, #e2f3e8); border-color: #bee0ca; }
+.reports-dashboard .metric-card:nth-child(3) { background: linear-gradient(145deg, #fffaf2, #ffefd9); border-color: #eed3a2; }
+.table-wrap { background: rgba(255, 255, 255, .76); border-color: #c8ddd2; }
+.table-wrap thead { background: linear-gradient(90deg, #dff0e6, #edf5fa); }
+.table-wrap tbody tr:nth-child(even) { background: rgba(233, 246, 237, .5); }
+.table-wrap tbody tr:hover { background: #dff2e7; }
+.modal { border: 1px solid #bcd8c7; background: linear-gradient(145deg, #fffefa, #e9f5ec); }
+.login-screen { background: radial-gradient(circle at 20% 0, #397969 0, transparent 34%), linear-gradient(135deg, #143b31, #1e5547); }
+.login-card { border: 1px solid rgba(216, 238, 224, .7); background: linear-gradient(145deg, #fffefa, #e8f5eb); }
+.search-box { background: rgba(255, 255, 255, .7); border-color: #bcd7c7; }
+@media (max-width: 650px) {
+  body { background: #dfece5; }
+  .main-content { background: radial-gradient(circle at 100% 0, #cbe7d6 0, transparent 34%), linear-gradient(160deg, #e9f4ed, #e1edf2); }
+  .topbar { background: rgba(244, 250, 246, .94); border-bottom-color: #bed9c8; }
+  .panel { box-shadow: 0 9px 22px rgba(23, 53, 45, .08); }
+}
+
 /* Barcode entry is a distinct control, not a hidden scanner shortcut inside a
    general text field. The camera action stays on the right edge of that field
    and remains large enough to use at a checkout counter. */

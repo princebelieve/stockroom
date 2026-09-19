@@ -68,13 +68,25 @@ if (isBrowserPwa()) {
   installBrowserApi()
 }
 
+let reloadingForPwaUpdate = false
 if (isBrowserPwa() && 'serviceWorker' in navigator) {
+  // A new worker controls future fetches, not the JavaScript document that is
+  // already open. Reload exactly once when control changes so an installed
+  // PWA receives a deployment without requiring the owner to swipe it away.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadingForPwaUpdate) return
+    reloadingForPwaUpdate = true
+    window.location.reload()
+  })
   const register = async () => {
     try {
       // Calling register on every launch makes the browser check the deployed
       // worker instead of leaving an existing PWA shell untouched forever.
       const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
       await registration.update()
+      const checkForUpdate = () => { void registration.update().catch(() => undefined) }
+      window.setInterval(checkForUpdate, 5 * 60_000)
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate() })
     } catch {
       // Ignore registration failures; app can still operate without the PWA shell cache.
     }
