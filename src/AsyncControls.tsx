@@ -1,4 +1,4 @@
-import { createContext, useContext, useRef, useState, type ButtonHTMLAttributes, type FormHTMLAttributes, type FormEvent } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ButtonHTMLAttributes, type FormHTMLAttributes, type FormEvent } from 'react'
 
 const Submission = createContext({ busy: false, label: 'Saving...' })
 
@@ -6,6 +6,11 @@ export function AsyncForm({ onSubmit, busyLabel = 'Saving...', children, ...prop
   const locked = useRef(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  useEffect(() => {
+    if (!error) return
+    const timeout = window.setTimeout(() => setError(''), 10_000)
+    return () => window.clearTimeout(timeout)
+  }, [error])
   return <Submission.Provider value={{ busy, label: busyLabel }}><form {...props} aria-busy={busy} onSubmit={async event => {
     event.preventDefault()
     if (locked.current) return
@@ -27,6 +32,11 @@ export function AsyncButton({ onClick, busyLabel = 'Working...', children, disab
   const locked = useRef(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  useEffect(() => {
+    if (!error) return
+    const timeout = window.setTimeout(() => setError(''), 10_000)
+    return () => window.clearTimeout(timeout)
+  }, [error])
   return <><button {...props} type="button" disabled={disabled || busy} aria-busy={busy} onClick={async () => {
     if (locked.current) return
     locked.current = true; setBusy(true); setError('')
