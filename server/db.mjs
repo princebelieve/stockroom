@@ -378,8 +378,15 @@ export function exportSalesCsv() {
   return ['Sale ID,Date,Items,Payment method,Payment reference,Total', ...rows.map((row) => [row.id, row.createdAt, row.items || '', row.paymentMethod, row.paymentReference, row.total].map(escape).join(','))].join('\n')
 }
 
+function normalizeCreatedAt(value) {
+  const timestamp = String(value || '').trim()
+  if (!timestamp) return now()
+  const parsed = new Date(timestamp)
+  return Number.isNaN(parsed.getTime()) ? now() : timestamp
+}
+
 export function listUsers() {
-  return database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess) }))
+  return database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }))
 }
 
 export function createUser(input) {
@@ -394,18 +401,29 @@ export function createUser(input) {
   if (password.length < 10) throw new Error('Password must be at least 10 characters long.')
   if (!['admin', 'cashier'].includes(role)) throw new Error('New users can only be admins or cashiers.')
   const id = String(input.id || crypto.randomUUID())
+  const createdAt = normalizeCreatedAt(input.createdAt)
   // SQLite retains a non-null unique email column for compatibility with
   // existing installations. This internal placeholder is never exposed.
   const storedEmail = email || `${id}@staff.local.invalid`
   try {
-    database.prepare('INSERT INTO users (id, organization_id, name, email, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, storedEmail, username, hashPassword(password), role, now())
+    database.prepare('INSERT INTO users (id, organization_id, name, email, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, storedEmail, username, hashPassword(password), role, createdAt)
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) throw new Error('That email address is already in use.')
     throw error
   }
   const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
   queueSync('user', id, 'upsert', user)
-  return { ...user, email, operationalAccess: Boolean(user.operationalAccess) }
+  return { ...user, email, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }
+}
+
+export function updateUserRole(id, role, operationalAccess = false) {
+  const nextRole = String(role || '').trim().toLowerCase()
+  if (!['admin', 'cashier'].includes(nextRole)) throw new Error('Only admin and cashier roles can be updated here.')
+  const result = database.prepare("UPDATE users SET role = ?, operational_access = ? WHERE id = ? AND organization_id = ? AND role IN ('admin', 'cashier')").run(nextRole, operationalAccess ? 1 : 0, id, organizationId)
+  if (!result.changes) throw new Error('Staff account not found.')
+  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ? AND organization_id = ?').get(id, organizationId)
+  queueSync('user', id, 'upsert', user)
+  return { ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }
 }
 
 export function setCashierOperationalAccess(id, enabled) {

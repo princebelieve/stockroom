@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
@@ -163,7 +163,20 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       try {
         const cloud = await cloudCreateStaff(String(input.cloudAccessToken || ''), input)
-        return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id }))
+        return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id, createdAt: cloud.account.createdAt || new Date().toISOString() }))
+      } catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+  const userRoleMatch = request.url?.match(/^\/api\/users\/([^/]+)\/role$/)
+  if (request.method === 'PUT' && userRoleMatch) {
+    const user = sessionUser(request)
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
+    return readJson(request, response, async (input) => {
+      try {
+        const nextRole = String(input.role || '').trim().toLowerCase()
+        if (!['admin', 'cashier'].includes(nextRole)) throw new Error('Role must be admin or cashier.')
+        const operationalAccess = nextRole === 'admin' ? Boolean(input.operationalAccess ?? true) : Boolean(input.operationalAccess ?? false)
+        return sendJson(response, 200, updateUserRole(userRoleMatch[1], nextRole, operationalAccess))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
