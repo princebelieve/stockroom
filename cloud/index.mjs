@@ -49,7 +49,7 @@ function signToken(payload) {
 function hashPassword(password) { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}` }
 function matchesPassword(password, stored) { const [salt, value] = String(stored).split(':'); if (!salt || !value) return false; const actual = scryptSync(password, salt, 64); const expected = Buffer.from(value, 'hex'); return actual.length === expected.length && timingSafeEqual(actual, expected) }
 function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, username: account.username || '', role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess) } }
-function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email, role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
+function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email || '', username: account.username || '', role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
 function deviceToken(businessId, deviceId) { return signToken({ kind: 'device', businessId, deviceId, exp: Math.floor(Date.now() / 1000) + 365 * 86_400 }) }
 function isAccess(claims) { return claims?.kind === 'access' }
 function isDevice(claims) { return claims?.kind === 'device' }
@@ -113,7 +113,9 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/v1/auth/me') {
       const claims = verifyToken(request)
       if (!isAccess(claims)) return send(response, 401, { error: 'Owner or staff access token required.' })
-      const account = await accounts.findOne({ businessId: claims.businessId, email: claims.email })
+      const account = claims.role === 'owner'
+        ? await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
+        : await accounts.findOne({ businessId: claims.businessId, username: claims.username, role: { $in: ['admin', 'cashier'] } })
       if (!account) return send(response, 401, { error: 'Account not found.' })
       return send(response, 200, { account: publicAccount(account) })
     }
@@ -157,6 +159,14 @@ const server = createServer(async (request, response) => {
     }
     const claims = verifyToken(request)
     if (!claims) return send(response, 401, { error: 'Unauthorized.' })
+    if (request.method === 'GET' && request.url?.startsWith('/v1/business/settings')) {
+      if (!isDevice(claims)) return send(response, 403, { error: 'Device token required.' })
+      const query = new URL(request.url, `http://${request.headers.host}`).searchParams
+      const businessId = query.get('businessId') || ''
+      if (!businessId || claims.businessId !== businessId) return send(response, 403, { error: 'Token does not authorize this business.' })
+      const latest = await operations.find({ businessId, entityType: 'settings', action: 'upsert' }).sort({ createdAt: -1, _id: -1 }).limit(1).next()
+      return send(response, 200, { settings: latest?.payload || null })
+    }
     if (request.method === 'POST' && request.url === '/v1/devices/enroll') {
       if (!isAccess(claims)) return send(response, 403, { error: 'Owner access token required.' })
       const input = await readJson(request)

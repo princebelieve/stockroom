@@ -230,6 +230,14 @@ function App() {
   const [stocktake, setStocktake] = useState<Stocktake | null>(null)
   const [stocktakeReason, setStocktakeReason] = useState('Approved after physical count')
   useEffect(() => {
+    if (active !== 'Stocktake') return
+    for (const button of document.querySelectorAll<HTMLButtonElement>('button')) {
+      for (const node of Array.from(button.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent?.includes('Start stock take')) node.textContent = node.textContent.replace('Start stock take', 'Start count')
+      }
+    }
+  }, [active, stocktake])
+  useEffect(() => {
     if (!isBrowserPwa() || !authToken || active !== 'Stocktake') return
     let cancelled = false
     fetch('/api/stocktakes', { headers: { Authorization: `Bearer ${authToken}` } }).then(async response => {

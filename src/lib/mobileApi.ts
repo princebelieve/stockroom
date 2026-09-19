@@ -28,6 +28,22 @@ async function sessionUser(): Promise<MobileUser | null> {
   const user = result.values?.[0]
   return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId: 'mobile-shop' } as MobileUser : null
 }
+async function restoreCloudSession(): Promise<MobileUser | null> {
+  const config = await getMobileSyncConfiguration()
+  const token = await setting('cloudAccessToken')
+  if (!config || !token) return null
+  const response = await originalFetch(`${config.syncApiUrl}/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok || !result.account?.id) return null
+  const account = result.account
+  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: 'mobile-shop' }
+  const db = await openMobileDatabase()
+  await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET id=excluded.id, name=excluded.name, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.role, localUser.operationalAccess ? 1 : 0, now()])
+  const stored = (await db.query('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE email = ?', [localUser.email])).values?.[0]
+  if (!stored) return null
+  await setSetting('sessionUserId', String(stored.id))
+  return { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' } as MobileUser
+}
 function isManager(user: MobileUser | null) { return Boolean(user && ['owner', 'admin'].includes(user.role)) }
 function canOperate(user: MobileUser | null) { return isManager(user) || Boolean(user?.role === 'cashier' && user.operationalAccess) }
 async function body(init?: RequestInit) { try { return JSON.parse(String(init?.body || '{}')) as Record<string, unknown> } catch { throw new Error('Request body must be valid JSON.') } }
@@ -158,6 +174,15 @@ async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) 
   if (config) {
     await pullLatest(config)
     const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
+    if (synced?.appName && synced?.currency && !(synced.appName === 'My Business' && synced.currency === 'USD')) return synced
+    // Recover settings even when a local repair retained the sync cursor.
+    const response = await originalFetch(`${config.syncApiUrl}/v1/business/settings?businessId=${encodeURIComponent(config.businessId)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const remote = await response.json().catch(() => ({}))
+    if (response.ok && remote.settings?.appName && remote.settings?.currency) {
+      const settings = remote.settings
+      await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, payment_policy, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, payment_policy=excluded.payment_policy, updated_at=excluded.updated_at', [settings.appName, settings.currency, settings.posProvider || '', settings.posTerminalId || '', settings.posConnection || 'manual', settings.logoData || '', JSON.stringify(paymentPolicy(settings.paymentPolicy)), settings.updatedAt || now()])
+      return { ...settings, paymentPolicy: JSON.stringify(paymentPolicy(settings.paymentPolicy)) }
+    }
     if (synced?.appName && synced?.currency) return synced
   }
   return current || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', logoData: '', updatedAt: now() }
@@ -194,7 +219,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     await setSetting('cloudAccessToken', '')
     return json({})
   }
-  const user = await sessionUser()
+  const user = await sessionUser() || await restoreCloudSession()
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Native SQLite' })
   if (path === '/api/settings' && method === 'GET') {
