@@ -41,13 +41,28 @@ async function sessionUser(): Promise<MobileUser | null> {
   return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId: config?.businessId || 'mobile-shop' } as MobileUser : null
 }
 async function restoreCloudSession(): Promise<MobileUser | null> {
-  const config = await getMobileSyncConfiguration()
-  const token = await setting('cloudAccessToken')
-  if (!config || !token) return null
-  const response = await originalFetch(`${config.syncApiUrl}/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+  let config = await getMobileSyncConfiguration()
+  // Keep a second copy of the short-lived cloud token with the app session.
+  // If IndexedDB is repaired or migrated but localStorage survives, an owner
+  // can securely restore the lost device enrollment without a logout.
+  const token = await setting('cloudAccessToken') || localStorage.getItem('stockroom-cloud-access-token') || ''
+  const syncApiUrl = config?.syncApiUrl || cloudUrl
+  if (!token) return null
+  const response = await originalFetch(`${syncApiUrl}/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
   const result = await response.json().catch(() => ({}))
   if (!response.ok || !result.account?.id) return null
   const account = result.account
+  if (!config) {
+    // Only an owner may restore an enrollment that has been lost locally.
+    // Staff still need an owner-enrolled browser to begin using the device.
+    if (account.role !== 'owner') return null
+    const deviceId = await browserDeviceId()
+    const enrolled = await originalFetch(`${syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ deviceId, label: `PWA ${deviceId.slice(-8)}` }) })
+    const device = await enrolled.json().catch(() => ({}))
+    if (!enrolled.ok || !device.businessId || !device.deviceToken) return null
+    config = { syncApiUrl, businessId: String(device.businessId), deviceId: String(device.deviceId || deviceId), deviceToken: String(device.deviceToken) }
+    await saveMobileSyncConfiguration(config)
+  }
   const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
   const db = await openMobileDatabase()
   await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
@@ -255,7 +270,11 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   if (['/api/auth/password-reset/request', '/api/auth/password-reset/confirm'].includes(path) && method === 'POST') {
     return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, headers: { 'Content-Type': 'application/json' }, body: init?.body })
   }
-  const user = await sessionUser() || await restoreSavedSession() || await restoreCloudSession()
+  const savedUser = await sessionUser() || await restoreSavedSession()
+  const enrolled = await getMobileSyncConfiguration()
+  // When an update/storage migration leaves the identity but loses enrollment,
+  // repair it from the owner's saved cloud token before treating sync as gone.
+  const user = (!enrolled && navigator.onLine ? await restoreCloudSession() || savedUser : savedUser || await restoreCloudSession())
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Browser SQLite / IndexedDB' })
   if (path === '/api/settings' && method === 'GET') {
