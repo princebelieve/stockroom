@@ -1,0 +1,176 @@
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { mailConfigured, sendSubscriptionReminder } from './mailer.mjs'
+import { subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
+
+export function validatePlan(input) {
+  const plan = { amount: Number(input.amount), currency: String(input.currency || '').toUpperCase(), days: Number(input.days), reminderDays: Number(input.reminderDays) }
+  if (!Number.isSafeInteger(plan.amount) || plan.amount < 1 || plan.amount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(plan.currency) || !Number.isInteger(plan.days) || plan.days < 1 || plan.days > 730 || !Number.isInteger(plan.reminderDays) || plan.reminderDays < 1 || plan.reminderDays > 30) throw new Error('Enter a valid amount in minor units, currency, duration (1–730 days), and reminder window (1–30 days).')
+  return plan
+}
+export function validSignature(raw, signature, secret) {
+  if (!secret || typeof signature !== 'string' || !/^[a-f0-9]{128}$/.test(signature)) return false
+  const expected = createHmac('sha512', secret).update(raw).digest('hex')
+  return signature.length === expected.length && timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+}
+export function paymentMatches(payment, data) {
+  return data.status === 'success' && data.reference === payment._id && data.amount === payment.amount && data.currency === payment.currency && data.customer?.email?.toLowerCase() === payment.email.toLowerCase()
+}
+async function body(request) {
+  const chunks = []; let size = 0
+  for await (const chunk of request) { size += chunk.length; if (size > 65536) throw new Error('Request too large.'); chunks.push(chunk) }
+  return Buffer.concat(chunks)
+}
+
+export async function createSubscriptions({ database, accounts, adminApiKey, verifyToken, send, fetcher = fetch }) {
+  const settings = database.collection('subscription_settings')
+  const subscriptions = database.collection('subscriptions')
+  const payments = database.collection('subscription_payments')
+  const notices = database.collection('subscription_notices')
+  await subscriptions.createIndex({ expiresAt: 1 })
+  const page = await readFile(new URL('./subscriptions.html', import.meta.url), 'utf8')
+  const getPlan = () => settings.findOne({ _id: 'plan' })
+  const referrals = database.collection('subscription_referrals')
+  const commissions = database.collection('referral_commissions')
+  await referrals.createIndex({ code: 1 }, { unique: true })
+  await commissions.createIndex({ referrerId: 1, createdAt: -1 })
+  // Roll out without blocking existing shops until the developer enables billing.
+  await settings.updateOne({ _id: 'control' }, { $setOnInsert: { testMode: true } }, { upsert: true })
+  const getControl = () => settings.findOne({ _id: 'control' })
+  async function access(businessId) {
+    const [control, subscription] = await Promise.all([getControl(), subscriptions.findOne({ _id: businessId })])
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: subscription?.expiresAt || null, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? portal() : '' })
+  }
+  async function ensureSubscription(businessId) {
+    await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
+  }
+  async function referralInfo(businessId) {
+    await referrals.updateOne({ _id: businessId }, { $setOnInsert: { code: randomBytes(16).toString('hex') } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
+    const referral = await referrals.findOne({ _id: businessId })
+    const rows = await commissions.find({ referrerId: businessId }).sort({ createdAt: -1 }).limit(100).toArray()
+    return { link: `${portal()}?ref=${encodeURIComponent(referral.code)}`, commissions: rows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amount, currency, percent, kind, createdAt })) }
+  }
+  const portal = () => { const url = new URL(process.env.SUBSCRIPTION_PUBLIC_URL); if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('Configure an HTTPS SUBSCRIPTION_PUBLIC_URL.'); return new URL('/subscriptions', url).href }
+  async function paystack(path, input) {
+    if (!process.env.PAYSTACK_SECRET_KEY) throw new Error('Paystack is not configured.')
+    const response = await fetcher(`https://api.paystack.co${path}`, { method: input ? 'POST' : 'GET', headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' }, ...(input ? { body: JSON.stringify(input) } : {}), signal: AbortSignal.timeout(20000) })
+    const result = await response.json()
+    if (!response.ok || !result.status) throw new Error('Paystack request failed. Please try again.')
+    return result.data
+  }
+  async function settle(reference, businessId) {
+    const payment = await payments.findOne({ _id: reference, ...(businessId ? { businessId } : {}) })
+    if (!payment) throw new Error('Payment reference not found.')
+    const data = await paystack(`/transaction/verify/${encodeURIComponent(reference)}`)
+    if (!paymentMatches(payment, data)) throw new Error('Payment has not been confirmed for this subscription.')
+    // One atomic document update makes concurrent callbacks and retries idempotent.
+    await ensureSubscription(payment.businessId)
+    const first = { $eq: [{ $size: { $ifNull: ['$references', []] } }, 0] }
+    const percent = { $cond: [first, payment.firstReferralPercent || 0, payment.recurringReferralPercent || 0] }
+    const basisPoints = { $cond: [first, Math.round((payment.firstReferralPercent || 0) * 100), Math.round((payment.recurringReferralPercent || 0) * 100)] }
+    const commission = { reference, referrerId: payment.referrerId || null, currency: payment.currency, percent, kind: { $cond: [first, 'first', 'recurring'] }, amount: { $floor: { $divide: [{ $multiply: [payment.amount, basisPoints] }, 10000] } }, createdAt: '$$NOW' }
+    await subscriptions.updateOne({ _id: payment.businessId, references: { $ne: reference } }, [{ $set: { expiresAt: { $add: [{ $max: ['$expiresAt', '$$NOW'] }, payment.days * 86400000] }, references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] }, commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] } } }])
+    // The same atomic update selects the first paid renewal, even with concurrent checkouts.
+    const settled = await subscriptions.findOne({ _id: payment.businessId })
+    const entry = settled.commissionEvents?.find(item => item.reference === reference)
+    if (entry?.referrerId) await commissions.updateOne({ _id: reference }, { $setOnInsert: entry }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
+    await payments.updateOne({ _id: reference }, { $set: { paidAt: new Date() } })
+    return { expiresAt: settled.expiresAt }
+  }
+  async function reminders() {
+    const plan = await getPlan()
+    if (!plan || !mailConfigured()) return
+    const now = new Date()
+    for await (const subscription of subscriptions.find({ expiresAt: { $gt: now, $lte: new Date(+now + plan.reminderDays * 86400000) } })) {
+      const owner = await accounts.findOne({ businessId: subscription._id, role: 'owner' })
+      if (!owner?.email) continue
+      const id = `${subscription._id}:${subscription.expiresAt.toISOString()}`
+      try { await notices.insertOne({ _id: id, lockedUntil: new Date(Date.now() + 600000), sent: false }) } catch (error) {
+        if (error.code !== 11000) throw error
+        const claim = await notices.updateOne({ _id: id, sent: false, lockedUntil: { $lt: now } }, { $set: { lockedUntil: new Date(Date.now() + 600000) } })
+        if (!claim.modifiedCount) continue
+      }
+      try {
+        await sendSubscriptionReminder({ to: owner.email, expiresAt: subscription.expiresAt, url: portal() })
+        await notices.updateOne({ _id: id }, { $set: { sent: true, sentAt: new Date() } })
+      } catch (error) { await notices.updateOne({ _id: id }, { $set: { lockedUntil: new Date(0) } }); console.error('Subscription reminder failed:', error.message) }
+    }
+  }
+  const timer = setInterval(() => reminders().catch(error => console.error('Reminder scan failed:', error.message)), 3600000)
+  timer.unref()
+  void reminders().catch(error => console.error('Reminder scan failed:', error.message))
+  return async (request, response) => {
+    const url = new URL(request.url, 'http://localhost')
+    if (url.pathname === '/subscriptions' && request.method === 'GET') {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer' }); response.end(page); return true
+    }
+    if (!url.pathname.startsWith('/v1/subscriptions')) return false
+    response.setHeader('Cache-Control', 'no-store')
+    const reply = (status, data) => { send(response, status, data); return true }
+    try {
+      if (url.pathname === '/v1/subscriptions/webhook' && request.method === 'POST') {
+        const raw = await body(request)
+        if (!validSignature(raw, request.headers['x-paystack-signature'], process.env.PAYSTACK_SECRET_KEY)) return reply(401, { error: 'Invalid signature.' })
+        const event = JSON.parse(raw)
+        if (event.event === 'charge.success' && await payments.findOne({ _id: event.data.reference })) await settle(event.data.reference)
+        return reply(200, { ok: true })
+      }
+      if (url.pathname === '/v1/subscriptions/setup') {
+        if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })
+        if (request.method === 'PUT') {
+          const input = JSON.parse(await body(request))
+          const plan = { ...validatePlan(input), ...referralPercentages(input) }
+          await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
+        } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
+        return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+      }
+      if (url.pathname === '/v1/subscriptions/test-mode' && request.method === 'PUT') {
+        if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })
+        const input = JSON.parse(await body(request))
+        if (typeof input.testMode !== 'boolean') return reply(400, { error: 'testMode must be true or false.' })
+        if (!input.testMode && !await getPlan()) return reply(409, { error: 'Save a subscription plan before enabling enforcement.' })
+        await settings.updateOne({ _id: 'control' }, { $set: { testMode: input.testMode, updatedAt: new Date() } })
+        return reply(200, { testMode: input.testMode })
+      }
+      const claims = verifyToken(request)
+      if (url.pathname === '/v1/subscriptions/access' && request.method === 'GET') {
+        if (!claims?.businessId || !['device', 'access'].includes(claims.kind)) return reply(401, { error: 'Sign in or enroll this device.' })
+        const authorized = claims.kind === 'device'
+          ? await database.collection('devices').findOne({ businessId: claims.businessId, deviceId: claims.deviceId, revokedAt: null })
+          : await accounts.findOne({ businessId: claims.businessId, ...(claims.email ? { email: claims.email } : { username: claims.username }) })
+        if (!authorized) return reply(403, { error: 'Account or device access was revoked.' })
+        return reply(200, await access(claims.businessId))
+      }
+      if (claims?.kind !== 'access' || claims.role !== 'owner') return reply(403, { error: 'Sign in with your cloud owner account.' })
+      const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
+      if (!owner) return reply(403, { error: 'Owner account not found.' })
+      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }) })
+      if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'GET') return reply(200, await referralInfo(claims.businessId))
+      if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'POST') {
+        const input = JSON.parse(await body(request))
+        const referral = await referrals.findOne({ code: String(input.code || '').trim() })
+        if (!referral || referral._id === claims.businessId) return reply(400, { error: 'Invalid referral code. You cannot refer your own business.' })
+        await ensureSubscription(claims.businessId)
+        const bound = await subscriptions.updateOne({ _id: claims.businessId, referrerId: { $exists: false }, referralClosed: { $ne: true }, 'references.0': { $exists: false } }, { $set: { referrerId: referral._id } })
+        if (!bound.modifiedCount) return reply(409, { error: 'A referrer is already assigned or your first checkout has started.' })
+        return reply(200, { ok: true })
+      }
+      if (url.pathname === '/v1/subscriptions/checkout' && request.method === 'POST') {
+        const plan = await getPlan()
+        if (!plan) return reply(409, { error: 'The developer has not configured a subscription plan.' })
+        const reference = `sub-${randomBytes(20).toString('hex')}`
+        const callback = portal()
+        await ensureSubscription(claims.businessId)
+        const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
+        await payments.insertOne({ ...validatePlan(plan), ...referralPercentages(plan), referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: callback })
+        return reply(200, { authorizationUrl: result.authorization_url, reference })
+      }
+      if (url.pathname === '/v1/subscriptions/verify' && request.method === 'POST') {
+        const input = JSON.parse(await body(request))
+        return reply(200, { subscription: await settle(String(input.reference || ''), claims.businessId) })
+      }
+      return reply(404, { error: 'Not found.' })
+    } catch (error) { return reply(url.pathname.endsWith('/webhook') ? 503 : 400, { error: error.message }) }
+  }
+}

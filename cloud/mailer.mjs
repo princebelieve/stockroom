@@ -1,7 +1,13 @@
 import nodemailer from 'nodemailer'
 
-function configured() {
+export function mailConfigured() {
   return Boolean(process.env.SMTP_USER && process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN)
+}
+const configured = mailConfigured
+
+export async function sendSubscriptionReminder({ to, expiresAt, url }) {
+  if (!configured()) throw new Error('Email is not configured.')
+  await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Your Stockroom subscription expires soon', text: `Your Stockroom subscription expires on ${expiresAt.toISOString().slice(0, 10)} (UTC).\n\nRenew manually at ${url}\n\nYou will not be charged automatically. Sign in as the business owner and choose Renew with Paystack.` })
 }
 
 function transport() {

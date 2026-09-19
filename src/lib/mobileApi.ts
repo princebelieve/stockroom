@@ -1,5 +1,6 @@
 import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
 import { normalizeCashSale } from '../../server/cash.mjs'
+import { loadSubscriptionAccess } from '../../server/subscription-client.mjs'
 import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, saveMobileSyncConfiguration, type MobileSyncConfiguration } from './mobileDatabase'
 import { mobileStocktake } from './mobileStocktake'
 
@@ -20,6 +21,10 @@ async function setting(key: string) {
 async function setSetting(key: string, value: string) {
   const db = await openMobileDatabase()
   await db.run('INSERT INTO mobile_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value])
+}
+async function subscriptionStatus(force = false) {
+  const config = await getMobileSyncConfiguration()
+  return loadSubscriptionAccess({ config: config ? { url: config.syncApiUrl, token: config.deviceToken, businessId: config.businessId } : null, read: setting, write: setSetting, fetcher: originalFetch, force })
 }
 async function sessionUser(): Promise<MobileUser | null> {
   const userId = await setting('sessionUserId')
@@ -267,6 +272,10 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   const stocktakeResponse = await mobileStocktake(path, init, canOperate(user), queue)
   if (stocktakeResponse) return stocktakeResponse
   if (path === '/api/sync/status') return json(await localSyncStatus())
+  if (path === '/api/subscriptions/access') {
+    if (!await sessionUser()) return error('Authentication required.', 401)
+    return json(await subscriptionStatus(new Headers(init?.headers).get('X-Subscription-Refresh') === 'true'))
+  }
   if (path === '/api/sync/pull' && method === 'POST') return json(await pullLatest())
   if (path === '/api/sync/now' && method === 'POST') return json(await syncNow())
   if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT id, name, sku, barcode, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products ORDER BY updated_at DESC')).values || [] })
@@ -287,6 +296,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return json((await db.query('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?', [stock[1]])).values?.[0])
   }
   if (path === '/api/sales' && method === 'POST') {
+    const subscription = await subscriptionStatus()
+    if (subscription.blocked) return error(subscription.reason, 402)
     let sale = await body(init); if (sale.paymentMethod === 'wallet' && (sale.paymentDetails as { creditApproved?: boolean } | undefined)?.creditApproved && user.role !== 'owner') return error('Only the owner may approve credit purchases.', 403); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
     if (sale.paymentMethod === 'wallet' && !(sale.paymentDetails as { customerId?: unknown } | undefined)?.customerId) return error('Select the customer wallet.')
     if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'synced' })

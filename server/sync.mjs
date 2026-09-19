@@ -2,6 +2,7 @@ import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSync
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadSubscriptionAccess } from './subscription-client.mjs'
 
 let running = false
 
@@ -40,6 +41,15 @@ export async function saveCloudConfiguration(input) {
 export async function getCloudConfiguration() {
   const { url, businessId } = await configuration()
   return { url, businessId }
+}
+
+export async function getSubscriptionAccess(force = false) {
+  const config = await configuration()
+  const path = `${configurationPath()}.subscription.json`
+  return loadSubscriptionAccess({ config, force,
+    read: async key => { try { const saved = JSON.parse(await readFile(path, 'utf8')); return saved.key === key ? saved.value : '' } catch { return '' } },
+    write: async (key, value) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, JSON.stringify({ key, value }), { mode: 0o600 }) },
+  })
 }
 
 export async function syncConfigurationStatus() {

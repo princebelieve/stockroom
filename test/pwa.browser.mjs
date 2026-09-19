@@ -22,11 +22,13 @@ try {
   let pushed = []
   let remoteOperations = []
   let cloudOffline = false
+  let subscription = { businessId: 'shop', testMode: true, expiresAt: null }
   const cloudRoute = async route => {
     if (cloudOffline) return route.abort('internetdisconnected')
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
     let result = {}
+    if (path === '/v1/subscriptions/access') result = subscription
     if (path === '/v1/auth/login') result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' }
     if (path === '/v1/devices/enroll') result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' }
     if (path === '/v1/sync/pull') {
@@ -44,6 +46,7 @@ try {
   const errors = []
   page.on('pageerror', error => { errors.push(error.message); console.error(error.message) })
   await page.goto(`http://127.0.0.1:${server.address().port}`)
+  await page.waitForFunction(() => navigator.serviceWorker.controller && performance.getEntriesByType('navigation')[0]?.type === 'reload')
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   console.log('PWA loaded')
   const api = (path, body) => page.evaluate(async ({ path, body }) => {
@@ -53,7 +56,7 @@ try {
   assert.equal((await api('/api/installer/activate', { mode: 'existing', ownerEmail: 'owner@test.com', ownerPassword: 'test-password', deviceId: 'pwa-test', label: 'iPhone' })).status, 201)
   assert.equal((await api('/api/auth/cloud-session', { email: 'other@test.com', password: 'test-password' })).status, 403)
   await page.reload()
-  await page.getByLabel('Email', { exact: true }).fill('owner@test.com')
+  await page.getByLabel('Owner email or staff username', { exact: true }).fill('owner@test.com')
   await page.getByLabel('Password', { exact: true }).fill('test-password')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await page.getByRole('button', { name: 'Log out' }).waitFor()
@@ -118,7 +121,8 @@ try {
   await newDevice.route('https://stockroom-0vm5.onrender.com/**', cloudRoute)
   const newPage = await newDevice.newPage()
   await newPage.goto(page.url())
-  await newPage.getByLabel('Email', { exact: true }).fill('owner@test.com')
+  await newPage.waitForFunction(() => navigator.serviceWorker.controller && performance.getEntriesByType('navigation')[0]?.type === 'reload')
+  await newPage.getByLabel('Owner email or staff username', { exact: true }).fill('owner@test.com')
   await newPage.getByLabel('Password', { exact: true }).fill('test-password')
   await newPage.getByRole('button', { name: 'Sign in', exact: true }).click()
   await newPage.getByRole('button', { name: 'Log out' }).waitFor()
@@ -128,19 +132,19 @@ try {
   // Upload one real product on device A, then download it via Refresh on B.
   const milo = (await api('/api/products', { name: 'Milo', sku: 'MILO-SYNC', category: 'Drink', unit: 'tin', stock: 1, reorder: 0, price: 300 })).data
   await page.getByRole('button', { name: 'Sync now', exact: true }).click()
-  await page.locator('.sync-feedback').filter({ hasText: 'All changes uploaded; 0 queued.' }).waitFor()
+  await page.locator('.sync-feedback').filter({ hasText: 'All changes uploaded; 0 queued.' }).waitFor({ state: 'attached' })
   const uploadedMilo = pushed.find(operation => operation.entityType === 'product' && operation.payload.id === milo.id)
   assert.ok(uploadedMilo, 'Sync must upload Milo before another browser can download it')
   remoteOperations.push(uploadedMilo)
   const uploadCount = pushed.length
   await newPage.getByLabel('Page options').click()
   await newPage.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await newPage.locator('.sync-feedback').filter({ hasText: 'Refresh complete.' }).waitFor({ timeout: 5000 })
+  await newPage.locator('.sync-feedback').filter({ hasText: 'Refresh complete.' }).waitFor({ timeout: 5000, state: 'attached' })
   await newPage.locator('.pos-product').filter({ hasText: 'Milo' }).waitFor({ timeout: 5000 })
   assert.equal(pushed.length, uploadCount, 'Refresh must never upload')
   cloudOffline = true
   await page.getByRole('button', { name: 'Sync now', exact: true }).click()
-  await page.locator('.sync-feedback').filter({ hasText: 'Sync failed:' }).waitFor()
+  await page.locator('.sync-feedback').filter({ hasText: 'Sync failed:' }).waitFor({ state: 'attached' })
   cloudOffline = false
   await newDevice.close()
   const secondTab = await context.newPage()
@@ -232,6 +236,18 @@ try {
   const walletAfterSale = (await api('/api/customers')).data.customers.find(c => c.id === walletCustomer.id)
   assert.ok(walletAfterSale.balance < 20)
   assert.equal(walletAfterSale.transactions.length, 2)
+  subscription = { businessId: 'shop', testMode: false, expiresAt: '2000-01-01T00:00:00Z' }
+  const forceAccess = () => page.evaluate(async () => (await fetch('/api/subscriptions/access', { headers: { 'X-Subscription-Refresh': 'true' } })).json())
+  assert.equal((await forceAccess()).blocked, true)
+  await page.reload()
+  await page.getByRole('button', { name: 'POS', exact: true }).click()
+  await page.getByRole('heading', { name: 'POS access paused' }).waitFor()
+  cloudOffline = true
+  assert.equal((await api('/api/sales', { id: 'blocked-sale' })).status, 402)
+  cloudOffline = false
+  subscription.testMode = true
+  await page.getByRole('button', { name: 'Check access again' }).click()
+  await page.getByRole('heading', { name: 'Sell products' }).waitFor()
   await page.getByRole('button', { name: 'Wallet', exact: true }).click()
   await page.getByRole('heading', { name: 'Wallet browser customer' }).waitFor()
   await page.getByRole('button', { name: 'Log out' }).click()

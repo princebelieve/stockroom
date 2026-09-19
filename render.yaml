@@ -16,6 +16,10 @@ services:
         value: stockroom_sync
       - key: SMTP_USER
         sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: SUBSCRIPTION_PUBLIC_URL
+        sync: false
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET

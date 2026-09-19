@@ -4,6 +4,7 @@ import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
 import { sendPasswordReset } from './mailer.mjs'
 import { corsHeadersFor } from './cors.mjs'
+import { createSubscriptions } from './subscriptions.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -90,12 +91,14 @@ async function assignLegacyStaffUsername(account) {
   return { ...account, username: candidate }
 }
 
+const subscriptionHandler = await createSubscriptions({ database, accounts, adminApiKey, verifyToken, send })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   for (const [name, value] of Object.entries(corsHeaders)) response.setHeader(name, value)
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   try {
+    if (await subscriptionHandler(request, response)) return
     if (request.method === 'POST' && request.url === '/v1/auth/register') {
       const input = await readJson(request)
       const businessId = String(input.businessId || '').trim()

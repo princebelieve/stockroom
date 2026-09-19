@@ -4,7 +4,7 @@ import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
 import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
-import { pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
+import { getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
@@ -26,6 +26,11 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'GET' && request.url === '/api/health') {
     return sendJson(response, 200, { ok: true, storage: storageName })
+  }
+
+  if (request.method === 'GET' && request.url === '/api/subscriptions/access') {
+    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
+    return sendJson(response, 200, await getSubscriptionAccess(request.headers['x-subscription-refresh'] === 'true'))
   }
 
   if (request.method === 'POST' && request.url === '/api/setup') {
@@ -318,6 +323,8 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       const user = sessionUser(request)
       if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
+      const subscription = await getSubscriptionAccess()
+      if (subscription.blocked) return sendJson(response, 402, { error: subscription.reason })
       if (input.paymentMethod === 'wallet' && input.paymentDetails?.creditApproved && user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner may approve credit purchases.' })
       if (!input?.id || !Array.isArray(input.items) || !Number.isFinite(Number(input.total))) return sendJson(response, 400, { error: 'Sale is invalid.' })
       try {

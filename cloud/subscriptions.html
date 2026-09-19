@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stockroom subscriptions</title>
+<style>body{font:16px system-ui;background:#f3f6fa;color:#142334;margin:0}main{max-width:650px;margin:40px auto;padding:24px}section{background:white;padding:24px;border-radius:16px;margin:20px 0}label{display:block;margin:16px 0}input,select,button{font:inherit;padding:12px;border:1px solid #b9c5cf;border-radius:8px;box-sizing:border-box}input,select{display:block;width:100%;margin-top:6px}button{background:#174c49;color:white;cursor:pointer}button:disabled{opacity:.5}p{line-height:1.6}#message{white-space:pre-wrap}small{color:#526171}</style></head>
+<body><main><h1>Subscription management</h1><p>Renew manually with Paystack. No automatic debits.</p>
+<section><label>Choose screen<select id="mode"><option value="owner">Business owner renewal</option><option value="developer">Developer subscription setup</option></select></label></section>
+<section id="owner"><h2>Owner renewal</h2><form id="login"><label>Owner email<input name="email" type="email" autocomplete="username" required></label><label>Cloud password<input name="password" type="password" autocomplete="current-password" required></label><button>Sign in</button></form><div id="renewal" hidden><p id="status"></p><p id="price"></p><p id="access-status"></p><button id="renew" type="button">Renew with Paystack</button> <button id="refresh" type="button">Refresh status</button> <button id="logout" type="button">Sign out</button><form id="verify"><label>Payment reference<input name="reference" required></label><button>Verify payment</button></form><small>If you paid but your subscription has not updated, verify the reference from Paystack.</small><h3>Referrals</h3><p>Share your link with another business. They must create their business account in the app, sign in here, and apply your code before their first checkout.</p><label>Your referral link<input id="referral-link" readonly></label><button id="copy-referral" type="button">Copy referral link</button><form id="claim-referral"><label>Who referred you? Referral code<input name="code" maxlength="32" pattern="[a-f0-9]{32}" required></label><button>Apply referral</button></form><p id="referral-status"></p><h4>Recent commission credits</h4><p>Credits are recorded for manual payout by the developer. No automatic payout is made.</p><ul id="commissions"></ul></div></section>
+<section id="developer" hidden><h2>Developer setup</h2><p>Paystack and Gmail OAuth secrets are configured in the cloud service environment.</p><form id="connect"><label>Developer Admin API key<input id="key" type="password" autocomplete="off" required></label><button>Load setup</button></form><p id="configuration"></p><div id="test-controls" hidden><p id="test-status"></p><button id="toggle-test" type="button"></button><p>Test mode lifts all subscription blocks. Disable it when ready to enforce billing. Businesses without a paid subscription will then need to subscribe; expired subscriptions have one calendar month of grace.</p></div><form id="plan" hidden><label>Price in minor units<input name="amount" type="number" min="1" max="1000000000" step="1" required></label><small>For example, NGN 5,000 = 500000 kobo. Use a currency enabled on your Paystack account.</small><label>Currency<select name="currency"><option>NGN</option><option>GHS</option><option>ZAR</option><option>KES</option><option>USD</option><option>XOF</option></select></label><label>Subscription duration (days)<input name="days" type="number" min="1" max="730" value="30" required></label><label>Send reminder within this many days of expiry<input name="reminderDays" type="number" min="1" max="30" value="7" required></label><label>First payment referral commission (%)<input name="firstReferralPercent" type="number" min="0" max="100" step="0.01" value="0" required></label><label>Recurring payment referral commission (%)<input name="recurringReferralPercent" type="number" min="0" max="100" step="0.01" value="0" required></label><small>One direct referrer per business. Rates apply to future checkouts; commission rounds down to the nearest minor unit.</small><button>Save subscription setup</button></form></section>
+<p id="message" role="status" aria-live="polite"></p></main>
+<script>
+const el = id => document.getElementById(id)
+let token = ''
+let testMode = true
+const referralCode = new URL(location.href).searchParams.get('ref')
+if (referralCode && /^[a-f0-9]{32}$/.test(referralCode)) sessionStorage.setItem('stockroom-referral-code', referralCode)
+el('claim-referral').elements.code.value = sessionStorage.getItem('stockroom-referral-code') || ''
+const callbackReference = new URL(location.href).searchParams.get('reference')
+if (callbackReference) { el('verify').elements.reference.value = callbackReference; history.replaceState(null, '', '/subscriptions'); el('message').textContent = 'Sign in to verify your payment and refresh your subscription.' }
+async function api(path, method = 'GET', input, developer = false) {
+ const response = await fetch('/v1/' + path, { method, headers: { 'Content-Type': 'application/json', ...(developer ? { 'X-Admin-Key': el('key').value } : { Authorization: 'Bearer ' + token }) }, ...(input ? { body: JSON.stringify(input) } : {}) })
+ const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Request failed.'); return data
+}
+async function run(action) {
+ el('message').textContent = ''
+ document.querySelectorAll('button').forEach(button => button.disabled = true)
+ try { await action() } catch (error) { el('message').textContent = error.message }
+ finally { document.querySelectorAll('button').forEach(button => button.disabled = false) }
+}
+async function refresh() {
+ const data = await api('subscriptions')
+ el('login').hidden = true; el('renewal').hidden = false
+ const expiry = data.subscription?.expiresAt
+ el('status').textContent = expiry ? (new Date(expiry) > new Date() ? 'Active until ' : 'Expired on ') + new Date(expiry).toLocaleString() : 'No paid subscription yet.'
+ el('price').textContent = data.plan ? data.plan.currency + ' ' + (data.plan.amount / 100).toFixed(2) + ' for ' + data.plan.days + ' days. Renewals extend your current unexpired period.' : 'The developer has not set a price yet.'
+ el('renew').hidden = !data.plan
+ el('access-status').textContent = data.access.reason
+ const assigned = Boolean(data.subscription?.referrerId)
+ el('claim-referral').hidden = assigned
+ el('referral-status').textContent = assigned ? 'Your referrer is assigned.' : 'Apply a referral code before your first checkout. Attribution cannot be changed later.'
+ try {
+  const referral = await api('subscriptions/referrals')
+  el('referral-link').value = referral.link
+  el('commissions').replaceChildren()
+  for (const row of referral.commissions) { const item = document.createElement('li'); item.textContent = row.currency + ' ' + (row.amount / 100).toFixed(2) + ' ? ' + row.kind + ' payment at ' + row.percent + '% (' + new Date(row.createdAt).toLocaleDateString() + ')'; el('commissions').append(item) }
+  if (!referral.commissions.length) el('commissions').textContent = 'No commission credits yet.'
+ } catch (error) { el('referral-status').textContent += ' ' + error.message }
+}
+function setup(data) {
+ el('plan').hidden = false
+ showTestMode(data.testMode)
+ if (data.plan) for (const name of ['amount', 'currency', 'days', 'reminderDays', 'firstReferralPercent', 'recurringReferralPercent']) el('plan').elements[name].value = data.plan[name] ?? 0
+ el('configuration').textContent = 'Paystack: ' + (data.paystackConfigured ? 'configured' : 'missing PAYSTACK_SECRET_KEY') + '. Email: ' + (data.emailConfigured ? 'configured' : 'missing Gmail OAuth credentials') + '. Portal URL: ' + (data.publicUrlConfigured ? 'configured' : 'missing SUBSCRIPTION_PUBLIC_URL') + '. Configuration presence does not confirm provider connectivity.'
+}
+function showTestMode(enabled) {
+ testMode = enabled
+ el('test-controls').hidden = false
+ el('test-status').textContent = enabled ? 'Developer test mode is ON. All subscription blocks are lifted.' : 'Subscription enforcement is ON. POS blocks after the grace period.'
+ el('toggle-test').textContent = enabled ? 'Disable test mode and enforce subscriptions' : 'Enable test mode and lift all blocks'
+}
+el('toggle-test').onclick = () => run(async () => { const result = await api('subscriptions/test-mode', 'PUT', { testMode: !testMode }, true); showTestMode(result.testMode) })
+el('claim-referral').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/referrals', 'POST', Object.fromEntries(new FormData(event.target))); sessionStorage.removeItem('stockroom-referral-code'); await refresh(); el('message').textContent = 'Referral applied.' }) }
+el('copy-referral').onclick = () => run(async () => { await navigator.clipboard.writeText(el('referral-link').value); el('message').textContent = 'Referral link copied.' })
+el('mode').onchange = () => { el('owner').hidden = el('mode').value !== 'owner'; el('developer').hidden = el('mode').value !== 'developer'; el('key').value = ''; el('plan').hidden = true; el('test-controls').hidden = true; el('configuration').textContent = ''; el('message').textContent = '' }
+el('login').onsubmit = event => { event.preventDefault(); run(async () => { const data = await api('auth/login', 'POST', Object.fromEntries(new FormData(event.target))); if (data.account.role !== 'owner') throw new Error('Owner account required.'); token = data.accessToken; event.target.reset(); await refresh(); if (callbackReference) { await api('subscriptions/verify', 'POST', { reference: callbackReference }); await refresh() } }) }
+el('connect').onsubmit = event => { event.preventDefault(); run(async () => setup(await api('subscriptions/setup', 'GET', null, true))) }
+el('plan').onsubmit = event => { event.preventDefault(); run(async () => { setup(await api('subscriptions/setup', 'PUT', Object.fromEntries(new FormData(event.target)), true)); el('message').textContent = 'Subscription setup saved.' }) }
+el('renew').onclick = () => run(async () => { const data = await api('subscriptions/checkout', 'POST', {}); el('verify').elements.reference.value = data.reference; const url = new URL(data.authorizationUrl); if (url.protocol !== 'https:' || url.hostname !== 'checkout.paystack.com') throw new Error('Invalid checkout URL.'); location.assign(url.href) })
+el('refresh').onclick = () => run(refresh)
+el('verify').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/verify', 'POST', Object.fromEntries(new FormData(event.target))); await refresh(); el('message').textContent = 'Payment confirmed.' }) }
+el('logout').onclick = () => { token = ''; el('renewal').hidden = true; el('login').hidden = false; el('message').textContent = ''; el('verify').reset() }
+</script></body></html>

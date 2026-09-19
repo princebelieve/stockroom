@@ -11,15 +11,25 @@ import { isNewerMutableOperation, mutableEntities } from '../cloud/conflict-poli
 
 const tempDirectories = []
 const processes = []
+const subscriptionClouds = []
 let port = 9200
 
-async function startBusiness({ syncApiUrl } = {}) {
+async function startBusiness({ syncApiUrl, entitlement = { testMode: true, expiresAt: null } } = {}) {
   const dataDirectory = await mkdtemp(join(tmpdir(), 'stockroom-test-'))
   tempDirectories.push(dataDirectory)
   const serverPort = ++port
+  if (!syncApiUrl) {
+    const cloud = createServer((request, response) => {
+      if (request.url === '/v1/subscriptions/access') { response.setHeader('Content-Type', 'application/json'); return response.end(JSON.stringify({ businessId: 'test-business', ...entitlement })) }
+      response.writeHead(503); response.end()
+    })
+    cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening')
+    subscriptionClouds.push(cloud)
+    syncApiUrl = `http://127.0.0.1:${cloud.address().port}`
+  }
   const child = spawn(globalThis.process.execPath, ['server/index.mjs'], {
     cwd: process.cwd(),
-    env: { ...globalThis.process.env, PORT: String(serverPort), CUSTOMER_DISPLAY_PORT: String(serverPort + 100), STOCKROOM_DATA_DIR: dataDirectory, ...(syncApiUrl ? { SYNC_API_URL: syncApiUrl, SYNC_DEVICE_TOKEN: 'test-device-token', BUSINESS_ID: 'test-business', DEVICE_ID: `device-${serverPort}` } : {}) },
+    env: { ...globalThis.process.env, PORT: String(serverPort), CUSTOMER_DISPLAY_PORT: String(serverPort + 100), STOCKROOM_DATA_DIR: dataDirectory, SYNC_CONFIG_PATH: join(dataDirectory, 'sync-config.json'), ...(syncApiUrl ? { SYNC_API_URL: syncApiUrl, SYNC_DEVICE_TOKEN: 'test-device-token', BUSINESS_ID: 'test-business', DEVICE_ID: `device-${serverPort}` } : {}) },
     stdio: 'ignore',
   })
   processes.push(child)
@@ -32,7 +42,7 @@ async function startBusiness({ syncApiUrl } = {}) {
 }
 
 async function stop(child) {
-  if (child.exitCode !== null) return
+  if (child.exitCode !== null || child.signalCode !== null) return
   child.kill()
   await once(child, 'exit').catch(() => undefined)
 }
@@ -50,7 +60,25 @@ async function product(baseUrl, token, stock = 5) {
 
 after(async () => {
   await Promise.all(processes.map((child) => stop(child)))
+  await Promise.all(subscriptionClouds.map(cloud => new Promise(resolve => { cloud.close(resolve); cloud.closeAllConnections() })))
   await Promise.all(tempDirectories.map((directory) => rm(directory, { recursive: true, force: true })))
+})
+
+test('expired subscriptions reject sales without changing stock; developer test mode restores POS', async () => {
+  const entitlement = { testMode: false, expiresAt: '2000-01-01T00:00:00Z' }
+  const { baseUrl } = await startBusiness({ entitlement })
+  const token = await createOwner(baseUrl)
+  const item = await product(baseUrl, token, 5)
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const sale = { id: 'subscription-block-test', items: [{ productId: item.id, quantity: 1, price: 10 }], total: 10, createdAt: new Date().toISOString(), paymentMethod: 'cash', cashReceived: 10 }
+  const post = () => json(`${baseUrl}/api/sales`, { method: 'POST', headers, body: JSON.stringify(sale) })
+  assert.equal((await post()).response.status, 402)
+  const products = await json(`${baseUrl}/api/products`, { headers })
+  assert.equal(products.body.products.find(row => row.id === item.id).stock, 5)
+  entitlement.testMode = true
+  const access = await json(`${baseUrl}/api/subscriptions/access`, { headers: { ...headers, 'X-Subscription-Refresh': 'true' } })
+  assert.equal(access.body.blocked, false)
+  assert.equal((await post()).response.status, 201)
 })
 
 test('offline sale is committed locally and duplicate sale IDs do not reduce stock twice', async () => {
