@@ -3,6 +3,7 @@ import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 import { browserSchema } from './browserSchema'
 
 export type BrowserSyncConfiguration = { syncApiUrl: string; businessId: string; deviceId: string; deviceToken: string }
+const enrollmentStorageKey = 'stockroom-pwa-enrollment'
 let current: Database | null = null
 let dirty = false
 let pending: Promise<unknown> = Promise.resolve()
@@ -89,6 +90,12 @@ export async function openBrowserDatabase() {
 }
 
 export async function saveBrowserSyncConfiguration(config: BrowserSyncConfiguration) {
+  // The SQL snapshot contains all offline business data. Keep this small,
+  // security-sensitive enrollment record separately as well, so a repaired
+  // snapshot cannot turn a signed-in PWA into an apparently new browser.
+  // Both stores are same-origin browser storage; this is a resilience copy,
+  // not a broader credential exposure.
+  localStorage.setItem(enrollmentStorageKey, JSON.stringify(config))
   const db = await openBrowserDatabase()
   for (const [key, value] of Object.entries(config)) {
     await db.run('INSERT INTO mobile_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [key, value])
@@ -99,5 +106,15 @@ export async function getBrowserSyncConfiguration(): Promise<BrowserSyncConfigur
   const db = await openBrowserDatabase()
   const rows = await db.query('SELECT key, value FROM mobile_settings WHERE key IN (?, ?, ?, ?)', ['syncApiUrl', 'businessId', 'deviceId', 'deviceToken'])
   const config = Object.fromEntries(rows.values.map(row => [String(row.key), String(row.value)]))
-  return config.syncApiUrl && config.businessId && config.deviceId && config.deviceToken ? config as BrowserSyncConfiguration : null
+  if (config.syncApiUrl && config.businessId && config.deviceId && config.deviceToken) return config as BrowserSyncConfiguration
+  try {
+    const saved = JSON.parse(localStorage.getItem(enrollmentStorageKey) || 'null') as Partial<BrowserSyncConfiguration> | null
+    if (!saved?.syncApiUrl || !saved.businessId || !saved.deviceId || !saved.deviceToken) return null
+    const restored: BrowserSyncConfiguration = { syncApiUrl: saved.syncApiUrl, businessId: saved.businessId, deviceId: saved.deviceId, deviceToken: saved.deviceToken }
+    // Heal the primary offline database during the current serialized request.
+    await saveBrowserSyncConfiguration(restored)
+    return restored
+  } catch {
+    return null
+  }
 }

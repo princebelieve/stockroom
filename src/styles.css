@@ -218,3 +218,57 @@ input:focus, select:focus, textarea:focus { border-color: #6aa887 !important; bo
 .cart-quantity-controls input { width: 90px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }
 .sync-feedback { color: #e4f5e8; font-size: 12px; line-height: 1.5; margin: 8px 0 0; overflow-wrap: anywhere; }
 .sync-feedback:empty { display: none; }
+
+/* Phone screens are the primary checkout surface.  Do not make staff zoom the
+   browser to read balances, stock or actions: use a deliberate touch-sized
+   type scale and stronger contrast at the actual device width. */
+@media (max-width: 650px) {
+  :root { font-size: 16px; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { min-width: 0; background: #eaf3ed; }
+  .main-content { padding-inline: 14px; padding-bottom: 104px; }
+  .topbar { margin-inline: -14px; padding-left: 72px; background: rgba(255, 253, 248, .97); }
+  .eyebrow { margin-bottom: 5px; color: #527164; font-size: 13px; font-weight: 600; }
+  .topbar h1 { font-size: 24px; line-height: 1.12; }
+  .hero-row { align-items: center; margin: 24px 0 16px; }
+  .hero-row h2 { font-size: 21px; line-height: 1.18; }
+  .hero-row p, .panel-heading p, .owner-panel p, .report-note p { color: #52675e; font-size: 14px; line-height: 1.45; }
+  .primary-button, .filter-button, .text-button:not(.logout-button), .page-options-panel button { min-height: 46px; font-size: 14px; }
+  .hero-row .primary-button, .full-panel .panel-heading .primary-button, .full-panel .primary-button { font-size: 14px; min-height: 46px; padding: 11px 14px; }
+  .metric-grid { gap: 12px; }
+  .metric-card { min-height: 132px; padding: 20px; border-width: 1px; }
+  .metric-card span { color: #52675e; font-size: 14px; font-weight: 600; }
+  .metric-card strong { margin: 10px 0 7px; font-size: 31px; line-height: 1.05; }
+  .metric-card small { color: #52675e; font-size: 13px; line-height: 1.35; }
+  .panel { padding: 20px 17px; }
+  .panel-heading h2, .panel-heading h3, .owner-panel h2 { font-size: 19px; line-height: 1.2; }
+  .empty-state { font-size: 14px; line-height: 1.45; }
+  .search-row { gap: 9px; margin-top: 18px; }
+  .search-box { min-height: 46px; padding-inline: 13px; }
+  .search-box input { padding-block: 11px; font-size: 16px; }
+  .table-wrap { margin-inline: -3px; border-radius: 10px; }
+  table { min-width: 560px; }
+  th { padding: 12px 11px; font-size: 11px; }
+  td { padding: 15px 11px; font-size: 14px; }
+  .product-cell strong, .alert-row strong, .cart-row strong, .transaction-row strong { font-size: 14px; }
+  .product-cell span, .stock-cell span, .alert-row span, .cart-row span, .transaction-row small, .customer-row small { font-size: 13px; line-height: 1.35; }
+  .product-icon { width: 36px; height: 36px; border-radius: 10px; font-size: 14px; }
+  .row-actions { gap: 7px; }
+  .row-actions button { width: 38px; height: 38px; border-radius: 9px; }
+  .settings-form { margin-top: 24px; gap: 17px; }
+  .settings-form label, .form-grid label { font-size: 15px; }
+  .settings-form label span, .form-grid label, .cloud-setup-note, .payment-options label { font-size: 13px; line-height: 1.4; }
+  .settings-form input, .settings-form select, .form-grid input, .payment-options input, .payment-options select, .provider-add input { min-height: 48px; font-size: 16px; }
+  .pos-layout, .wallet-grid, .team-grid { gap: 12px; margin-top: 24px; }
+  .pos-product { min-height: 64px; padding: 14px 13px; }
+  .pos-product strong { font-size: 15px; }.pos-product small { font-size: 13px; }.pos-product b { font-size: 14px; }
+  .cart-row, .transaction-row, .customer-row { padding-block: 16px; }
+  .cart-total strong { font-size: 26px; }
+  .payment-note, .auth-error, .settings-message { font-size: 13px; line-height: 1.45; }
+  .mobile-pwa-sync .sync-button { min-height: 48px; padding: 12px 15px; border-radius: 12px; font-size: 14px; }
+  .mobile-pwa-sync .mobile-sync-feedback { padding: 10px 12px; font-size: 13px; line-height: 1.4; }
+  .login-card { padding: 26px 22px; border-radius: 18px; }
+  .login-card h1 { font-size: 27px; }.login-card p { font-size: 15px; line-height: 1.45; }
+  .login-card label, .demo-account strong { font-size: 14px; }.demo-account span { font-size: 13px; }
+  .login-card input { min-height: 48px; font-size: 16px; }
+}

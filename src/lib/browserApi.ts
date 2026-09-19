@@ -274,7 +274,10 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   const enrolled = await getMobileSyncConfiguration()
   // When an update/storage migration leaves the identity but loses enrollment,
   // repair it from the owner's saved cloud token before treating sync as gone.
-  const user = (!enrolled && navigator.onLine ? await restoreCloudSession() || savedUser : savedUser || await restoreCloudSession())
+  // navigator.onLine is only a browser hint and can briefly report false when
+  // a PWA changes viewport/window mode. Do not let that hint prevent an owner
+  // session from repairing a missing enrollment.
+  const user = (!enrolled ? await restoreCloudSession() || savedUser : savedUser || await restoreCloudSession())
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Browser SQLite / IndexedDB' })
   if (path === '/api/settings' && method === 'GET') {
