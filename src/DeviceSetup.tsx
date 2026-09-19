@@ -10,10 +10,10 @@ import { controlHardware } from './lib/hardware'
 import { canRecordTerminalPayment, readTerminalSettings } from './lib/terminalSettings'
 import { deviceLabels, readDeviceProfile, saveDeviceProfile, scannerSettings, type DeviceKind } from './lib/deviceSetup'
 
-type Props = { businessId: string; defaultProvider: string; onTerminalSaved: () => void; createPairing: () => Promise<void>; openSecondMonitor: () => Promise<void>; pairing: { url: string } | null; scan: () => Promise<string | undefined> }
+type Props = { businessId: string; defaultProvider: string; onTerminalSaved: () => void; createPairing: () => Promise<void>; openSecondMonitor: () => Promise<void>; pairing: { url: string } | null; scan: () => Promise<string | undefined>; initialKind?: DeviceKind }
 
 export function DeviceSetup(props: Props) {
-  const [kind, setKind] = useState<DeviceKind | null>(null)
+  const [kind, setKind] = useState<DeviceKind | null>(props.initialKind || null)
   const [revision, setRevision] = useState(0)
   return <section className="settings-form device-setup"><h3>Device setup wizard</h3><p>Set up each device on this checkout. Enter the model from its label or manual; a model name alone does not install a driver.</p>
     {!kind ? <div className="device-grid">{(Object.keys(deviceLabels) as DeviceKind[]).map(device => {

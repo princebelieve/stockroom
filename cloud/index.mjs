@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { sendPasswordReset, sendStaffInvite } from './mailer.mjs'
+import { sendPasswordReset } from './mailer.mjs'
 import { corsHeadersFor } from './cors.mjs'
 
 const port = Number(process.env.PORT || 8080)
@@ -22,8 +22,12 @@ const passwordResets = database.collection('password_resets')
 await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
-await accounts.createIndex({ email: 1 }, { unique: true })
+// Staff email is optional contact data. Convert the original mandatory unique
+// index once so several staff accounts can omit it.
+await accounts.dropIndex('email_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
+await accounts.createIndex({ email: 1 }, { unique: true, partialFilterExpression: { email: { $type: 'string' } } })
 await accounts.createIndex({ businessId: 1 }, { unique: true })
+await accounts.createIndex({ businessId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } })
 await devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true })
 await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
@@ -44,7 +48,7 @@ function signToken(payload) {
 }
 function hashPassword(password) { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}` }
 function matchesPassword(password, stored) { const [salt, value] = String(stored).split(':'); if (!salt || !value) return false; const actual = scryptSync(password, salt, 64); const expected = Buffer.from(value, 'hex'); return actual.length === expected.length && timingSafeEqual(actual, expected) }
-function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess) } }
+function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, username: account.username || '', role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess) } }
 function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email, role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
 function deviceToken(businessId, deviceId) { return signToken({ kind: 'device', businessId, deviceId, exp: Math.floor(Date.now() / 1000) + 365 * 86_400 }) }
 function isAccess(claims) { return claims?.kind === 'access' }
@@ -68,6 +72,17 @@ function readJson(request) {
     request.on('end', () => { try { resolve(JSON.parse(body || '{}')) } catch { reject(new Error('Invalid JSON.')) } })
   })
 }
+function username(value) { return String(value || '').trim().toLowerCase() }
+function validUsername(value) { return /^[a-z0-9][a-z0-9._-]{2,31}$/.test(value) }
+async function assignLegacyStaffUsername(account) {
+  if (account.role === 'owner' || validUsername(account.username)) return account
+  const base = username(String(account.email || '').split('@')[0]).replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '').slice(0, 28) || 'staff'
+  let candidate = base.length >= 3 ? base : `${base}01`
+  let suffix = 2
+  while (await accounts.findOne({ businessId: account.businessId, username: candidate, _id: { $ne: account._id } })) candidate = `${base.slice(0, 28)}-${suffix++}`
+  await accounts.updateOne({ _id: account._id, username: { $exists: false } }, { $set: { username: candidate, usernameAssignedAt: new Date() } })
+  return { ...account, username: candidate }
+}
 
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
@@ -88,8 +103,11 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'POST' && request.url === '/v1/auth/login') {
       const input = await readJson(request)
-      const account = await accounts.findOne({ email: String(input.email || '').trim().toLowerCase() })
-      if (!account || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Email or password is incorrect.' })
+      const email = String(input.email || '').trim().toLowerCase()
+      const staffUsername = username(input.username)
+      if ((email && staffUsername) || (!email && !staffUsername)) return send(response, 400, { error: 'Use an owner email or staff username.' })
+      const account = email ? await accounts.findOne({ email, role: 'owner' }) : await accounts.findOne({ username: staffUsername, role: { $in: ['admin', 'cashier'] } })
+      if (!account || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Username or password is incorrect.' })
       return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account) })
     }
     if (request.method === 'GET' && request.url === '/v1/auth/me') {
@@ -103,7 +121,9 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request)
       const account = await accounts.findOne({ email: String(input.email || '').trim().toLowerCase() })
       // Always return the same response so email addresses cannot be discovered.
-      if (!account) return send(response, 202, { ok: true })
+      // Staff accounts deliberately cannot recover access from their own email.
+      // Only the business owner's recovery address is an account-control channel.
+      if (!account || account.role !== 'owner') return send(response, 202, { ok: true })
       const rawToken = randomBytes(32).toString('base64url')
       await passwordResets.insertOne({ accountId: account._id, tokenHash: createHmac('sha256', jwtSecret).update(rawToken).digest('hex'), expiresAt: new Date(Date.now() + 30 * 60_000), usedAt: null })
       // Configure an email provider webhook outside this code. In non-production
@@ -119,7 +139,8 @@ const server = createServer(async (request, response) => {
       const tokenHash = createHmac('sha256', jwtSecret).update(String(input.token || '')).digest('hex')
       const reset = await passwordResets.findOneAndUpdate({ tokenHash, usedAt: null, expiresAt: { $gt: new Date() } }, { $set: { usedAt: new Date() } }, { returnDocument: 'after' })
       if (!reset) return send(response, 400, { error: 'The reset link is invalid or has expired.' })
-      const account = await accounts.findOneAndUpdate({ _id: reset.accountId }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
+      const account = await accounts.findOneAndUpdate({ _id: reset.accountId, role: 'owner' }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
+      if (!account) return send(response, 400, { error: 'Only an owner password can be reset by email.' })
       await devices.updateMany({ businessId: account.businessId }, { $set: { revokedAt: new Date(), revokeReason: 'Owner password reset' } })
       return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account), message: 'Password updated. Re-enroll each device.' })
     }
@@ -147,24 +168,36 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/v1/staff') {
       if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       const input = await readJson(request)
-      const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const password = String(input.password || ''); const role = String(input.role || '')
-      if (!name || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details and an 8-character password.' })
-      const staff = { businessId: claims.businessId, name, email, role, passwordHash: hashPassword(password), createdAt: new Date() }
-      try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That email address is already in use.' }); throw error }
-      const delivered = await sendStaffInvite({ to: email, name, businessId: claims.businessId, password }).catch(() => false)
-      return send(response, 201, { account: publicAccount(staff), invitationDelivered: delivered })
+      const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
+      if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 10 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3–32 character username, and a 10-character password.' })
+      const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, passwordHash: hashPassword(password), createdAt: new Date() }
+      try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That contact email or username is already in use.' }); throw error }
+      // Credentials are deliberately never emailed. The owner gives the staff
+      // member their username and temporary password through a private channel.
+      return send(response, 201, { account: publicAccount(staff), invitationDelivered: false })
     }
     if (request.method === 'GET' && request.url === '/v1/staff') {
-      if (!isAccess(claims) || !['owner', 'admin'].includes(claims.role)) return send(response, 403, { error: 'Owner or admin access token required.' })
-      const staff = await accounts.find({ businessId: claims.businessId }).sort({ createdAt: 1 }).toArray()
+      if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
+      const staff = await Promise.all((await accounts.find({ businessId: claims.businessId }).sort({ createdAt: 1 }).toArray()).map(assignLegacyStaffUsername))
       return send(response, 200, { users: staff.map((account) => ({ ...publicAccount(account), createdAt: account.createdAt })) })
     }
     const accessMatch = request.url?.match(/^\/v1\/staff\/([^/]+)\/operational-access$/)
     if (request.method === 'PUT' && accessMatch) {
-      if (!isAccess(claims) || !['owner', 'admin'].includes(claims.role)) return send(response, 403, { error: 'Owner or admin access token required.' })
+      if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       if (!ObjectId.isValid(accessMatch[1])) return send(response, 400, { error: 'Invalid staff account.' })
       const input = await readJson(request)
       const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(accessMatch[1]), businessId: claims.businessId, role: 'cashier' }, { $set: { operationalAccess: input.enabled === true } }, { returnDocument: 'after' })
+      if (!updated) return send(response, 404, { error: 'Cashier account not found.' })
+      return send(response, 200, { account: publicAccount(updated) })
+    }
+    const passwordMatch = request.url?.match(/^\/v1\/staff\/([^/]+)\/password$/)
+    if (request.method === 'PUT' && passwordMatch) {
+      if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
+      if (!ObjectId.isValid(passwordMatch[1])) return send(response, 400, { error: 'Invalid staff account.' })
+      const input = await readJson(request)
+      const password = String(input.password || '')
+      if (password.length < 10) return send(response, 400, { error: 'Password must be at least 10 characters.' })
+      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(passwordMatch[1]), businessId: claims.businessId, role: 'cashier' }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
       if (!updated) return send(response, 404, { error: 'Cashier account not found.' })
       return send(response, 200, { account: publicAccount(updated) })
     }

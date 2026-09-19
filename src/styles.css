@@ -66,6 +66,9 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .nav-item { padding: 12px; font-size: 14px; }
   .nav-item b, .sidebar-foot { display: block; }
   .main-content { padding-top: 76px; }
+  .settings-form input, .settings-form select, .payment-options input, .payment-options select { min-height: 48px; font-size: 16px; }
+  .primary-button, .filter-button, .icon-button { min-height: 44px; }
+  .settings-form .primary-button { min-height: 48px; }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .top-actions { margin-left: auto; gap: 8px; }
   .page-options summary { width: 44px; height: 44px; }

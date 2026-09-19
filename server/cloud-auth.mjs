@@ -17,7 +17,10 @@ async function request(path, payload) {
   return { ...body, syncApiUrl: url }
 }
 
-export async function cloudLogin(email, password) { return request('/v1/auth/login', { email, password }) }
+export async function cloudLogin(identifier, password) {
+  const value = String(identifier || '').trim()
+  return request('/v1/auth/login', value.includes('@') ? { email: value, password } : { username: value, password })
+}
 export async function cloudLoginAt(syncApiUrl, email, password) {
   const url = cloudUrl(syncApiUrl)
   const response = await fetch(`${url}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
@@ -51,6 +54,14 @@ export async function cloudSetCashierOperationalAccess(accessToken, userId, enab
   const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ enabled: enabled === true }) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Could not update cloud staff access.')
+  return body
+}
+export async function cloudResetCashierPassword(accessToken, userId, password) {
+  const { url } = await getCloudConfiguration()
+  if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before resetting a cashier password.')
+  const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/password`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ password }) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Could not reset cashier password.')
   return body
 }
 export async function cloudEnrollDevice(syncApiUrl, accessToken, input) {

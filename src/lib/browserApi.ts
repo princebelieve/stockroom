@@ -238,7 +238,8 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   if (path === '/api/auth/cloud-session' && method === 'POST') {
     const input = await body(init); let config = await getMobileSyncConfiguration()
     const syncApiUrl = config?.syncApiUrl || cloudUrl
-    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.email, password: input.password }) })
+    const identifier = String(input.identifier || input.email || '').trim()
+    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password }) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
     const account = result.account
     if (!config && account.role !== 'owner') return error('An owner must sign in on this browser once before staff can use it.', 403)
@@ -261,7 +262,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
       config.deviceToken = device.deviceToken
       await saveMobileSyncConfiguration(config)
     }
-    const localUser: MobileUser = { id: account.id || id(), name: account.name, email: account.email, role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
+    const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
     await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET id=excluded.id, name=excluded.name, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.role, localUser.operationalAccess ? 1 : 0, now()])
     const stored = (await db.query('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE email = ?', [localUser.email])).values?.[0]
     await setSetting('sessionUserId', String(stored.id))
@@ -382,17 +383,22 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return new Response(csv, { headers: { 'Content-Type': 'text/csv;charset=utf-8' } })
   }
   if (path === '/api/users' && method === 'GET') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (user.role !== 'owner') return error('Owner access required.', 403)
     try { const result = await cloudRequest('/v1/staff'); for (const account of result.users || []) await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email, account.role, account.operationalAccess ? 1 : 0, String(account.createdAt || now())]); return json({ users: result.users || [] }) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not load staff.', 503) }
   }
   if (path === '/api/users' && method === 'POST') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    try { const input = await body(init); const result = await cloudRequest('/v1/staff', { method: 'POST', body: JSON.stringify(input) }); const account = result.account; await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?)', [account.id, account.name, account.email, account.role, account.operationalAccess ? 1 : 0, now()]); return json(account, 201) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not create staff.', 400) }
+    try { const input = await body(init); const result = await cloudRequest('/v1/staff', { method: 'POST', body: JSON.stringify(input) }); const account = result.account; await db.run('INSERT INTO users (id, name, email, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?)', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.role, account.operationalAccess ? 1 : 0, now()]); return json(account, 201) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not create staff.', 400) }
   }
   const staffAccess = path.match(/^\/api\/users\/([^/]+)\/operational-access$/)
   if (staffAccess && method === 'PUT') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (user.role !== 'owner') return error('Owner access required.', 403)
     try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffAccess[1])}/operational-access`, { method: 'PUT', body: JSON.stringify({ enabled: input.enabled === true }) }); const account = result.account; await db.run('UPDATE users SET operational_access = ? WHERE id = ?', [account.operationalAccess ? 1 : 0, account.id]); return json(account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not update cashier access.', 400) }
+  }
+  const staffPassword = path.match(/^\/api\/users\/([^/]+)\/password$/)
+  if (staffPassword && method === 'PUT') {
+    if (user.role !== 'owner') return error('Only the owner can reset a cashier password.', 403)
+    try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffPassword[1])}/password`, { method: 'PUT', body: JSON.stringify({ password: input.password }) }); return json(result.account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not reset cashier password.', 400) }
   }
   if (path === '/api/settings' && method === 'PUT') {
     if (user.role !== 'owner') return error('Only the owner can change business settings.', 403)

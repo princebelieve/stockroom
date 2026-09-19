@@ -18,7 +18,7 @@ import { paymentPolicy, recordPayment, type PaymentPolicy } from '../server/paym
 import { referenceFromScan } from './lib/reconciliation'
 import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
 import { DeviceSetup } from './DeviceSetup'
-import { scannerSettings } from './lib/deviceSetup'
+import { scannerSettings, type DeviceKind } from './lib/deviceSetup'
 import { readTerminalSettings, canRecordTerminalPayment } from './lib/terminalSettings'
 import { printerSettings, printDocument } from './lib/printing'
 import { PaymentPolicySettings } from './PaymentPolicySettings'
@@ -95,12 +95,12 @@ type AppSettings = {
   existingBusiness?: boolean
 }
 
-type User = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; organizationId: string }
-type SaleRecord = { id: string; total: number; paymentMethod: string; paymentReference: string; terminalProvider: string; paymentDetails?: Sale['paymentDetails']; cashReceived?: number | null; changeGiven?: number | null; staffName?: string; createdAt: string; items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number }> }
+type User = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; organizationId: string }
+type SaleRecord = { id: string; total: number; paymentMethod: string; paymentReference: string; terminalProvider: string; paymentDetails?: Sale['paymentDetails']; cashReceived?: number | null; changeGiven?: number | null; staffId?: string; staffName?: string; createdAt: string; items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number }> }
 type Movement = { id: string; productName: string; sku: string; quantity: number; reason: string; createdAt: string }
 type SyncStatus = { configured: boolean; pending: number; conflicts?: number; lastError: string; existingBusiness?: boolean }
 type SyncConflict = { id: string; entityType: string; entityId: string; reason: string; createdAt: string }
-type StaffUser = { id: string; name: string; email: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; createdAt: string }
+type StaffUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; createdAt: string }
 type Reports = { daily: { total: number; count: number }; weekly: { total: number; count: number }; monthly: { total: number; count: number }; inventory: { value: number; products: number; lowStock: number }; profit: { revenue: number; cost: number; expenses: number; amount: number } }
 type Expense = { id: string; category: string; description: string; amount: number; incurredAt: string }
 
@@ -113,6 +113,7 @@ function App() {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState('Overview')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [deviceSetupKind, setDeviceSetupKind] = useState<DeviceKind | undefined>()
   const [showAdd, setShowAdd] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ configured: false, pending: 0, lastError: '' })
@@ -192,6 +193,10 @@ function App() {
   const deviceTerminal = useMemo(() => readTerminalSettings(user?.organizationId || ''), [user?.organizationId, terminalRevision])
   const manualTerminalAllowed = canRecordTerminalPayment(deviceTerminal)
   useEffect(() => { setTerminalProvider(deviceTerminal.provider || posProvider) }, [deviceTerminal.provider, posProvider])
+  useEffect(() => {
+    const inputs = document.querySelectorAll<HTMLInputElement>('.payment-options input[placeholder*="provider"], .payment-options input[placeholder*="Bank name"]')
+    inputs.forEach(input => input.setAttribute('list', 'approved-payment-providers'))
+  }, [active, paymentMethod, extraPaymentPolicy.providers])
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('stockroom-token') || '')
   useEffect(() => { setCashReceived('') }, [authToken])
   const [cloudAccessToken, setCloudAccessToken] = useState(() => localStorage.getItem('stockroom-cloud-access-token') || '')
@@ -201,6 +206,13 @@ function App() {
   const [walletCreditApproved, setWalletCreditApproved] = useState(false)
   useEffect(() => { setWalletCreditApproved(false) }, [cart, walletCustomerId, authToken])
   const [staff, setStaff] = useState<StaffUser[]>([])
+  useEffect(() => {
+    if (active !== 'Team' || user?.role !== 'owner') return
+    const email = document.querySelector<HTMLInputElement>('.team-form input[name="email"]')
+    if (!email) return
+    email.required = false
+    email.placeholder = 'Optional contact email'
+  }, [active, user?.role, staff.length])
   const [reports, setReports] = useState<Reports | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [sales, setSales] = useState<SaleRecord[]>([])
@@ -250,7 +262,7 @@ function App() {
     }).catch(() => undefined)
   }, [authToken])
   useEffect(() => { if (canManageOperations) fetch('/api/customers', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ customers: Customer[] }> : Promise.reject()).then((data) => setCustomers(data.customers)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
-  useEffect(() => { let cancelled = false; setSales([]); if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => { if (!cancelled) setSales(data.sales) }).catch(() => { if (!cancelled) setReceiptError('Could not load older sales. Locally archived receipts remain available.') }); return () => { cancelled = true } }, [authToken, user?.organizationId, user?.operationalAccess, user?.role])
+  useEffect(() => { let cancelled = false; if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => { if (!cancelled) setSales(data.sales) }).catch(() => undefined); return () => { cancelled = true } }, [authToken, user?.organizationId, user?.operationalAccess, user?.role])
   useEffect(() => { if (canManageOperations) fetch('/api/movements', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ movements: Movement[] }> : Promise.reject()).then((data) => setMovements(data.movements)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
   useEffect(() => {
     if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
@@ -762,6 +774,12 @@ function App() {
 
   const canManageOperations = user?.role === 'owner' || user?.role === 'admin' || Boolean(user?.operationalAccess)
   const canManageInventory = canManageOperations
+  const canManageDeviceSetup = user?.role === 'owner' || user?.role === 'admin'
+  useEffect(() => {
+    if (!canManageDeviceSetup || printerSettings().receipt) return
+    setDeviceSetupKind('receipt')
+    setActive('Device')
+  }, [canManageDeviceSetup, user?.organizationId])
   const allReceipts: Sale[] = [...receiptHistory, ...sales.filter(row => !receiptHistory.some(receipt => receipt.id === row.id)).map(row => ({ ...row, paymentMethod: row.paymentMethod as Sale['paymentMethod'], syncStatus: 'synced' as const, items: row.items.map(item => ({ productId: item.productId, productName: item.productName, quantity: item.quantity, price: item.unitPrice })) }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const formatMoney = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
   async function refreshWallets() {
@@ -799,7 +817,9 @@ function App() {
     const submittedForm = event.currentTarget
     const form = new FormData(event.currentTarget)
     if (!cloudAccessToken) { setSettingsMessage('Connect to the internet and sign in again before creating staff accounts.'); return }
-    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), password: form.get('password'), role: form.get('role'), cloudAccessToken }) })
+    const username = window.prompt('Choose a unique staff username (3–32 characters; letters, numbers, dots, hyphens, and underscores).')?.trim().toLowerCase()
+    if (!username) return
+    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password: form.get('password'), role: form.get('role'), cloudAccessToken }) })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Could not add user.' })) as { error?: string }
       setSettingsMessage(error.error || 'Could not add user.')
@@ -818,6 +838,18 @@ function App() {
     const updated = await response.json() as StaffUser
     setStaff((current) => current.map((member) => member.id === updated.id ? updated : member))
     setSettingsMessage(`${updated.name} can ${updated.operationalAccess ? 'now manage operations' : 'now only use POS'}.`)
+  }
+
+  async function resetCashierPassword(member: StaffUser) {
+    if (!cloudAccessToken) return setSettingsMessage('Connect to the internet and sign in again before resetting a cashier password.')
+    const password = window.prompt(`Set a new temporary password for ${member.name}. It must have at least 10 characters.`)
+    if (!password) return
+    if (password.length < 10) return setSettingsMessage('Cashier passwords must be at least 10 characters long.')
+    const confirmation = window.prompt(`Re-enter the new password for ${member.name}.`)
+    if (password !== confirmation) return setSettingsMessage('Passwords did not match. No change was made.')
+    const response = await fetch(`/api/users/${member.id}/password`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ password, cloudAccessToken }) })
+    if (!response.ok) { const error = await response.json().catch(() => ({})) as { error?: string }; return setSettingsMessage(error.error || 'Could not reset cashier password.') }
+    setSettingsMessage(`Password reset for ${member.name}. Give them the temporary password privately.`)
   }
 
   async function exportSalesCsv() {
@@ -931,9 +963,9 @@ function App() {
     } else if (isBrowserPwa()) window.alert((await response.json()).error || 'Could not approve stocktake.')
   }
 
-  async function login(email: string, password: string) {
-    const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
-    const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).catch(() => null)
+  async function login(identifier: string, password: string) {
+    const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) })
+    const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) }).catch(() => null)
     const cloudData = cloudResponse?.ok ? await cloudResponse.json() as { token: string; user: User; cloudAccessToken: string } : null
     if (!response.ok && !cloudResponse?.ok) {
       if (isBrowserPwa()) {
@@ -1022,7 +1054,8 @@ function App() {
         {!isBrowserPwa() && ['owner', 'admin'].includes(user.role) && <button className={active === 'Owner' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Owner')}><LayoutDashboard size={18} />Business dashboard</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Reports' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Reports')}><BarChart3 size={18} />Reports</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Sync' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sync')}><RefreshCw size={18} />Sync issues {syncConflicts.length > 0 && <b>{syncConflicts.length}</b>}</button>}
-        {['owner', 'admin'].includes(user.role) && <button className={active === 'Team' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Team')}><UserRoundCog size={18} />Team management</button>}
+        {user.role === 'owner' && <button className={active === 'Team' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Team')}><UserRoundCog size={18} />Team management</button>}
+        {canManageDeviceSetup && <button className={active === 'Device' ? 'nav-item active' : 'nav-item'} onClick={() => { setDeviceSetupKind(undefined); setActive('Device') }}><Printer size={18} />Device setup</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Settings')}><UserRoundCog size={18} />Business settings</button>}
       </nav>
       <div className="sidebar-foot pwa-sync-controls"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` Â· ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline Â· saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncingâ€¦' : 'Sync now'}</button><p className="sync-feedback" role="status" aria-live="polite">{syncFeedback}</p><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
@@ -1051,14 +1084,15 @@ function App() {
       {active === 'Owner' && <OwnerDashboard token={authToken} currency={currency} />}
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
       {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} />}
-      {active === 'Team' && <TeamManagement staff={staff} addStaff={addStaff} setCashierAccess={setCashierAccess} canCreateStaff={user.role === 'owner'} message={settingsMessage} />}
-      {active === 'Settings' && user.role === 'admin' && <section className="panel full-panel"><DeviceSetup key={user.organizationId} businessId={user.organizationId} defaultProvider={posProvider} onTerminalSaved={() => setTerminalRevision(value => value + 1)} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} pairing={displayPairing} scan={() => scanBarcode('setup')} /></section>}
+      {active === 'Team' && <><StaffActivity staff={staff} sales={sales} money={formatMoney} /><TeamManagement staff={staff} addStaff={addStaff} setCashierAccess={setCashierAccess} resetCashierPassword={resetCashierPassword} canCreateStaff={user.role === 'owner'} message={settingsMessage} />{user.role === 'owner' && <CashierPasswordReset staff={staff} resetCashierPassword={resetCashierPassword} />}</>}
+      {active === 'Device' && canManageDeviceSetup && <section className="panel full-panel"><div className="panel-heading"><div><h2>Device setup</h2><p>These settings apply only to this checkout device, not the whole business.</p></div><Printer size={20} /></div><DeviceSetup key={`${user.organizationId}-${deviceSetupKind || 'all'}`} businessId={user.organizationId} defaultProvider={posProvider} onTerminalSaved={() => setTerminalRevision(value => value + 1)} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} pairing={displayPairing} scan={() => scanBarcode('setup')} initialKind={deviceSetupKind} /></section>}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel logo-settings"><h3>Business logo</h3><p>PNG, JPEG, or WebP up to 1 MB. It syncs to enrolled devices when you save business settings.</p>{logoData && <img src={logoData} alt="Business logo preview" className="settings-logo-preview" />}<label className="logo-upload-control"><strong>Upload logo</strong><input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseLogo} /></label></section>}
-      {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><AsyncForm className="settings-form" busyLabel="Saving settings..." onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>Default payment-terminal provider<span>Shared business default. Each checkout can override it in Payment terminal settings below.</span><input value={posProvider} placeholder="e.g. OPay" maxLength={100} onChange={(event) => setPosProvider(event.target.value)} /></label><PaymentPolicySettings value={extraPaymentPolicy} onChange={setExtraPaymentPolicy} /><SubmitButton className="primary-button">Save business settings <ArrowUpToLine size={17} /></SubmitButton>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</AsyncForm><DeviceSetup key={user.organizationId} businessId={user.organizationId} defaultProvider={posProvider} onTerminalSaved={() => setTerminalRevision(value => value + 1)} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} pairing={displayPairing} scan={() => scanBarcode('setup')} />{!isBrowserPwa() && <AsyncForm className="settings-form" busyLabel="Updating password..." onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><SubmitButton className="primary-button" type="submit">Update password</SubmitButton>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</AsyncForm>}{isBrowserPwa() && <p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p>}</section>}
+      {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><AsyncForm className="settings-form" busyLabel="Saving settings..." onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>Default payment-terminal provider<span>Shared business default. Each checkout can override it in Device setup.</span><input value={posProvider} placeholder="e.g. OPay" maxLength={100} onChange={(event) => setPosProvider(event.target.value)} /></label><PaymentPolicySettings value={extraPaymentPolicy} onChange={setExtraPaymentPolicy} /><SubmitButton className="primary-button">Save business settings <ArrowUpToLine size={17} /></SubmitButton>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</AsyncForm>{!isBrowserPwa() && <AsyncForm className="settings-form" busyLabel="Updating password..." onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><SubmitButton className="primary-button" type="submit">Update password</SubmitButton>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</AsyncForm>}{isBrowserPwa() && <p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p>}</section>}
     </main>
     {showAdd && <div className="modal-backdrop" onMouseDown={() => { if (!document.querySelector('form.modal[aria-busy="true"]')) setShowAdd(false) }}><AsyncForm className="modal" busyLabel="Saving product..." onSubmit={addProduct} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2>Add product</h2><p>It will be saved on this device immediately.</p></div><button type="button" className="icon-button" onClick={() => setShowAdd(false)}><X size={19} /></button></div><div className="form-grid"><label>Product name<input name="name" required placeholder="e.g. Espresso beans" /></label><label>Barcode<input name="barcode" placeholder="Scan or enter product barcode" /></label><label>SKU<input name="sku" required placeholder="COF-001" /></label><label>Category<input name="category" required placeholder="Beverages" /></label><label>Unit<input name="unit" required placeholder="bag" /></label><label>Starting stock<input name="stock" type="number" min="0" required defaultValue="0" /></label><label>Reorder point<input name="reorder" type="number" min="0" required defaultValue="10" /></label><label>Unit price<input name="price" type="number" min="0" step="0.01" required defaultValue="0" /></label></div><SubmitButton className="primary-button submit-button">Save product <ArrowUpToLine size={17} /></SubmitButton></AsyncForm></div>}
     {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><video ref={cameraVideo} muted playsInline style={{ width: '100%' }} /><button className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
     {lastReceipt && active === 'POS' && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
+    <datalist id="approved-payment-providers">{extraPaymentPolicy.providers.map(provider => <option key={provider} value={provider} />)}</datalist>
     {lastReceipt && <div className="print-receipt"><h2>{lastReceipt.businessName || appName}</h2><p>Receipt: {lastReceipt.id}</p>{(!lastReceipt.currency || !lastReceipt.businessName) && <p>Historical currency/business identity unavailable; current settings used.</p>}<p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>{lastReceipt.items.map((item) => <p key={item.productId}>{item.productName || item.productId}<br />{item.quantity} Ã— {new Intl.NumberFormat(undefined, { style: 'currency', currency: lastReceipt.currency || currency }).format(item.price)}</p>)}<strong>Total: {new Intl.NumberFormat(undefined, { style: 'currency', currency: lastReceipt.currency || currency }).format(lastReceipt.total)}</strong>{lastReceipt.paymentMethod === 'cash' && lastReceipt.cashReceived != null && <><p>Cash received: {new Intl.NumberFormat(undefined, { style: 'currency', currency: lastReceipt.currency || currency }).format(lastReceipt.cashReceived)}</p><p>Change given: {new Intl.NumberFormat(undefined, { style: 'currency', currency: lastReceipt.currency || currency }).format(lastReceipt.changeGiven ?? 0)}</p></>}<p>Payment: {lastReceipt.paymentMethod === 'external-pos' ? 'POS terminal' : lastReceipt.paymentMethod === 'cash' ? 'Cash' : 'Customer wallet'}</p>{lastReceipt.paymentMethod === 'external-pos' && <>{lastReceipt.terminalProvider && <p>Provider: {lastReceipt.terminalProvider}</p>}{lastReceipt.paymentReference && <p>Reference: {lastReceipt.paymentReference}</p>}</>}{lastReceipt.paymentDetails?.printExtraDetails && lastReceipt.paymentDetails.extraKept > 0 && <p>Extra retained: {formatMoney(lastReceipt.paymentDetails.extraKept)} ({lastReceipt.paymentDetails.reason}){lastReceipt.paymentDetails.note ? ` — ${lastReceipt.paymentDetails.note}` : ''}</p>}</div>}
   </div>
 }
@@ -1077,6 +1111,14 @@ function LoginScreen({ onLogin, error, setError }: { onLogin: (email: string, pa
   const [resetPassword, setResetPassword] = useState('')
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  useEffect(() => {
+    if (mode !== 'login') return
+    const identityInput = document.querySelector<HTMLInputElement>('.login-card input[type="email"]')
+    if (!identityInput) return
+    identityInput.type = 'text'
+    identityInput.placeholder = 'Owner email or staff username'
+    identityInput.setAttribute('autocomplete', 'username')
+  }, [mode])
   const resetView = () => { setError(''); setMessage('') }
   const returnToLogin = () => { resetView(); setMode('login') }
 
@@ -1115,8 +1157,21 @@ function OwnerDashboard({ token, currency }: { token: string; currency: string }
   return <section className="owner-dashboard"><div className="metric-grid"><div className="metric-card"><span>Sales recorded</span><strong>{metrics ? money(metrics.salesToday) : 'â€”'}</strong><small>Synced sales total</small></div><div className="metric-card"><span>Transactions</span><strong>{metrics?.saleCount ?? 'â€”'}</strong><small>Completed receipts</small></div><div className="metric-card alert-card"><span>Low stock</span><strong>{metrics?.lowStock ?? 'â€”'}</strong><small>Items needing attention</small></div></div><div className="panel owner-panel"><h2>Business monitoring</h2><p>Inventory value: <strong>{metrics ? money(metrics.inventoryValue) : 'â€”'}</strong> across {metrics?.productCount ?? 'â€”'} products.</p><p>Sales made offline are included after they synchronize.</p></div></section>
 }
 
-function TeamManagement({ staff, addStaff, setCashierAccess, canCreateStaff, message }: { staff: StaffUser[]; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; setCashierAccess: (id: string, enabled: boolean) => Promise<void>; canCreateStaff: boolean; message: string }) {
+function TeamManagement({ staff, addStaff, setCashierAccess, resetCashierPassword, canCreateStaff, message }: { staff: StaffUser[]; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; setCashierAccess: (id: string, enabled: boolean) => Promise<void>; resetCashierPassword: (member: StaffUser) => Promise<void>; canCreateStaff: boolean; message: string }) {
   return <section className="panel full-panel team-management"><div className="panel-heading"><div><h2>Team management</h2><p>Cashiers start with POS-only access. An admin or owner can grant operational access when needed.</p></div><UserRoundCog size={20} /></div><div className="team-grid"><section><h3>Current team</h3><div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th><th>Created</th></tr></thead><tbody>{staff.length ? staff.map((member) => <tr key={member.id}><td><strong>{member.name}</strong></td><td>{member.email}</td><td><span className={`role-badge ${member.role}`}>{member.role}</span></td><td>{member.role === 'cashier' ? <label><input type="checkbox" checked={Boolean(member.operationalAccess)} onChange={(event) => setCashierAccess(member.id, event.target.checked)} /> Operational</label> : 'Full role access'}</td><td>{new Date(member.createdAt).toLocaleDateString()}</td></tr>) : <tr><td colSpan={5} className="empty-state">Loading team accountsâ€¦</td></tr>}</tbody></table></div></section>{canCreateStaff && <AsyncForm className="settings-form team-form" busyLabel="Creating account..." onSubmit={addStaff}><h3>Add team member</h3><label>Full name<input name="name" required maxLength={100} placeholder="e.g. Ada Okafor" /></label><label>Email address<input name="email" type="email" required placeholder="ada@yourbusiness.com" /></label><label>Access role<select name="role" defaultValue="cashier"><option value="cashier">Cashier â€” POS only by default</option><option value="admin">Admin â€” manage stock and operations</option></select></label><label>Temporary password<input name="password" type="password" minLength={8} required placeholder="At least 8 characters" /></label><SubmitButton className="primary-button" type="submit">Create account <UserRoundCog size={17} /></SubmitButton></AsyncForm>}</div>{message && <p className="settings-message">{message}</p>}</section>
+}
+
+function CashierPasswordReset({ staff, resetCashierPassword }: { staff: StaffUser[]; resetCashierPassword: (member: StaffUser) => Promise<void> }) {
+  const cashiers = staff.filter((member) => member.role === 'cashier')
+  const [cashierId, setCashierId] = useState('')
+  useEffect(() => { if (!cashierId && cashiers[0]) setCashierId(cashiers[0].id) }, [cashierId, cashiers])
+  if (!cashiers.length) return null
+  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Cashier password control</h2><p>Cashier email addresses cannot reset accounts. Set a replacement password here and share it privately.</p></div></div><label>Cashier<select value={cashierId} onChange={(event) => setCashierId(event.target.value)}>{cashiers.map((member) => <option key={member.id} value={member.id}>{member.name} — {member.email}</option>)}</select></label><button type="button" className="primary-button" onClick={() => { const cashier = cashiers.find((member) => member.id === cashierId); if (cashier) void resetCashierPassword(cashier) }}>Reset cashier password</button></section>
+}
+
+function StaffActivity({ staff, sales, money }: { staff: StaffUser[]; sales: SaleRecord[]; money: (amount: number) => string }) {
+  const cashiers = staff.filter(member => member.role === 'cashier')
+  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Cashier activity</h2><p>Completed sales are grouped by the cashier who recorded them.</p></div></div><div className="table-wrap"><table><thead><tr><th>Cashier</th><th>Role</th><th>Sales</th><th>Sales total</th><th>Latest sale</th></tr></thead><tbody>{cashiers.length ? cashiers.map(cashier => { const recorded = sales.filter(sale => sale.staffId === cashier.id || (!sale.staffId && sale.staffName === cashier.name)); const latest = recorded[0]; return <tr key={cashier.id}><td><strong>{cashier.name}</strong><span className="table-subtext">{cashier.email}</span></td><td>Cashier</td><td>{recorded.length}</td><td>{money(recorded.reduce((sum, sale) => sum + sale.total, 0))}</td><td>{latest ? <>{new Date(latest.createdAt).toLocaleString()}<span className="table-subtext">{money(latest.total)} · {latest.paymentMethod}</span></> : 'No recorded sales'}</td></tr> }) : <tr><td colSpan={5} className="empty-state">No cashier accounts have been added yet.</td></tr>}</tbody></table></div></section>
 }
 
 function ReportsDashboard({ reports, currency, expenses, exportCsv, addExpense }: { reports: Reports | null; currency: string; expenses: Expense[]; exportCsv: () => Promise<void>; addExpense: (event: React.FormEvent<HTMLFormElement>) => Promise<void> }) {

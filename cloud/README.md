@@ -21,7 +21,7 @@ $body = @{ businessId = 'client-001'; ownerName = 'Client Owner'; email = 'owner
 Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/auth/register' -ContentType 'application/json' -Body $body
 ```
 
-Owners sign in with `POST /v1/auth/login`. Use their returned `accessToken` to enroll, list, or revoke devices. Enroll a device:
+Owners sign in with their email and password through `POST /v1/auth/login`. Staff sign in with their unique username and password; staff email addresses are contact-only and cannot authenticate. Existing staff receive a username derived from their email prefix the next time the owner opens Team management. Use the owner's returned `accessToken` to enroll, list, or revoke devices. Enroll a device:
 
 ```powershell
 $headers = @{ Authorization = 'Bearer OWNER_ACCESS_TOKEN'; 'Content-Type' = 'application/json' }
@@ -31,7 +31,7 @@ Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/devices/enroll' 
 
 List devices with `GET /v1/devices`; revoke one with `POST /v1/devices/DEVICE_ID/revoke`. A revoked device can no longer push or pull data.
 
-Password recovery uses `POST /v1/auth/password-reset/request` and `POST /v1/auth/password-reset/confirm`. In production, connect the request endpoint to your transactional-email provider and email the reset token/link. Resetting an owner password revokes every enrolled device, requiring deliberate re-enrollment.
+Password recovery uses `POST /v1/auth/password-reset/request` and `POST /v1/auth/password-reset/confirm`, and is available only to the business owner. Staff emails cannot reset an account. An authenticated owner resets a cashier password through `PUT /v1/staff/:id/password`; this action cannot target owners or admins. Resetting an owner password revokes every enrolled device, requiring deliberate re-enrollment.
 
 ### Gmail OAuth mail setup
 

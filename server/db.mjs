@@ -80,9 +80,15 @@ database.exec(`
     organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'cashier')),
     created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS customers (
     id TEXT PRIMARY KEY,
@@ -200,6 +206,7 @@ try { database.exec("ALTER TABLE stocktakes ADD COLUMN approval_reason TEXT NOT 
 try { database.exec("ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DEFAULT 0") } catch {}
 try { database.exec("ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0") } catch {}
 try { database.exec("ALTER TABLE users ADD COLUMN operational_access INTEGER NOT NULL DEFAULT 0") } catch {}
+try { database.exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''") } catch {}
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex')
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
@@ -283,17 +290,35 @@ export async function createOwnerSetup(input) {
   return { appName, ownerEmail: email, ownerName, mongoUri, mongoDatabase }
 }
 
-export function authenticateUser(email, password) {
-  const user = database.prepare('SELECT id, name, email, password_hash AS passwordHash, role, operational_access AS operationalAccess FROM users WHERE email = ? AND organization_id = ?').get(email.toLowerCase(), organizationId)
+export function authenticateUser(identifier, password) {
+  const value = String(identifier || '').trim().toLowerCase()
+  const user = database.prepare("SELECT id, name, email, username, password_hash AS passwordHash, role, operational_access AS operationalAccess FROM users WHERE organization_id = ? AND ((role = 'owner' AND email = ?) OR (role IN ('admin', 'cashier') AND username = ?))").get(organizationId, value, value)
   if (!user) return null
   if (!matchesPassword(password, user.passwordHash)) return null
   if (!String(user.passwordHash).includes(':')) database.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id)
-  return { id: user.id, name: user.name, email: user.email, role: user.role, operationalAccess: Boolean(user.operationalAccess), organizationId }
+  return { id: user.id, name: user.name, email: user.email, username: user.username || '', role: user.role, operationalAccess: Boolean(user.operationalAccess), organizationId }
 }
 
 export function getUserById(id) {
-  const user = database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ?').get(id, organizationId)
+  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ?').get(id, organizationId)
   return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId } : null
+}
+
+export function createSession(userId) {
+  const token = crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  database.prepare('INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userId, expiresAt)
+  return token
+}
+
+export function sessionUser(token) {
+  if (!token) return null
+  const session = database.prepare('SELECT user_id AS userId FROM auth_sessions WHERE token = ? AND expires_at > ?').get(token, now())
+  return session ? getUserById(session.userId) : null
+}
+
+export function deleteSession(token) {
+  if (token) database.prepare('DELETE FROM auth_sessions WHERE token = ?').run(token)
 }
 
 export function changePassword(userId, currentPassword, newPassword) {
@@ -340,28 +365,33 @@ export function exportSalesCsv() {
 }
 
 export function listUsers() {
-  return database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess) }))
+  return database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess) }))
 }
 
 export function createUser(input) {
   const name = String(input.name || '').trim()
   const email = String(input.email || '').trim().toLowerCase()
+  const username = String(input.username || '').trim().toLowerCase()
   const password = String(input.password || '')
   const role = String(input.role || '')
   if (!name || name.length > 100) throw new Error('Name is required and must be 100 characters or less.')
-  if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('A valid email address is required.')
-  if (password.length < 8) throw new Error('Password must be at least 8 characters long.')
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error('A valid email address is required when supplied.')
+  if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) throw new Error('Username must be 3–32 characters and use letters, numbers, dots, hyphens, or underscores.')
+  if (password.length < 10) throw new Error('Password must be at least 10 characters long.')
   if (!['admin', 'cashier'].includes(role)) throw new Error('New users can only be admins or cashiers.')
   const id = String(input.id || crypto.randomUUID())
+  // SQLite retains a non-null unique email column for compatibility with
+  // existing installations. This internal placeholder is never exposed.
+  const storedEmail = email || `${id}@staff.local.invalid`
   try {
-    database.prepare('INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, email, hashPassword(password), role, now())
+    database.prepare('INSERT INTO users (id, organization_id, name, email, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, storedEmail, username, hashPassword(password), role, now())
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) throw new Error('That email address is already in use.')
     throw error
   }
-  const user = database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
+  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
   queueSync('user', id, 'upsert', user)
-  return { ...user, operationalAccess: Boolean(user.operationalAccess) }
+  return { ...user, email, operationalAccess: Boolean(user.operationalAccess) }
 }
 
 export function setCashierOperationalAccess(id, enabled) {
@@ -374,15 +404,17 @@ export function setCashierOperationalAccess(id, enabled) {
 export function provisionCloudUser(input) {
   const name = String(input.name || '').trim()
   const email = String(input.email || '').trim().toLowerCase()
+  const username = String(input.username || '').trim().toLowerCase()
   const role = String(input.role || 'cashier')
   const password = String(input.password || '')
-  if (!name || !email || password.length < 8 || !['owner', 'admin', 'cashier'].includes(role)) throw new Error('Cloud user data is invalid.')
-  const existing = database.prepare('SELECT id FROM users WHERE email = ? AND organization_id = ?').get(email, organizationId)
+  if (!name || (role === 'owner' && !email) || (role !== 'owner' && !/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) || password.length < 8 || !['owner', 'admin', 'cashier'].includes(role)) throw new Error('Cloud user data is invalid.')
+  const existing = input.id ? database.prepare('SELECT id FROM users WHERE id = ? AND organization_id = ?').get(String(input.id), organizationId) : database.prepare('SELECT id FROM users WHERE email = ? AND organization_id = ?').get(email, organizationId)
   const id = String(existing?.id || input.id || crypto.randomUUID())
   const operationalAccess = input.operationalAccess === true ? 1 : 0
-  database.prepare(`INSERT INTO users (id, organization_id, name, email, password_hash, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, password_hash = excluded.password_hash, role = excluded.role, operational_access = excluded.operational_access`).run(id, organizationId, name, email, hashPassword(password), role, operationalAccess, now())
-  return authenticateUser(email, password)
+  const storedEmail = email || `${id}@staff.local.invalid`
+  database.prepare(`INSERT INTO users (id, organization_id, name, email, username, password_hash, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, password_hash = excluded.password_hash, role = excluded.role, operational_access = excluded.operational_access`).run(id, organizationId, name, storedEmail, username, hashPassword(password), role, operationalAccess, now())
+  return authenticateUser(role === 'owner' ? email : username, password)
 }
 
 export function listExpenses(limit = 200) {

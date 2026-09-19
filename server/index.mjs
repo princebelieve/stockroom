@@ -3,13 +3,12 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createStocktake, createUser, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, getUserById, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, setCashierOperationalAccess, updateStocktakeCount } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount } from './repository.mjs'
 import { pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
-const sessions = new Map()
 const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
 const distDirectory = join(fileURLToPath(new URL('..', import.meta.url)), 'dist')
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' }
@@ -39,31 +38,29 @@ const server = createServer(async (request, response) => {
         password: String(input.password || ''),
       })
       const user = await authenticateUser(String(input.email || '').trim(), String(input.password || ''))
-      const token = crypto.randomUUID()
-      sessions.set(token, user)
+      const token = createSession(user.id)
       return sendJson(response, 200, { token, user, setup: result })
     })
   }
 
   if (request.method === 'POST' && request.url === '/api/auth/login') {
     return readJson(request, response, async (input) => {
-      const user = await authenticateUser(String(input.email || '').trim(), String(input.password || ''))
+      const user = await authenticateUser(String(input.identifier || input.email || '').trim(), String(input.password || ''))
       if (!user) return sendJson(response, 401, { error: 'Email or password is incorrect.' })
-      const token = crypto.randomUUID()
-      sessions.set(token, user)
+      const token = createSession(user.id)
       return sendJson(response, 200, { token, user })
     })
   }
 
   if (request.method === 'POST' && request.url === '/api/auth/logout') {
     const token = request.headers.authorization?.replace('Bearer ', '')
-    if (token) sessions.delete(token)
+    deleteSession(token)
     return sendJson(response, 204, {})
   }
 
   if (request.method === 'PUT' && request.url === '/api/auth/password') {
     const token = request.headers.authorization?.replace('Bearer ', '')
-    const user = token ? sessions.get(token) : null
+    const user = savedSessionUser(token)
     if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
     return readJson(request, response, async (input) => {
       try {
@@ -106,9 +103,9 @@ const server = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/auth/cloud-session') return readJson(request, response, async (input) => {
     try {
       const password = String(input.password || '')
-      const remote = await cloudLogin(String(input.email || ''), password)
+      const remote = await cloudLogin(String(input.identifier || input.email || ''), password)
       const user = provisionCloudUser({ ...remote.account, password })
-      const token = crypto.randomUUID(); sessions.set(token, user)
+      const token = createSession(user.id)
       return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken })
     } catch (error) { return sendJson(response, 400, { error: error.message }) }
   })
@@ -157,7 +154,7 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'GET' && request.url === '/api/users') {
     const user = sessionUser(request)
-    if (!isManager(user)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
     return sendJson(response, 200, { users: await listUsers() })
   }
   if (request.method === 'POST' && request.url === '/api/users') {
@@ -172,11 +169,23 @@ const server = createServer(async (request, response) => {
   }
   const cashierAccessMatch = request.url?.match(/^\/api\/users\/([^/]+)\/operational-access$/)
   if (request.method === 'PUT' && cashierAccessMatch) {
-    if (!isManager(sessionUser(request))) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    const user = sessionUser(request)
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
     return readJson(request, response, async (input) => {
       try {
         const cloud = await cloudSetCashierOperationalAccess(String(input.cloudAccessToken || ''), cashierAccessMatch[1], input.enabled === true)
         return sendJson(response, 200, setCashierOperationalAccess(cashierAccessMatch[1], cloud.account.operationalAccess === true))
+      } catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+  const cashierPasswordMatch = request.url?.match(/^\/api\/users\/([^/]+)\/password$/)
+  if (request.method === 'PUT' && cashierPasswordMatch) {
+    const user = sessionUser(request)
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner can reset a cashier password.' })
+    return readJson(request, response, async (input) => {
+      try {
+        const cloud = await cloudResetCashierPassword(String(input.cloudAccessToken || ''), cashierPasswordMatch[1], String(input.password || ''))
+        return sendJson(response, 200, cloud.account)
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
@@ -374,8 +383,7 @@ startCustomerDisplayGateway(customerDisplayPort)
 
 function sessionUser(request) {
   const token = request.headers.authorization?.replace('Bearer ', '')
-  const session = token ? sessions.get(token) : null
-  return session ? getUserById(session.id) : null
+  return savedSessionUser(token)
 }
 
 function isManager(user) { return Boolean(user && ['owner', 'admin'].includes(user.role)) }

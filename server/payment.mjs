@@ -2,7 +2,7 @@ export const extraReasons = { tip: 'Voluntary tip', rounding: 'Agreed rounding',
 export function paymentPolicy(value) {
   if (typeof value === 'string') { try { value = JSON.parse(value) } catch { value = {} } }
   const p = value || {}
-  return { allowWallet: p.allowWallet === true, allowWalletCredit: p.allowWalletCredit === true, allowExtras: p.allowExtras === true, reasonForChange: p.reasonForChange === true, printExtraDetails: p.printExtraDetails === true, reasons: Array.isArray(p.reasons) ? [...new Set(p.reasons.filter(r => Object.hasOwn(extraReasons, r)))] : ['tip', 'rounding', 'other'] }
+  return { allowWallet: p.allowWallet === true, allowWalletCredit: p.allowWalletCredit === true, allowExtras: p.allowExtras === true, reasonForChange: p.reasonForChange === true, printExtraDetails: p.printExtraDetails === true, reasons: Array.isArray(p.reasons) ? [...new Set(p.reasons.filter(r => Object.hasOwn(extraReasons, r)))] : ['tip', 'rounding', 'other'], providers: Array.isArray(p.providers) ? [...new Set(p.providers.map(value => String(value).trim().slice(0, 100)).filter(Boolean))].slice(0, 20) : [] }
 }
 function cents(value, label) {
   if (!/^\d+(?:\.\d{1,2})?$/.test(String(value ?? '').trim())) throw new Error(`${label} must be a non-negative amount with at most two decimals.`)
