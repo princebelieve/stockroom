@@ -39,7 +39,10 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
   const referralSupportEmail = String(process.env.REFERRAL_SUPPORT_EMAIL || 'support@stockroom.business').trim()
   const defaultReferralSupportCopy = 'Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at {email} for your referral bonus. You will receive it as soon as possible.'
   const getPlan = () => settings.findOne({ _id: 'plan' })
-  const getReferralSupportCopy = async (plan = await getPlan()) => String(plan?.referralSupportCopy ?? '').trim() || defaultReferralSupportCopy
+  const getReferralSupportCopy = async (plan) => {
+    const selectedPlan = plan ?? await getPlan()
+    return String(selectedPlan?.referralSupportCopy ?? '').trim() || defaultReferralSupportCopy
+  }
   const referrals = database.collection('subscription_referrals')
   const commissions = database.collection('referral_commissions')
   await referrals.createIndex({ code: 1 }, { unique: true })
