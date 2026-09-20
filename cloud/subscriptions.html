@@ -509,6 +509,20 @@
       saveAuthState()
     }
 
+    function clearStaleDeveloperState() {
+      const currentEmail = String(state.currentEmail || '').trim().toLowerCase()
+      if (!currentEmail) return
+      if (!state.developerEmail || currentEmail === state.developerEmail.trim().toLowerCase()) return
+      state.developerAuthenticated = false
+      state.developerEmail = ''
+      el('developer-auth').classList.add('hidden')
+      el('developer-email').value = currentEmail
+      el('key').value = ''
+      el('developer-panel-root').hidden = true
+      el('developer').classList.remove('visible')
+      saveAuthState()
+    }
+
     function normalizeSupportCopy(value) {
       const raw = String(value ?? '').trim()
       return raw || DEFAULT_REFERRAL_SUPPORT_COPY
@@ -530,10 +544,17 @@
       const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Request failed.'); return data
     }
 
+    function readableError(error) {
+      if (error instanceof Error && error.message) return error.message
+      if (typeof error === 'string' && error.trim()) return error.trim()
+      if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' && error.message.trim()) return error.message.trim()
+      return 'Something went wrong. Please try again.'
+    }
+
     async function run(action) {
       el('message').textContent = ''
       document.querySelectorAll('button').forEach(button => button.disabled = true)
-      try { await action() } catch (error) { el('message').textContent = error.message }
+      try { await action() } catch (error) { el('message').textContent = readableError(error) }
       finally { document.querySelectorAll('button').forEach(button => button.disabled = false) }
     }
 
@@ -748,6 +769,7 @@
     window.addEventListener('DOMContentLoaded', () => {
       bindPasswordToggles()
       restoreAuthState()
+      clearStaleDeveloperState()
       if (state.token) {
         el('login').hidden = true
         el('renewal').hidden = false
