@@ -35,6 +35,8 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
   const notices = database.collection('subscription_notices')
   await subscriptions.createIndex({ expiresAt: 1 })
   const page = await readFile(new URL('./subscriptions.html', import.meta.url), 'utf8')
+  const developerEmail = String(process.env.DEVELOPER_EMAIL || '').trim().toLowerCase()
+  const referralSupportEmail = String(process.env.REFERRAL_SUPPORT_EMAIL || 'support@stockroom.business').trim()
   const getPlan = () => settings.findOne({ _id: 'plan' })
   const referrals = database.collection('subscription_referrals')
   const commissions = database.collection('referral_commissions')
@@ -138,7 +140,7 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
           const plan = { ...validatePlan(input), ...referralPercentages(input) }
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
-        return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+        return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL), developerEmail, referralSupportEmail })
       }
       if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
         if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })
@@ -167,7 +169,7 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
       if (claims?.kind !== 'access' || claims.role !== 'owner') return reply(403, { error: 'Sign in with your cloud owner account.' })
       const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
       if (!owner) return reply(403, { error: 'Owner account not found.' })
-      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }) })
+      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }), developerEmail, referralSupportEmail })
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'GET') return reply(200, await referralInfo(claims.businessId))
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'POST') {
         const input = JSON.parse(await body(request))

@@ -1,110 +1,564 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stockroom subscriptions</title>
-<style>body{font:16px system-ui;background:#f3f6fa;color:#142334;margin:0}main{max-width:650px;margin:40px auto;padding:24px}section{background:white;padding:24px;border-radius:16px;margin:20px 0}label{display:block;margin:16px 0}input,select,button{font:inherit;padding:12px;border:1px solid #b9c5cf;border-radius:8px;box-sizing:border-box}input,select{display:block;width:100%;margin-top:6px}button{background:#174c49;color:white;cursor:pointer}button:disabled{opacity:.5}p{line-height:1.6}#message{white-space:pre-wrap}small{color:#526171}</style></head>
-<body><main><h1>Subscription management</h1><p>Renew manually with Paystack. No automatic debits.</p>
-<section><label>Choose screen<select id="mode"><option value="owner">Business owner renewal</option><option value="developer">Developer subscription setup</option></select></label></section>
-<section id="owner"><h2>Owner renewal</h2><form id="login"><label>Owner email<input name="email" type="email" autocomplete="username" required></label><label>Cloud password<input name="password" type="password" autocomplete="current-password" required></label><button>Sign in</button></form><div id="renewal" hidden><p id="status"></p><p id="price"></p><p id="access-status"></p><button id="renew" type="button">Renew with Paystack</button> <button id="refresh" type="button">Refresh status</button> <button id="logout" type="button">Sign out</button><form id="verify"><label>Payment reference<input name="reference" required></label><button>Verify payment</button></form><small>If you paid but your subscription has not updated, verify the reference from Paystack.</small><h3>Referrals</h3><p>Share your link with another business. They must create their business account in the app, sign in here, and apply your code before their first checkout.</p><label>Your referral link<input id="referral-link" readonly></label><button id="copy-referral" type="button">Copy referral link</button><form id="claim-referral"><label>Who referred you? Referral code<input name="code" maxlength="32" pattern="[a-f0-9]{32}" required></label><button>Apply referral</button></form><p id="referral-status"></p><h4>Recent commission credits</h4><p>Credits are recorded for manual payout by the developer. No automatic payout is made.</p><ul id="commissions"></ul></div></section>
-<section id="developer" hidden><h2>Developer setup</h2><p>Paystack and Gmail OAuth secrets are configured in the cloud service environment.</p><div class="developer-tabs"><button type="button" class="developer-tab active" data-tab="setup">Setup</button><button type="button" class="developer-tab" data-tab="businesses">Businesses</button></div><div id="developer-setup-panel"><form id="connect"><label>Developer Admin API key<input id="key" type="password" autocomplete="off" required></label><button>Load setup</button></form><p id="configuration"></p><div id="test-controls" hidden><p id="test-status"></p><button id="toggle-test" type="button"></button><p>Test mode lifts all subscription blocks. Disable it when ready to enforce billing. Businesses without a paid subscription will then need to subscribe; expired subscriptions have one calendar month of grace.</p></div><form id="plan" hidden><label>Price in minor units<input name="amount" type="number" min="1" max="1000000000" step="1" required></label><small>For example, NGN 5,000 = 500000 kobo. Use a currency enabled on your Paystack account.</small><label>Currency<select name="currency"><option>NGN</option><option>GHS</option><option>ZAR</option><option>KES</option><option>USD</option><option>XOF</option></select></label><label>Subscription duration (days)<input name="days" type="number" min="1" max="730" value="30" required></label><label>Free trial for new business (days)<input name="freeTrialDays" type="number" min="0" max="365" value="0" required></label><label>Send reminder within this many days of expiry<input name="reminderDays" type="number" min="1" max="30" value="7" required></label><label>First payment referral commission (%)<input name="firstReferralPercent" type="number" min="0" max="100" step="0.01" value="0" required></label><label>Recurring payment referral commission (%)<input name="recurringReferralPercent" type="number" min="0" max="100" step="0.01" value="0" required></label><small>One direct referrer per business. Rates apply to future checkouts; commission rounds down to the nearest minor unit.</small><button>Save subscription setup</button></form></div><div id="business-directory" hidden><h3>Businesses on this platform</h3><p>Only the newest 10 businesses are loaded initially. More appear as you scroll.</p><ul id="businesses"></ul></div></section>
-<p id="message" role="status" aria-live="polite"></p></main>
-<script>
-const el = id => document.getElementById(id)
-let token = ''
-let testMode = true
-let businessPage = 0
-let businessLoading = false
-let businessHasMore = true
-const referralCode = new URL(location.href).searchParams.get('ref')
-if (referralCode && /^[a-f0-9]{32}$/.test(referralCode)) sessionStorage.setItem('stockroom-referral-code', referralCode)
-el('claim-referral').elements.code.value = sessionStorage.getItem('stockroom-referral-code') || ''
-const callbackReference = new URL(location.href).searchParams.get('reference')
-if (callbackReference) { el('verify').elements.reference.value = callbackReference; history.replaceState(null, '', '/subscriptions'); el('message').textContent = 'Sign in to verify your payment and refresh your subscription.' }
-async function loadBusinesses() {
-  if (businessLoading || !businessHasMore) return
-  businessLoading = true
-  try {
-    const page = await api('subscriptions/businesses?limit=10&skip=' + (businessPage * 10), 'GET', null, true)
-    const list = page.businesses || []
-    const current = el('businesses')
-    for (const business of list) {
-      const item = document.createElement('li')
-      item.textContent = `${business.businessId} · ${business.ownerName || business.name || 'Owner'} · ${business.email || 'No email'} · ${business.createdAt ? new Date(business.createdAt).toLocaleDateString() : 'Unknown date'}`
-      current.append(item)
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stockroom Business | Subscription</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --panel-alt: #f9fafc;
+      --line: #dfe7f1;
+      --text: #172133;
+      --muted: #53657d;
+      --brand: #0f172a;
+      --brand-soft: #eaf0ff;
+      --accent: #1d4ed8;
+      --success: #166534;
+      --warning: #92400e;
+      --shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
     }
-    businessPage += 1
-    businessHasMore = list.length === 10
-    if (!businessHasMore) current.dataset.complete = 'true'
-  } finally {
-    businessLoading = false
-  }
-}
-function showDeveloperTab(name) {
-  const active = name === 'businesses'
-  el('developer-setup-panel').hidden = active
-  el('business-directory').hidden = !active
-  document.querySelectorAll('.developer-tab').forEach((button) => {
-    const selected = button.dataset.tab === name
-    button.classList.toggle('active', selected)
-    button.setAttribute('aria-pressed', String(selected))
-  })
-  if (active) void loadBusinesses()
-}
-async function api(path, method = 'GET', input, developer = false) {
- const response = await fetch('/v1/' + path, { method, headers: { 'Content-Type': 'application/json', ...(developer ? { 'X-Admin-Key': el('key').value } : { Authorization: 'Bearer ' + token }) }, ...(input ? { body: JSON.stringify(input) } : {}) })
- const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Request failed.'); return data
-}
-async function run(action) {
- el('message').textContent = ''
- document.querySelectorAll('button').forEach(button => button.disabled = true)
- try { await action() } catch (error) { el('message').textContent = error.message }
- finally { document.querySelectorAll('button').forEach(button => button.disabled = false) }
-}
-async function refresh() {
- const data = await api('subscriptions')
- el('login').hidden = true; el('renewal').hidden = false
- const expiry = data.subscription?.expiresAt
- el('status').textContent = expiry ? (new Date(expiry) > new Date() ? 'Active until ' : 'Expired on ') + new Date(expiry).toLocaleString() : 'No paid subscription yet.'
- el('price').textContent = data.plan ? data.plan.currency + ' ' + (data.plan.amount / 100).toFixed(2) + ' for ' + data.plan.days + ' days. Renewals extend your current unexpired period.' : 'The developer has not set a price yet.'
- el('renew').hidden = !data.plan
- el('access-status').textContent = data.access.reason
- const assigned = Boolean(data.subscription?.referrerId)
- el('claim-referral').hidden = assigned
- el('referral-status').textContent = assigned ? 'Your referrer is assigned.' : 'Apply a referral code before your first checkout. Attribution cannot be changed later.'
- try {
-  const referral = await api('subscriptions/referrals')
-  el('referral-link').value = referral.link
-  el('commissions').replaceChildren()
-  for (const row of referral.commissions) { const item = document.createElement('li'); item.textContent = row.currency + ' ' + (row.amount / 100).toFixed(2) + ' ? ' + row.kind + ' payment at ' + row.percent + '% (' + new Date(row.createdAt).toLocaleDateString() + ')'; el('commissions').append(item) }
-  if (!referral.commissions.length) el('commissions').textContent = 'No commission credits yet.'
- } catch (error) { el('referral-status').textContent += ' ' + error.message }
-}
-function setup(data) {
- el('plan').hidden = false
- showDeveloperTab('setup')
- showTestMode(data.testMode)
- if (data.plan) for (const name of ['amount', 'currency', 'days', 'freeTrialDays', 'reminderDays', 'firstReferralPercent', 'recurringReferralPercent']) el('plan').elements[name].value = data.plan[name] ?? 0
- el('configuration').textContent = 'Paystack: ' + (data.paystackConfigured ? 'configured' : 'missing PAYSTACK_SECRET_KEY') + '. Email: ' + (data.emailConfigured ? 'configured' : 'missing Gmail OAuth credentials') + '. Portal URL: ' + (data.publicUrlConfigured ? 'configured' : 'missing SUBSCRIPTION_PUBLIC_URL') + '. Configuration presence does not confirm provider connectivity.'
-}
-function showTestMode(enabled) {
- testMode = enabled
- el('test-controls').hidden = false
- el('test-status').textContent = enabled ? 'Developer test mode is ON. All subscription blocks are lifted.' : 'Subscription enforcement is ON. POS blocks after the grace period.'
- el('toggle-test').textContent = enabled ? 'Disable test mode and enforce subscriptions' : 'Enable test mode and lift all blocks'
-}
-el('toggle-test').onclick = () => run(async () => { const result = await api('subscriptions/test-mode', 'PUT', { testMode: !testMode }, true); showTestMode(result.testMode) })
-el('claim-referral').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/referrals', 'POST', Object.fromEntries(new FormData(event.target))); sessionStorage.removeItem('stockroom-referral-code'); await refresh(); el('message').textContent = 'Referral applied.' }) }
-el('copy-referral').onclick = () => run(async () => { await navigator.clipboard.writeText(el('referral-link').value); el('message').textContent = 'Referral link copied.' })
-Array.from(document.querySelectorAll('.developer-tab')).forEach((button) => button.addEventListener('click', () => showDeveloperTab(button.dataset.tab)))
-el('mode').onchange = () => { el('owner').hidden = el('mode').value !== 'owner'; el('developer').hidden = el('mode').value !== 'developer'; el('key').value = ''; el('plan').hidden = true; el('business-directory').hidden = true; el('developer-setup-panel').hidden = false; el('test-controls').hidden = true; el('configuration').textContent = ''; el('message').textContent = ''; businessPage = 0; businessHasMore = true; businessLoading = false; el('businesses').replaceChildren(); document.querySelectorAll('.developer-tab').forEach((button) => button.classList.toggle('active', button.dataset.tab === 'setup')) }
-el('login').onsubmit = event => { event.preventDefault(); run(async () => { const data = await api('auth/login', 'POST', Object.fromEntries(new FormData(event.target))); if (data.account.role !== 'owner') throw new Error('Owner account required.'); token = data.accessToken; event.target.reset(); await refresh(); if (callbackReference) { await api('subscriptions/verify', 'POST', { reference: callbackReference }); await refresh() } }) }
-el('connect').onsubmit = event => { event.preventDefault(); run(async () => setup(await api('subscriptions/setup', 'GET', null, true))) }
-el('plan').onsubmit = event => { event.preventDefault(); run(async () => { setup(await api('subscriptions/setup', 'PUT', Object.fromEntries(new FormData(event.target)), true)); el('message').textContent = 'Subscription setup saved.' }) }
-el('renew').onclick = () => run(async () => { const data = await api('subscriptions/checkout', 'POST', {}); el('verify').elements.reference.value = data.reference; const url = new URL(data.authorizationUrl); if (url.protocol !== 'https:' || url.hostname !== 'checkout.paystack.com') throw new Error('Invalid checkout URL.'); location.assign(url.href) })
-el('refresh').onclick = () => run(refresh)
-el('verify').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/verify', 'POST', Object.fromEntries(new FormData(event.target))); await refresh(); el('message').textContent = 'Payment confirmed.' }) }
-el('logout').onclick = () => { token = ''; el('renewal').hidden = true; el('login').hidden = false; el('message').textContent = ''; el('verify').reset() }
-window.addEventListener('scroll', () => {
-  if (el('developer').hidden || el('business-directory').hidden) return
-  const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 120
-  if (nearBottom) void loadBusinesses()
-})
-</script></body></html>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 16px/1.5 "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #eef3ff 0%, var(--bg) 24%, var(--bg) 100%);
+      color: var(--text);
+    }
+    main {
+      max-width: 980px;
+      margin: 40px auto;
+      padding: 24px;
+    }
+    .brand-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding: 22px 24px;
+      background: rgba(255,255,255,0.74);
+      border: 1px solid rgba(223,231,241,0.9);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+    }
+    .brand-header h1 {
+      margin: 0;
+      font-size: clamp(1.7rem, 2vw, 2.5rem);
+      letter-spacing: -0.04em;
+    }
+    .brand-header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+    .brand-tag {
+      display: inline-flex;
+      align-items: center;
+      background: var(--brand-soft);
+      border: 1px solid #d4e1ff;
+      color: var(--accent);
+      border-radius: 999px;
+      font-size: 12px;
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 12px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      gap: 24px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+    .panel h2, .panel h3 { margin-top: 0; }
+    .muted { color: var(--muted); }
+    .stack { display: grid; gap: 18px; }
+    label {
+      display: block;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 14px;
+    }
+    input, select, button {
+      font: inherit;
+      border-radius: 12px;
+    }
+    input, select {
+      width: 100%;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 12px 14px;
+    }
+    input:focus, select:focus { outline: 3px solid rgba(29,78,216,0.12); border-color: var(--accent); }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid transparent;
+      padding: 12px 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .primary {
+      background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+      color: #fff;
+      box-shadow: 0 12px 24px rgba(17,24,39,.18);
+    }
+    .secondary {
+      background: rgba(15,23,42,0.03);
+      border-color: var(--line);
+      color: var(--text);
+    }
+    .small {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status-box {
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: var(--panel-alt);
+      border: 1px solid var(--line);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .status-box strong { display: block; margin-bottom: 6px; }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .inline-form { display: grid; gap: 10px; }
+    .hidden { display: none !important; }
+    #message {
+      margin-top: 16px;
+      min-height: 20px;
+      color: var(--success);
+      font-weight: 600;
+      white-space: pre-wrap;
+    }
+    .developer-panel {
+      display: none;
+      margin-top: 24px;
+    }
+    .developer-panel.visible { display: block; }
+    ul { margin: 0; padding-left: 18px; }
+    li + li { margin-top: 8px; }
+    @media (max-width: 760px) {
+      .layout { grid-template-columns: 1fr; }
+      .brand-header { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="brand-header">
+      <div>
+        <div class="brand-tag">Subscription</div>
+        <h1>Stockroom Business</h1>
+        <p>Secure billing and plan management.</p>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="panel" id="owner-panel">
+        <div class="stack">
+          <div>
+            <h2>Business billing</h2>
+            <p class="muted">Your account, renewal status, referral link, and active plan information.</p>
+          </div>
+
+          <form id="login" class="stack">
+            <label>
+              Business owner email
+              <input name="email" type="email" autocomplete="username" required placeholder="owner@business.com" />
+            </label>
+            <label>
+              Cloud password
+              <input name="password" type="password" autocomplete="current-password" required placeholder="Enter your password" />
+            </label>
+            <button class="primary" type="submit">Sign in</button>
+          </form>
+
+          <div id="renewal" class="stack hidden">
+            <div class="status-box">
+              <strong id="status">No active plan</strong>
+              <span id="price"></span>
+            </div>
+
+            <div class="status-box">
+              <strong>Access status</strong>
+              <span id="access-status"></span>
+            </div>
+
+            <div class="actions">
+              <button id="renew" class="primary" type="button">Renew plan</button>
+              <button id="refresh" class="secondary" type="button">Refresh status</button>
+              <button id="logout" class="secondary" type="button">Sign out</button>
+            </div>
+
+            <form id="verify" class="inline-form">
+              <label>
+                Payment reference
+                <input name="reference" required placeholder="Enter the payment reference" />
+              </label>
+              <button class="secondary" type="submit">Verify payment</button>
+            </form>
+
+            <div class="small">If a payment was sent but the plan has not updated, enter the reference to confirm the renewal.</div>
+
+            <div>
+              <h3>Referrals</h3>
+              <p class="muted">Share your link with another business and invite them to get started with Stockroom Business.</p>
+            </div>
+
+            <label>
+              Your referral link
+              <input id="referral-link" readonly />
+            </label>
+            <div class="actions">
+              <button id="copy-referral" class="secondary" type="button">Copy referral link</button>
+            </div>
+
+            <form id="claim-referral" class="inline-form">
+              <label>
+                Referral code
+                <input name="code" maxlength="32" pattern="[a-f0-9]{32}" required placeholder="Enter referral code" />
+              </label>
+              <button class="secondary" type="submit">Apply referral</button>
+            </form>
+
+            <p id="referral-status" class="muted"></p>
+
+            <div id="bonus-message" class="status-box hidden">
+              <strong>Your referral bonus</strong>
+              <span id="bonus-support-copy">Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support for your referral bonus. You will receive it as soon as possible.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel" id="developer-panel-root">
+        <div class="stack">
+          <h2>Developer access</h2>
+          <p class="muted">This area is only available to the configured developer account.</p>
+          <div id="developer" class="developer-panel">
+            <div class="developer-tabs stack">
+              <button type="button" class="developer-tab primary" data-tab="setup">Setup</button>
+              <button type="button" class="developer-tab secondary" data-tab="businesses">Businesses</button>
+            </div>
+
+            <div id="developer-setup-panel" class="stack">
+              <form id="connect" class="stack">
+                <label>
+                  Developer admin key
+                  <input id="key" type="password" autocomplete="off" required placeholder="Enter admin key" />
+                </label>
+                <button class="primary" type="submit">Load setup</button>
+              </form>
+
+              <p id="configuration" class="small"></p>
+
+              <div id="test-controls" class="hidden stack">
+                <p id="test-status" class="small"></p>
+                <button id="toggle-test" type="button" class="secondary"></button>
+              </div>
+
+              <form id="plan" class="stack hidden">
+                <label>
+                  Price in minor units
+                  <input name="amount" type="number" min="1" max="1000000000" step="1" required />
+                </label>
+                <div class="small">Example: NGN 5,000 = 500000.</div>
+
+                <label>
+                  Currency
+                  <select name="currency">
+                    <option>NGN</option>
+                    <option>GHS</option>
+                    <option>ZAR</option>
+                    <option>KES</option>
+                    <option>USD</option>
+                    <option>XOF</option>
+                  </select>
+                </label>
+
+                <label>
+                  Subscription duration (days)
+                  <input name="days" type="number" min="1" max="730" value="30" required />
+                </label>
+
+                <label>
+                  Free trial for new businesses (days)
+                  <input name="freeTrialDays" type="number" min="0" max="365" value="0" required />
+                </label>
+
+                <label>
+                  Reminder window (days before expiry)
+                  <input name="reminderDays" type="number" min="1" max="30" value="7" required />
+                </label>
+
+                <label>
+                  First payment referral commission (%)
+                  <input name="firstReferralPercent" type="number" min="0" max="100" step="0.01" value="0" required />
+                </label>
+
+                <label>
+                  Recurring payment referral commission (%)
+                  <input name="recurringReferralPercent" type="number" min="0" max="100" step="0.01" value="0" required />
+                </label>
+
+                <button class="primary" type="submit">Save subscription setup</button>
+              </form>
+            </div>
+
+            <div id="business-directory" class="hidden">
+              <ul id="businesses"></ul>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div id="message" role="status" aria-live="polite"></div>
+  </main>
+
+  <script>
+    const el = id => document.getElementById(id)
+    const state = {
+      token: '',
+      currentEmail: '',
+      developerEmail: '',
+      developerVisible: false,
+    }
+
+    const referralCode = new URL(location.href).searchParams.get('ref')
+    window.__referralSupportEmail = 'support@stockroom.business'
+    if (referralCode && /^[a-f0-9]{32}$/.test(referralCode)) sessionStorage.setItem('stockroom-referral-code', referralCode)
+    el('claim-referral').elements.code.value = sessionStorage.getItem('stockroom-referral-code') || ''
+
+    const callbackReference = new URL(location.href).searchParams.get('reference')
+    if (callbackReference) {
+      el('verify').elements.reference.value = callbackReference
+      history.replaceState(null, '', '/subscriptions')
+      el('message').textContent = 'Sign in to verify your payment and refresh your subscription.'
+    }
+
+    function isDeveloperAccount(email) {
+      return Boolean(email) && Boolean(state.developerEmail) && email.trim().toLowerCase() === state.developerEmail.trim().toLowerCase()
+    }
+
+    function updateDeveloperVisibility() {
+      state.developerVisible = isDeveloperAccount(state.currentEmail)
+      const panel = el('developer')
+      const root = el('developer-panel-root')
+      if (state.developerVisible) {
+        panel.classList.add('visible')
+        root.hidden = false
+      } else {
+        panel.classList.remove('visible')
+        root.hidden = true
+      }
+    }
+
+    async function api(path, method = 'GET', input, developer = false) {
+      const response = await fetch('/v1/' + path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(developer ? { 'X-Admin-Key': el('key').value } : { Authorization: 'Bearer ' + state.token }),
+        },
+        ...(input ? { body: JSON.stringify(input) } : {}),
+      })
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Request failed.'); return data
+    }
+
+    async function run(action) {
+      el('message').textContent = ''
+      document.querySelectorAll('button').forEach(button => button.disabled = true)
+      try { await action() } catch (error) { el('message').textContent = error.message }
+      finally { document.querySelectorAll('button').forEach(button => button.disabled = false) }
+    }
+
+    async function loadBusinesses() {
+      if (businessLoading || !businessHasMore) return
+      businessLoading = true
+      try {
+        const page = await api('subscriptions/businesses?limit=10&skip=' + (businessPage * 10), 'GET', null, true)
+        const list = page.businesses || []
+        const current = el('businesses')
+        for (const business of list) {
+          const item = document.createElement('li')
+          item.textContent = `${business.businessId} · ${business.ownerName || business.name || 'Owner'} · ${business.email || 'No email'} · ${business.createdAt ? new Date(business.createdAt).toLocaleDateString() : 'Unknown date'}`
+          current.append(item)
+        }
+        businessPage += 1
+        businessHasMore = list.length === 10
+      } finally { businessLoading = false }
+    }
+
+    function showDeveloperTab(name) {
+      const active = name === 'businesses'
+      el('developer-setup-panel').hidden = active
+      el('business-directory').hidden = !active
+      document.querySelectorAll('.developer-tab').forEach((button) => {
+        const selected = button.dataset.tab === name
+        button.classList.toggle('primary', selected)
+        button.classList.toggle('secondary', !selected)
+      })
+      if (active) void loadBusinesses()
+    }
+
+    async function refresh() {
+      const data = await api('subscriptions')
+      state.developerEmail = String(data.developerEmail || '').trim().toLowerCase()
+      window.__referralSupportEmail = String(data.referralSupportEmail || 'support@stockroom.business').trim()
+      const emailFromForm = String(document.querySelector('[name="email"]').value || '').trim().toLowerCase()
+      if (emailFromForm) state.currentEmail = emailFromForm
+      updateDeveloperVisibility()
+
+      el('login').hidden = true
+      el('renewal').hidden = false
+
+      const expiry = data.subscription?.expiresAt
+      el('status').textContent = expiry ? (new Date(expiry) > new Date() ? 'Active until ' : 'Expired on ') + new Date(expiry).toLocaleString() : 'No paid subscription yet.'
+      el('price').textContent = data.plan ? data.plan.currency + ' ' + (data.plan.amount / 100).toFixed(2) + ' for ' + data.plan.days + ' days. Renewals extend your current active period.' : 'The plan has not been configured yet.'
+      el('renew').hidden = !data.plan
+      el('access-status').textContent = data.access.reason
+      const assigned = Boolean(data.subscription?.referrerId)
+      el('claim-referral').hidden = assigned
+      el('referral-status').textContent = assigned ? 'Your referrer is assigned.' : 'Apply a referral code before your first payment. Attribution cannot be changed later.'
+      const bonusMessage = el('bonus-message')
+      const bonusSupportText = el('bonus-support-copy')
+      let referral = null
+      try {
+        referral = await api('subscriptions/referrals')
+        el('referral-link').value = referral.link
+        const supportEmail = String(data.referralSupportEmail || 'support@stockroom.business').trim()
+        if (Array.isArray(referral.commissions) && referral.commissions.length > 0) {
+          bonusMessage.classList.remove('hidden')
+          bonusSupportText.textContent = 'Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at ' + supportEmail + ' for your referral bonus. You will receive it as soon as possible.'
+        } else {
+          bonusMessage.classList.add('hidden')
+        }
+      } catch (error) {
+        el('referral-status').textContent += ' ' + error.message
+        bonusMessage.classList.add('hidden')
+      }
+    }
+
+    function setup(data) {
+      state.developerEmail = String(data.developerEmail || '').trim().toLowerCase()
+      updateDeveloperVisibility()
+      el('plan').hidden = false
+      showDeveloperTab('setup')
+      showTestMode(data.testMode)
+      if (data.plan) {
+        for (const name of ['amount', 'currency', 'days', 'freeTrialDays', 'reminderDays', 'firstReferralPercent', 'recurringReferralPercent']) {
+          el('plan').elements[name].value = data.plan[name] ?? 0
+        }
+      }
+      el('configuration').textContent = 'Payment provider: ' + (data.paystackConfigured ? 'configured' : 'missing PAYSTACK_SECRET_KEY') + '. Email: ' + (data.emailConfigured ? 'configured' : 'missing Gmail OAuth credentials') + '. Portal URL: ' + (data.publicUrlConfigured ? 'configured' : 'missing SUBSCRIPTION_PUBLIC_URL') + '.'
+    }
+
+    function showTestMode(enabled) {
+      testMode = enabled
+      el('test-controls').hidden = false
+      el('test-status').textContent = enabled ? 'Test mode is active. All subscription restrictions are lifted.' : 'Billing enforcement is active. POS access will pause after any grace period.'
+      el('toggle-test').textContent = enabled ? 'Disable test mode and enforce billing' : 'Enable test mode and lift restrictions'
+    }
+
+    let testMode = true
+    let businessPage = 0
+    let businessLoading = false
+    let businessHasMore = true
+
+    document.querySelectorAll('.developer-tab').forEach((button) => button.addEventListener('click', () => showDeveloperTab(button.dataset.tab)))
+
+    el('toggle-test').onclick = () => run(async () => { const result = await api('subscriptions/test-mode', 'PUT', { testMode: !testMode }, true); showTestMode(result.testMode) })
+    el('claim-referral').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/referrals', 'POST', Object.fromEntries(new FormData(event.target))); sessionStorage.removeItem('stockroom-referral-code'); await refresh(); el('message').textContent = 'Referral applied.'; const bonus = el('bonus-message'); const supportEmail = String(window.__referralSupportEmail || 'support@stockroom.business').trim(); bonus.classList.remove('hidden'); el('bonus-support-copy').textContent = 'Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at ' + supportEmail + ' for your referral bonus. You will receive it as soon as possible.'; }) }
+    el('copy-referral').onclick = () => run(async () => { await navigator.clipboard.writeText(el('referral-link').value); el('message').textContent = 'Referral link copied.' })
+
+    el('login').onsubmit = event => {
+      event.preventDefault();
+      run(async () => {
+        const form = new FormData(event.target)
+        const payload = Object.fromEntries(form)
+        const data = await api('auth/login', 'POST', payload)
+        if (data.account.role !== 'owner') throw new Error('Owner account required.')
+        state.token = data.accessToken
+        state.currentEmail = String(data.account.email || payload.email || '').trim().toLowerCase()
+        event.target.reset()
+        await refresh()
+        if (callbackReference) {
+          await api('subscriptions/verify', 'POST', { reference: callbackReference })
+          await refresh()
+        }
+      })
+    }
+
+    el('connect').onsubmit = event => {
+      event.preventDefault();
+      run(async () => setup(await api('subscriptions/setup', 'GET', null, true)))
+    }
+
+    el('plan').onsubmit = event => {
+      event.preventDefault();
+      run(async () => {
+        setup(await api('subscriptions/setup', 'PUT', Object.fromEntries(new FormData(event.target)), true))
+        el('message').textContent = 'Subscription setup saved.'
+      })
+    }
+
+    el('renew').onclick = () => run(async () => {
+      const data = await api('subscriptions/checkout', 'POST', {})
+      el('verify').elements.reference.value = data.reference
+      const url = new URL(data.authorizationUrl)
+      if (url.protocol !== 'https:' || url.hostname !== 'checkout.paystack.com') throw new Error('Invalid checkout URL.')
+      location.assign(url.href)
+    })
+
+    el('refresh').onclick = () => run(refresh)
+
+    el('verify').onsubmit = event => {
+      event.preventDefault();
+      run(async () => {
+        await api('subscriptions/verify', 'POST', Object.fromEntries(new FormData(event.target)))
+        await refresh()
+        el('message').textContent = 'Payment confirmed.'
+      })
+    }
+
+    el('logout').onclick = () => {
+      state.token = ''
+      state.currentEmail = ''
+      state.developerEmail = ''
+      el('renewal').hidden = true
+      el('login').hidden = false
+      el('message').textContent = ''
+      el('verify').reset()
+      el('developer-panel-root').hidden = true
+      el('developer').classList.remove('visible')
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      el('developer-panel-root').hidden = true
+      el('developer').classList.remove('visible')
+    })
+  </script>
+</body>
+</html>
