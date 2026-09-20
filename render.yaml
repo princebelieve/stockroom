@@ -18,8 +18,6 @@ services:
         sync: false
       - key: PAYSTACK_SECRET_KEY
         sync: false
-      - key: DEVELOPER_EMAIL
-        sync: false
       - key: REFERRAL_SUPPORT_EMAIL
         sync: false
       - key: SUBSCRIPTION_PUBLIC_URL

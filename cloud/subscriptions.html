@@ -646,14 +646,8 @@
       const emailInput = el('developer-email')
       const keyInput = el('key')
       const developerEmail = (emailInput.value || state.currentEmail || '').trim().toLowerCase()
-      if (state.developerEmail && developerEmail && developerEmail !== state.developerEmail.trim().toLowerCase()) {
-        el('message').textContent = 'This account is not the configured developer account. Enter the developer email to continue.'
-        emailInput.focus()
-        emailInput.classList.add('field-error')
-        return
-      }
       if (!developerEmail) {
-        el('message').textContent = 'Enter the developer email before continuing.'
+        el('message').textContent = 'Enter the business owner email before continuing.'
         emailInput.focus()
         return
       }
@@ -663,11 +657,6 @@
         return
       }
       const key = keyInput.value.trim()
-      if (state.developerEmail && developerEmail !== state.developerEmail.trim().toLowerCase()) {
-        el('message').textContent = 'The developer email does not match the configured admin account.'
-        emailInput.focus()
-        return
-      }
       const response = await fetch('/v1/subscriptions/setup', {
         method: 'GET',
         headers: {
