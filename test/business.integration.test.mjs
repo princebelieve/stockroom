@@ -92,6 +92,30 @@ test('local owner credentials can auto-create the missing cloud owner account', 
   }
 })
 
+test('a valid local login succeeds even when the cloud session endpoint is unavailable', async () => {
+  const cloud = createServer((request, response) => {
+    const url = new URL(request.url, 'http://localhost')
+    if (request.method === 'POST' && url.pathname === '/v1/auth/login') {
+      return jsonResponse(response, 503, { error: 'Cloud sync is temporarily unavailable.' })
+    }
+    if (request.method === 'POST' && url.pathname === '/v1/auth/register') {
+      return jsonResponse(response, 503, { error: 'Cloud sync is temporarily unavailable.' })
+    }
+    response.writeHead(503); response.end(JSON.stringify({ error: 'Cloud sync is temporarily unavailable.' }))
+  })
+  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening')
+  try {
+    const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
+    const token = await createOwner(baseUrl, 'owner-valid-login@test.local')
+    assert.equal(token.length > 0, true)
+    const login = await json(`${baseUrl}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'owner-valid-login@test.local', password: 'long-test-password' }) })
+    assert.equal(login.response.status, 200)
+    assert.equal(login.body.user.email, 'owner-valid-login@test.local')
+  } finally {
+    await new Promise((resolve) => cloud.close(resolve))
+  }
+})
+
 function jsonResponse(response, status, payload) {
   response.writeHead(status, { 'Content-Type': 'application/json' })
   response.end(JSON.stringify(payload))
