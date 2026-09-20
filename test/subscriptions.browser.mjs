@@ -12,6 +12,7 @@ try {
   let assigned = false
   let plan = { amount: 500000, currency: 'NGN', days: 30, reminderDays: 7, firstReferralPercent: 10, recurringReferralPercent: 5 }
   const code = 'a'.repeat(32)
+  const developerEmail = 'owner@example.com'
   await page.route('https://subscription.test/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -29,7 +30,7 @@ try {
       testMode = input.testMode
       data = { testMode }
     }
-    if (path === '/v1/subscriptions') data = { plan, subscription: { expiresAt: '2000-01-01', ...(assigned ? { referrerId: 'referrer' } : {}) }, access: { reason: testMode ? 'Developer test mode is on.' : 'Grace period has ended.' }, developerEmail: 'developer@example.com' }
+    if (path === '/v1/subscriptions') data = { plan, subscription: { expiresAt: '2000-01-01', ...(assigned ? { referrerId: 'referrer' } : {}) }, access: { reason: testMode ? 'Developer test mode is on.' : 'Grace period has ended.' }, developerEmail }
     if (path === '/v1/subscriptions/referrals') {
       assert.equal(request.headers().authorization, 'Bearer owner-token')
       if (request.method() === 'POST') { assert.equal(input.code, code); assigned = true; data = { ok: true } }
@@ -45,6 +46,12 @@ try {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await page.locator('#referral-link').waitFor()
   assert.equal(await page.locator('#mode').count(), 0)
+  assert.equal(await page.locator('#developer').isVisible(), false)
+  await page.locator('#logout').click()
+  await page.locator('[name=email]').fill('owner@example.com')
+  await page.locator('[name=password]').fill('owner-password')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await page.locator('#referral-link').waitFor()
   assert.equal(await page.locator('#developer').isVisible(), false)
   await page.locator('#logout').click()
   await page.locator('[name=email]').fill('developer@example.com')

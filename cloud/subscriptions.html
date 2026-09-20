@@ -322,6 +322,11 @@
                   <input name="recurringReferralPercent" type="number" min="0" max="100" step="0.01" value="0" required />
                 </label>
 
+                <label>
+                  Referral support text
+                  <textarea name="referralSupportCopy" rows="3" placeholder="Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at {email} for your referral bonus. You will receive it as soon as possible."></textarea>
+                </label>
+
                 <button class="primary" type="submit">Save subscription setup</button>
               </form>
             </div>
@@ -339,11 +344,17 @@
 
   <script>
     const el = id => document.getElementById(id)
+    const DEFAULT_REFERRAL_SUPPORT_COPY = 'Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at {email} for your referral bonus. You will receive it as soon as possible.'
     const state = {
       token: '',
       currentEmail: '',
       developerEmail: '',
       developerVisible: false,
+      referralSupportCopy: DEFAULT_REFERRAL_SUPPORT_COPY,
+    }
+
+    function isDeveloperAccessRequested() {
+      return new URL(location.href).searchParams.get('developer') === '1'
     }
 
     const referralCode = new URL(location.href).searchParams.get('ref')
@@ -363,7 +374,7 @@
     }
 
     function updateDeveloperVisibility() {
-      state.developerVisible = isDeveloperAccount(state.currentEmail)
+      state.developerVisible = isDeveloperAccessRequested() && isDeveloperAccount(state.currentEmail)
       const panel = el('developer')
       const root = el('developer-panel-root')
       if (state.developerVisible) {
@@ -373,6 +384,15 @@
         panel.classList.remove('visible')
         root.hidden = true
       }
+    }
+
+    function normalizeSupportCopy(value) {
+      const raw = String(value ?? '').trim()
+      return raw || DEFAULT_REFERRAL_SUPPORT_COPY
+    }
+
+    function buildSupportCopy(template, supportEmail) {
+      return normalizeSupportCopy(template).replace(/\{email\}/gi, supportEmail || 'support@stockroom.business')
     }
 
     async function api(path, method = 'GET', input, developer = false) {
@@ -426,6 +446,7 @@
     async function refresh() {
       const data = await api('subscriptions')
       state.developerEmail = String(data.developerEmail || '').trim().toLowerCase()
+      state.referralSupportCopy = normalizeSupportCopy(data.referralSupportCopy || DEFAULT_REFERRAL_SUPPORT_COPY)
       window.__referralSupportEmail = String(data.referralSupportEmail || 'support@stockroom.business').trim()
       const emailFromForm = String(document.querySelector('[name="email"]').value || '').trim().toLowerCase()
       if (emailFromForm) state.currentEmail = emailFromForm
@@ -451,7 +472,7 @@
         const supportEmail = String(data.referralSupportEmail || 'support@stockroom.business').trim()
         if (Array.isArray(referral.commissions) && referral.commissions.length > 0) {
           bonusMessage.classList.remove('hidden')
-          bonusSupportText.textContent = 'Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at ' + supportEmail + ' for your referral bonus. You will receive it as soon as possible.'
+          bonusSupportText.textContent = buildSupportCopy(state.referralSupportCopy, supportEmail)
         } else {
           bonusMessage.classList.add('hidden')
         }
@@ -463,6 +484,7 @@
 
     function setup(data) {
       state.developerEmail = String(data.developerEmail || '').trim().toLowerCase()
+      state.referralSupportCopy = normalizeSupportCopy(data.referralSupportCopy || data.plan?.referralSupportCopy || DEFAULT_REFERRAL_SUPPORT_COPY)
       updateDeveloperVisibility()
       el('plan').hidden = false
       showDeveloperTab('setup')
@@ -471,6 +493,7 @@
         for (const name of ['amount', 'currency', 'days', 'freeTrialDays', 'reminderDays', 'firstReferralPercent', 'recurringReferralPercent']) {
           el('plan').elements[name].value = data.plan[name] ?? 0
         }
+        el('plan').elements.referralSupportCopy.value = normalizeSupportCopy(data.plan.referralSupportCopy || DEFAULT_REFERRAL_SUPPORT_COPY)
       }
       el('configuration').textContent = 'Payment provider: ' + (data.paystackConfigured ? 'configured' : 'missing PAYSTACK_SECRET_KEY') + '. Email: ' + (data.emailConfigured ? 'configured' : 'missing Gmail OAuth credentials') + '. Portal URL: ' + (data.publicUrlConfigured ? 'configured' : 'missing SUBSCRIPTION_PUBLIC_URL') + '.'
     }
@@ -490,7 +513,7 @@
     document.querySelectorAll('.developer-tab').forEach((button) => button.addEventListener('click', () => showDeveloperTab(button.dataset.tab)))
 
     el('toggle-test').onclick = () => run(async () => { const result = await api('subscriptions/test-mode', 'PUT', { testMode: !testMode }, true); showTestMode(result.testMode) })
-    el('claim-referral').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/referrals', 'POST', Object.fromEntries(new FormData(event.target))); sessionStorage.removeItem('stockroom-referral-code'); await refresh(); el('message').textContent = 'Referral applied.'; const bonus = el('bonus-message'); const supportEmail = String(window.__referralSupportEmail || 'support@stockroom.business').trim(); bonus.classList.remove('hidden'); el('bonus-support-copy').textContent = 'Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at ' + supportEmail + ' for your referral bonus. You will receive it as soon as possible.'; }) }
+    el('claim-referral').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/referrals', 'POST', Object.fromEntries(new FormData(event.target))); sessionStorage.removeItem('stockroom-referral-code'); await refresh(); el('message').textContent = 'Referral applied.'; const bonus = el('bonus-message'); const supportEmail = String(window.__referralSupportEmail || 'support@stockroom.business').trim(); bonus.classList.remove('hidden'); el('bonus-support-copy').textContent = buildSupportCopy(state.referralSupportCopy, supportEmail); }) }
     el('copy-referral').onclick = () => run(async () => { await navigator.clipboard.writeText(el('referral-link').value); el('message').textContent = 'Referral link copied.' })
 
     el('login').onsubmit = event => {
