@@ -221,7 +221,23 @@
               </div>
             </label>
             <button class="primary" type="submit">Sign in</button>
+            <button id="developer-login" class="secondary" type="button">Sign in as developer</button>
           </form>
+
+          <div id="developer-auth" class="stack hidden">
+            <label id="developer-email-row" class="hidden">
+              Developer email
+              <input id="developer-email" type="email" autocomplete="username" placeholder="developer@business.com" />
+            </label>
+            <label>
+              Admin key
+              <div class="password-wrap">
+                <input id="key" type="password" autocomplete="off" required placeholder="Enter admin key" />
+                <button type="button" class="password-toggle" data-password-toggle="key" aria-label="Show admin key">👁</button>
+              </div>
+            </label>
+            <button id="developer-connect" class="primary" type="button">Open developer access</button>
+          </div>
 
           <div id="renewal" class="stack hidden">
             <div class="status-box">
@@ -296,8 +312,8 @@
                 <label>
                   Developer admin key
                   <div class="password-wrap">
-                    <input id="key" type="password" autocomplete="off" required placeholder="Enter admin key" />
-                    <button type="button" class="password-toggle" data-password-toggle="key" aria-label="Show admin key">👁</button>
+                    <input id="connect-key" type="password" autocomplete="off" required placeholder="Enter admin key" />
+                    <button type="button" class="password-toggle" data-password-toggle="connect-key" aria-label="Show admin key">👁</button>
                   </div>
                 </label>
                 <button class="primary" type="submit">Load setup</button>
@@ -390,12 +406,48 @@
         })
       })
     }
+    const AUTH_STORAGE_KEY = 'stockroom-subscription-auth'
     const state = {
       token: '',
       currentEmail: '',
       developerEmail: '',
+      developerAuthenticated: false,
       developerVisible: false,
       referralSupportCopy: DEFAULT_REFERRAL_SUPPORT_COPY,
+    }
+
+    function saveAuthState() {
+      const snapshot = {
+        token: state.token,
+        currentEmail: state.currentEmail,
+        developerEmail: state.developerEmail,
+        developerAuthenticated: state.developerAuthenticated,
+      }
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(snapshot))
+    }
+
+    function restoreAuthState() {
+      try {
+        const raw = sessionStorage.getItem(AUTH_STORAGE_KEY)
+        if (!raw) return
+        const snapshot = JSON.parse(raw)
+        if (snapshot && typeof snapshot === 'object') {
+          state.token = typeof snapshot.token === 'string' ? snapshot.token : ''
+          state.currentEmail = typeof snapshot.currentEmail === 'string' ? snapshot.currentEmail : ''
+          state.developerEmail = typeof snapshot.developerEmail === 'string' ? snapshot.developerEmail : ''
+          state.developerAuthenticated = Boolean(snapshot.developerAuthenticated)
+        }
+      } catch (error) {
+        sessionStorage.removeItem(AUTH_STORAGE_KEY)
+      }
+    }
+
+    function clearAuthState() {
+      state.token = ''
+      state.currentEmail = ''
+      state.developerEmail = ''
+      state.developerAuthenticated = false
+      sessionStorage.removeItem(AUTH_STORAGE_KEY)
     }
 
     function isDeveloperAccessRequested() {
@@ -414,12 +466,8 @@
       el('message').textContent = 'Sign in to verify your payment and refresh your subscription.'
     }
 
-    function isDeveloperAccount(email) {
-      return Boolean(email) && Boolean(state.developerEmail) && email.trim().toLowerCase() === state.developerEmail.trim().toLowerCase()
-    }
-
     function updateDeveloperVisibility() {
-      state.developerVisible = isDeveloperAccessRequested() && isDeveloperAccount(state.currentEmail)
+      state.developerVisible = isDeveloperAccessRequested() && state.developerAuthenticated
       const panel = el('developer')
       const root = el('developer-panel-root')
       if (state.developerVisible) {
@@ -429,6 +477,36 @@
         panel.classList.remove('visible')
         root.hidden = true
       }
+    }
+
+    function showDeveloperAuth() {
+      const auth = el('developer-auth')
+      const emailRow = el('developer-email-row')
+      const emailInput = el('developer-email')
+      const keyInput = el('key')
+      auth.classList.remove('hidden')
+      if (state.developerEmail && state.currentEmail.trim().toLowerCase() === state.developerEmail.trim().toLowerCase()) {
+        emailRow.classList.add('hidden')
+        emailInput.value = state.currentEmail
+      } else {
+        emailRow.classList.remove('hidden')
+        emailInput.value = state.currentEmail || ''
+      }
+      keyInput.value = ''
+      keyInput.focus()
+    }
+
+    function resetDeveloperAuth() {
+      state.developerAuthenticated = false
+      state.developerEmail = ''
+      el('developer-auth').classList.add('hidden')
+      el('developer-email').value = ''
+      el('key').value = ''
+      el('developer-panel-root').hidden = true
+      el('developer').classList.remove('visible')
+      if (el('connect')) el('connect').reset()
+      if (el('plan')) el('plan').reset()
+      saveAuthState()
     }
 
     function normalizeSupportCopy(value) {
@@ -529,6 +607,7 @@
 
     function setup(data) {
       state.developerEmail = String(data.developerEmail || '').trim().toLowerCase()
+      state.developerAuthenticated = true
       state.referralSupportCopy = normalizeSupportCopy(data.referralSupportCopy || data.plan?.referralSupportCopy || DEFAULT_REFERRAL_SUPPORT_COPY)
       updateDeveloperVisibility()
       el('plan').hidden = false
@@ -556,6 +635,57 @@
     let businessHasMore = true
 
     document.querySelectorAll('.developer-tab').forEach((button) => button.addEventListener('click', () => showDeveloperTab(button.dataset.tab)))
+    el('developer-login').onclick = () => {
+      if (!state.token) {
+        el('message').textContent = 'Sign in as the business owner first, then open developer access.'
+        return
+      }
+      showDeveloperAuth()
+    }
+    el('developer-connect').onclick = () => run(async () => {
+      const emailInput = el('developer-email')
+      const keyInput = el('key')
+      const developerEmail = (emailInput.value || state.currentEmail || '').trim().toLowerCase()
+      if (state.developerEmail && developerEmail && developerEmail !== state.developerEmail.trim().toLowerCase()) {
+        el('message').textContent = 'This account is not the configured developer account. Enter the developer email to continue.'
+        emailInput.focus()
+        emailInput.classList.add('field-error')
+        return
+      }
+      if (!developerEmail) {
+        el('message').textContent = 'Enter the developer email before continuing.'
+        emailInput.focus()
+        return
+      }
+      if (!keyInput.value.trim()) {
+        el('message').textContent = 'Enter the admin key to unlock developer access.'
+        keyInput.focus()
+        return
+      }
+      const key = keyInput.value.trim()
+      if (state.developerEmail && developerEmail !== state.developerEmail.trim().toLowerCase()) {
+        el('message').textContent = 'The developer email does not match the configured admin account.'
+        emailInput.focus()
+        return
+      }
+      const response = await fetch('/v1/subscriptions/setup', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Key': key,
+        },
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Invalid admin key.')
+      state.developerEmail = String(data.developerEmail || developerEmail || '').trim().toLowerCase()
+      state.developerAuthenticated = true
+      saveAuthState()
+      updateDeveloperVisibility()
+      el('developer-auth').classList.add('hidden')
+      el('developer').classList.add('visible')
+      el('developer-panel-root').hidden = false
+      setup(data)
+    })
 
     el('toggle-test').onclick = () => run(async () => { const result = await api('subscriptions/test-mode', 'PUT', { testMode: !testMode }, true); showTestMode(result.testMode) })
     el('claim-referral').onsubmit = event => { event.preventDefault(); run(async () => { await api('subscriptions/referrals', 'POST', Object.fromEntries(new FormData(event.target))); sessionStorage.removeItem('stockroom-referral-code'); await refresh(); el('message').textContent = 'Referral applied.'; const bonus = el('bonus-message'); const supportEmail = String(window.__referralSupportEmail || 'support@stockroom.business').trim(); bonus.classList.remove('hidden'); el('bonus-support-copy').textContent = buildSupportCopy(state.referralSupportCopy, supportEmail); }) }
@@ -571,7 +701,7 @@
         if (data.account.role !== 'owner') throw new Error('Owner account required.')
         state.token = data.accessToken
         state.currentEmail = String(data.account.email || payload.email || '').trim().toLowerCase()
-        form.reset()
+        saveAuthState()
         await refresh()
         if (callbackReference) {
           await api('subscriptions/verify', 'POST', { reference: callbackReference })
@@ -584,6 +714,10 @@
       event.preventDefault();
       run(async () => setup(await api('subscriptions/setup', 'GET', null, true)))
     }
+
+    el('developer-auth').addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') el('developer-auth').classList.add('hidden')
+    })
 
     el('plan').onsubmit = event => {
       event.preventDefault();
@@ -613,21 +747,23 @@
     }
 
     el('logout').onclick = () => {
-      state.token = ''
-      state.currentEmail = ''
-      state.developerEmail = ''
+      clearAuthState()
+      resetDeveloperAuth()
       el('renewal').hidden = true
       el('login').hidden = false
       el('message').textContent = ''
       el('verify').reset()
-      el('developer-panel-root').hidden = true
-      el('developer').classList.remove('visible')
+      el('login').reset()
     }
 
     window.addEventListener('DOMContentLoaded', () => {
       bindPasswordToggles()
-      el('developer-panel-root').hidden = true
-      el('developer').classList.remove('visible')
+      restoreAuthState()
+      if (state.token) {
+        el('login').hidden = true
+        el('renewal').hidden = false
+      }
+      updateDeveloperVisibility()
     })
   </script>
 </body>

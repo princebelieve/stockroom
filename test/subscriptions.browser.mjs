@@ -41,6 +41,16 @@ try {
   await page.goto('https://subscription.test/subscriptions?ref=' + code)
   assert.equal(await page.locator('#mode').count(), 0)
   assert.equal(await page.locator('#developer').isVisible(), false)
+
+  await page.route('https://subscription.test/v1/auth/login', route => route.fulfill({ status: 401, json: { error: 'Invalid credentials.' } }))
+  await page.locator('[name=email]').fill('wrong@example.com')
+  await page.locator('[name=password]').fill('wrong-password')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await page.getByText('Invalid credentials.', { exact: true }).waitFor()
+  assert.equal(await page.locator('[name=email]').inputValue(), 'wrong@example.com')
+  assert.equal(await page.locator('[name=password]').inputValue(), 'wrong-password')
+
+  await page.unroute('https://subscription.test/v1/auth/login')
   await page.locator('[name=email]').fill('owner@example.com')
   await page.locator('[name=password]').fill('owner-password')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
@@ -60,6 +70,11 @@ try {
   await page.locator('#key').waitFor()
   assert.equal(await page.locator('#mode').count(), 0)
   assert.equal(await page.locator('#developer').isVisible(), true)
+
+  await page.reload()
+  await page.locator('#developer').waitFor()
+  assert.equal(await page.locator('#developer').isVisible(), true)
+
   await page.locator('#logout').click()
   await page.locator('[name=email]').fill('owner@example.com')
   await page.locator('[name=password]').fill('owner-password')
