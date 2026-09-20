@@ -100,6 +100,32 @@
       color: var(--text);
       padding: 12px 14px;
     }
+    .password-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .password-wrap input {
+      width: 100%;
+      padding-right: 42px;
+    }
+    .password-toggle {
+      position: absolute;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 0;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      box-shadow: none;
+    }
+    .password-toggle:hover { background: rgba(15, 23, 42, 0.04); }
     input:focus, select:focus { outline: 3px solid rgba(29,78,216,0.12); border-color: var(--accent); }
     button {
       display: inline-flex;
@@ -189,7 +215,10 @@
             </label>
             <label>
               Cloud password
-              <input name="password" type="password" autocomplete="current-password" required placeholder="Enter your password" />
+              <div class="password-wrap">
+                <input id="login-password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password" />
+                <button type="button" class="password-toggle" data-password-toggle="login-password" aria-label="Show password">👁</button>
+              </div>
             </label>
             <button class="primary" type="submit">Sign in</button>
           </form>
@@ -266,7 +295,10 @@
               <form id="connect" class="stack">
                 <label>
                   Developer admin key
-                  <input id="key" type="password" autocomplete="off" required placeholder="Enter admin key" />
+                  <div class="password-wrap">
+                    <input id="key" type="password" autocomplete="off" required placeholder="Enter admin key" />
+                    <button type="button" class="password-toggle" data-password-toggle="key" aria-label="Show admin key">👁</button>
+                  </div>
                 </label>
                 <button class="primary" type="submit">Load setup</button>
               </form>
@@ -345,6 +377,19 @@
   <script>
     const el = id => document.getElementById(id)
     const DEFAULT_REFERRAL_SUPPORT_COPY = 'Your referred business has just subscribed to Stockroom Business. Contact Stockroom Business Support at {email} for your referral bonus. You will receive it as soon as possible.'
+    function bindPasswordToggles() {
+      document.querySelectorAll('[data-password-toggle]').forEach((button) => {
+        const targetId = button.getAttribute('data-password-toggle')
+        const input = targetId ? document.getElementById(targetId) : null
+        if (!input) return
+        button.addEventListener('click', () => {
+          const showing = input.type === 'text'
+          input.type = showing ? 'password' : 'text'
+          button.textContent = showing ? '👁' : '🙈'
+          button.setAttribute('aria-label', showing ? 'Show password' : 'Hide password')
+        })
+      })
+    }
     const state = {
       token: '',
       currentEmail: '',
@@ -517,15 +562,16 @@
     el('copy-referral').onclick = () => run(async () => { await navigator.clipboard.writeText(el('referral-link').value); el('message').textContent = 'Referral link copied.' })
 
     el('login').onsubmit = event => {
-      event.preventDefault();
+      event.preventDefault()
+      event.stopPropagation()
+      const form = event.currentTarget
       run(async () => {
-        const form = new FormData(event.target)
-        const payload = Object.fromEntries(form)
+        const payload = Object.fromEntries(new FormData(form))
         const data = await api('auth/login', 'POST', payload)
         if (data.account.role !== 'owner') throw new Error('Owner account required.')
         state.token = data.accessToken
         state.currentEmail = String(data.account.email || payload.email || '').trim().toLowerCase()
-        event.target.reset()
+        form.reset()
         await refresh()
         if (callbackReference) {
           await api('subscriptions/verify', 'POST', { reference: callbackReference })
@@ -579,6 +625,7 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
+      bindPasswordToggles()
       el('developer-panel-root').hidden = true
       el('developer').classList.remove('visible')
     })
