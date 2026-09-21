@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { mailConfigured, sendReferralBonusNotice, sendSubscriptionReminder } from './mailer.mjs'
-import { subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
+import { mailConfigured, sendReferralBonusNotice, sendSubscriptionConfirmation, sendSubscriptionGraceNotice, sendSubscriptionReminder } from './mailer.mjs'
+import { graceEndsAt, subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
 
 export function validatePlan(input) {
   const plan = {
@@ -104,7 +104,9 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       const recorded = await commissions.updateOne({ _id: reference }, { $setOnInsert: entry }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
       newlyCredited = Boolean(recorded?.upsertedCount)
     }
+    const firstConfirmation = !payment.paidAt
     await payments.updateOne({ _id: reference }, { $set: { paidAt: new Date() } })
+    if (firstConfirmation && owner?.email && mailConfigured()) void sendSubscriptionConfirmation({ to: owner.email, amount: payment.amount, currency: payment.currency, expiresAt: settled.expiresAt }).catch(error => console.error('Subscription confirmation email failed:', error.message))
     if (newlyCredited && entry.amount > 0) {
       const referrer = await accounts.findOne({ businessId: entry.referrerId, role: 'owner' })
       if (referrer?.email) void sendReferralBonusNotice({ to: referrer.email, amount: entry.amount, currency: entry.currency, kind: entry.kind }).catch(error => console.error('Referral bonus notice failed:', error.message))
@@ -128,6 +130,15 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         await sendSubscriptionReminder({ to: owner.email, expiresAt: subscription.expiresAt, url: appUrl() })
         await notices.updateOne({ _id: id }, { $set: { sent: true, sentAt: new Date() } })
       } catch (error) { await notices.updateOne({ _id: id }, { $set: { lockedUntil: new Date(0) } }); console.error('Subscription reminder failed:', error.message) }
+    }
+    for await (const subscription of subscriptions.find({ expiresAt: { $lte: now } })) {
+      const end = graceEndsAt(subscription.expiresAt, Number(plan.graceMonths ?? 1))
+      if (!end || new Date(end) <= now) continue
+      const owner = await accounts.findOne({ businessId: subscription._id, role: 'owner' })
+      if (!owner?.email) continue
+      const id = `grace:${subscription._id}:${new Date(subscription.expiresAt).toISOString()}`
+      try { await notices.insertOne({ _id: id, sent: false }) } catch (error) { if (error?.code === 11000) continue; throw error }
+      try { await sendSubscriptionGraceNotice({ to: owner.email, expiresAt: new Date(subscription.expiresAt), graceEndsAt: new Date(end), url: appUrl() }); await notices.updateOne({ _id: id }, { $set: { sent: true, sentAt: new Date() } }) } catch (error) { console.error('Subscription grace email failed:', error.message) }
     }
   }
   const timer = setInterval(() => reminders().catch(error => console.error('Reminder scan failed:', error.message)), 3600000)

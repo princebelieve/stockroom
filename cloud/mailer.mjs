@@ -10,6 +10,18 @@ export async function sendSubscriptionReminder({ to, expiresAt, url }) {
   await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Your Stockroom subscription expires soon', text: `Your Stockroom subscription expires on ${expiresAt.toISOString().slice(0, 10)} (UTC).\n\nRenew manually at ${url}\n\nYou will not be charged automatically. Sign in as the business owner and choose Renew with Paystack.` })
 }
 
+export async function sendSubscriptionConfirmation({ to, amount, currency, expiresAt }) {
+  if (!configured()) throw new Error('Email is not configured.')
+  const value = `${currency} ${(amount / 100).toFixed(2)}`
+  const renewal = expiresAt.toISOString().slice(0, 10)
+  await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Your Stockroom subscription payment is confirmed', text: `We confirmed your Stockroom subscription payment of ${value}.\n\nYour current access renews or expires on ${renewal} (UTC).\n\nYou will not be charged automatically.`, html: `<p>We confirmed your Stockroom subscription payment of <b>${value}</b>.</p><p>Your current access renews or expires on <b>${renewal}</b> (UTC).</p><p>You will not be charged automatically.</p>` })
+}
+
+export async function sendSubscriptionGraceNotice({ to, expiresAt, graceEndsAt, url }) {
+  if (!configured()) throw new Error('Email is not configured.')
+  await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Your Stockroom subscription is now in grace period', text: `Your subscription expired on ${expiresAt.toISOString().slice(0, 10)} (UTC). POS access ends on ${graceEndsAt.toISOString().slice(0, 10)} (UTC) unless you renew.\n\nRenew at ${url}`, html: `<p>Your subscription is now in its grace period.</p><p>POS access ends on <b>${graceEndsAt.toISOString().slice(0, 10)} (UTC)</b> unless you renew.</p><p><a href="${url}">Renew your subscription</a></p>` })
+}
+
 export async function sendReferralBonusNotice({ to, amount, currency, kind }) {
   if (!configured()) throw new Error('Email is not configured.')
   const paymentType = kind === 'first' ? 'a new subscription' : 'a subscription renewal'
