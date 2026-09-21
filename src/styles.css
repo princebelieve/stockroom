@@ -340,3 +340,38 @@ body { background: #dfece5; }
   .login-card label, .demo-account strong { font-size: 14px; }.demo-account span { font-size: 13px; }
   .login-card input { min-height: 48px; font-size: 16px; }
 }
+
+/* Give the working interface a more confident desktop reading scale without
+   enlarging the dashboard figures that already carry the visual hierarchy. */
+@media (min-width: 651px) {
+  .main-content { max-width: 1600px; padding-top: 46px; padding-bottom: 72px; }
+  .sidebar { width: 270px; padding: 32px 18px 24px; }
+  .brand strong { font-size: 22px; }.brand span, .nav-item b, .sidebar-foot small { font-size: 12px; }
+  .workspace, .nav-item { font-size: 15px; }.nav-item { padding: 13px; }
+  .sync-status, .sync-button { font-size: 13px; }
+  .eyebrow { font-size: 13px; }.topbar h1 { font-size: 32px; }.hero-row h2 { font-size: 25px; }
+  .hero-row p, .panel-heading p, .owner-panel p, .report-note p { font-size: 15px; line-height: 1.5; }
+  .primary-button, .filter-button, .text-button, .page-options-panel button { font-size: 14px; min-height: 42px; }
+  .icon-button, .avatar { width: 42px; height: 42px; }
+  .panel { padding: 26px; }.panel-heading h2, .panel-heading h3, .owner-panel h2 { font-size: 20px; }
+  .empty-state { font-size: 15px; }.search-box input { font-size: 15px; padding-block: 12px; }
+  th { font-size: 11px; } td { font-size: 14px; padding-block: 15px; }
+  .product-cell strong, .alert-row strong, .cart-row strong, .transaction-row strong { font-size: 14px; }
+  .product-cell span, .stock-cell span, .alert-row span, .cart-row span, .transaction-row small, .customer-row small { font-size: 13px; line-height: 1.4; }
+  .settings-form label, .form-grid label { font-size: 14px; }.settings-form label span, .payment-options label { font-size: 13px; }
+  .settings-form input, .settings-form select, .form-grid input, .payment-options input, .payment-options select, .provider-add input { min-height: 44px; font-size: 15px; }
+  .pos-product { min-height: 58px; padding: 13px; }.pos-product strong { font-size: 15px; }.pos-product small, .pos-product b { font-size: 13px; }
+  .cart-row, .transaction-row, .customer-row { padding-block: 16px; }.payment-note, .auth-error, .settings-message { font-size: 14px; line-height: 1.45; }
+  .login-card { width: min(440px, 100%); }.login-card h1 { font-size: 28px; }.login-card p { font-size: 15px; }.login-card label { font-size: 14px; }.login-card input { min-height: 44px; font-size: 15px; }
+}
+
+/* On phones the fixed menu trigger needs its own clear lane above the page.
+   Keeping the header in normal flow prevents it from covering the first body
+   content, while the sticky state still keeps page actions available. */
+@media (max-width: 650px) {
+  .mobile-nav-toggle { top: max(8px, env(safe-area-inset-top)); }
+  .main-content { padding-top: 84px; }
+  .topbar { margin-top: 0; }
+  .main-content, .topbar, .hero-row, .panel, .payment-options, .settings-form { max-width: 100%; }
+  .topbar, .panel-heading, .hero-row, .customer-row, .report-actions { min-width: 0; }
+}
