@@ -51,4 +51,4 @@ Copy the returned `deviceToken` into the installed app's `%APPDATA%\Stockroom Bu
 
 For the Vercel/iPhone PWA, set PWA_ALLOWED_ORIGINS to the exact HTTPS origin(s), separated by commas. Android's https://localhost remains allowed. See [PWA-DEPLOYMENT.md](../PWA-DEPLOYMENT.md).
 
-Manual Paystack subscriptions, the developer test-mode switch, one-month POS grace, and referral commission settings are available at `/subscriptions`. See [subscription setup](../docs/subscriptions.md). Test mode starts enabled; deploy the cloud service before updated clients, then disable test mode when ready to enforce billing.
+Manual Paystack subscriptions, the developer-only enforcement switch, and one-month POS grace are integrated into the Vercel Business App. See [subscription setup](../docs/subscriptions.md). Enforcement starts off; deploy this cloud service before the updated client, then turn it on from the in-app Subscription screen when ready.

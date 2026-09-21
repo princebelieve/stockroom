@@ -91,7 +91,7 @@ async function assignLegacyStaffUsername(account) {
   return { ...account, username: candidate }
 }
 
-const subscriptionHandler = await createSubscriptions({ database, accounts, adminApiKey, verifyToken, send })
+const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   for (const [name, value] of Object.entries(corsHeaders)) response.setHeader(name, value)

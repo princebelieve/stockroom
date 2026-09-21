@@ -20,6 +20,10 @@ services:
         sync: false
       - key: SUBSCRIPTION_PUBLIC_URL
         sync: false
+      - key: DEVELOPER_EMAIL
+        sync: false
+      - key: PWA_ALLOWED_ORIGINS
+        sync: false
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET

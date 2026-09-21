@@ -1,5 +1,4 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { mailConfigured, sendSubscriptionReminder } from './mailer.mjs'
 import { subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
 
@@ -28,13 +27,12 @@ async function body(request) {
   return Buffer.concat(chunks)
 }
 
-export async function createSubscriptions({ database, accounts, adminApiKey, verifyToken, send, fetcher = fetch }) {
+export async function createSubscriptions({ database, accounts, verifyToken, send, fetcher = fetch }) {
   const settings = database.collection('subscription_settings')
   const subscriptions = database.collection('subscriptions')
   const payments = database.collection('subscription_payments')
   const notices = database.collection('subscription_notices')
   await subscriptions.createIndex({ expiresAt: 1 })
-  const page = await readFile(new URL('./subscriptions.html', import.meta.url), 'utf8')
   const getPlan = () => settings.findOne({ _id: 'plan' })
   const referrals = database.collection('subscription_referrals')
   const commissions = database.collection('referral_commissions')
@@ -51,22 +49,32 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
       ? new Date(createdAtTime + trialDays * 86400000).toISOString()
       : null
     const effectiveExpiresAt = subscription?.expiresAt || (trialEndsAt && new Date(trialEndsAt) > new Date() ? trialEndsAt : null)
-    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? portal() : '' })
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
+  }
+  const developerEmail = String(process.env.DEVELOPER_EMAIL || '').trim().toLowerCase()
+  const isDeveloper = claims => Boolean(developerEmail && claims?.kind === 'access' && claims.role === 'owner' && String(claims.email || '').trim().toLowerCase() === developerEmail)
+  const appUrl = () => {
+    const url = new URL(process.env.SUBSCRIPTION_PUBLIC_URL)
+    if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('Configure an HTTPS SUBSCRIPTION_PUBLIC_URL.')
+    url.pathname = '/'
+    url.search = ''
+    url.searchParams.set('screen', 'subscription')
+    return url.href
   }
   async function referralInfo(businessId) {
     await referrals.updateOne({ _id: businessId }, { $setOnInsert: { code: randomBytes(16).toString('hex') } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
     const referral = await referrals.findOne({ _id: businessId })
     const rows = await commissions.find({ referrerId: businessId }).sort({ createdAt: -1 }).limit(100).toArray()
-    return { link: `${portal()}?ref=${encodeURIComponent(referral.code)}`, commissions: rows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amount, currency, percent, kind, createdAt })) }
+    const link = new URL(appUrl()); link.searchParams.set('ref', referral.code)
+    return { link: link.href, commissions: rows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amount, currency, percent, kind, createdAt })) }
   }
   async function listBusinesses(limit = 10, skip = 0) {
     const rows = await accounts.find({ role: 'owner' }).sort({ createdAt: -1 }).skip(Number(skip) || 0).limit(Number(limit) || 10).toArray()
     return rows.map((account) => ({ businessId: account.businessId, ownerName: account.ownerName || account.name || '', email: account.email || '', createdAt: account.createdAt }))
   }
-  const portal = () => { const url = new URL(process.env.SUBSCRIPTION_PUBLIC_URL); if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('Configure an HTTPS SUBSCRIPTION_PUBLIC_URL.'); return new URL('/subscriptions', url).href }
   async function paystack(path, input) {
     if (!process.env.PAYSTACK_SECRET_KEY) throw new Error('Paystack is not configured.')
     const response = await fetcher(`https://api.paystack.co${path}`, { method: input ? 'POST' : 'GET', headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' }, ...(input ? { body: JSON.stringify(input) } : {}), signal: AbortSignal.timeout(20000) })
@@ -107,7 +115,7 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
         if (!claim.modifiedCount) continue
       }
       try {
-        await sendSubscriptionReminder({ to: owner.email, expiresAt: subscription.expiresAt, url: portal() })
+        await sendSubscriptionReminder({ to: owner.email, expiresAt: subscription.expiresAt, url: appUrl() })
         await notices.updateOne({ _id: id }, { $set: { sent: true, sentAt: new Date() } })
       } catch (error) { await notices.updateOne({ _id: id }, { $set: { lockedUntil: new Date(0) } }); console.error('Subscription reminder failed:', error.message) }
     }
@@ -117,9 +125,6 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
   void reminders().catch(error => console.error('Reminder scan failed:', error.message))
   return async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
-    if (url.pathname === '/subscriptions' && request.method === 'GET') {
-      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer' }); response.end(page); return true
-    }
     if (!url.pathname.startsWith('/v1/subscriptions')) return false
     response.setHeader('Cache-Control', 'no-store')
     const reply = (status, data) => { send(response, status, data); return true }
@@ -131,8 +136,9 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
         if (event.event === 'charge.success' && await payments.findOne({ _id: event.data.reference })) await settle(event.data.reference)
         return reply(200, { ok: true })
       }
+      const claims = verifyToken(request)
       if (url.pathname === '/v1/subscriptions/setup') {
-        if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })
+        if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
         if (request.method === 'PUT') {
           const input = JSON.parse(await body(request))
           const plan = { ...validatePlan(input), ...referralPercentages(input) }
@@ -141,21 +147,20 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
         return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
       }
       if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
-        if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })
+        if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
         const params = new URL(request.url, 'http://localhost').searchParams
         const limit = Number(params.get('limit') || '10')
         const skip = Number(params.get('skip') || '0')
         return reply(200, { businesses: await listBusinesses(Math.min(Math.max(limit, 1), 10), Math.max(skip, 0)) })
       }
       if (url.pathname === '/v1/subscriptions/test-mode' && request.method === 'PUT') {
-        if (request.headers['x-admin-key'] !== adminApiKey) return reply(401, { error: 'Developer API key required.' })
+        if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
         const input = JSON.parse(await body(request))
         if (typeof input.testMode !== 'boolean') return reply(400, { error: 'testMode must be true or false.' })
         if (!input.testMode && !await getPlan()) return reply(409, { error: 'Save a subscription plan before enabling enforcement.' })
         await settings.updateOne({ _id: 'control' }, { $set: { testMode: input.testMode, updatedAt: new Date() } })
         return reply(200, { testMode: input.testMode })
       }
-      const claims = verifyToken(request)
       if (url.pathname === '/v1/subscriptions/access' && request.method === 'GET') {
         if (!claims?.businessId || !['device', 'access'].includes(claims.kind)) return reply(401, { error: 'Sign in or enroll this device.' })
         const authorized = claims.kind === 'device'
@@ -167,7 +172,7 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
       if (claims?.kind !== 'access' || claims.role !== 'owner') return reply(403, { error: 'Sign in with your cloud owner account.' })
       const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
       if (!owner) return reply(403, { error: 'Owner account not found.' })
-      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }) })
+      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }), isDeveloper: isDeveloper(claims) })
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'GET') return reply(200, await referralInfo(claims.businessId))
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'POST') {
         const input = JSON.parse(await body(request))
@@ -182,7 +187,7 @@ export async function createSubscriptions({ database, accounts, adminApiKey, ver
         const plan = await getPlan()
         if (!plan) return reply(409, { error: 'The developer has not configured a subscription plan.' })
         const reference = `sub-${randomBytes(20).toString('hex')}`
-        const callback = portal()
+        const callback = appUrl()
         await ensureSubscription(claims.businessId)
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         await payments.insertOne({ ...validatePlan(plan), ...referralPercentages(plan), referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })

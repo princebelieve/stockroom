@@ -68,14 +68,16 @@ function memoryDatabase() {
 test('cloud routes enforce developer authorization and attribute first/recurring credits once', async () => {
   const oldUrl = process.env.SUBSCRIPTION_PUBLIC_URL
   const oldKey = process.env.PAYSTACK_SECRET_KEY
-  process.env.SUBSCRIPTION_PUBLIC_URL = 'https://cloud.test'
+  const oldDeveloperEmail = process.env.DEVELOPER_EMAIL
+  process.env.SUBSCRIPTION_PUBLIC_URL = 'https://app.test'
   process.env.PAYSTACK_SECRET_KEY = 'sk_test_fake'
+  process.env.DEVELOPER_EMAIL = 'buyer@test.local'
   try {
     const database = memoryDatabase()
     const accounts = database.collection('accounts')
     await accounts.insertOne({ _id: 'a', businessId: 'buyer', email: 'buyer@test.local', role: 'owner' })
     await accounts.insertOne({ _id: 'b', businessId: 'referrer', email: 'referrer@test.local', role: 'owner' })
-    const handler = await createSubscriptions({ database, accounts, adminApiKey: 'secret', verifyToken: request => request.claims,
+    const handler = await createSubscriptions({ database, accounts, verifyToken: request => request.claims,
       send: (response, status, data) => { response.status = status; response.data = data },
       fetcher: async (url, options) => {
         if (url.endsWith('/initialize')) {
@@ -89,18 +91,17 @@ test('cloud routes enforce developer authorization and attribute first/recurring
         return Response.json({ status: true, data: { reference, amount: payment.amount, currency: payment.currency, status: 'success', customer: { email: payment.email } } })
       },
     })
-    const call = async (path, { method = 'GET', input, businessId = 'buyer', admin = false } = {}) => {
+    const call = async (path, { method = 'GET', input, businessId = 'buyer' } = {}) => {
       const request = Readable.from([Buffer.from(JSON.stringify(input || {}))])
-      Object.assign(request, { url: '/v1/subscriptions' + path, method, headers: admin ? { 'x-admin-key': 'secret' } : {}, claims: { kind: 'access', role: 'owner', businessId, email: `${businessId}@test.local` } })
+      Object.assign(request, { url: '/v1/subscriptions' + path, method, headers: {}, claims: { kind: 'access', role: 'owner', businessId, email: `${businessId}@test.local` } })
       const response = { setHeader() {} }
       await handler(request, response)
       return response
     }
-    assert.equal((await call('/setup')).status, 401)
-    assert.equal((await call('/test-mode', { method: 'PUT', input: { testMode: false } })).status, 401)
-    assert.equal((await call('/setup', { admin: true })).data.testMode, true)
-    assert.equal((await call('/test-mode', { method: 'PUT', admin: true, input: { testMode: false } })).status, 409)
-    assert.equal((await call('/setup', { method: 'PUT', admin: true, input: { amount: 999, currency: 'NGN', days: 30, reminderDays: 7, firstReferralPercent: 15, recurringReferralPercent: 5 } })).status, 200)
+    assert.equal((await call('/setup', { businessId: 'referrer' })).status, 403)
+    assert.equal((await call('/setup')).data.testMode, true)
+    assert.equal((await call('/test-mode', { method: 'PUT', input: { testMode: false } })).status, 409)
+    assert.equal((await call('/setup', { method: 'PUT', input: { amount: 999, currency: 'NGN', days: 30, reminderDays: 7, firstReferralPercent: 15, recurringReferralPercent: 5 } })).status, 200)
     const info = await call('/referrals', { businessId: 'referrer' })
     const code = new URL(info.data.link).searchParams.get('ref')
     assert.equal((await call('/referrals', { method: 'POST', businessId: 'referrer', input: { code } })).status, 400)
@@ -119,12 +120,13 @@ test('cloud routes enforce developer authorization and attribute first/recurring
     assert.equal(credits.find(row => row.kind === 'first').amount, 149)
     assert.equal(credits.find(row => row.kind === 'recurring').amount, 49)
     assert.equal((await call('/verify', { method: 'POST', businessId: 'referrer', input: { reference: first } })).status, 400)
-    assert.equal((await call('/test-mode', { method: 'PUT', admin: true, input: { testMode: false } })).status, 200)
+    assert.equal((await call('/test-mode', { method: 'PUT', input: { testMode: false } })).status, 200)
     assert.equal((await call('/access', { businessId: 'referrer' })).data.blocked, true)
-    assert.equal((await call('/test-mode', { method: 'PUT', admin: true, input: { testMode: true } })).status, 200)
+    assert.equal((await call('/test-mode', { method: 'PUT', input: { testMode: true } })).status, 200)
     assert.equal((await call('/access', { businessId: 'referrer' })).data.blocked, false)
   } finally {
     if (oldUrl === undefined) delete process.env.SUBSCRIPTION_PUBLIC_URL; else process.env.SUBSCRIPTION_PUBLIC_URL = oldUrl
     if (oldKey === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = oldKey
+    if (oldDeveloperEmail === undefined) delete process.env.DEVELOPER_EMAIL; else process.env.DEVELOPER_EMAIL = oldDeveloperEmail
   }
 })
