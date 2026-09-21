@@ -1,4 +1,4 @@
-import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
+import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markKnownLocalOperationsApplied, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -59,9 +59,13 @@ export async function syncConfigurationStatus() {
 
 async function pullRemoteChanges({ url, token, businessId, deviceId }) {
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  // Include this device's own cloud history. This is essential after its local
+  // SQLite database is restored or replaced during deployment; normal local
+  // operations are pre-recorded in the inbox and therefore remain idempotent.
+  markKnownLocalOperationsApplied()
   let cursor = getSyncCursor()
   while (true) {
-  const pulled = await fetch(`${url}/v1/sync/pull?businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers })
+  const pulled = await fetch(`${url}/v1/sync/pull?businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
   if (!pulled.ok) throw new Error(`Cloud pull failed (${pulled.status}).`)
   const result = await pulled.json()
   applyRemoteOperations(result.operations || [])
@@ -69,6 +73,17 @@ async function pullRemoteChanges({ url, token, businessId, deviceId }) {
   if ((result.operations || []).length < 500 || !result.cursor || result.cursor === cursor) break
   cursor = result.cursor
   }
+}
+
+// A reset local database can retain its device enrollment but lose its outbox.
+// Never let that empty database publish a default settings snapshot over an
+// established cloud business. A snapshot is created only after the cloud
+// positively confirms that this is a brand-new business.
+async function cloudHasBusinessSettings({ url, token, businessId }) {
+  const response = await fetch(`${url}/v1/business/settings?businessId=${encodeURIComponent(businessId)}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!response.ok) throw new Error(`Cloud settings check failed (${response.status}).`)
+  const result = await response.json()
+  return Boolean(result?.settings)
 }
 
 export async function pullLatest() {
@@ -87,7 +102,7 @@ export async function syncNow() {
   running = true
   try {
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-    if (!existingBusiness) await queueInitialSettingsSnapshot()
+    if (!existingBusiness && !(await cloudHasBusinessSettings({ url, token, businessId }))) await queueInitialSettingsSnapshot()
     while (true) {
     const pending = getPendingSyncOperations()
     if (!pending.length) break

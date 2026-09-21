@@ -281,7 +281,11 @@ const server = createServer(async (request, response) => {
       const deviceId = query.get('deviceId') || ''
       const cursor = query.get('cursor') || ''
       if (!businessId || !deviceId || claims.businessId !== businessId || claims.deviceId !== deviceId) return send(response, 403, { error: 'Token does not authorize this business/device.' })
-      const filter = { businessId, deviceId: { $ne: deviceId }, ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
+      // Newer clients request their own history during recovery. Older clients
+      // retain the original behaviour until upgraded, preventing a deployment
+      // from changing their replay semantics unexpectedly.
+      const includeOwn = query.get('includeOwn') === '1'
+      const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
       return send(response, 200, { operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })
     }

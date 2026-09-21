@@ -137,6 +137,10 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 }
 
 .submission-fields { display: contents; border: 0; padding: 0; margin: 0; min-width: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.receipt-photo-picker { position: fixed; inset: 0; z-index: 40; display: grid; align-items: end; background: rgba(14, 40, 33, .38); }
+.receipt-photo-picker > div { display: grid; gap: 10px; padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 18px 18px 0 0; background: var(--paper); box-shadow: 0 -12px 38px rgba(14, 40, 33, .18); }
+.receipt-photo-picker h3, .receipt-photo-picker p { margin: 0; }.receipt-photo-picker p { color: var(--muted); font-size: 13px; }.receipt-photo-picker .primary-button, .receipt-photo-picker .filter-button { justify-content: center; width: 100%; min-height: 48px; }.receipt-photo-picker .text-button { justify-self: center; }
 button:disabled { cursor: not-allowed; opacity: .6; }
 button[aria-busy="true"] { cursor: progress; }
 .button-spinner { display: inline-block; width: 14px; height: 14px; flex-shrink: 0; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: button-spin .75s linear infinite; }

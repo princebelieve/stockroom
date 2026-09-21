@@ -237,6 +237,14 @@ export function markSyncOperationsSynced(operationIds) {
   for (const operationId of operationIds) update.run(now(), operationId)
 }
 
+// A device has already applied every operation it created locally. Record
+// those IDs before a recovery pull so the cloud can safely return the full
+// business history (including this device's own past operations) without
+// replaying stock or wallet adjustments.
+export function markKnownLocalOperationsApplied() {
+  database.prepare('INSERT OR IGNORE INTO sync_inbox (operation_id, received_at) SELECT operation_id, ? FROM sync_outbox').run(now())
+}
+
 export function recordSyncConflicts(conflicts) {
   if (!Array.isArray(conflicts)) return
   const insert = database.prepare('INSERT OR IGNORE INTO sync_conflicts (id, operation_id, entity_type, entity_id, reason, local_payload, remote_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')

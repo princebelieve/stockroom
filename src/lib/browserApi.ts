@@ -194,10 +194,14 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
   if (!config) return { configured: false, pending: 0, lastError: 'This browser has not been enrolled.' }
   const db = await openMobileDatabase()
   try {
+    // The cloud can return this device's own history after a browser-storage
+    // restore. Those writes already exist locally, so mark their operation IDs
+    // first; missing data is then restored while existing data is not replayed.
+    await db.run('INSERT OR IGNORE INTO sync_inbox (operation_id, received_at) SELECT operation_id, ? FROM sync_outbox', [now()])
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {

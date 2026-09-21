@@ -1,14 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { readReceiptPhoto, receiptSuggestions } from './lib/receiptOcr'
 import { referenceFromScan } from './lib/reconciliation'
 
 export function ReceiptPhoto({ total, onReference }: { total: number; onReference: (reference: string) => void }) {
   const [busy, setBusy] = useState(false)
+  const [photoPickerOpen, setPhotoPickerOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [result, setResult] = useState<ReturnType<typeof receiptSuggestions> | null>(null)
   const [reference, setReference] = useState('')
   const [checked, setChecked] = useState(false)
   const controller = useRef<AbortController | null>(null)
+  const libraryInput = useRef<HTMLInputElement>(null)
+  const cameraInput = useRef<HTMLInputElement>(null)
   useEffect(() => () => controller.current?.abort(), [])
   useEffect(() => { setChecked(false) }, [total])
   async function read(file?: File) {
@@ -25,9 +28,17 @@ export function ReceiptPhoto({ total, onReference }: { total: number; onReferenc
     } catch (error) { if (controller.current === current) setMessage(error instanceof Error ? error.message : 'Could not read receipt.') }
     finally { if (controller.current === current) setBusy(false) }
   }
-  return <div className="receipt-photo"><label>Read terminal receipt photo<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { void read(e.target.files?.[0]); e.target.value = '' }} /></label>
-    <label>Take a receipt photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={busy} onChange={e => { void read(e.target.files?.[0]); e.target.value = '' }} /></label>
-    <small>Choose a photo or use your phone’s photo picker camera. The image is processed locally and is not saved with the sale.</small>
+  const selectPhoto = (event: ChangeEvent<HTMLInputElement>) => {
+    setPhotoPickerOpen(false)
+    void read(event.target.files?.[0])
+    event.target.value = ''
+  }
+  return <div className="receipt-photo">
+    <input ref={libraryInput} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={selectPhoto} />
+    <input ref={cameraInput} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={busy} onChange={selectPhoto} />
+    <button type="button" className="filter-button" disabled={busy} onClick={() => setPhotoPickerOpen(true)}>Add receipt photo</button>
+    <small>Optional: use a receipt photo only when its barcode or QR cannot be scanned. The image is processed locally and is not saved with the sale.</small>
+    {photoPickerOpen && <div className="receipt-photo-picker" role="dialog" aria-modal="true" aria-label="Add receipt photo" onClick={() => setPhotoPickerOpen(false)}><div onClick={event => event.stopPropagation()}><h3>Add receipt photo</h3><p>Choose where the receipt image comes from.</p><button type="button" className="primary-button" onClick={() => libraryInput.current?.click()}>Choose existing photo</button><button type="button" className="filter-button" onClick={() => cameraInput.current?.click()}>Take photo</button><button type="button" className="text-button" onClick={() => setPhotoPickerOpen(false)}>Cancel</button></div></div>}
     {busy && <button type="button" className="filter-button" onClick={() => controller.current?.abort()}>Cancel reading</button>}
     <p role="status">{message}</p>
     {result && <><p>{result.status}</p>{result.amount && <p>Detected amount: {result.amount}{Math.round(Number(result.amount) * 100) !== Math.round(total * 100) ? ' — does not match this sale' : ' — matches this sale total'}</p>}
