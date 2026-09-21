@@ -251,6 +251,10 @@ function App() {
     }
   }, [active, paymentMethod])
   const [user, setUser] = useState<User | null>(() => JSON.parse(localStorage.getItem('stockroom-user') || 'null'))
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('ref') || ''
+    if (/^[a-f0-9]{32}$/.test(code)) sessionStorage.setItem('stockroom-referral-code', code)
+  }, [])
   const [terminalRevision, setTerminalRevision] = useState(0)
   const deviceTerminal = useMemo(() => readTerminalSettings(user?.organizationId || ''), [user?.organizationId, terminalRevision])
   const manualTerminalAllowed = canRecordTerminalPayment(deviceTerminal)
@@ -1176,7 +1180,15 @@ function App() {
     localStorage.setItem('stockroom-app-name', data.setup.appName)
     document.title = data.setup.appName
     const cloud = await fetch('/api/auth/cloud-register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => null)
-    if (cloud?.ok) { const result = await cloud.json() as { accessToken: string }; setCloudAccessToken(result.accessToken); localStorage.setItem('stockroom-cloud-access-token', result.accessToken) }
+    if (cloud?.ok) {
+      const result = await cloud.json() as { accessToken: string }
+      setCloudAccessToken(result.accessToken); localStorage.setItem('stockroom-cloud-access-token', result.accessToken)
+      const referralCode = sessionStorage.getItem('stockroom-referral-code') || ''
+      if (/^[a-f0-9]{32}$/.test(referralCode)) {
+        const referral = await fetch(`${subscriptionApiUrl}/v1/subscriptions/referrals`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ code: referralCode }) }).catch(() => null)
+        if (referral?.ok) sessionStorage.removeItem('stockroom-referral-code')
+      }
+    }
   }
 
   async function logout() {
