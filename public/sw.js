@@ -17,12 +17,14 @@ self.addEventListener('fetch', event => {
   // Never cache API responses, tokens, errors, or unrelated origins.
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/v1/')) return
   if (event.request.mode === 'navigate') {
-    // Always prefer the deployed application shell. The cached shell is only
-    // an offline fallback, so an update cannot preserve obsolete app code.
-    event.respondWith(fetch(event.request).then(async response => {
-      if (response.ok) (await caches.open(CACHE_NAME)).put('/index.html', response.clone())
-      return response
-    }).catch(() => caches.open(CACHE_NAME).then(cache => cache.match('/index.html')).then(cached => cached || Response.error())))
+    // Keep an HTML shell and its hashed assets together. An older worker can
+    // see a newly deployed index.html before its replacement worker has
+    // precached that deployment's assets. Saving that HTML in the older cache
+    // would make the next offline launch request JavaScript that it does not
+    // have. The replacement worker is activated immediately and reloads the
+    // client, so cache-first navigation does not leave the app on an old
+    // release once the new shell is ready.
+    event.respondWith(caches.open(CACHE_NAME).then(cache => cache.match('/index.html')).then(cached => cached || fetch(event.request)))
     return
   }
   if (!APP_SHELL.includes(url.pathname)) return
