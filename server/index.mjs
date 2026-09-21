@@ -107,25 +107,8 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'POST' && request.url === '/api/auth/cloud-session') return readJson(request, response, async (input) => {
     try {
-      const identifier = String(input.identifier || input.email || '').trim()
       const password = String(input.password || '')
-      const localUser = await authenticateUser(identifier, password)
-      if (!localUser) throw new Error('Email or password is incorrect.')
-      let remote = null
-      try {
-        remote = await cloudLogin(identifier, password)
-      } catch (error) {
-        if (localUser.role !== 'owner') throw error
-        try {
-          await cloudRegister({ ownerName: localUser.name || 'Shop Owner', email: localUser.email || identifier, password })
-        } catch (registerError) {
-          // A missing cloud owner account should be created from the verified local owner
-          // record instead of forcing a duplicate login flow. Surface the original remote
-          // error if registration cannot be completed for this installation.
-          throw registerError
-        }
-        remote = await cloudLogin(localUser.email || identifier, password)
-      }
+      const remote = await cloudLogin(String(input.identifier || input.email || ''), password)
       const user = provisionCloudUser({ ...remote.account, password })
       const token = createSession(user.id)
       return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken })

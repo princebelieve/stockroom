@@ -64,63 +64,6 @@ after(async () => {
   await Promise.all(tempDirectories.map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
-test('local owner credentials can auto-create the missing cloud owner account', async () => {
-  let cloudOwnerCreated = false
-  const cloud = createServer((request, response) => {
-    const url = new URL(request.url, 'http://localhost')
-    if (request.method === 'POST' && url.pathname === '/v1/auth/login') {
-      if (!cloudOwnerCreated) return jsonResponse(response, 401, { error: 'Owner not registered.' })
-      return jsonResponse(response, 200, { account: { id: 'cloud-owner', businessId: 'test-business', name: 'Owner', email: 'owner@test.local', role: 'owner' }, accessToken: 'cloud-token' })
-    }
-    if (request.method === 'POST' && url.pathname === '/v1/auth/register') {
-      cloudOwnerCreated = true
-      return jsonResponse(response, 201, { account: { id: 'cloud-owner', businessId: 'test-business', name: 'Owner', email: 'owner@test.local', role: 'owner' }, accessToken: 'cloud-token' })
-    }
-    response.writeHead(404); response.end()
-  })
-  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening')
-  try {
-    const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
-    const token = await createOwner(baseUrl, 'owner@test.local')
-    assert.equal(token.length > 0, true)
-    const cloudSession = await json(`${baseUrl}/api/auth/cloud-session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'owner@test.local', password: 'long-test-password' }) })
-    assert.equal(cloudSession.response.status, 200)
-    assert.equal(cloudSession.body.cloudAccessToken, 'cloud-token')
-    assert.equal(cloudSession.body.user.email, 'owner@test.local')
-  } finally {
-    await new Promise((resolve) => cloud.close(resolve))
-  }
-})
-
-test('a valid local login succeeds even when the cloud session endpoint is unavailable', async () => {
-  const cloud = createServer((request, response) => {
-    const url = new URL(request.url, 'http://localhost')
-    if (request.method === 'POST' && url.pathname === '/v1/auth/login') {
-      return jsonResponse(response, 503, { error: 'Cloud sync is temporarily unavailable.' })
-    }
-    if (request.method === 'POST' && url.pathname === '/v1/auth/register') {
-      return jsonResponse(response, 503, { error: 'Cloud sync is temporarily unavailable.' })
-    }
-    response.writeHead(503); response.end(JSON.stringify({ error: 'Cloud sync is temporarily unavailable.' }))
-  })
-  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening')
-  try {
-    const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
-    const token = await createOwner(baseUrl, 'owner-valid-login@test.local')
-    assert.equal(token.length > 0, true)
-    const login = await json(`${baseUrl}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'owner-valid-login@test.local', password: 'long-test-password' }) })
-    assert.equal(login.response.status, 200)
-    assert.equal(login.body.user.email, 'owner-valid-login@test.local')
-  } finally {
-    await new Promise((resolve) => cloud.close(resolve))
-  }
-})
-
-function jsonResponse(response, status, payload) {
-  response.writeHead(status, { 'Content-Type': 'application/json' })
-  response.end(JSON.stringify(payload))
-}
-
 test('expired subscriptions reject sales without changing stock; developer test mode restores POS', async () => {
   const entitlement = { testMode: false, expiresAt: '2000-01-01T00:00:00Z' }
   const { baseUrl } = await startBusiness({ entitlement })

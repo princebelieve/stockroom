@@ -1120,41 +1120,20 @@ function App() {
   }
 
   async function login(identifier: string, password: string) {
-    type AuthPayload = { token?: string; user?: User; cloudAccessToken?: string; error?: string }
-
-    const localResponse = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) })
+    const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) })
     const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) }).catch(() => null)
-
-    const localPayload: AuthPayload = localResponse.ok
-      ? await localResponse.json() as { token: string; user: User }
-      : await localResponse.json().catch(() => ({ error: 'Email or password is incorrect.' })) as AuthPayload
-
-    const cloudPayload: AuthPayload | null = cloudResponse?.ok
-      ? await cloudResponse.json() as AuthPayload
-      : cloudResponse
-        ? await cloudResponse.json().catch(() => ({ error: 'Cloud sign-in is unavailable right now.' })) as AuthPayload
-        : null
-
-    if (!localResponse.ok && !cloudResponse?.ok) {
-      const message = cloudPayload?.error || localPayload?.error || 'Email or password is incorrect.'
+    const cloudData = cloudResponse?.ok ? await cloudResponse.json() as { token: string; user: User; cloudAccessToken: string } : null
+    if (!response.ok && !cloudResponse?.ok) {
       if (isBrowserPwa()) {
-        throw new Error(message || 'Connect to the internet to sign in. An existing signed-in session can work offline.')
+        const failure = await cloudResponse?.json().catch(() => null)
+        throw new Error(failure?.error || 'Connect to the internet to sign in. An existing signed-in session can work offline.')
       }
-      throw new Error(message || 'Email or password is incorrect.')
+      throw new Error('Email or password is incorrect.')
     }
-
-    const data = localResponse.ok
-      ? localPayload as { token: string; user: User }
-      : cloudPayload as { token: string; user: User; cloudAccessToken?: string }
-
-    if (!data || !data.token || !data.user) {
-      const message = cloudPayload?.error || localPayload?.error || 'Unable to sign in. Please try again.'
-      throw new Error(message)
-    }
-
+    const data = response.ok ? await response.json() as { token: string; user: User } : cloudData!
     const fallbackCloudToken = localStorage.getItem('stockroom-cloud-access-token') || ''
-    const resolvedCloudToken = cloudPayload?.cloudAccessToken ? resolveCloudAccessToken(cloudPayload.cloudAccessToken, fallbackCloudToken) : fallbackCloudToken
-    if (resolvedCloudToken) {
+    const resolvedCloudToken = resolveCloudAccessToken(cloudData?.cloudAccessToken || '', fallbackCloudToken)
+    if (cloudData || resolvedCloudToken) {
       setCloudAccessToken(resolvedCloudToken)
       localStorage.setItem('stockroom-cloud-access-token', resolvedCloudToken)
     }

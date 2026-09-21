@@ -12,7 +12,6 @@ try {
   let assigned = false
   let plan = { amount: 500000, currency: 'NGN', days: 30, reminderDays: 7, firstReferralPercent: 10, recurringReferralPercent: 5 }
   const code = 'a'.repeat(32)
-  const developerEmail = 'owner@example.com'
   await page.route('https://subscription.test/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -23,14 +22,14 @@ try {
     if (path === '/v1/subscriptions/setup') {
       assert.equal(request.headers()['x-admin-key'], 'developer-key')
       if (request.method() === 'PUT') plan = input
-      data = { plan, testMode, paystackConfigured: true, emailConfigured: true, publicUrlConfigured: true, developerEmail: 'developer@example.com' }
+      data = { plan, testMode, paystackConfigured: true, emailConfigured: true, publicUrlConfigured: true }
     }
     if (path === '/v1/subscriptions/test-mode') {
       assert.equal(request.headers()['x-admin-key'], 'developer-key')
       testMode = input.testMode
       data = { testMode }
     }
-    if (path === '/v1/subscriptions') data = { plan, subscription: { expiresAt: '2000-01-01', ...(assigned ? { referrerId: 'referrer' } : {}) }, access: { reason: testMode ? 'Developer test mode is on.' : 'Grace period has ended.' }, developerEmail }
+    if (path === '/v1/subscriptions') data = { plan, subscription: { expiresAt: '2000-01-01', ...(assigned ? { referrerId: 'referrer' } : {}) }, access: { reason: testMode ? 'Developer test mode is on.' : 'Grace period has ended.' } }
     if (path === '/v1/subscriptions/referrals') {
       assert.equal(request.headers().authorization, 'Bearer owner-token')
       if (request.method() === 'POST') { assert.equal(input.code, code); assigned = true; data = { ok: true } }
@@ -39,46 +38,8 @@ try {
     await route.fulfill({ json: data })
   })
   await page.goto('https://subscription.test/subscriptions?ref=' + code)
-  assert.equal(await page.locator('#mode').count(), 0)
-  assert.equal(await page.locator('#developer').isVisible(), false)
-
-  await page.route('https://subscription.test/v1/auth/login', route => route.fulfill({ status: 401, json: { error: 'Invalid credentials.' } }))
-  await page.locator('[name=email]').fill('wrong@example.com')
-  await page.locator('[name=password]').fill('wrong-password')
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await page.getByText('Invalid credentials.', { exact: true }).waitFor()
-  assert.equal(await page.locator('[name=email]').inputValue(), 'wrong@example.com')
-  assert.equal(await page.locator('[name=password]').inputValue(), 'wrong-password')
-
-  await page.unroute('https://subscription.test/v1/auth/login')
-  await page.locator('[name=email]').fill('owner@example.com')
-  await page.locator('[name=password]').fill('owner-password')
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await page.locator('#referral-link').waitFor()
-  assert.equal(await page.locator('#mode').count(), 0)
-  assert.equal(await page.locator('#developer').isVisible(), false)
-  await page.locator('#logout').click()
-  await page.locator('[name=email]').fill('owner@example.com')
-  await page.locator('[name=password]').fill('owner-password')
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await page.locator('#referral-link').waitFor()
-  assert.equal(await page.locator('#developer').isVisible(), false)
-  await page.locator('#logout').click()
-  await page.locator('[name=email]').fill('developer@example.com')
-  await page.locator('[name=password]').fill('developer-password')
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await page.locator('#key').waitFor()
-  assert.equal(await page.locator('#mode').count(), 0)
-  assert.equal(await page.locator('#developer').isVisible(), true)
-
-  await page.reload()
-  await page.locator('#developer').waitFor()
-  assert.equal(await page.locator('#developer').isVisible(), true)
-
-  await page.locator('#logout').click()
-  await page.locator('[name=email]').fill('owner@example.com')
-  await page.locator('[name=password]').fill('owner-password')
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await page.locator('#mode').selectOption('developer')
+  await page.locator('#key').fill('developer-key')
   await page.getByRole('button', { name: 'Load setup' }).click()
   await page.getByRole('button', { name: 'Disable test mode and enforce subscriptions' }).click()
   await page.getByRole('button', { name: 'Enable test mode and lift all blocks' }).waitFor()
