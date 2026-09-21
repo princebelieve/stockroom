@@ -34,8 +34,19 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
   const subscriptions = database.collection('subscriptions')
   const payments = database.collection('subscription_payments')
   const notices = database.collection('subscription_notices')
+  const enterpriseRequests = database.collection('enterprise_subscription_requests')
   await subscriptions.createIndex({ expiresAt: 1 })
   const getPlan = () => settings.findOne({ _id: 'plan' })
+  const getPlans = async () => {
+    const saved = await getPlan()
+    if (!saved) return []
+    if (Array.isArray(saved.plans)) return saved.plans
+    return [{ ...saved, id: 'monthly', name: 'Monthly' }]
+  }
+  async function currentEnterpriseRequest(businessId) {
+    const rows = await enterpriseRequests.find({ businessId }).sort({ createdAt: -1 }).limit(20).toArray()
+    return rows.find(row => row.status === 'pending' || row.status === 'approved') || null
+  }
   const referrals = database.collection('subscription_referrals')
   const commissions = database.collection('referral_commissions')
   await referrals.createIndex({ code: 1 }, { unique: true })
@@ -105,8 +116,10 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       newlyCredited = Boolean(recorded?.upsertedCount)
     }
     const firstConfirmation = !payment.paidAt
+    const paymentOwner = firstConfirmation && mailConfigured() ? await accounts.findOne({ businessId: payment.businessId, role: 'owner' }) : null
     await payments.updateOne({ _id: reference }, { $set: { paidAt: new Date() } })
-    if (firstConfirmation && owner?.email && mailConfigured()) void sendSubscriptionConfirmation({ to: owner.email, amount: payment.amount, currency: payment.currency, expiresAt: settled.expiresAt }).catch(error => console.error('Subscription confirmation email failed:', error.message))
+    if (payment.enterpriseRequestId) await enterpriseRequests.updateOne({ _id: payment.enterpriseRequestId, status: 'approved' }, { $set: { status: 'paid', paidAt: new Date(), paymentReference: reference } })
+    if (paymentOwner?.email) void sendSubscriptionConfirmation({ to: paymentOwner.email, amount: payment.amount, currency: payment.currency, expiresAt: settled.expiresAt }).catch(error => console.error('Subscription confirmation email failed:', error.message))
     if (newlyCredited && entry.amount > 0) {
       const referrer = await accounts.findOne({ businessId: entry.referrerId, role: 'owner' })
       if (referrer?.email) void sendReferralBonusNotice({ to: referrer.email, amount: entry.amount, currency: entry.currency, kind: entry.kind }).catch(error => console.error('Referral bonus notice failed:', error.message))
@@ -162,7 +175,10 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
         if (request.method === 'PUT') {
           const input = JSON.parse(await body(request))
-          const plan = { ...validatePlan(input), ...referralPercentages(input) }
+          const referral = referralPercentages(input)
+          const plan = input.monthlyAmount === undefined
+            ? { ...validatePlan(input), ...referral }
+            : (() => { const base = { currency: input.currency, reminderDays: input.reminderDays, freeTrialDays: input.freeTrialDays, graceMonths: input.graceMonths }; const plans = [{ ...validatePlan({ ...base, amount: input.monthlyAmount, days: 30 }), id: 'monthly', name: 'Monthly' }, { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365 }), id: 'yearly', name: 'Yearly' }, { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365) }), id: 'enterprise', name: 'Enterprise' }]; return { ...plans[0], ...referral, plans } })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
@@ -173,6 +189,22 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const limit = Number(params.get('limit') || '10')
         const skip = Number(params.get('skip') || '0')
         return reply(200, { businesses: await listBusinesses(Math.min(Math.max(limit, 1), 10), Math.max(skip, 0)) })
+      }
+      if (url.pathname === '/v1/subscriptions/enterprise-requests' && request.method === 'GET') {
+        if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
+        const rows = await enterpriseRequests.find({}).sort({ createdAt: -1 }).limit(100).toArray()
+        return reply(200, { requests: rows.map(({ _id, businessId, ownerName, email, message, status, createdAt, offeredAmount, offeredCurrency, offeredDays, offerNote, approvedAt }) => ({ id: _id, businessId, ownerName, email, message, status, createdAt, offeredAmount, offeredCurrency, offeredDays, offerNote, approvedAt })) })
+      }
+      if (url.pathname === '/v1/subscriptions/enterprise-requests/approve' && request.method === 'POST') {
+        if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
+        const input = JSON.parse(await body(request))
+        const requestRow = await enterpriseRequests.findOne({ _id: String(input.requestId || ''), status: 'pending' })
+        if (!requestRow) return reply(404, { error: 'Pending enterprise request not found.' })
+        const configured = await getPlan()
+        if (!configured) return reply(409, { error: 'Save subscription plans before approving an enterprise request.' })
+        const offer = validatePlan({ amount: input.amount, currency: input.currency || configured.currency, days: input.days, reminderDays: configured.reminderDays, freeTrialDays: configured.freeTrialDays, graceMonths: configured.graceMonths })
+        await enterpriseRequests.updateOne({ _id: requestRow._id, status: 'pending' }, { $set: { status: 'approved', offeredAmount: offer.amount, offeredCurrency: offer.currency, offeredDays: offer.days, offerNote: String(input.note || '').trim().slice(0, 1000), approvedAt: new Date() } })
+        return reply(200, { ok: true })
       }
       if (url.pathname === '/v1/subscriptions/test-mode' && request.method === 'PUT') {
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
@@ -193,7 +225,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       if (claims?.kind !== 'access' || claims.role !== 'owner') return reply(403, { error: 'Sign in with your cloud owner account.' })
       const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
       if (!owner) return reply(403, { error: 'Owner account not found.' })
-      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }), isDeveloper: isDeveloper(claims) })
+      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), plans: await getPlans(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }), enterpriseRequest: await currentEnterpriseRequest(claims.businessId), isDeveloper: isDeveloper(claims) })
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'GET') return reply(200, await referralInfo(claims.businessId))
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'POST') {
         const input = JSON.parse(await body(request))
@@ -205,14 +237,36 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         return reply(200, { ok: true })
       }
       if (url.pathname === '/v1/subscriptions/checkout' && request.method === 'POST') {
-        const plan = await getPlan()
-        if (!plan) return reply(409, { error: 'The developer has not configured a subscription plan.' })
+        const input = JSON.parse(await body(request))
+        const plan = (await getPlans()).find(item => item.id === String(input.planId || 'monthly'))
+        if (!plan) return reply(409, { error: 'The selected subscription plan is unavailable.' })
+        if (plan.id === 'enterprise') return reply(409, { error: 'Enterprise plans require an approved proposal.' })
         const reference = `sub-${randomBytes(20).toString('hex')}`
         const callback = appUrl()
         await ensureSubscription(claims.businessId)
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         await payments.insertOne({ ...validatePlan(plan), ...referralPercentages(plan), referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
         const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: callback })
+        return reply(200, { authorizationUrl: result.authorization_url, reference })
+      }
+      if (url.pathname === '/v1/subscriptions/enterprise-request' && request.method === 'POST') {
+        const input = JSON.parse(await body(request))
+        if (await currentEnterpriseRequest(claims.businessId)) return reply(409, { error: 'You already have an enterprise request in progress.' })
+        const message = String(input.message || '').trim()
+        if (message.length > 1000) return reply(400, { error: 'Your message must be 1,000 characters or fewer.' })
+        await enterpriseRequests.insertOne({ _id: `enterprise-${randomBytes(16).toString('hex')}`, businessId: claims.businessId, ownerName: owner.ownerName || owner.name || '', email: owner.email, message, status: 'pending', createdAt: new Date() })
+        return reply(201, { ok: true })
+      }
+      if (url.pathname === '/v1/subscriptions/enterprise-checkout' && request.method === 'POST') {
+        const requestRow = await currentEnterpriseRequest(claims.businessId)
+        if (!requestRow || requestRow.status !== 'approved') return reply(409, { error: 'There is no approved enterprise proposal ready for payment.' })
+        const configured = await getPlan()
+        const plan = validatePlan({ amount: requestRow.offeredAmount, currency: requestRow.offeredCurrency, days: requestRow.offeredDays, reminderDays: configured?.reminderDays, freeTrialDays: configured?.freeTrialDays, graceMonths: configured?.graceMonths })
+        const reference = `sub-${randomBytes(20).toString('hex')}`
+        await ensureSubscription(claims.businessId)
+        const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
+        await payments.insertOne({ ...plan, ...referralPercentages(configured || {}), enterpriseRequestId: requestRow._id, referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: appUrl() })
         return reply(200, { authorizationUrl: result.authorization_url, reference })
       }
       if (url.pathname === '/v1/subscriptions/verify' && request.method === 'POST') {

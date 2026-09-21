@@ -124,6 +124,16 @@ test('cloud routes enforce developer authorization and attribute first/recurring
     assert.equal((await call('/access', { businessId: 'referrer' })).data.blocked, true)
     assert.equal((await call('/test-mode', { method: 'PUT', input: { testMode: true } })).status, 200)
     assert.equal((await call('/access', { businessId: 'referrer' })).data.blocked, false)
+
+    assert.equal((await call('/setup', { method: 'PUT', input: { monthlyAmount: 999, yearlyAmount: 9999, enterpriseAmount: 50000, enterpriseDays: 365, currency: 'NGN', reminderDays: 7, freeTrialDays: 0, firstReferralPercent: 15, recurringReferralPercent: 5 } })).status, 200)
+    assert.equal((await call('/enterprise-request', { method: 'POST', businessId: 'referrer', input: { message: 'Two locations and onboarding support.' } })).status, 201)
+    const request = (await call('/enterprise-requests')).data.requests[0]
+    assert.equal((await call('/checkout', { method: 'POST', businessId: 'referrer', input: { planId: 'enterprise' } })).status, 409)
+    assert.equal((await call('/enterprise-requests/approve', { method: 'POST', input: { requestId: request.id, amount: 175000, currency: 'NGN', days: 400, note: 'Includes onboarding support.' } })).status, 200)
+    const enterprisePayment = (await call('/enterprise-checkout', { method: 'POST', businessId: 'referrer' })).data.reference
+    assert.ok(enterprisePayment)
+    assert.equal((await call('/verify', { method: 'POST', businessId: 'referrer', input: { reference: enterprisePayment } })).status, 200)
+    assert.equal((await database.collection('enterprise_subscription_requests').findOne({ _id: request.id })).status, 'paid')
   } finally {
     if (oldUrl === undefined) delete process.env.SUBSCRIPTION_PUBLIC_URL; else process.env.SUBSCRIPTION_PUBLIC_URL = oldUrl
     if (oldKey === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = oldKey
