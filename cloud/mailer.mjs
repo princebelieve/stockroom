@@ -10,6 +10,13 @@ export async function sendSubscriptionReminder({ to, expiresAt, url }) {
   await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Your Stockroom subscription expires soon', text: `Your Stockroom subscription expires on ${expiresAt.toISOString().slice(0, 10)} (UTC).\n\nRenew manually at ${url}\n\nYou will not be charged automatically. Sign in as the business owner and choose Renew with Paystack.` })
 }
 
+export async function sendReferralBonusNotice({ to, amount, currency, kind }) {
+  if (!configured()) throw new Error('Email is not configured.')
+  const paymentType = kind === 'first' ? 'a new subscription' : 'a subscription renewal'
+  const value = `${currency} ${(amount / 100).toFixed(2)}`
+  await transport().sendMail({ from: `Stockroom Business <${process.env.SMTP_USER}>`, to, subject: 'Referral bonus available', text: `Your referral link was used for ${paymentType}. A referral bonus of ${value} is available. Please contact support to arrange your payout.`, html: `<p>Your referral link was used for ${paymentType}.</p><p>A referral bonus of <b>${value}</b> is available.</p><p>Please contact support to arrange your payout.</p>` })
+}
+
 function transport() {
   return nodemailer.createTransport({
     service: 'gmail',

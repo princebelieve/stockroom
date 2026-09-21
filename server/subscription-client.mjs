@@ -14,7 +14,7 @@ export async function loadSubscriptionAccess({ config, read, write, fetcher = fe
     if (!response.ok) throw new Error('Subscription service unavailable.')
     const data = await response.json()
     if (data.businessId !== config.businessId || typeof data.testMode !== 'boolean') throw new Error('Invalid subscription response.')
-    const snapshot = { businessId: data.businessId, testMode: data.testMode, expiresAt: data.expiresAt, portalUrl: data.portalUrl, checkedAt: now }
+    const snapshot = { businessId: data.businessId, testMode: data.testMode, expiresAt: data.expiresAt, graceMonths: data.graceMonths, portalUrl: data.portalUrl, checkedAt: now }
     await write(key, JSON.stringify(snapshot))
     return subscriptionAccess(snapshot)
   } catch {

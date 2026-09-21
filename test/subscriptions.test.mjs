@@ -10,6 +10,8 @@ test('grace is one UTC calendar month, preserving time and clamping month end', 
   assert.equal(graceEndsAt('2028-01-31T15:30:00Z'), '2028-02-29T15:30:00.000Z')
   assert.equal(graceEndsAt('2026-12-15T00:00:00Z'), '2027-01-15T00:00:00.000Z')
   assert.equal(graceEndsAt('bad-date'), null)
+  assert.equal(graceEndsAt('2026-01-31T15:30:00Z', 2), '2026-03-31T15:30:00.000Z')
+  assert.equal(graceEndsAt('2026-01-31T15:30:00Z', 0), '2026-01-31T15:30:00.000Z')
 })
 test('POS works through grace and blocks exactly at its end', () => {
   const snapshot = { testMode: false, expiresAt: '2026-01-31T15:30:00Z' }
@@ -60,9 +62,9 @@ test('disabling test mode replaces cached bypass and revoked credentials clear i
 })
 
 test('plan accepts integer minor units, free-trial days, and rejects unsafe amounts and periods', () => {
-  const plan = { amount: 500000, currency: 'NGN', days: 30, reminderDays: 7, freeTrialDays: 14 }
+  const plan = { amount: 500000, currency: 'NGN', days: 30, reminderDays: 7, freeTrialDays: 14, graceMonths: 2 }
   assert.deepEqual(validatePlan(plan), plan)
-  for (const patch of [{ amount: -1 }, { amount: 1.5 }, { days: 0 }, { days: 731 }, { reminderDays: 0 }, { freeTrialDays: -1 }, { freeTrialDays: 366 }, { currency: 'BAD' }]) assert.throws(() => validatePlan({ ...plan, ...patch }))
+  for (const patch of [{ amount: -1 }, { amount: 1.5 }, { days: 0 }, { days: 731 }, { reminderDays: 0 }, { freeTrialDays: -1 }, { freeTrialDays: 366 }, { graceMonths: -1 }, { graceMonths: 13 }, { currency: 'BAD' }]) assert.throws(() => validatePlan({ ...plan, ...patch }))
 })
 test('webhook requires a signature over the exact raw bytes', () => {
   const raw = Buffer.from('{"event":"charge.success"}')

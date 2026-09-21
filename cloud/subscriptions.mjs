@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { mailConfigured, sendSubscriptionReminder } from './mailer.mjs'
+import { mailConfigured, sendReferralBonusNotice, sendSubscriptionReminder } from './mailer.mjs'
 import { subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
 
 export function validatePlan(input) {
@@ -9,8 +9,10 @@ export function validatePlan(input) {
     days: Number(input.days),
     reminderDays: Number(input.reminderDays),
     freeTrialDays: Number(input.freeTrialDays ?? 0),
+    graceMonths: Number(input.graceMonths ?? 1),
   }
   if (!Number.isSafeInteger(plan.amount) || plan.amount < 1 || plan.amount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(plan.currency) || !Number.isInteger(plan.days) || plan.days < 1 || plan.days > 730 || !Number.isInteger(plan.reminderDays) || plan.reminderDays < 1 || plan.reminderDays > 30 || !Number.isInteger(plan.freeTrialDays) || plan.freeTrialDays < 0 || plan.freeTrialDays > 365) throw new Error('Enter a valid amount in minor units, currency, duration (1–730 days), reminder window (1–30 days), and free-trial days (0–365).')
+  if (!Number.isInteger(plan.graceMonths) || plan.graceMonths < 0 || plan.graceMonths > 12) throw new Error('Grace period must be between 0 and 12 calendar months.')
   return plan
 }
 export function validSignature(raw, signature, secret) {
@@ -49,7 +51,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       ? new Date(createdAtTime + trialDays * 86400000).toISOString()
       : null
     const effectiveExpiresAt = subscription?.expiresAt || (trialEndsAt && new Date(trialEndsAt) > new Date() ? trialEndsAt : null)
-    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, graceMonths: Number(plan?.graceMonths ?? 1), portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
@@ -97,8 +99,16 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     // The same atomic update selects the first paid renewal, even with concurrent checkouts.
     const settled = await subscriptions.findOne({ _id: payment.businessId })
     const entry = settled.commissionEvents?.find(item => item.reference === reference)
-    if (entry?.referrerId) await commissions.updateOne({ _id: reference }, { $setOnInsert: entry }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
+    let newlyCredited = false
+    if (entry?.referrerId) {
+      const recorded = await commissions.updateOne({ _id: reference }, { $setOnInsert: entry }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
+      newlyCredited = Boolean(recorded?.upsertedCount)
+    }
     await payments.updateOne({ _id: reference }, { $set: { paidAt: new Date() } })
+    if (newlyCredited && entry.amount > 0) {
+      const referrer = await accounts.findOne({ businessId: entry.referrerId, role: 'owner' })
+      if (referrer?.email) void sendReferralBonusNotice({ to: referrer.email, amount: entry.amount, currency: entry.currency, kind: entry.kind }).catch(error => console.error('Referral bonus notice failed:', error.message))
+    }
     return { expiresAt: settled.expiresAt }
   }
   async function reminders() {
