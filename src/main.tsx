@@ -359,6 +359,34 @@ function App() {
   const [installerMessage, setInstallerMessage] = useState('')
   const [mobilePullDistance, setMobilePullDistance] = useState(0)
   const [refreshingView, setRefreshingView] = useState(false)
+  useEffect(() => {
+    // All platforms restore identity from their local session store first:
+    // Desktop SQLite, PWA IndexedDB, or Android SQLite. Cloud is not involved.
+    if (!settingsLoaded || (!authToken && !isBrowserPwa() && !isNativeMobile())) return
+    let cancelled = false
+    const restore = async () => {
+      const response = await fetch('/api/auth/session', { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} }).catch(() => null)
+      if (cancelled || !response) return
+      if (!response.ok) {
+        setUser(null)
+        setAuthToken('')
+        localStorage.removeItem('stockroom-token')
+        localStorage.removeItem('stockroom-user')
+        return
+      }
+      const saved = await response.json() as { user: User; token?: string }
+      if (cancelled) return
+      const token = saved.token || authToken
+      setUser(saved.user)
+      if (token) {
+        setAuthToken(token)
+        localStorage.setItem('stockroom-token', token)
+      }
+      localStorage.setItem('stockroom-user', JSON.stringify(saved.user))
+    }
+    void restore()
+    return () => { cancelled = true }
+  }, [settingsLoaded, authToken])
   const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
   const subscriptionApiUrl = (import.meta.env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com').replace(/\/$/, '')
   const subscriptionButtonLabel = posAccess.status === 'active' ? 'Subscribed' : posAccess.status === 'grace' ? 'Grace period' : 'Subscribe'
@@ -600,7 +628,7 @@ function App() {
     event.preventDefault()
     setInstallerMessage('')
     const form = new FormData(event.currentTarget)
-    const response = await fetch('/api/installer/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: form.get('mode'), syncApiUrl: form.get('syncApiUrl'), businessId: form.get('businessId'), deviceId: form.get('deviceId'), label: form.get('label'), adminApiKey: form.get('adminApiKey'), ownerEmail: form.get('ownerEmail'), ownerPassword: form.get('ownerPassword') }) })
+    const response = await fetch('/api/installer/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: form.get('mode'), syncApiUrl: form.get('syncApiUrl'), businessId: form.get('businessId'), label: form.get('label'), adminApiKey: form.get('adminApiKey'), ownerEmail: form.get('ownerEmail'), ownerPassword: form.get('ownerPassword') }) })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) { setInstallerMessage(data.error || 'Installation could not be activated.'); return }
     setInstallerMessage(data.existingBusiness ? 'Device enrolled. Sign in with the existing owner account.' : 'Installation activated. You can now create the client owner account.')
@@ -1398,7 +1426,7 @@ function SyncIssues({ conflicts, resolveConflict }: { conflicts: SyncConflict[];
 
 function InstallerScreen({ onActivate, message }: { onActivate: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; message: string }) {
   const [mode, setMode] = useState<'new' | 'existing'>('existing')
-  return <main className="login-screen"><AsyncForm className="login-card installer-card" busyLabel="Activating device..." onSubmit={onActivate}><input type="hidden" name="mode" value={mode} /><div className="brand-mark"><Boxes size={21} /></div><h1>{mode === 'new' ? 'New client activation' : 'Add another device'}</h1><p>{mode === 'new' ? 'Installer-only: activate this client device before handing over the app.' : 'For the business owner: add this device to your existing business.'}</p>{!isBrowserPwa() && <div className="installer-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>New client</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Existing business</button></div>}{mode === 'new' && <label>Client business ID<input name="businessId" required pattern="[a-z0-9][a-z0-9-]{2,80}" placeholder="client-business-001" /></label>}<label>Device ID<input name="deviceId" required pattern="[a-z0-9][a-z0-9-]{2,100}" placeholder="client-business-main-pc" /></label><label>Device label<input name="label" required maxLength={100} placeholder="Main checkout computer" /></label>{mode === 'new' ? <><label>Installer Admin API key<input name="adminApiKey" type="password" required autoComplete="off" placeholder="Private installer key" /></label><p className="installer-note">The app connects to the configured cloud service automatically. This key is sent only to the cloud service and is never saved.</p></> : <><label>Owner email<input name="ownerEmail" type="email" required placeholder="owner@business.com" /></label><label>Owner password<input name="ownerPassword" type="password" minLength={10} required autoComplete="current-password" placeholder="Cloud owner password" /></label><p className="installer-note">Your business is identified from the owner account. The password is used only to enroll this device and is not stored.</p></>}{message && <div className={message.startsWith('Installation activated') ? 'settings-message' : 'auth-error'}>{message}</div>}<SubmitButton className="primary-button login-button">{mode === 'new' ? 'Activate new client' : 'Add this device'}</SubmitButton></AsyncForm></main>
+  return <main className="login-screen"><AsyncForm className="login-card installer-card" busyLabel="Activating device..." onSubmit={onActivate}><input type="hidden" name="mode" value={mode} /><div className="brand-mark"><Boxes size={21} /></div><h1>{mode === 'new' ? 'New client activation' : 'Add another device'}</h1><p>{mode === 'new' ? 'Installer-only: activate this client device before handing over the app.' : 'For the business owner: add this device to your existing business.'}</p>{!isBrowserPwa() && <div className="installer-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>New client</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Existing business</button></div>}{mode === 'new' && <label>Client business ID<input name="businessId" required pattern="[a-z0-9][a-z0-9-]{2,80}" placeholder="client-business-001" /></label>}<label>Device label<input name="label" required maxLength={100} placeholder="Main checkout computer" /></label><p className="installer-note">A secure device ID is generated automatically for this installation.</p>{mode === 'new' ? <><label>Installer Admin API key<input name="adminApiKey" type="password" required autoComplete="off" placeholder="Private installer key" /></label><p className="installer-note">The app connects to the configured cloud service automatically. This key is sent only to the cloud service and is never saved.</p></> : <><label>Owner email<input name="ownerEmail" type="email" required placeholder="owner@business.com" /></label><label>Owner password<input name="ownerPassword" type="password" minLength={10} required autoComplete="current-password" placeholder="Cloud owner password" /></label><p className="installer-note">Your business is identified from the owner account. The password is used only to enroll this device and is not stored.</p></>}{message && <div className={message.startsWith('Installation activated') ? 'settings-message' : 'auth-error'}>{message}</div>}<SubmitButton className="primary-button login-button">{mode === 'new' ? 'Activate new client' : 'Add this device'}</SubmitButton></AsyncForm></main>
 }
 
 function CustomerDisplayPairing({ pairing, createPairing, openSecondMonitor, prompt }: { pairing: { url: string; code: string; expiresAt: string } | null; createPairing: () => Promise<void>; openSecondMonitor: () => Promise<void>; prompt: (options: Omit<InlinePromptRequest, 'resolve'>) => Promise<string | null> }) {

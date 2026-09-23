@@ -1,17 +1,19 @@
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
 import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
-import { getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
+import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
 const distDirectory = join(fileURLToPath(new URL('..', import.meta.url)), 'dist')
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' }
+const generatedDeviceId = () => `desktop-${randomUUID()}`
 
 function sendJson(response, status, payload) {
   response.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
@@ -55,6 +57,14 @@ const server = createServer(async (request, response) => {
       const token = createSession(user.id)
       return sendJson(response, 200, { token, user })
     })
+  }
+
+  // Desktop identity lives in its local SQLite session table. The UI asks this
+  // endpoint on startup so it does not guess from an old localStorage copy.
+  if (request.method === 'GET' && request.url === '/api/auth/session') {
+    const user = sessionUser(request)
+    if (!user) return sendJson(response, 401, { error: 'No saved local session.' })
+    return sendJson(response, 200, { user })
   }
 
   if (request.method === 'POST' && request.url === '/api/auth/logout') {
@@ -109,6 +119,8 @@ const server = createServer(async (request, response) => {
     try {
       const password = String(input.password || '')
       const remote = await cloudLogin(String(input.identifier || input.email || ''), password)
+      const configured = await getCloudConfiguration()
+      if (configured.businessId && remote.account?.businessId !== configured.businessId) throw new Error('This account belongs to a different business than this enrolled device.')
       const user = provisionCloudUser({ ...remote.account, password })
       const token = createSession(user.id)
       return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken })
@@ -167,6 +179,8 @@ const server = createServer(async (request, response) => {
     if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
     return readJson(request, response, async (input) => {
       try {
+        const configured = await getCloudConfiguration()
+        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
         const cloud = await cloudCreateStaff(String(input.cloudAccessToken || ''), input)
         return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id, createdAt: cloud.account.createdAt || new Date().toISOString() }))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
@@ -191,6 +205,8 @@ const server = createServer(async (request, response) => {
     if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
     return readJson(request, response, async (input) => {
       try {
+        const configured = await getCloudConfiguration()
+        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
         const cloud = await cloudSetCashierOperationalAccess(String(input.cloudAccessToken || ''), cashierAccessMatch[1], input.enabled === true)
         return sendJson(response, 200, setCashierOperationalAccess(cashierAccessMatch[1], cloud.account.operationalAccess === true))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
@@ -203,6 +219,8 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       try {
         const password = String(input.password || '')
+        const configured = await getCloudConfiguration()
+        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
         await cloudResetCashierPassword(String(input.cloudAccessToken || ''), cashierPasswordMatch[1], password)
         return sendJson(response, 200, resetCashierPassword(cashierPasswordMatch[1], password))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
@@ -217,9 +235,10 @@ const server = createServer(async (request, response) => {
         const businessId = existingBusiness ? String(remote?.account?.businessId || '') : String(input.businessId || '').trim()
         if (remote && remote.account?.role !== 'owner') throw new Error('Only a business owner can add another device.')
         const syncApiUrl = existingBusiness ? remote.syncApiUrl : getDefaultCloudApiUrl()
+        const deviceId = generatedDeviceId()
         const enrolled = existingBusiness
-          ? await cloudEnrollDevice(syncApiUrl, remote.accessToken, { deviceId: input.deviceId, label: input.label })
-          : await cloudEnrollDeviceAsInstaller(syncApiUrl, String(input.adminApiKey || ''), { businessId, deviceId: input.deviceId, label: input.label, expiresInDays: 365 })
+          ? await cloudEnrollDevice(syncApiUrl, remote.accessToken, { deviceId, label: input.label })
+          : await cloudEnrollDeviceAsInstaller(syncApiUrl, String(input.adminApiKey || ''), { businessId, deviceId, label: input.label, expiresInDays: 365 })
         const configuration = await saveCloudConfiguration({ syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken, existingBusiness })
         return sendJson(response, 201, { ...configuration, configured: true, existingBusiness })
       } catch (error) { return sendJson(response, 400, { error: error.message }) }

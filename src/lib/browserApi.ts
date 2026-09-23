@@ -57,6 +57,11 @@ async function restoreCloudSession(): Promise<MobileUser | null> {
   const result = await response.json().catch(() => ({}))
   if (!response.ok || !result.account?.id) return null
   const account = result.account
+  if (config && account.businessId !== config.businessId) {
+    await setSetting('cloudAccessToken', '')
+    localStorage.removeItem('stockroom-cloud-access-token')
+    return null
+  }
   if (!config) {
     // Only an owner may restore an enrollment that has been lost locally.
     // Staff still need an owner-enrolled browser to begin using the device.
@@ -224,7 +229,9 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
 async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) {
   const db = await openMobileDatabase()
   const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
-  if (current?.appName && current?.currency && !(current.appName === 'My Business' && current.currency === 'USD')) return current
+  // Startup is always local-first. A valid local settings row, including the
+  // initial default values, must never make reopening the PWA wait for cloud.
+  if (current?.appName && current?.currency) return current
   if (config) {
     await pullLatest(config)
     const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
@@ -280,13 +287,11 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, headers: { 'Content-Type': 'application/json' }, body: init?.body })
   }
   const savedUser = await sessionUser() || await restoreSavedSession()
-  const enrolled = await getMobileSyncConfiguration()
-  // When an update/storage migration leaves the identity but loses enrollment,
-  // repair it from the owner's saved cloud token before treating sync as gone.
-  // navigator.onLine is only a browser hint and can briefly report false when
-  // a PWA changes viewport/window mode. Do not let that hint prevent an owner
-  // session from repairing a missing enrollment.
-  const user = (!enrolled ? await restoreCloudSession() || savedUser : savedUser || await restoreCloudSession())
+  // A saved local session is the offline source of truth. Do not contact the
+  // cloud before returning it, even when enrollment metadata was repaired or
+  // lost. Cloud restoration is only a recovery path when no local session
+  // exists at all.
+  const user = savedUser || await restoreCloudSession()
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Browser SQLite / IndexedDB' })
   if (path === '/api/settings' && method === 'GET') {
@@ -301,7 +306,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const cloud = cloudUrl
     const login = await originalFetch(`${cloud}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.ownerEmail, password: input.ownerPassword }) })
     const account = await login.json(); if (!login.ok || account.account?.role !== 'owner') return error(account.error || 'Only a business owner can enroll this browser.')
-    const enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: input.deviceId, label: input.label }) })
+    const enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: await browserDeviceId(), label: input.label }) })
     const device = await enrolled.json(); if (!enrolled.ok) return error(device.error || 'Could not enroll this browser.')
     await saveMobileSyncConfiguration({ syncApiUrl: cloud, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken })
     await setSetting('deviceLabel', String(input.label || input.deviceId))
@@ -311,7 +316,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const input = await body(init); let config = await getMobileSyncConfiguration()
     const syncApiUrl = config?.syncApiUrl || cloudUrl
     const identifier = String(input.identifier || input.email || '').trim()
-    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password }) })
+    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId: config?.businessId }) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
     const account = result.account
     if (!config && account.role !== 'owner') return error('An owner must sign in on this browser once before staff can use it.', 403)
@@ -346,6 +351,10 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken })
   }
   if (!user) return error('Authentication required.', 401)
+  if (path === '/api/auth/session' && method === 'GET') {
+    const token = new Headers(init?.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') || id()
+    return json({ user, token })
+  }
   const stocktakeResponse = await browserStocktake(path, init, canOperate(user), queue)
   if (stocktakeResponse) return stocktakeResponse
   if (path === '/api/sync/conflicts' && method === 'GET') {

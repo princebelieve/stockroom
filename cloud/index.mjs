@@ -114,8 +114,14 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request)
       const email = String(input.email || '').trim().toLowerCase()
       const staffUsername = username(input.username)
+      const businessId = String(input.businessId || '').trim()
       if ((email && staffUsername) || (!email && !staffUsername)) return send(response, 400, { error: 'Use an owner email or staff username.' })
-      const account = email ? await accounts.findOne({ email, role: 'owner' }) : await accounts.findOne({ username: staffUsername, role: { $in: ['admin', 'cashier'] } })
+      // Owner email is globally unique. Staff usernames are unique only within
+      // a business, so clients must send their enrolled business ID for staff.
+      if (staffUsername && !businessId) return send(response, 400, { error: 'This device must identify its business before staff can sign in.' })
+      const account = email
+        ? await accounts.findOne({ email, role: 'owner' })
+        : await accounts.findOne({ businessId, username: staffUsername, role: { $in: ['admin', 'cashier'] } })
       if (!account || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Username or password is incorrect.' })
       return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account) })
     }

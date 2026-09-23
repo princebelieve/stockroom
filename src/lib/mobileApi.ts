@@ -7,7 +7,8 @@ import { mobileStocktake } from './mobileStocktake'
 type MobileUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
 type Operation = { operationId: string; entityType: string; entityId: string; action: string; payload: Record<string, unknown>; createdAt: string }
 
-const originalFetch = window.fetch.bind(window)
+const networkFetch = window.fetch.bind(window)
+const originalFetch: typeof fetch = (input, init = {}) => networkFetch(input, { ...init, signal: init.signal || AbortSignal.timeout(20000) })
 const now = () => new Date().toISOString()
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const error = (message: string, status = 400) => json({ error: message }, status)
@@ -26,13 +27,21 @@ async function subscriptionStatus(force = false) {
   const config = await getMobileSyncConfiguration()
   return loadSubscriptionAccess({ config: config ? { url: config.syncApiUrl, token: config.deviceToken, businessId: config.businessId } : null, read: setting, write: setSetting, fetcher: originalFetch, force })
 }
+async function mobileDeviceId() {
+  const existing = await setting('mobileDeviceId')
+  if (existing) return existing
+  const generated = `android-${crypto.randomUUID()}`
+  await setSetting('mobileDeviceId', generated)
+  return generated
+}
 async function sessionUser(): Promise<MobileUser | null> {
   const userId = await setting('sessionUserId')
   if (!userId) return null
   const db = await openMobileDatabase()
   const result = await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [userId])
   const user = result.values?.[0]
-  return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId: 'mobile-shop' } as MobileUser : null
+  const config = await getMobileSyncConfiguration()
+  return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId: config?.businessId || 'mobile-local' } as MobileUser : null
 }
 async function restoreCloudSession(): Promise<MobileUser | null> {
   const config = await getMobileSyncConfiguration()
@@ -42,18 +51,23 @@ async function restoreCloudSession(): Promise<MobileUser | null> {
   const result = await response.json().catch(() => ({}))
   if (!response.ok || !result.account?.id) return null
   const account = result.account
-  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: 'mobile-shop' }
+  if (account.businessId !== config.businessId) {
+    await setSetting('cloudAccessToken', '')
+    return null
+  }
+  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
   const db = await openMobileDatabase()
   await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
   const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
   if (!stored) return null
   await setSetting('sessionUserId', String(stored.id))
-  return { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' } as MobileUser
+  return { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId } as MobileUser
 }
 async function restoreSavedSession(): Promise<MobileUser | null> {
   const saved = JSON.parse(localStorage.getItem('stockroom-user') || 'null') as Partial<MobileUser> | null
   if (!saved?.id) return null
-  const localUser: MobileUser = { id: saved.id, name: String(saved.name || ''), email: String(saved.email || `${saved.id}@staff.local.invalid`), username: String(saved.username || ''), role: saved.role || 'cashier', operationalAccess: Boolean(saved.operationalAccess), organizationId: 'mobile-shop' }
+  const config = await getMobileSyncConfiguration()
+  const localUser: MobileUser = { id: saved.id, name: String(saved.name || ''), email: String(saved.email || `${saved.id}@staff.local.invalid`), username: String(saved.username || ''), role: saved.role || 'cashier', operationalAccess: Boolean(saved.operationalAccess), organizationId: config?.businessId || String(saved.organizationId || 'mobile-local') }
   const db = await openMobileDatabase()
   await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
   await setSetting('sessionUserId', localUser.id)
@@ -185,7 +199,9 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
 async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) {
   const db = await openMobileDatabase()
   const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
-  if (current?.appName && current?.currency && !(current.appName === 'My Business' && current.currency === 'USD')) return current
+  // Native startup is local-first too. The default local row is still usable
+  // offline; a cloud refresh must not delay identity or screen restoration.
+  if (current?.appName && current?.currency) return current
   if (config) {
     await pullLatest(config)
     const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
@@ -248,7 +264,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     const cloud = 'https://stockroom-0vm5.onrender.com'
     const login = await originalFetch(`${cloud}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.ownerEmail, password: input.ownerPassword }) })
     const account = await login.json(); if (!login.ok || account.account?.role !== 'owner') return error(account.error || 'Only a business owner can enroll this phone.')
-    const enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: input.deviceId, label: input.label }) })
+    const enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: await mobileDeviceId(), label: input.label }) })
     const device = await enrolled.json(); if (!enrolled.ok) return error(device.error || 'Could not enroll this phone.')
     await saveMobileSyncConfiguration({ syncApiUrl: cloud, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken })
     return json({ configured: true, existingBusiness: true }, 201)
@@ -256,9 +272,9 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   if (path === '/api/auth/cloud-session' && method === 'POST') {
     const input = await body(init); const config = await getMobileSyncConfiguration(); if (!config) return error('Enroll this phone before signing in.', 400)
     const identifier = String(input.identifier || input.email || '').trim()
-    const response = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password }) })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId: config.businessId }) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
-    const account = result.account; const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: 'mobile-shop' }
+    const account = result.account; if (account.businessId !== config.businessId) return error('This account belongs to a different business.', 403); const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
     await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
     const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
     await setSetting('sessionUserId', String(stored.id))
@@ -266,9 +282,13 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     await pullLatest(config)
     const initialized = await hydrateBusinessSettings(config)
     await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [initialized.appName || 'My Business', initialized.currency || 'USD', initialized.posProvider || '', initialized.posTerminalId || '', initialized.posConnection || 'manual', initialized.logoData || '', initialized.updatedAt || now()])
-    return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: 'mobile-shop' }, cloudAccessToken: result.accessToken })
+    return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken })
   }
   if (!user) return error('Authentication required.', 401)
+  if (path === '/api/auth/session' && method === 'GET') {
+    const token = new Headers(init?.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') || id()
+    return json({ user, token })
+  }
   const stocktakeResponse = await mobileStocktake(path, init, canOperate(user), queue)
   if (stocktakeResponse) return stocktakeResponse
   if (path === '/api/sync/status') return json(await localSyncStatus())

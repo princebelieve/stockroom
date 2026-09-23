@@ -18,8 +18,9 @@ async function request(path, payload) {
 }
 
 export async function cloudLogin(identifier, password) {
+  const { businessId } = await getCloudConfiguration()
   const value = String(identifier || '').trim()
-  return request('/v1/auth/login', value.includes('@') ? { email: value, password } : { username: value, password })
+  return request('/v1/auth/login', value.includes('@') ? { email: value, password } : { username: value, password, businessId })
 }
 export async function cloudLoginAt(syncApiUrl, email, password) {
   const url = cloudUrl(syncApiUrl)
@@ -47,6 +48,14 @@ export async function cloudCreateStaff(accessToken, input) {
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Could not create cloud staff account.')
   return body
+}
+export async function cloudOwnerForBusiness(accessToken, businessId) {
+  const { url } = await getCloudConfiguration()
+  if (!url || !accessToken || !businessId) throw new Error('Connect to the internet and sign in again before managing staff.')
+  const response = await fetch(`${url}/v1/auth/me`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.account?.role !== 'owner' || body.account?.businessId !== businessId) throw new Error('Your cloud sign-in belongs to a different business. Sign in again on this enrolled device.')
+  return body.account
 }
 export async function cloudSetCashierOperationalAccess(accessToken, userId, enabled) {
   const { url } = await getCloudConfiguration()

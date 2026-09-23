@@ -21,6 +21,8 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
   let pushed = []
   let remoteOperations = []
+  let loginBodies = []
+  let enrollmentBodies = []
   let cloudOffline = false
   let subscription = { businessId: 'shop', testMode: true, expiresAt: null }
   const cloudRoute = async route => {
@@ -29,8 +31,8 @@ try {
     const body = route.request().postDataJSON() || {}
     let result = {}
     if (path === '/v1/subscriptions/access') result = subscription
-    if (path === '/v1/auth/login') result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' }
-    if (path === '/v1/devices/enroll') result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' }
+    if (path === '/v1/auth/login') { loginBodies.push(body); result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' } }
+    if (path === '/v1/devices/enroll') { enrollmentBodies.push(body); result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' } }
     if (path === '/v1/sync/pull') {
       const cursor = Number(new URL(route.request().url()).searchParams.get('cursor') || 0)
       const operations = remoteOperations.slice(cursor, cursor + 500)
@@ -43,6 +45,13 @@ try {
   await context.route('https://stockroom-0vm5.onrender.com/**', cloudRoute)
   const page = await context.newPage()
   page.setDefaultTimeout(15000)
+  // At a phone width the primary navigation is intentionally inside the
+  // drawer. Exercise that real interaction instead of treating the hidden
+  // sidebar as a desktop navigation bar.
+  const navigateMobile = async (target) => {
+    await page.getByLabel('Open navigation menu', { exact: true }).click()
+    await page.getByRole('button', { name: target, exact: true }).click()
+  }
   const errors = []
   page.on('pageerror', error => { errors.push(error.message); console.error(error.message) })
   await page.goto(`http://127.0.0.1:${server.address().port}`)
@@ -54,7 +63,9 @@ try {
     return { status: response.status, data: await response.json() }
   }, { path, body })
   assert.equal((await api('/api/installer/activate', { mode: 'existing', ownerEmail: 'owner@test.com', ownerPassword: 'test-password', deviceId: 'pwa-test', label: 'iPhone' })).status, 201)
+  assert.notEqual(enrollmentBodies[0].deviceId, 'pwa-test', 'Enrollment must use the generated browser installation ID, not a form value')
   assert.equal((await api('/api/auth/cloud-session', { email: 'other@test.com', password: 'test-password' })).status, 403)
+  assert.deepEqual(loginBodies.at(-1), { email: 'other@test.com', password: 'test-password' }, 'Owner login must return its actual business so the device can reject a mismatch explicitly')
   await page.reload()
   await page.getByLabel('Owner email or staff username', { exact: true }).fill('owner@test.com')
   await page.getByLabel('Password', { exact: true }).fill('test-password')
@@ -175,7 +186,7 @@ try {
   assert.equal(await count(teaCount.id, 0), 200)
   assert.equal((await api('/api/sync/status')).data.pending, beforeDraft)
   await page.reload()
-  await page.getByRole('button', { name: 'Stock take', exact: true }).click()
+  await navigateMobile('Stock take')
   await page.getByRole('button', { name: 'Approve adjustments' }).waitFor()
   assert.equal((await api('/api/stocktakes')).data.stocktake.counts.find(item => item.id === coffeeCount.id).counted, 8)
   await api('/api/products/remote/stock', { amount: -5 })
@@ -195,7 +206,7 @@ try {
   assert.deepEqual(stocktakeOps.map(item => item.action), ['create', 'approved'])
   assert.equal(stocktakeOps[0].payload.status, 'approved')
   assert.equal(stocktakeOps[1].payload.counts.find(item => item.id === coffeeCount.id).variance, -2)
-  await page.getByRole('button', { name: 'POS', exact: true }).click()
+  await navigateMobile('POS')
   await page.locator('.pos-product').filter({ hasText: 'Coffee' }).click()
   await page.getByLabel('Payment method').selectOption('cash')
   assert.equal(await page.getByRole('button', { name: 'Complete sale', exact: true }).isDisabled(), true)
@@ -227,7 +238,7 @@ try {
   const walletCustomer = (await api('/api/customers', { name: 'Wallet browser customer' })).data
   assert.equal((await api('/api/customers/' + walletCustomer.id + '/wallet', { amount: 20, reason: 'Deposit' })).status, 200)
   await page.reload()
-  await page.getByRole('button', { name: 'POS', exact: true }).click()
+  await navigateMobile('POS')
   await page.locator('.pos-product').first().click()
   await page.getByRole('combobox', { name: /^Payment method/ }).selectOption('wallet')
   await page.getByRole('combobox', { name: /^Customer wallet/ }).selectOption(walletCustomer.id)
@@ -240,7 +251,7 @@ try {
   const forceAccess = () => page.evaluate(async () => (await fetch('/api/subscriptions/access', { headers: { 'X-Subscription-Refresh': 'true' } })).json())
   assert.equal((await forceAccess()).blocked, true)
   await page.reload()
-  await page.getByRole('button', { name: 'POS', exact: true }).click()
+  await navigateMobile('POS')
   await page.getByRole('heading', { name: 'POS access paused' }).waitFor()
   cloudOffline = true
   assert.equal((await api('/api/sales', { id: 'blocked-sale' })).status, 402)
@@ -248,7 +259,7 @@ try {
   subscription.testMode = true
   await page.getByRole('button', { name: 'Check access again' }).click()
   await page.getByRole('heading', { name: 'Sell products' }).waitFor()
-  await page.getByRole('button', { name: 'Wallet', exact: true }).click()
+  await navigateMobile('Wallet')
   await page.getByRole('heading', { name: 'Wallet browser customer' }).waitFor()
   await page.getByRole('button', { name: 'Log out' }).click()
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
