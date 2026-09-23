@@ -161,7 +161,16 @@ function App() {
   })
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(() => sessionStorage.getItem('stockroom-active-screen') || 'Overview')
+  const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<'Sales' | 'Team' | null>(null)
   useEffect(() => { sessionStorage.setItem('stockroom-active-screen', active) }, [active])
+  const navigateToSection = (screen: 'Sales' | 'Team', heading: string) => {
+    setActive(screen)
+    setMobileMenuOpen(false)
+    window.setTimeout(() => {
+      const target = [...document.querySelectorAll('main h2, main h3')].find(element => element.textContent?.trim() === heading)
+      target?.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+  }
   const goBackInApp = () => {
     if (active === 'Overview') return
     const previousScreen = (window.history.state as { screen?: string } | null)?.screen
@@ -1318,19 +1327,19 @@ function App() {
     {mobileMenuOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />}
     <aside className={`sidebar${mobileMenuOpen ? ' mobile-menu-open' : ''}`}>
       <div className="brand"><div className="brand-mark">{logoData ? <img src={logoData} alt="" className="brand-logo" /> : <Boxes size={21} />}</div><div><strong>{appName}</strong><span>Business operations</span></div></div>
-      <nav onClick={() => setMobileMenuOpen(false)}>
+      <nav onClick={(event) => { if (!(event.target as HTMLElement).closest('.sidebar-nav-group')) setMobileMenuOpen(false) }}>
         {canManageOperations && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
         {canManageOperations && <button className={active === 'Inventory' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Inventory')}><Boxes size={18} />Inventory <b>{products.length}</b></button>}
         {canManageInventory && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
         <button className={active === 'POS' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('POS')}><ShoppingCart size={18} />POS</button>
         {!isBrowserPwa() && !isNativeMobile() && <button className={active === 'Display' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Display')}><Store size={18} />Customer display</button>}
-        {canManageOperations && <button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sales')}><ShoppingCart size={18} />Sales</button>}
+        {canManageOperations && <div className="sidebar-nav-group"><button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Sales'} onClick={() => { setActive('Sales'); setExpandedSidebarGroup(group => group === 'Sales' ? null : 'Sales') }}><ShoppingCart size={18} />Sales <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Sales' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Sales' && <div className="sidebar-subnav"><button onClick={() => navigateToSection('Sales', 'Receipt history')}>Receipt history</button><button onClick={() => navigateToSection('Sales', 'Payment accountability')}>Payment evidence</button><button onClick={() => navigateToSection('Sales', 'Sales history')}>Sales history</button><button onClick={() => navigateToSection('Sales', 'Reconcile provider report')}>Reconciliation</button></div>}</div>}
         {canManageOperations && <button className={active === 'Movements' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Movements')}><ArrowDownToLine size={18} />Stock movements</button>}
         {canManageOperations && <button className={active === 'Wallet' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Wallet')}><WalletCards size={18} />Wallet</button>}
         {!isBrowserPwa() && ['owner', 'admin'].includes(user.role) && <button className={active === 'Owner' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Owner')}><LayoutDashboard size={18} />Business dashboard</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Reports' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Reports')}><BarChart3 size={18} />Reports</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Sync' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sync')}><RefreshCw size={18} />Sync issues {syncConflicts.length > 0 && <b>{syncConflicts.length}</b>}</button>}
-        {user.role === 'owner' && <button className={active === 'Team' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Team')}><UserRoundCog size={18} />Team management</button>}
+        {user.role === 'owner' && <div className="sidebar-nav-group"><button className={active === 'Team' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Team'} onClick={() => { setActive('Team'); setExpandedSidebarGroup(group => group === 'Team' ? null : 'Team') }}><UserRoundCog size={18} />Team management <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Team' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Team' && <div className="sidebar-subnav"><button onClick={() => navigateToSection('Team', 'Cashier activity')}>Cashier activity</button><button onClick={() => navigateToSection('Team', 'Team management')}>Team members</button><button onClick={() => navigateToSection('Team', 'Add team member')}>Add staff</button>{staff.some(member => member.role === 'cashier') && <button onClick={() => navigateToSection('Team', 'Cashier password control')}>Cashier password</button>}</div>}</div>}
         {user.role === 'owner' && <button className={active === 'Subscription' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Subscription')}><WalletCards size={18} />Subscription</button>}
         {canManageDeviceSetup && <button className={active === 'Device' ? 'nav-item active' : 'nav-item'} onClick={() => { setDeviceSetupKind(undefined); setActive('Device') }}><Printer size={18} />Device setup</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Settings')}><UserRoundCog size={18} />Business settings</button>}
