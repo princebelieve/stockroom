@@ -10,7 +10,7 @@ type Setup = { plan: (Plan & { plans?: NamedPlan[] }) | null; testMode: boolean;
 type Referral = { link: string }
 const summaryCacheKey = 'stockroom-subscription-summary'
 
-export function SubscriptionSettings({ apiUrl, token, onAccess }: { apiUrl: string; token: string; onAccess: (access: SubscriptionAccess) => void }) {
+export function SubscriptionSettings({ apiUrl, token, onAccess, onToken }: { apiUrl: string; token: string; onAccess: (access: SubscriptionAccess) => void; onToken: (token: string, refreshToken: string) => void }) {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [setup, setSetup] = useState<Setup | null>(null)
   const [referral, setReferral] = useState<Referral | null>(null)
@@ -19,9 +19,20 @@ export function SubscriptionSettings({ apiUrl, token, onAccess }: { apiUrl: stri
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const request = async (path: string, init: RequestInit = {}) => {
-    const response = await fetch(`${apiUrl}/v1/subscriptions${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) } })
+  const request = async (path: string, init: RequestInit = {}, renewed = false, accessToken = token): Promise<any> => {
+    const response = await fetch(`${apiUrl}/v1/subscriptions${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}`, ...(init.headers || {}) } })
     const data = await response.json().catch(() => ({}))
+    if (response.status === 401 || response.status === 403) {
+      const refreshToken = localStorage.getItem('stockroom-cloud-refresh-token') || ''
+      if (!renewed && refreshToken) {
+        const renewal = await fetch(`${apiUrl}/v1/auth/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }) })
+        const renewedSession = await renewal.json().catch(() => ({}))
+        if (renewal.ok && renewedSession.accessToken && renewedSession.refreshToken) {
+          onToken(renewedSession.accessToken, renewedSession.refreshToken)
+          return request(path, init, true, renewedSession.accessToken)
+        }
+      }
+    }
     if (!response.ok) throw new Error(data.error || 'Subscription request failed.')
     return data
   }

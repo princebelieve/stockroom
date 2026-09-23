@@ -348,11 +348,12 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
     await setSetting('sessionUserId', String(stored.id))
     await setSetting('cloudAccessToken', String(result.accessToken))
+    await setSetting('cloudRefreshToken', String(result.refreshToken || ''))
     const pulled = await pullLatest(config)
     await setSetting('lastSyncError', pulled.lastError)
     const initialized = await hydrateBusinessSettings(config)
     await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [initialized.appName || 'My Business', initialized.currency || 'USD', initialized.posProvider || '', initialized.posTerminalId || '', initialized.posConnection || 'manual', initialized.logoData || '', initialized.updatedAt || now()])
-    return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken })
+    return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken, refreshToken: result.refreshToken })
   }
   if (!user) return error('Authentication required.', 401)
   if (path === '/api/auth/session' && method === 'GET') {

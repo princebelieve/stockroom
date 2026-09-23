@@ -123,7 +123,7 @@ const server = createServer(async (request, response) => {
       if (configured.businessId && remote.account?.businessId !== configured.businessId) throw new Error('This account belongs to a different business than this enrolled device.')
       const user = provisionCloudUser({ ...remote.account, password })
       const token = createSession(user.id)
-      return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken })
+      return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken, refreshToken: remote.refreshToken })
     } catch (error) { return sendJson(response, 400, { error: error.message }) }
   })
   if (request.method === 'POST' && request.url === '/api/auth/cloud-register') return readJson(request, response, async (input) => {

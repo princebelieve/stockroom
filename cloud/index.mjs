@@ -21,6 +21,7 @@ const businessSettings = database.collection('business_settings')
 const accounts = database.collection('accounts')
 const devices = database.collection('devices')
 const passwordResets = database.collection('password_resets')
+const refreshTokens = database.collection('auth_refresh_tokens')
 await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
@@ -37,6 +38,8 @@ await accounts.createIndex({ businessId: 1 })
 await accounts.createIndex({ businessId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } })
 await devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true })
 await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+await refreshTokens.createIndex({ tokenHash: 1 }, { unique: true })
+await refreshTokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
 // Sales, stock movements, wallet adjustments, expenses, and audit events are
 // immutable financial/inventory events: accept once by operation ID. Mutable
@@ -57,6 +60,12 @@ function hashPassword(password) { const salt = randomBytes(16).toString('hex'); 
 function matchesPassword(password, stored) { const [salt, value] = String(stored).split(':'); if (!salt || !value) return false; const actual = scryptSync(password, salt, 64); const expected = Buffer.from(value, 'hex'); return actual.length === expected.length && timingSafeEqual(actual, expected) }
 function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, username: account.username || '', role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess) } }
 function accessToken(account) { return signToken({ kind: 'access', businessId: account.businessId, email: account.email || '', username: account.username || '', role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
+function refreshTokenHash(token) { return createHmac('sha256', jwtSecret).update(token).digest('hex') }
+async function cloudSession(account) {
+  const refreshToken = randomBytes(32).toString('base64url')
+  await refreshTokens.insertOne({ tokenHash: refreshTokenHash(refreshToken), accountId: account._id, businessId: account.businessId, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), createdAt: new Date() })
+  return { account: publicAccount(account), accessToken: accessToken(account), refreshToken }
+}
 function deviceToken(businessId, deviceId) { return signToken({ kind: 'device', businessId, deviceId, exp: Math.floor(Date.now() / 1000) + 365 * 86_400 }) }
 function isAccess(claims) { return claims?.kind === 'access' }
 function isDevice(claims) { return claims?.kind === 'device' }
@@ -108,7 +117,7 @@ const server = createServer(async (request, response) => {
       if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId) || !ownerName || !/^\S+@\S+\.\S+$/.test(email) || password.length < 10) return send(response, 400, { error: 'Provide a valid business ID, owner name, email, and password of at least 10 characters.' })
       const account = { businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash: hashPassword(password), createdAt: new Date() }
       try { const created = await accounts.insertOne(account); account._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That business ID or email already exists.' }); throw error }
-      return send(response, 201, { account: publicAccount(account), accessToken: accessToken(account) })
+      return send(response, 201, await cloudSession(account))
     }
     if (request.method === 'POST' && request.url === '/v1/auth/login') {
       const input = await readJson(request)
@@ -123,7 +132,16 @@ const server = createServer(async (request, response) => {
         ? await accounts.findOne({ email, role: 'owner' })
         : await accounts.findOne({ businessId, username: staffUsername, role: { $in: ['admin', 'cashier'] } })
       if (!account || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Username or password is incorrect.' })
-      return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account) })
+      return send(response, 200, await cloudSession(account))
+    }
+    if (request.method === 'POST' && request.url === '/v1/auth/refresh') {
+      const input = await readJson(request)
+      const tokenHash = refreshTokenHash(String(input.refreshToken || ''))
+      const saved = await refreshTokens.findOneAndDelete({ tokenHash, expiresAt: { $gt: new Date() } })
+      if (!saved) return send(response, 401, { error: 'Cloud session renewal expired. Sign in again.' })
+      const account = await accounts.findOne({ _id: saved.accountId })
+      if (!account) return send(response, 401, { error: 'Cloud account is no longer available.' })
+      return send(response, 200, await cloudSession(account))
     }
     if (request.method === 'GET' && request.url === '/v1/auth/me') {
       const claims = verifyToken(request)
@@ -159,6 +177,7 @@ const server = createServer(async (request, response) => {
       const account = await accounts.findOneAndUpdate({ _id: reset.accountId, role: 'owner' }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
       if (!account) return send(response, 400, { error: 'Only an owner password can be reset by email.' })
       await devices.updateMany({ businessId: account.businessId }, { $set: { revokedAt: new Date(), revokeReason: 'Owner password reset' } })
+      await refreshTokens.deleteMany({ accountId: account._id })
       return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account), message: 'Password updated. Re-enroll each device.' })
     }
     if (request.method === 'POST' && request.url === '/v1/admin/devices') {
