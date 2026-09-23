@@ -121,6 +121,14 @@ type SyncConflict = { id: string; entityType: string; entityId: string; reason: 
 type StaffUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; createdAt: string }
 type Reports = { daily: { total: number; count: number }; weekly: { total: number; count: number }; monthly: { total: number; count: number }; inventory: { value: number; products: number; lowStock: number }; profit: { revenue: number; cost: number; expenses: number; amount: number } }
 type Expense = { id: string; category: string; description: string; amount: number; incurredAt: string }
+type InlinePromptRequest = { title: string; message: string; inputType?: 'text' | 'password'; initialValue?: string; minLength?: number; resolve: (value: string | null) => void }
+
+function InlinePrompt({ request, onClose }: { request: InlinePromptRequest; onClose: (value: string | null) => void }) {
+  const [value, setValue] = useState(request.initialValue || '')
+  const input = useRef<HTMLInputElement>(null)
+  useEffect(() => { input.current?.focus() }, [])
+  return <div className="modal-backdrop" onMouseDown={() => onClose(null)}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="inline-prompt-title" onMouseDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); onClose(value) }}><div className="modal-head"><div><h2 id="inline-prompt-title">{request.title}</h2><p>{request.message}</p></div><button type="button" className="icon-button" aria-label="Cancel" onClick={() => onClose(null)}><X size={19} /></button></div><label>Value<input ref={input} type={request.inputType || 'text'} value={value} minLength={request.minLength} required onChange={event => setValue(event.target.value)} /></label><div className="report-actions"><button type="button" className="filter-button" onClick={() => onClose(null)}>Cancel</button><button className="primary-button" type="submit">Continue</button></div></form></div>
+}
 
 function App() {
   const deriveSku = (name: string) => `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`
@@ -225,6 +233,14 @@ function App() {
     return () => { scan.remove() }
   }, [showAdd])
   const [settingsMessage, setSettingsMessage] = useState('')
+  const [inlinePrompt, setInlinePrompt] = useState<InlinePromptRequest | null>(null)
+  function requestInlinePrompt(options: Omit<InlinePromptRequest, 'resolve'>) {
+    return new Promise<string | null>(resolve => setInlinePrompt({ ...options, resolve }))
+  }
+  function closeInlinePrompt(value: string | null) {
+    inlinePrompt?.resolve(value)
+    setInlinePrompt(null)
+  }
   const [passwordMessage, setPasswordMessage] = useState('')
   const [cart, setCart] = useState<Record<string, number>>({})
   const [paymentMethod, setPaymentMethod] = useState<Sale['paymentMethod']>('external-pos')
@@ -962,7 +978,7 @@ function App() {
     const passwordConfirmation = String(form.get('passwordConfirmation') || '')
     if (password !== passwordConfirmation) { setSettingsMessage('Temporary passwords do not match. No staff account was created.'); return }
     if (!cloudAccessToken) { setSettingsMessage('Connect to the internet and sign in again before creating staff accounts.'); return }
-    const username = window.prompt('Choose a unique staff username (3–32 characters; letters, numbers, dots, hyphens, and underscores).')?.trim().toLowerCase()
+    const username = (await requestInlinePrompt({ title: 'Choose staff username', message: 'Enter a unique username (3–32 characters; letters, numbers, dots, hyphens, and underscores).', minLength: 3 }))?.trim().toLowerCase()
     if (!username) return
     const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password, role: form.get('role'), cloudAccessToken }) })
     if (!response.ok) {
@@ -1002,10 +1018,10 @@ function App() {
 
   async function resetCashierPassword(member: StaffUser) {
     if (!cloudAccessToken) return setSettingsMessage('Connect to the internet and sign in again before resetting a cashier password.')
-    const password = window.prompt(`Set a new temporary password for ${member.name}. It must have at least 10 characters.`)
+    const password = await requestInlinePrompt({ title: 'Reset cashier password', message: `Set a new temporary password for ${member.name}. It must have at least 10 characters.`, inputType: 'password', minLength: 10 })
     if (!password) return
     if (password.length < 10) return setSettingsMessage('Cashier passwords must be at least 10 characters long.')
-    const confirmation = window.prompt(`Re-enter the new password for ${member.name}.`)
+    const confirmation = await requestInlinePrompt({ title: 'Confirm cashier password', message: `Re-enter the new password for ${member.name}.`, inputType: 'password', minLength: 10 })
     if (password !== confirmation) return setSettingsMessage('Passwords did not match. No change was made.')
     const response = await fetch(`/api/users/${member.id}/password`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ password, cloudAccessToken }) })
     if (!response.ok) { const error = await response.json().catch(() => ({})) as { error?: string }; return setSettingsMessage(error.error || 'Could not reset cashier password.') }
@@ -1054,11 +1070,11 @@ function App() {
     }
     setQuery(value)
   }
-  function acceptPaymentReference(raw: string) {
+  async function acceptPaymentReference(raw: string) {
     if (!raw.trim()) return
     try {
       const reference = referenceFromScan(raw)
-      const confirmed = window.prompt('Confirm this reference against the terminal receipt. This does not verify payment.', reference)
+      const confirmed = await requestInlinePrompt({ title: 'Confirm payment reference', message: 'Confirm this reference against the terminal receipt. This does not verify payment.', initialValue: reference })
       if (confirmed !== null) setPaymentReference(referenceFromScan(confirmed))
     } catch (error) { window.alert(error instanceof Error ? error.message : 'Could not read payment reference.') }
   }
@@ -1068,7 +1084,7 @@ function App() {
     const Detector = (window as unknown as { BarcodeDetector?: new () => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> } }).BarcodeDetector
     if (!Detector || !navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
-      const value = window.prompt('Enter or scan a barcode') || ''
+      const value = await requestInlinePrompt({ title: 'Enter barcode', message: 'Enter or scan a barcode.' }) || ''
       accept(value)
       return value || undefined
     }
@@ -1092,7 +1108,7 @@ function App() {
         await new Promise(resolve => window.setTimeout(resolve, 150))
       }
     } catch (error) {
-      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; const value = window.prompt('Camera unavailable. Enter or scan the barcode') || ''; accept(value); return value || undefined }
+      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; const value = await requestInlinePrompt({ title: 'Camera unavailable', message: 'Enter or scan the barcode.' }) || ''; accept(value); return value || undefined }
     } finally { window.clearTimeout(timeout) }
   }
 
@@ -1256,7 +1272,7 @@ function App() {
       {active === 'Inventory' && <ProductIntake create={importProduct} products={products} defaultUnit={defaultUnit} scan={() => scanBarcode('intake')} />}
       {active === 'Subscription' && user.role === 'owner' && <SubscriptionSettings apiUrl={subscriptionApiUrl} token={cloudAccessToken} onAccess={setPosAccess} />}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel"><h3>Business type</h3><p>Choose the kind of goods you primarily sell. It only sets the default unit for new products and imports; existing records stay unchanged.</p><div className="settings-form"><BusinessProfileSettings value={businessMode} onChange={value => { setBusinessMode(value); localStorage.setItem('stockroom-business-mode', value); setSettingsMessage('Business type saved on this device.') }} /></div></section>}
-      {active === 'Display' && <CustomerDisplayPairing pairing={displayPairing} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} />}
+      {active === 'Display' && <CustomerDisplayPairing pairing={displayPairing} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} prompt={requestInlinePrompt} />}
       {(active === 'POS' || active === 'Display') && displayError && <div role="alert" className="auth-error">{displayError}<button className="filter-button" onClick={() => setDisplayRetry(value => value + 1)}>Retry display update</button></div>}
       {receiptError && <p role="alert" className="auth-error">{receiptError}</p>}
       {(active === 'POS' || active === 'Sales') && <section className="panel full-panel"><h2>Receipt history</h2><p>Saved receipts on this device, newest first. Older receipts without snapshots use current business and currency settings.</p>{allReceipts.length ? allReceipts.map(receipt => <div className="customer-row" key={receipt.id}><div><strong>{new Date(receipt.createdAt).toLocaleString()}</strong><small>{receipt.id} ? {receipt.paymentReference || receipt.paymentMethod}</small></div><AsyncButton className="filter-button" busyLabel="Printing..." onClick={() => printReceipt(receipt)}>Reprint receipt</AsyncButton></div>) : <p>No saved receipts yet.</p>}</section>}
@@ -1273,6 +1289,7 @@ function App() {
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><AsyncForm className="settings-form" busyLabel="Saving settings..." onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>Default payment-terminal provider<span>Shared business default. Each checkout can override it in Device setup.</span><input value={posProvider} placeholder="e.g. OPay" maxLength={100} onChange={(event) => setPosProvider(event.target.value)} /></label><PaymentPolicySettings value={extraPaymentPolicy} onChange={setExtraPaymentPolicy} /><SubmitButton className="primary-button">Save business settings <ArrowUpToLine size={17} /></SubmitButton>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</AsyncForm>{!isBrowserPwa() && <AsyncForm className="settings-form" busyLabel="Updating password..." onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><SubmitButton className="primary-button" type="submit">Update password</SubmitButton>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</AsyncForm>}{isBrowserPwa() && <p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p>}</section>}
     </main>
     {showAdd && <div className="modal-backdrop" onMouseDown={() => { if (!document.querySelector('form.modal[aria-busy="true"]')) setShowAdd(false) }}><AsyncForm className="modal" busyLabel="Saving product..." onSubmit={addProduct} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2>Add product</h2><p>It will be saved on this device immediately.</p></div><button type="button" className="icon-button" onClick={() => setShowAdd(false)}><X size={19} /></button></div><div className="form-grid"><label>Product name<input name="name" required placeholder="e.g. Espresso beans" /></label><label>Barcode<input name="barcode" placeholder="Scan or enter product barcode" /></label><label>SKU<input name="sku" required placeholder="COF-001" /></label><label>Category<input name="category" required placeholder="Beverages" /></label><label>Unit<input name="unit" required placeholder="bag" /></label><label>Starting stock<input name="stock" type="number" min="0" required defaultValue="0" /></label><label>Reorder point<input name="reorder" type="number" min="0" required defaultValue="10" /></label><label>Unit price<input name="price" type="number" min="0" step="0.01" required defaultValue="0" /></label></div><SubmitButton className="primary-button submit-button">Save product <ArrowUpToLine size={17} /></SubmitButton></AsyncForm></div>}
+    {inlinePrompt && <InlinePrompt request={inlinePrompt} onClose={closeInlinePrompt} />}
     {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><video ref={cameraVideo} muted playsInline style={{ width: '100%' }} /><button className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
     {lastReceipt && active === 'POS' && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
     <datalist id="approved-payment-providers">{extraPaymentPolicy.providers.map(provider => <option key={provider} value={provider} />)}</datalist>
@@ -1384,8 +1401,8 @@ function InstallerScreen({ onActivate, message }: { onActivate: (event: React.Fo
   return <main className="login-screen"><AsyncForm className="login-card installer-card" busyLabel="Activating device..." onSubmit={onActivate}><input type="hidden" name="mode" value={mode} /><div className="brand-mark"><Boxes size={21} /></div><h1>{mode === 'new' ? 'New client activation' : 'Add another device'}</h1><p>{mode === 'new' ? 'Installer-only: activate this client device before handing over the app.' : 'For the business owner: add this device to your existing business.'}</p>{!isBrowserPwa() && <div className="installer-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>New client</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Existing business</button></div>}{mode === 'new' && <label>Client business ID<input name="businessId" required pattern="[a-z0-9][a-z0-9-]{2,80}" placeholder="client-business-001" /></label>}<label>Device ID<input name="deviceId" required pattern="[a-z0-9][a-z0-9-]{2,100}" placeholder="client-business-main-pc" /></label><label>Device label<input name="label" required maxLength={100} placeholder="Main checkout computer" /></label>{mode === 'new' ? <><label>Installer Admin API key<input name="adminApiKey" type="password" required autoComplete="off" placeholder="Private installer key" /></label><p className="installer-note">The app connects to the configured cloud service automatically. This key is sent only to the cloud service and is never saved.</p></> : <><label>Owner email<input name="ownerEmail" type="email" required placeholder="owner@business.com" /></label><label>Owner password<input name="ownerPassword" type="password" minLength={10} required autoComplete="current-password" placeholder="Cloud owner password" /></label><p className="installer-note">Your business is identified from the owner account. The password is used only to enroll this device and is not stored.</p></>}{message && <div className={message.startsWith('Installation activated') ? 'settings-message' : 'auth-error'}>{message}</div>}<SubmitButton className="primary-button login-button">{mode === 'new' ? 'Activate new client' : 'Add this device'}</SubmitButton></AsyncForm></main>
 }
 
-function CustomerDisplayPairing({ pairing, createPairing, openSecondMonitor }: { pairing: { url: string; code: string; expiresAt: string } | null; createPairing: () => Promise<void>; openSecondMonitor: () => Promise<void> }) {
-  return <section className="panel full-panel pairing-panel"><div className="panel-heading"><div><h2>Customer display</h2><p>Share a read-only live order view with a customer or a second display on the same shop Wi-Fi.</p></div><Store size={20} /></div><ol><li>Connect the customer phone/tablet and checkout computer to the same private Wi-Fi.</li><li>Create a link and send or open it on that customer device within five minutes.</li><li>The customer can review the live basket and see the completed-sale confirmation, but cannot change anything.</li></ol><div className="report-actions">{window.stockroomDesktop && <AsyncButton busyLabel="Opening display..." className="primary-button" onClick={openSecondMonitor}>Open customer display on second monitor</AsyncButton>}<AsyncButton busyLabel="Creating link..." className="filter-button" onClick={createPairing}>Create customer share link</AsyncButton></div>{pairing && <section className="pairing-code"><span>Send or open this customer link</span><strong>{pairing.url}</strong><button className="filter-button" onClick={() => navigator.clipboard?.writeText(pairing.url).catch(() => window.prompt('Copy this customer link', pairing.url))}>Copy link</button><small>Pairing code: <b>{pairing.code}</b> Â· expires {new Date(pairing.expiresAt).toLocaleTimeString()}</small></section>}<p className="settings-message">After the link is opened, its read-only display session expires after 12 hours or when the checkout app restarts.</p></section>
+function CustomerDisplayPairing({ pairing, createPairing, openSecondMonitor, prompt }: { pairing: { url: string; code: string; expiresAt: string } | null; createPairing: () => Promise<void>; openSecondMonitor: () => Promise<void>; prompt: (options: Omit<InlinePromptRequest, 'resolve'>) => Promise<string | null> }) {
+  return <section className="panel full-panel pairing-panel"><div className="panel-heading"><div><h2>Customer display</h2><p>Share a read-only live order view with a customer or a second display on the same shop Wi-Fi.</p></div><Store size={20} /></div><ol><li>Connect the customer phone/tablet and checkout computer to the same private Wi-Fi.</li><li>Create a link and send or open it on that customer device within five minutes.</li><li>The customer can review the live basket and see the completed-sale confirmation, but cannot change anything.</li></ol><div className="report-actions">{window.stockroomDesktop && <AsyncButton busyLabel="Opening display..." className="primary-button" onClick={openSecondMonitor}>Open customer display on second monitor</AsyncButton>}<AsyncButton busyLabel="Creating link..." className="filter-button" onClick={createPairing}>Create customer share link</AsyncButton></div>{pairing && <section className="pairing-code"><span>Send or open this customer link</span><strong>{pairing.url}</strong><button className="filter-button" onClick={async () => { try { await navigator.clipboard?.writeText(pairing.url) } catch { await prompt({ title: 'Copy this customer link', message: 'Select and copy the link below.', initialValue: pairing.url }) } }}>Copy link</button><small>Pairing code: <b>{pairing.code}</b> Â· expires {new Date(pairing.expiresAt).toLocaleTimeString()}</small></section>}<p className="settings-message">After the link is opened, its read-only display session expires after 12 hours or when the checkout app restarts.</p></section>
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode>{window.location.pathname === '/customer-display' ? <main className="login-screen"><section className="login-card"><h1>Customer display</h1><p>Open a new pairing link from the checkout computer?s Customer display page.</p></section></main> : <App />}</StrictMode>)
