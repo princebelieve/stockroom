@@ -31,23 +31,8 @@ import { applyLogoTheme } from './lib/logoTheme'
 import { resolveCloudAccessToken } from './lib/cloudSession'
 import { SubscriptionSettings } from './SubscriptionSettings'
 
-type ListFilter = { screen: string; search: string; from: string; to: string }
-const listFilterEvent = 'stockroom-list-filter'
-
 function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
   const menu = useRef<HTMLDetailsElement>(null)
-  const [filtersOpen, setFiltersOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const activeScreen = () => sessionStorage.getItem('stockroom-active-screen') || 'Overview'
-  const publishFilter = (next: Partial<Omit<ListFilter, 'screen'>> = {}) => {
-    const filter = { screen: activeScreen(), search, from, to, ...next }
-    if ('search' in next) setSearch(next.search || '')
-    if ('from' in next) setFrom(next.from || '')
-    if ('to' in next) setTo(next.to || '')
-    window.dispatchEvent(new CustomEvent<ListFilter>(listFilterEvent, { detail: filter }))
-  }
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       if (menu.current && !menu.current.contains(event.target as Node)) menu.current.open = false
@@ -65,19 +50,11 @@ function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean
       document.removeEventListener('keydown', escape)
     }
   }, [])
-  useEffect(() => {
-    const filterButton = document.querySelector<HTMLButtonElement>('button[title="Filter"]')
-    const openFilters = () => { if (menu.current) menu.current.open = true; setFiltersOpen(true) }
-    filterButton?.addEventListener('click', openFilters)
-    return () => filterButton?.removeEventListener('click', openFilters)
-  }, [])
   return <details className="page-options" ref={menu} onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node)) event.currentTarget.open = false
   }}>
     <summary className="icon-button" aria-label="Page options" title="Page options"><MoreHorizontal size={19} /></summary>
     <div className="page-options-panel">
-      <button type="button" onClick={() => setFiltersOpen(value => !value)}><SlidersHorizontal size={16} />Filter current list</button>
-      {filtersOpen && <div className="list-filter-panel"><label>Search<input value={search} onChange={event => publishFilter({ search: event.target.value })} placeholder="Name, item, reference" /></label><label>From<input type="date" value={from} onChange={event => publishFilter({ from: event.target.value })} /></label><label>To<input type="date" value={to} onChange={event => publishFilter({ to: event.target.value })} /></label><button type="button" onClick={() => publishFilter({ search: '', from: '', to: '' })}>Clear filters</button></div>}
       <button type="button" disabled={busy} onClick={() => {
         if (menu.current) {
           menu.current.open = false
@@ -204,7 +181,7 @@ function App() {
   const [posAccess, setPosAccess] = useState<SubscriptionAccess>(() => subscriptionAccess(null))
   const [syncing, setSyncing] = useState(false)
   const [syncFeedback, setSyncFeedback] = useState('')
-  const [allSyncConflicts, setSyncConflicts] = useState<SyncConflict[]>([])
+  const [syncConflicts, setSyncConflicts] = useState<SyncConflict[]>([])
   const [displayPairing, setDisplayPairing] = useState<{ url: string; code: string; expiresAt: string } | null>(null)
   const [appName, setAppName] = useState(() => localStorage.getItem('stockroom-app-name') || 'My Business')
   const [currency, setCurrency] = useState(() => localStorage.getItem('stockroom-currency') || 'USD')
@@ -344,11 +321,11 @@ function App() {
   useEffect(() => { setCashReceived('') }, [authToken])
   const [cloudAccessToken, setCloudAccessToken] = useState(() => localStorage.getItem('stockroom-cloud-access-token') || '')
   const [authError, setAuthError] = useState('')
-  const [allCustomers, setCustomers] = useState<Customer[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [walletCustomerId, setWalletCustomerId] = useState('')
   const [walletCreditApproved, setWalletCreditApproved] = useState(false)
   useEffect(() => { setWalletCreditApproved(false) }, [cart, walletCustomerId, authToken])
-  const [allStaff, setStaff] = useState<StaffUser[]>([])
+  const [staff, setStaff] = useState<StaffUser[]>([])
   const [staffLoaded, setStaffLoaded] = useState(false)
   useEffect(() => {
     if (active !== 'Team' || user?.role !== 'owner') return
@@ -356,30 +333,11 @@ function App() {
     if (!email) return
     email.required = false
     email.placeholder = 'Optional contact email'
-  }, [active, user?.role, allStaff.length])
+  }, [active, user?.role, staff.length])
   const [reports, setReports] = useState<Reports | null>(null)
-  const [allExpenses, setExpenses] = useState<Expense[]>([])
-  const [allSales, setSales] = useState<SaleRecord[]>([])
-  const [allMovements, setMovements] = useState<Movement[]>([])
-  const [listFilter, setListFilter] = useState<ListFilter>({ screen: '', search: '', from: '', to: '' })
-  useEffect(() => {
-    const receive = (event: Event) => setListFilter((event as CustomEvent<ListFilter>).detail)
-    window.addEventListener(listFilterEvent, receive)
-    return () => window.removeEventListener(listFilterEvent, receive)
-  }, [])
-  const matchesCurrentList = (date: string | undefined, ...values: Array<string | number | undefined>) => {
-    if (listFilter.screen !== active) return true
-    const text = values.join(' ').toLowerCase()
-    const day = String(date || '').slice(0, 10)
-    const dateMatches = !day || ((!listFilter.from || day >= listFilter.from) && (!listFilter.to || day <= listFilter.to))
-    return (!listFilter.search || text.includes(listFilter.search.toLowerCase())) && dateMatches
-  }
-  const customers = allCustomers.filter(customer => matchesCurrentList(undefined, customer.name, customer.phone, customer.balance))
-  const staff = allStaff.filter(member => matchesCurrentList(member.createdAt, member.name, member.email, member.username, member.role))
-  const expenses = allExpenses.filter(expense => matchesCurrentList(expense.incurredAt, expense.category, expense.description, expense.amount))
-  const sales = allSales.filter(sale => matchesCurrentList(sale.createdAt, sale.id, sale.paymentMethod, sale.paymentReference, sale.staffName, sale.total, ...sale.items.map(item => item.productName)))
-  const movements = allMovements.filter(movement => matchesCurrentList(movement.createdAt, movement.productName, movement.sku, movement.reason, movement.quantity))
-  const syncConflicts = allSyncConflicts.filter(conflict => matchesCurrentList(conflict.createdAt, conflict.entityType, conflict.reason))
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [sales, setSales] = useState<SaleRecord[]>([])
+  const [movements, setMovements] = useState<Movement[]>([])
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
   const [receiptHistory, setReceiptHistory] = useState<Sale[]>([])
@@ -1022,8 +980,7 @@ function App() {
   const canManageOperations = user?.role === 'owner' || user?.role === 'admin' || Boolean(user?.operationalAccess)
   const canManageInventory = canManageOperations
   const canManageDeviceSetup = user?.role === 'owner' || user?.role === 'admin'
-  const allReceiptsRaw: Sale[] = [...receiptHistory, ...allSales.filter(row => !receiptHistory.some(receipt => receipt.id === row.id)).map(row => ({ ...row, paymentMethod: row.paymentMethod as Sale['paymentMethod'], syncStatus: 'synced' as const, items: row.items.map(item => ({ productId: item.productId, productName: item.productName, quantity: item.quantity, price: item.unitPrice })) }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const allReceipts = allReceiptsRaw.filter(receipt => matchesCurrentList(receipt.createdAt, receipt.id, receipt.paymentMethod, receipt.paymentReference, receipt.total, ...receipt.items.map(item => item.productName)))
+  const allReceipts: Sale[] = [...receiptHistory, ...sales.filter(row => !receiptHistory.some(receipt => receipt.id === row.id)).map(row => ({ ...row, paymentMethod: row.paymentMethod as Sale['paymentMethod'], syncStatus: 'synced' as const, items: row.items.map(item => ({ productId: item.productId, productName: item.productName, quantity: item.quantity, price: item.unitPrice })) }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const formatMoney = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
   async function refreshWallets() {
     const response = await fetch('/api/customers', { headers: authHeaders })
@@ -1373,8 +1330,8 @@ function App() {
       {receiptError && <p role="alert" className="auth-error">{receiptError}</p>}
       {(active === 'POS' || active === 'Sales') && <section className="panel full-panel"><h2>Receipt history</h2><p>Saved receipts on this device, newest first. Older receipts without snapshots use current business and currency settings.</p>{allReceipts.length ? allReceipts.map(receipt => <div className="customer-row" key={receipt.id}><div><strong>{new Date(receipt.createdAt).toLocaleString()}</strong><small>{receipt.id} ? {receipt.paymentReference || receipt.paymentMethod}</small></div><AsyncButton className="filter-button" busyLabel="Printing..." onClick={() => printReceipt(receipt)}>Reprint receipt</AsyncButton></div>) : <p>No saved receipts yet.</p>}</section>}
       {active === 'Sales' && canManageOperations && <Reconciliation key={user.organizationId} sales={allReceipts} />}
-      {active === 'Sales' && <><PaymentEvidence sales={allReceipts} money={formatMoney} /><section className="panel full-panel"><div className="panel-heading"><div><h2>Sales history</h2><p>Completed sales saved on this device.</p></div></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Items</th><th>Payment</th><th>Total</th></tr></thead><tbody>{sales.length ? sales.map((sale) => <tr key={sale.id}><td>{new Date(sale.createdAt).toLocaleString()}</td><td>{sale.items.map((item) => `${item.quantity} Ã— ${item.productName}`).join(', ') || 'Legacy sale'}</td><td>{sale.paymentMethod}{sale.paymentReference ? ` Â· ${sale.paymentReference}` : ''}</td><td>{formatMoney(sale.total)}</td></tr>) : <tr><td colSpan={4} className="empty-state">No completed sales yet.</td></tr>}</tbody></table></div></section></>}
-      {active === 'Movements' && <section className="panel full-panel"><div className="panel-heading"><div><h2>Stock movements</h2><p>Every sale, adjustment, and approved stock-take is recorded here.</p></div></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Product</th><th>Change</th><th>Reason</th></tr></thead><tbody>{movements.length ? movements.map((movement) => <tr key={movement.id}><td>{new Date(movement.createdAt).toLocaleString()}</td><td><strong>{movement.productName}</strong><span className="table-subtext">{movement.sku}</span></td><td className={movement.quantity < 0 ? 'low-stock' : 'positive'}>{movement.quantity > 0 ? '+' : ''}{movement.quantity}</td><td>{movement.reason}</td></tr>) : <tr><td colSpan={4} className="empty-state">No stock movements yet.</td></tr>}</tbody></table></div></section>}
+      {active === 'Sales' && <><PaymentEvidence sales={allReceipts} money={formatMoney} /><SalesHistory sales={sales} money={formatMoney} /></>}
+      {active === 'Movements' && <MovementHistory movements={movements} />}
       {active === 'Wallet' && <section className="wallet-grid"><div className="panel customer-wallet-panel"><div className="panel-heading"><div><h2>Customer wallets</h2><p>Positive balance is prepaid money. Amount owed is customer debt. Add a deposit or repayment, or record a withdrawal.</p></div><WalletCards size={20} /></div><AsyncForm className="form-grid" busyLabel="Adding customer..." onSubmit={addCustomer}><label>Customer name<input value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} required placeholder="Customer name" /></label><label>Phone number<input value={newCustomerPhone} onChange={(event) => setNewCustomerPhone(event.target.value)} placeholder="Optional" /></label><SubmitButton className="primary-button" type="submit">Add customer</SubmitButton></AsyncForm>{customers.length ? customers.map(customer => <WalletCustomer key={customer.id} customer={customer} money={formatMoney} adjust={adjustWallet} />) : <div className="empty-state">Add your first customer to begin managing wallet credit.</div>}</div></section>}
       {active === 'Owner' && <OwnerDashboard token={authToken} currency={currency} />}
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
@@ -1451,6 +1408,31 @@ function OwnerDashboard({ token, currency }: { token: string; currency: string }
   useEffect(() => { fetch('/api/owner/metrics', { headers: { Authorization: `Bearer ${token}` } }).then((response) => response.ok ? response.json() : Promise.reject()).then(setMetrics).catch(() => undefined) }, [token])
   const money = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
   return <section className="owner-dashboard"><div className="metric-grid"><div className="metric-card"><span>Sales recorded</span><strong>{metrics ? money(metrics.salesToday) : 'â€”'}</strong><small>Synced sales total</small></div><div className="metric-card"><span>Transactions</span><strong>{metrics?.saleCount ?? 'â€”'}</strong><small>Completed receipts</small></div><div className="metric-card alert-card"><span>Low stock</span><strong>{metrics?.lowStock ?? 'â€”'}</strong><small>Items needing attention</small></div></div><div className="panel owner-panel"><h2>Business monitoring</h2><p>Inventory value: <strong>{metrics ? money(metrics.inventoryValue) : 'â€”'}</strong> across {metrics?.productCount ?? 'â€”'} products.</p><p>Sales made offline are included after they synchronize.</p></div></section>
+}
+
+function RecordFilters({ query, setQuery, from, setFrom, to, setTo, placeholder = 'Search records' }: { query: string; setQuery: (value: string) => void; from: string; setFrom: (value: string) => void; to: string; setTo: (value: string) => void; placeholder?: string }) {
+  return <div className="search-row record-filters"><div className="search-box"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder={placeholder} /></div><label>From<input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<input type="date" value={to} onChange={event => setTo(event.target.value)} /></label>{(query || from || to) && <button type="button" className="filter-button" onClick={() => { setQuery(''); setFrom(''); setTo('') }}>Clear filters</button>}</div>
+}
+
+function isInDateRange(value: string, from: string, to: string) {
+  const date = value.slice(0, 10)
+  return (!from || date >= from) && (!to || date <= to)
+}
+
+function SalesHistory({ sales, money }: { sales: SaleRecord[]; money: (amount: number) => string }) {
+  const [query, setQuery] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const filtered = sales.filter(sale => `${sale.id} ${sale.staffName || ''} ${sale.paymentMethod} ${sale.paymentReference || ''} ${sale.items.map(item => item.productName).join(' ')}`.toLowerCase().includes(query.toLowerCase()) && isInDateRange(sale.createdAt, from, to))
+  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Sales history</h2><p>Search by receipt, cashier, product, payment reference, or date range.</p></div></div><RecordFilters query={query} setQuery={setQuery} from={from} setFrom={setFrom} to={to} setTo={setTo} placeholder="Search sales, receipts, cashiers" /><div className="table-wrap"><table><thead><tr><th>Date</th><th>Items</th><th>Payment</th><th>Total</th></tr></thead><tbody>{filtered.length ? filtered.map(sale => <tr key={sale.id}><td>{new Date(sale.createdAt).toLocaleString()}<span className="table-subtext">{sale.staffName || sale.id}</span></td><td>{sale.items.map(item => `${item.quantity} × ${item.productName}`).join(', ') || 'Legacy sale'}</td><td>{sale.paymentMethod}{sale.paymentReference ? ` · ${sale.paymentReference}` : ''}</td><td>{money(sale.total)}</td></tr>) : <tr><td colSpan={4} className="empty-state">No sales match these filters.</td></tr>}</tbody></table></div></section>
+}
+
+function MovementHistory({ movements }: { movements: Movement[] }) {
+  const [query, setQuery] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const filtered = movements.filter(movement => `${movement.productName} ${movement.sku} ${movement.reason} ${movement.quantity}`.toLowerCase().includes(query.toLowerCase()) && isInDateRange(movement.createdAt, from, to))
+  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Stock movements</h2><p>Every sale, adjustment, and approved stock-take is recorded here.</p></div></div><RecordFilters query={query} setQuery={setQuery} from={from} setFrom={setFrom} to={to} setTo={setTo} placeholder="Search product, SKU, reason" /><div className="table-wrap"><table><thead><tr><th>Date</th><th>Product</th><th>Change</th><th>Reason</th></tr></thead><tbody>{filtered.length ? filtered.map(movement => <tr key={movement.id}><td>{new Date(movement.createdAt).toLocaleString()}</td><td><strong>{movement.productName}</strong><span className="table-subtext">{movement.sku}</span></td><td className={movement.quantity < 0 ? 'low-stock' : 'positive'}>{movement.quantity > 0 ? '+' : ''}{movement.quantity}</td><td>{movement.reason}</td></tr>) : <tr><td colSpan={4} className="empty-state">No stock movements match these filters.</td></tr>}</tbody></table></div></section>
 }
 
 function TeamManagement({ staff, loaded, addStaff, updateStaffRole, setCashierAccess, resetCashierPassword, canCreateStaff, message }: { staff: StaffUser[]; loaded: boolean; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; updateStaffRole: (id: string, role: 'admin' | 'cashier', operationalAccess?: boolean) => Promise<void>; setCashierAccess: (id: string, enabled: boolean) => Promise<void>; resetCashierPassword: (member: StaffUser) => Promise<void>; canCreateStaff: boolean; message: string }) {
