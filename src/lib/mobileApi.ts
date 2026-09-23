@@ -235,6 +235,10 @@ async function cloudRequest(path: string, init: RequestInit = {}) {
   if (!response.ok) throw new Error(result.error || 'Cloud request failed.')
   return result
 }
+async function cachedStaff(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
+  const rows = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users ORDER BY created_at ASC')).values || []
+  return rows.map(account => ({ ...account, operationalAccess: Boolean(account.operationalAccess) }))
+}
 
 function reportWindow(sales: Array<Record<string, unknown>>, since: number) {
   const selected = sales.filter((sale) => new Date(String(sale.createdAt)).getTime() >= since)
@@ -381,7 +385,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === '/api/users' && method === 'GET') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    try { const result = await cloudRequest('/v1/staff'); for (const account of result.users || []) await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, String(account.createdAt || now())]); return json({ users: result.users || [] }) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not load staff.', 503) }
+    try { const result = await cloudRequest('/v1/staff'); for (const account of result.users || []) await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, String(account.createdAt || now())]); return json({ users: await cachedStaff(db), refreshed: true }) } catch (caught) { return json({ users: await cachedStaff(db), refreshed: false, refreshError: caught instanceof Error ? caught.message : 'Could not refresh team accounts.' }) }
   }
   if (path === '/api/users' && method === 'POST') {
     if (user.role !== 'owner') return error('Owner access required.', 403)

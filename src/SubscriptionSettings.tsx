@@ -8,6 +8,7 @@ type EnterpriseRequest = { id: string; status: 'pending' | 'approved' | 'paid'; 
 type Summary = { plan: Plan | null; plans?: NamedPlan[]; access: SubscriptionAccess; subscription: { expiresAt?: string | null } | null; enterpriseRequest?: EnterpriseRequest | null; isDeveloper: boolean }
 type Setup = { plan: (Plan & { plans?: NamedPlan[] }) | null; testMode: boolean; paystackConfigured: boolean; emailConfigured: boolean; publicUrlConfigured: boolean }
 type Referral = { link: string }
+const summaryCacheKey = 'stockroom-subscription-summary'
 
 export function SubscriptionSettings({ apiUrl, token, onAccess }: { apiUrl: string; token: string; onAccess: (access: SubscriptionAccess) => void }) {
   const [summary, setSummary] = useState<Summary | null>(null)
@@ -29,6 +30,7 @@ export function SubscriptionSettings({ apiUrl, token, onAccess }: { apiUrl: stri
     try {
       const next = await request('') as Summary
       setSummary(next); onAccess(next.access)
+      localStorage.setItem(summaryCacheKey, JSON.stringify(next))
       setReferral(await request('/referrals') as Referral)
       const code = sessionStorage.getItem('stockroom-referral-code') || ''
       if (/^[a-f0-9]{32}$/.test(code)) {
@@ -38,7 +40,16 @@ export function SubscriptionSettings({ apiUrl, token, onAccess }: { apiUrl: stri
       }
       setSetup(next.isDeveloper ? await request('/setup') as Setup : null)
       setEnterpriseRequests(next.isDeveloper ? (await request('/enterprise-requests') as { requests: EnterpriseRequest[] }).requests : [])
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not load subscription details.') }
+    } catch (caught) {
+      // Subscription status already downloaded for this local business remains
+      // useful offline. Cloud is required to refresh or change it, not to
+      // redisplay it after an app restart.
+      try {
+        const cached = JSON.parse(localStorage.getItem(summaryCacheKey) || 'null') as Summary | null
+        if (cached?.access) { setSummary(cached); onAccess(cached.access) }
+      } catch { /* a missing/corrupt cache is handled by the visible error */ }
+      setError(caught instanceof Error ? caught.message : 'Could not load subscription details.')
+    }
     finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [apiUrl, token])

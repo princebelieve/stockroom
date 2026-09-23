@@ -61,7 +61,7 @@ function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean
           menu.current.querySelector('summary')?.focus()
         }
         onRefresh()
-      }}><RefreshCw size={16} />Refresh</button>
+      }}><RefreshCw size={16} className={busy ? 'spin' : ''} />{busy ? 'Refreshing…' : 'Refresh'}</button>
     </div>
   </details>
 }
@@ -137,7 +137,8 @@ function App() {
     return saved ? JSON.parse(saved) : []
   })
   const [query, setQuery] = useState('')
-  const [active, setActive] = useState('Overview')
+  const [active, setActive] = useState(() => sessionStorage.getItem('stockroom-active-screen') || 'Overview')
+  useEffect(() => { sessionStorage.setItem('stockroom-active-screen', active) }, [active])
   const goBackInApp = () => {
     if (active === 'Overview') return
     const previousScreen = (window.history.state as { screen?: string } | null)?.screen
@@ -316,6 +317,7 @@ function App() {
   const [walletCreditApproved, setWalletCreditApproved] = useState(false)
   useEffect(() => { setWalletCreditApproved(false) }, [cart, walletCustomerId, authToken])
   const [staff, setStaff] = useState<StaffUser[]>([])
+  const [staffLoaded, setStaffLoaded] = useState(false)
   useEffect(() => {
     if (active !== 'Team' || user?.role !== 'owner') return
     const email = document.querySelector<HTMLInputElement>('.team-form input[name="email"]')
@@ -434,9 +436,12 @@ function App() {
   useEffect(() => { let cancelled = false; if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => { if (!cancelled) setSales(data.sales) }).catch(() => undefined); return () => { cancelled = true } }, [authToken, user?.organizationId, user?.operationalAccess, user?.role])
   useEffect(() => { if (canManageOperations) fetch('/api/movements', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ movements: Movement[] }> : Promise.reject()).then((data) => setMovements(data.movements)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
   useEffect(() => {
-    if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
-    fetch('/api/users', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<{ users: StaffUser[] }> : Promise.reject()).then((data) => setStaff(data.users)).catch(() => undefined)
-  }, [authToken, user?.role])
+    if (!authToken || user?.role !== 'owner') return
+    let cancelled = false
+    setStaffLoaded(false)
+    fetch('/api/users', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<{ users: StaffUser[] }> : Promise.reject()).then((data) => { if (!cancelled) setStaff(data.users) }).catch(() => undefined).finally(() => { if (!cancelled) setStaffLoaded(true) })
+    return () => { cancelled = true }
+  }, [authToken, user?.role, user?.organizationId])
   useEffect(() => {
     if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
     fetch('/api/sync/conflicts', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<{ conflicts: SyncConflict[] }> : Promise.reject()).then((data) => setSyncConflicts(data.conflicts)).catch(() => undefined)
@@ -1247,6 +1252,7 @@ function App() {
     localStorage.removeItem('stockroom-token')
     localStorage.removeItem('stockroom-user')
     localStorage.removeItem('stockroom-cloud-access-token')
+    sessionStorage.removeItem('stockroom-active-screen')
     setCloudAccessToken('')
   }
 
@@ -1311,7 +1317,7 @@ function App() {
       {active === 'Owner' && <OwnerDashboard token={authToken} currency={currency} />}
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
       {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} />}
-      {active === 'Team' && <><StaffActivity staff={staff} sales={sales} money={formatMoney} /><TeamManagement staff={staff} addStaff={addStaff} updateStaffRole={updateStaffRole} setCashierAccess={setCashierAccess} resetCashierPassword={resetCashierPassword} canCreateStaff={user.role === 'owner'} message={settingsMessage} />{user.role === 'owner' && <CashierPasswordReset staff={staff} resetCashierPassword={resetCashierPassword} />}</>}
+      {active === 'Team' && <><StaffActivity staff={staff} sales={sales} money={formatMoney} /><TeamManagement staff={staff} loaded={staffLoaded} addStaff={addStaff} updateStaffRole={updateStaffRole} setCashierAccess={setCashierAccess} resetCashierPassword={resetCashierPassword} canCreateStaff={user.role === 'owner'} message={settingsMessage} />{user.role === 'owner' && <CashierPasswordReset staff={staff} resetCashierPassword={resetCashierPassword} />}</>}
       {active === 'Device' && canManageDeviceSetup && <section className="panel full-panel"><div className="panel-heading"><div><h2>Device setup</h2><p>These settings apply only to this checkout device, not the whole business.</p></div><Printer size={20} /></div><DeviceSetup key={`${user.organizationId}-${deviceSetupKind || 'all'}`} businessId={user.organizationId} defaultProvider={posProvider} onTerminalSaved={() => setTerminalRevision(value => value + 1)} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} pairing={displayPairing} scan={() => scanBarcode('setup')} initialKind={deviceSetupKind} /></section>}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel logo-settings"><h3>Business logo</h3><p>PNG, JPEG, or WebP up to 1 MB. It syncs to enrolled devices when you save business settings.</p>{logoData && <img src={logoData} alt="Business logo preview" className="settings-logo-preview" />}<label className="logo-upload-control"><strong>Upload logo</strong><input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseLogo} /></label></section>}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><AsyncForm className="settings-form" busyLabel="Saving settings..." onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>Default payment-terminal provider<span>Shared business default. Each checkout can override it in Device setup.</span><input value={posProvider} placeholder="e.g. OPay" maxLength={100} onChange={(event) => setPosProvider(event.target.value)} /></label><PaymentPolicySettings value={extraPaymentPolicy} onChange={setExtraPaymentPolicy} /><SubmitButton className="primary-button">Save business settings <ArrowUpToLine size={17} /></SubmitButton>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</AsyncForm>{!isBrowserPwa() && <AsyncForm className="settings-form" busyLabel="Updating password..." onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><SubmitButton className="primary-button" type="submit">Update password</SubmitButton>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</AsyncForm>}{isBrowserPwa() && <p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p>}</section>}
@@ -1385,7 +1391,7 @@ function OwnerDashboard({ token, currency }: { token: string; currency: string }
   return <section className="owner-dashboard"><div className="metric-grid"><div className="metric-card"><span>Sales recorded</span><strong>{metrics ? money(metrics.salesToday) : 'â€”'}</strong><small>Synced sales total</small></div><div className="metric-card"><span>Transactions</span><strong>{metrics?.saleCount ?? 'â€”'}</strong><small>Completed receipts</small></div><div className="metric-card alert-card"><span>Low stock</span><strong>{metrics?.lowStock ?? 'â€”'}</strong><small>Items needing attention</small></div></div><div className="panel owner-panel"><h2>Business monitoring</h2><p>Inventory value: <strong>{metrics ? money(metrics.inventoryValue) : 'â€”'}</strong> across {metrics?.productCount ?? 'â€”'} products.</p><p>Sales made offline are included after they synchronize.</p></div></section>
 }
 
-function TeamManagement({ staff, addStaff, updateStaffRole, setCashierAccess, resetCashierPassword, canCreateStaff, message }: { staff: StaffUser[]; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; updateStaffRole: (id: string, role: 'admin' | 'cashier', operationalAccess?: boolean) => Promise<void>; setCashierAccess: (id: string, enabled: boolean) => Promise<void>; resetCashierPassword: (member: StaffUser) => Promise<void>; canCreateStaff: boolean; message: string }) {
+function TeamManagement({ staff, loaded, addStaff, updateStaffRole, setCashierAccess, resetCashierPassword, canCreateStaff, message }: { staff: StaffUser[]; loaded: boolean; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; updateStaffRole: (id: string, role: 'admin' | 'cashier', operationalAccess?: boolean) => Promise<void>; setCashierAccess: (id: string, enabled: boolean) => Promise<void>; resetCashierPassword: (member: StaffUser) => Promise<void>; canCreateStaff: boolean; message: string }) {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
   const formatCreatedDate = (value?: string) => {

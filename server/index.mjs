@@ -263,7 +263,9 @@ const server = createServer(async (request, response) => {
   }
   if (request.method === 'POST' && request.url === '/api/sync/pull') {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access is required.' })
+    // Pull only downloads data already authorized by this enrolled device's
+    // token. Every locally signed-in staff member may refresh that local copy.
+    if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, await pullLatest())
   }
   const walletMatch = request.url?.match(/^\/api\/customers\/([^/]+)\/wallet$/)
