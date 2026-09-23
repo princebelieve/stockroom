@@ -57,12 +57,20 @@ export async function cloudOwnerForBusiness(accessToken, businessId) {
   if (!response.ok || body.account?.role !== 'owner' || body.account?.businessId !== businessId) throw new Error('Your cloud sign-in belongs to a different business. Sign in again on this enrolled device.')
   return body.account
 }
-export async function cloudSetCashierOperationalAccess(accessToken, userId, enabled) {
+export async function cloudSetCashierOperationalAccess(accessToken, userId, enabled, ownerPassword) {
   const { url } = await getCloudConfiguration()
   if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before changing staff access.')
-  const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ enabled: enabled === true }) })
+  const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ enabled: enabled === true, ownerPassword }) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Could not update cloud staff access.')
+  return body
+}
+export async function cloudUpdateStaffRole(accessToken, userId, role, operationalAccess, ownerPassword) {
+  const { url } = await getCloudConfiguration()
+  if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before changing staff roles.')
+  const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ role, operationalAccess: operationalAccess === true, ownerPassword }) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Could not update cloud staff role.')
   return body
 }
 export async function cloudResetCashierPassword(accessToken, userId, password) {

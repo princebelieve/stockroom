@@ -485,7 +485,12 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   const staffAccess = path.match(/^\/api\/users\/([^/]+)\/operational-access$/)
   if (staffAccess && method === 'PUT') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffAccess[1])}/operational-access`, { method: 'PUT', body: JSON.stringify({ enabled: input.enabled === true }) }); const account = result.account; await db.run('UPDATE users SET operational_access = ? WHERE id = ?', [account.operationalAccess ? 1 : 0, account.id]); return json(account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not update cashier access.', 400) }
+    try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffAccess[1])}/operational-access`, { method: 'PUT', body: JSON.stringify({ enabled: input.enabled === true, ownerPassword: input.ownerPassword }) }); const account = result.account; await db.run('UPDATE users SET operational_access = ? WHERE id = ?', [account.operationalAccess ? 1 : 0, account.id]); return json(account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not update cashier access.', 400) }
+  }
+  const staffRole = path.match(/^\/api\/users\/([^/]+)\/role$/)
+  if (staffRole && method === 'PUT') {
+    if (user.role !== 'owner') return error('Owner access required.', 403)
+    try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffRole[1])}/role`, { method: 'PUT', body: JSON.stringify({ role: input.role, operationalAccess: input.operationalAccess === true, ownerPassword: input.ownerPassword }) }); const account = result.account; await db.run('UPDATE users SET role = ?, operational_access = ? WHERE id = ?', [account.role, account.operationalAccess ? 1 : 0, account.id]); return json(account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not update staff role.', 400) }
   }
   const staffPassword = path.match(/^\/api\/users\/([^/]+)\/password$/)
   if (staffPassword && method === 'PUT') {

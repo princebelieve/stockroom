@@ -99,6 +99,10 @@ async function assignLegacyStaffUsername(account) {
   await accounts.updateOne({ _id: account._id, username: { $exists: false } }, { $set: { username: candidate, usernameAssignedAt: new Date() } })
   return { ...account, username: candidate }
 }
+async function ownerPasswordIsValid(claims, value) {
+  const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
+  return Boolean(owner && matchesPassword(String(value || ''), owner.passwordHash))
+}
 
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send })
 const server = createServer(async (request, response) => {
@@ -214,6 +218,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/v1/staff') {
       if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       const input = await readJson(request)
+      if (!await ownerPasswordIsValid(claims, input.ownerPassword)) return send(response, 401, { error: 'Owner password confirmation is required to create a staff account.' })
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
       if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 10 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3–32 character username, and a 10-character password.' })
       const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, passwordHash: hashPassword(password), createdAt: new Date() }
@@ -238,8 +243,22 @@ const server = createServer(async (request, response) => {
       if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       if (!ObjectId.isValid(accessMatch[1])) return send(response, 400, { error: 'Invalid staff account.' })
       const input = await readJson(request)
+      if (!await ownerPasswordIsValid(claims, input.ownerPassword)) return send(response, 401, { error: 'Owner password confirmation is required to change cashier access.' })
       const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(accessMatch[1]), businessId: claims.businessId, role: 'cashier' }, { $set: { operationalAccess: input.enabled === true } }, { returnDocument: 'after' })
       if (!updated) return send(response, 404, { error: 'Cashier account not found.' })
+      return send(response, 200, { account: publicAccount(updated) })
+    }
+    const roleMatch = request.url?.match(/^\/v1\/staff\/([^/]+)\/role$/)
+    if (request.method === 'PUT' && roleMatch) {
+      if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
+      if (!ObjectId.isValid(roleMatch[1])) return send(response, 400, { error: 'Invalid staff account.' })
+      const input = await readJson(request)
+      if (!await ownerPasswordIsValid(claims, input.ownerPassword)) return send(response, 401, { error: 'Owner password confirmation is required to change a staff role.' })
+      const role = String(input.role || '').trim().toLowerCase()
+      if (!['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Role must be admin or cashier.' })
+      const operationalAccess = role === 'admin' ? true : input.operationalAccess === true
+      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(roleMatch[1]), businessId: claims.businessId, role: { $in: ['admin', 'cashier'] } }, { $set: { role, operationalAccess } }, { returnDocument: 'after' })
+      if (!updated) return send(response, 404, { error: 'Staff account not found.' })
       return send(response, 200, { account: publicAccount(updated) })
     }
     const passwordMatch = request.url?.match(/^\/v1\/staff\/([^/]+)\/password$/)

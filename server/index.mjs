@@ -7,7 +7,7 @@ import { createProduct, adjustStock, createSale, getSettings, listProducts, upda
 import { authenticateUser, adjustCustomerWallet, approveStocktake, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
@@ -195,7 +195,10 @@ const server = createServer(async (request, response) => {
         const nextRole = String(input.role || '').trim().toLowerCase()
         if (!['admin', 'cashier'].includes(nextRole)) throw new Error('Role must be admin or cashier.')
         const operationalAccess = nextRole === 'admin' ? Boolean(input.operationalAccess ?? true) : Boolean(input.operationalAccess ?? false)
-        return sendJson(response, 200, updateUserRole(userRoleMatch[1], nextRole, operationalAccess))
+        const configured = await getCloudConfiguration()
+        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
+        const cloud = await cloudUpdateStaffRole(String(input.cloudAccessToken || ''), userRoleMatch[1], nextRole, operationalAccess, String(input.ownerPassword || ''))
+        return sendJson(response, 200, updateUserRole(userRoleMatch[1], cloud.account.role, cloud.account.operationalAccess === true))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
@@ -207,7 +210,7 @@ const server = createServer(async (request, response) => {
       try {
         const configured = await getCloudConfiguration()
         await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
-        const cloud = await cloudSetCashierOperationalAccess(String(input.cloudAccessToken || ''), cashierAccessMatch[1], input.enabled === true)
+        const cloud = await cloudSetCashierOperationalAccess(String(input.cloudAccessToken || ''), cashierAccessMatch[1], input.enabled === true, String(input.ownerPassword || ''))
         return sendJson(response, 200, setCashierOperationalAccess(cashierAccessMatch[1], cloud.account.operationalAccess === true))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })

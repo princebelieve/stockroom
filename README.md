@@ -1,52 +1,80 @@
-# Stockroom Business App
+# Stockroom Business
 
-## Desktop application
+Stockroom Business is an offline-first inventory, point-of-sale, and business-operations app for small businesses. It supports Windows Desktop, browser/PWA, and Android clients.
 
-The Windows desktop version starts its own private local server and SQLite database. Your clients open the installed application; they do not open a terminal or run `npm`.
+## Offline-first by design
 
-For development, run:
+Each client has its own local workspace and saves operational work locally before cloud sync:
+
+- **Windows Desktop:** local SQLite managed by the desktop app.
+- **Browser/PWA:** Browser SQLite backed by IndexedDB in the browser profile that opened the app URL. Opening the URL is enough; browser installation is optional.
+- **Android:** native SQLite on the phone.
+
+Products, sales, stock takes, customers, receipts, and business settings remain available from the local database after a successful sign-in. When internet is available, queued changes synchronize through the hosted cloud sync API.
+
+## Businesses, devices, and identity
+
+Cloud records are tenant-separated with `businessId`. A browser profile or app installation is enrolled for one business at a time, preventing it from reading or writing another business's data. This enrollment identifies a local app workspace; it does not make a physical device the owner of a business.
+
+The app uses two different credentials:
+
+- A **local app session** restores the already signed-in user for offline use.
+- A **cloud owner credential** authorizes sensitive online operations such as subscription checkout, referrals, and cloud team management. Its short-lived access token is renewed using a rotating refresh credential. Password reset deliberately revokes cloud refresh credentials and device enrollments.
+
+Staff usernames are unique within their business. Owner emails are globally unique. Do not manually alter cloud accounts, device records, or sync operations to resolve a local sign-in problem.
+
+## What needs internet
+
+Internet is not required to reopen a saved local workspace or perform normal local operations. It is required to:
+
+- enroll a new device or browser profile;
+- download cloud changes or upload queued changes;
+- create or change cloud staff accounts;
+- complete payment, subscription, referral, or developer subscription actions.
+
+The active screen is retained across a normal reload. **Refresh** downloads cloud changes into the local database without discarding local work. Subscription access and the last retrieved owner summary are cached locally for offline display.
+
+## Client notes
+
+### Windows Desktop
+
+The installed desktop app starts its own local service and SQLite database; clients do not run `npm`.
+
+The normal database path is typically:
+
+`%APPDATA%\stockroom-business-app\data\stockroom.sqlite`
+
+Back up that file before upgrades, recovery work, or moving a workstation. Do not delete it merely to solve a cloud-session problem.
+
+### Browser / PWA
+
+The deployed URL runs in PWA mode. Browser tabs and an installed app window in the same browser profile share the same local workspace. A different browser profile has separate storage and needs its own enrollment.
+
+See [PWA deployment instructions](PWA-DEPLOYMENT.md) for hosting and service-worker details.
+
+### Android
+
+Android uses its own device-local SQLite database through Capacitor. The current project build path produces a debug APK for testing; it is not a Play Store release workflow.
+
+## Development and validation
 
 ```powershell
-npm run desktop
+npm run build
+npm test
 ```
 
-To create a 64-bit Windows installer, run:
+For the PWA integration test:
 
 ```powershell
-npm run desktop:package
+npm run build:pwa
+node test/pwa.browser.mjs
+npm run build
 ```
 
-When packaging succeeds, give clients the `Setup.exe` file in the `release` folder. Their business data is stored separately at `%APPDATA%\Stockroom Business\data`, so it survives application upgrades and uninstall/reinstall choices that preserve user data. Back up `stockroom.sqlite` from that directory regularly.
+Desktop packaging and Android APK generation are release operations, not routine validation commands.
 
-## iPhone PWA
+## Cloud service and release checks
 
-The separate PWA build runs in the browser with a persistent local database and cloud synchronization. See [PWA deployment instructions](PWA-DEPLOYMENT.md) for Vercel, Render configuration, installation, supported features, and testing. Windows and Android retain their existing native storage paths.
+MongoDB is accessed only through the hosted cloud sync API. Connection strings, admin keys, and other server secrets must never be placed in the desktop build, PWA bundle, APK, or browser settings.
 
-## Android debug APK
-
-Capacitor and the Android project are included. The desktop application is unchanged; Android will use its own device-local SQLite database and synchronize through the existing Render sync API.
-
-Install Android SDK Platform 36 and Build-Tools 36 from Android Studio or the Android command-line tools, then set `android/local.properties` (this file is deliberately ignored by Git):
-
-```properties
-sdk.dir=C:\\Users\\YOUR-WINDOWS-USER\\AppData\\Local\\Android\\Sdk
-```
-
-Build an installable debug APK with:
-
-```powershell
-npm run android:debug
-```
-
-The APK is copied to `release\android\Stockroom-debug.apk`. Transfer that file to the phone and approve installation from the file manager. Debug APKs are for testing and are not suitable for Play Store distribution.
-
-## MongoDB sync (next phase)
-
-MongoDB must be connected only by a hosted sync API. Do not put a MongoDB URI or database password in the desktop/mobile application or its settings page. The sync API needs server-owned credentials, user authentication, operation IDs for idempotency, conflict rules, and backups.
-
-## Before distribution
-
-- Test installation, offline use, restart, and an application update on a clean Windows computer.
-- Set your real application name, publisher/author, version, privacy policy, and support contact in `package.json`.
-- Obtain a Windows code-signing certificate. Unsigned installers show Windows SmartScreen warnings.
-- For Android/iPhone store releases, create Google Play / Apple Developer accounts and complete the Capacitor/native build phase.
+Before public distribution, test local restart and identity restoration, offline work, Refresh, two-device sync, and rejection of a different business account on an enrolled client. Configure support, privacy, signing, and store-release details before distributing production installers or APKs.

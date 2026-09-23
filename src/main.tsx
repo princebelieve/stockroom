@@ -1013,7 +1013,9 @@ function App() {
     if (!cloudAccessToken) { setSettingsMessage('Connect to the internet and sign in again before creating staff accounts.'); return }
     const username = (await requestInlinePrompt({ title: 'Choose staff username', message: 'Enter a unique username (3–32 characters; letters, numbers, dots, hyphens, and underscores).', minLength: 3 }))?.trim().toLowerCase()
     if (!username) return
-    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password, role: form.get('role'), cloudAccessToken }) })
+    const ownerPassword = await requestInlinePrompt({ title: 'Confirm owner password', message: 'Enter your owner password to create this staff account. It is checked securely and is not stored.', inputType: 'password', minLength: 1 })
+    if (!ownerPassword) return
+    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password, role: form.get('role'), cloudAccessToken, ownerPassword }) })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Could not add user.' })) as { error?: string }
       setSettingsMessage(error.error || 'Could not add user.')
@@ -1027,18 +1029,23 @@ function App() {
 
   async function setCashierAccess(id: string, enabled: boolean) {
     if (!cloudAccessToken) return setSettingsMessage('Connect to the internet and sign in again before changing cashier access.')
-    const response = await fetch(`/api/users/${id}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ enabled, cloudAccessToken }) })
-    if (!response.ok) return setSettingsMessage('Could not update cashier access.')
+    const ownerPassword = await requestInlinePrompt({ title: 'Confirm owner password', message: `Enter your owner password to ${enabled ? 'grant' : 'remove'} operational access. It is not stored.`, inputType: 'password', minLength: 1 })
+    if (!ownerPassword) return
+    const response = await fetch(`/api/users/${id}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ enabled, cloudAccessToken, ownerPassword }) })
+    if (!response.ok) { const error = await response.json().catch(() => ({})) as { error?: string }; return setSettingsMessage(error.error || 'Could not update cashier access.') }
     const updated = await response.json() as StaffUser
     setStaff((current) => current.map((member) => member.id === updated.id ? { ...member, ...updated, createdAt: updated.createdAt || member.createdAt || new Date().toISOString() } : member))
     setSettingsMessage(`${updated.name} can ${updated.operationalAccess ? 'now manage operations' : 'now only use POS'}.`)
   }
 
   async function updateStaffRole(id: string, role: 'admin' | 'cashier', operationalAccess?: boolean) {
+    if (!cloudAccessToken) { setSettingsMessage('Connect to the internet and sign in again before changing staff roles.'); return }
+    const ownerPassword = await requestInlinePrompt({ title: 'Confirm owner password', message: `Enter your owner password to change this staff member to ${role}. It is not stored.`, inputType: 'password', minLength: 1 })
+    if (!ownerPassword) return
     const response = await fetch(`/api/users/${id}/role`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ role, operationalAccess: typeof operationalAccess === 'boolean' ? operationalAccess : role === 'admin' }),
+      body: JSON.stringify({ role, operationalAccess: typeof operationalAccess === 'boolean' ? operationalAccess : role === 'admin', cloudAccessToken, ownerPassword }),
     })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Could not update staff role.' })) as { error?: string }
