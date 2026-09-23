@@ -57,6 +57,7 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 .page-options-panel button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 10px; border-radius: 5px; text-align: left; background: transparent; color: var(--ink); font-size: 13px; }
 .page-options-panel button:hover { background: var(--mint); }
 .page-options-panel button:disabled { opacity: .5; cursor: not-allowed; }
+.list-filter-panel { display: grid; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }.list-filter-panel label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }.list-filter-panel input { min-width: 180px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: white; }
 .mobile-nav-toggle, .mobile-nav-backdrop { display: none; }
 .main-content, .panel, .form-grid > *, .settings-form > *, .team-grid > *, .pos-layout > *, .wallet-grid > * { min-width: 0; }
 .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
