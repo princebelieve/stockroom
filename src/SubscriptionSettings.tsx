@@ -10,7 +10,7 @@ type Setup = { plan: (Plan & { plans?: NamedPlan[] }) | null; testMode: boolean;
 type Referral = { link: string }
 const summaryCacheKey = 'stockroom-subscription-summary'
 
-export function SubscriptionSettings({ apiUrl, token, onAccess, onToken }: { apiUrl: string; token: string; onAccess: (access: SubscriptionAccess) => void; onToken: (token: string, refreshToken: string) => void }) {
+export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInToCloud }: { apiUrl: string; token: string; onAccess: (access: SubscriptionAccess) => void; onToken: (token: string, refreshToken: string) => void; signInToCloud: (identifier: string, password: string) => Promise<{ accessToken: string; refreshToken: string }> }) {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [setup, setSetup] = useState<Setup | null>(null)
   const [referral, setReferral] = useState<Referral | null>(null)
@@ -19,6 +19,9 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken }: { api
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [showCloudSignIn, setShowCloudSignIn] = useState(false)
+  const [cloudIdentifier, setCloudIdentifier] = useState('')
+  const [cloudPassword, setCloudPassword] = useState('')
   const request = async (path: string, init: RequestInit = {}, renewed = false, accessToken = token): Promise<any> => {
     const response = await fetch(`${apiUrl}/v1/subscriptions${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}`, ...(init.headers || {}) } })
     const data = await response.json().catch(() => ({}))
@@ -77,6 +80,17 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken }: { api
     try { const data = await request('/checkout', { method: 'POST', body: JSON.stringify({ planId }) }) as { authorizationUrl: string }; window.location.assign(data.authorizationUrl) }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not start checkout.') }
   }
+  const restoreCloudOwnerSession = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError(''); setMessage('')
+    try {
+      const session = await signInToCloud(cloudIdentifier, cloudPassword)
+      onToken(session.accessToken, session.refreshToken)
+      setCloudPassword('')
+      setShowCloudSignIn(false)
+      setMessage('Cloud owner session restored. Loading your subscription…')
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not sign in to the cloud account.') }
+  }
   const requestEnterprise = async () => {
     setError(''); setMessage('')
     try { await request('/enterprise-request', { method: 'POST', body: JSON.stringify({ message: enterpriseMessage }) }); setMessage('Your Enterprise request was sent. We will prepare a proposal for you.'); await load() }
@@ -113,6 +127,7 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken }: { api
     <section className="panel full-panel subscription-panel">
       <div className="panel-heading"><div><h2>Subscription</h2><p>Choose a plan and manage your renewal.</p></div><AsyncButton className="text-button" busyLabel="Refreshing…" onClick={load}>Refresh</AsyncButton></div>
       {error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="settings-message" role="status">{message}</p>}
+      {(!token || /sign in with your cloud owner account|owner account not found|cloud session|access token/i.test(error)) && <div className="subscription-cloud-sign-in"><p>Subscription changes require the cloud owner account. This does not sign you out of the app.</p>{showCloudSignIn ? <form className="settings-form" onSubmit={restoreCloudOwnerSession}><label>Cloud owner email<input type="email" value={cloudIdentifier} onChange={event => setCloudIdentifier(event.target.value)} autoComplete="username" required /></label><label>Cloud owner password<input type="password" value={cloudPassword} onChange={event => setCloudPassword(event.target.value)} autoComplete="current-password" required /></label><div className="report-actions"><button className="primary-button" type="submit">Sign in to cloud</button><button type="button" className="filter-button" onClick={() => { setShowCloudSignIn(false); setCloudPassword('') }}>Cancel</button></div></form> : <button type="button" className="primary-button" onClick={() => setShowCloudSignIn(true)}>Sign in to cloud</button>}</div>}
       {!plan ? <p className="subscription-status">A subscription plan has not been configured yet.</p> : <div className="subscription-summary"><div><span>Current base plan</span><strong>{plan.currency} {(plan.amount / 100).toFixed(2)}</strong><small>{plan.days} days of access</small></div><div><span>Status</span><strong>{summary?.access.status === 'active' ? 'Active' : summary?.access.status === 'grace' ? 'Grace period' : summary?.access.status === 'test' ? 'Enforcement off' : 'Payment needed'}</strong><small>{expires ? `Renews by ${new Date(expires).toLocaleDateString()}` : summary?.access.reason}</small></div></div>}
       {plans.length > 0 && <div className="subscription-plan-options">{plans.map(option => <article key={option.id}><strong>{option.name}</strong>{option.id !== 'enterprise' && <><span>{option.currency} {(option.amount / 100).toFixed(2)}</span><small>{option.days} days</small><AsyncButton className="primary-button" busyLabel="Opening secure checkout…" onClick={() => startCheckout(option.id)}>Choose {option.name}</AsyncButton></>}{option.id === 'enterprise' && <>{summary?.enterpriseRequest?.status === 'approved' ? <><span>{summary.enterpriseRequest.offeredCurrency} {((summary.enterpriseRequest.offeredAmount || 0) / 100).toFixed(2)}</span><small>{summary.enterpriseRequest.offeredDays} days · Your proposal is ready.</small>{summary.enterpriseRequest.offerNote && <small>{summary.enterpriseRequest.offerNote}</small>}<AsyncButton className="primary-button" busyLabel="Opening secure checkout…" onClick={startEnterpriseCheckout}>Pay approved proposal</AsyncButton></> : summary?.enterpriseRequest?.status === 'pending' ? <small>Your request is awaiting a proposal.</small> : <><small>Tell us what your business needs and we will send a custom proposal.</small><textarea aria-label="Enterprise requirements" value={enterpriseMessage} maxLength={1000} placeholder="Number of stores, users, integrations, support needs…" onChange={event => setEnterpriseMessage(event.target.value)} /><AsyncButton className="primary-button" busyLabel="Sending request…" onClick={requestEnterprise}>Request Enterprise proposal</AsyncButton></>}</>}</article>)}</div>}
       {referral && <div className="subscription-enforcement"><div><strong>Invite another business</strong><p>Share your invitation before they create their business account.</p></div><AsyncButton className="filter-button" busyLabel="Copying…" onClick={copyReferral}>Copy invitation</AsyncButton></div>}

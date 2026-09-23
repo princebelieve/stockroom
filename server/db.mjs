@@ -397,6 +397,35 @@ export function listUsers() {
   return database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }))
 }
 
+// Cloud staff details are cached so the Team screen remains useful offline. The
+// cloud never sends password hashes, so a newly cached account cannot be used
+// for an offline sign-in until that staff member has signed in on this device.
+export function cacheCloudUsers(accounts) {
+  const save = database.transaction((rows) => {
+    for (const account of rows) {
+      const remoteId = String(account?.id || '').trim()
+      const name = String(account?.name || '').trim()
+      const email = String(account?.email || '').trim().toLowerCase()
+      const username = String(account?.username || '').trim().toLowerCase()
+      const role = String(account?.role || '')
+      if (!remoteId || !name || !['owner', 'admin', 'cashier'].includes(role)) continue
+      // A desktop owner may have a local ID which differs from the cloud ID.
+      // Preserve that record and its local password/session relationship.
+      const existing = database.prepare(`SELECT id FROM users
+        WHERE organization_id = ? AND (id = ? OR (role = 'owner' AND email = ?))
+        LIMIT 1`).get(organizationId, remoteId, email)
+      const id = String(existing?.id || remoteId)
+      const storedEmail = email || `${id}@staff.local.invalid`
+      database.prepare(`INSERT INTO users (id, organization_id, name, email, username, password_hash, role, operational_access, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, role = excluded.role, operational_access = excluded.operational_access, created_at = excluded.created_at`)
+        .run(id, organizationId, name, storedEmail, username, hashPassword(crypto.randomUUID()), role, account.operationalAccess === true ? 1 : 0, normalizeCreatedAt(account.createdAt))
+    }
+  })
+  save(Array.isArray(accounts) ? accounts : [])
+  return listUsers()
+}
+
 export function createUser(input) {
   const name = String(input.name || '').trim()
   const email = String(input.email || '').trim().toLowerCase()

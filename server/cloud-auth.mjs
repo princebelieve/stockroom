@@ -49,6 +49,14 @@ export async function cloudCreateStaff(accessToken, input) {
   if (!response.ok) throw new Error(body.error || 'Could not create cloud staff account.')
   return body
 }
+export async function cloudListStaff(accessToken) {
+  const { url } = await getCloudConfiguration()
+  if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before refreshing team accounts.')
+  const response = await fetch(`${url}/v1/staff`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Could not refresh cloud staff accounts.')
+  return body
+}
 export async function cloudOwnerForBusiness(accessToken, businessId) {
   const { url } = await getCloudConfiguration()
   if (!url || !accessToken || !businessId) throw new Error('Connect to the internet and sign in again before managing staff.')
