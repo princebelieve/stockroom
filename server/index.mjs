@@ -7,7 +7,7 @@ import { createProduct, adjustStock, createSale, getSettings, listProducts, upda
 import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
@@ -21,6 +21,22 @@ function sendJson(response, status, payload) {
 }
 
 const server = createServer(async (request, response) => {
+  // The desktop renderer cannot call the cloud from its loopback browser
+  // origin. Forward only subscription/session routes to the enrolled service.
+  if (request.url?.startsWith('/api/cloud/')) {
+    const user = savedSessionUser(String(request.headers['x-local-session'] || ''))
+    if (!user || user.role !== 'owner') return sendJson(response, 401, { error: 'Local owner authentication required.' })
+    const path = request.url.slice('/api/cloud'.length)
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me'].includes(path)) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    try {
+      const config = await getCloudConfiguration()
+      if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
+      let body = ''
+      for await (const chunk of request) body += chunk
+      const upstream = await fetch(`${config.url}${path}`, { method: request.method, headers: { 'Content-Type': 'application/json', Authorization: String(request.headers.authorization || '') }, ...(body ? { body } : {}), signal: AbortSignal.timeout(8000) })
+      return sendJson(response, upstream.status, await upstream.json())
+    } catch { return sendJson(response, 503, { error: 'Could not reach the cloud service. Check your connection and try again.' }) }
+  }
   if (request.method === 'OPTIONS') {
     response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' })
     return response.end()
@@ -126,6 +142,33 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken, refreshToken: remote.refreshToken })
     } catch (error) { return sendJson(response, 400, { error: error.message }) }
   })
+  // This is the desktop equivalent of the PWA/Android cloud-session restore.
+  // It never creates or replaces the local SQLite session, so offline use and
+  // the current screen remain intact. It only renews cloud credentials and
+  // hydrates cloud-owned directory data when a connection is available.
+  if (request.method === 'POST' && request.url === '/api/auth/cloud-bootstrap') return readJson(request, response, async (input) => {
+    const localUser = sessionUser(request)
+    if (!localUser) return sendJson(response, 401, { error: 'Authentication required.' })
+    try {
+      const configured = await getCloudConfiguration()
+      let accessToken = String(input.accessToken || '')
+      let refreshToken = String(input.refreshToken || '')
+      let account
+      try {
+        account = await cloudAccountForBusiness(accessToken, configured.businessId)
+      } catch (initialError) {
+        if (!refreshToken) throw initialError
+        const renewed = await cloudRefreshSession(refreshToken)
+        accessToken = String(renewed.accessToken || '')
+        refreshToken = String(renewed.refreshToken || '')
+        account = await cloudAccountForBusiness(accessToken, configured.businessId)
+      }
+      const users = localUser.role === 'owner' && account.role === 'owner'
+        ? cacheCloudUsers((await cloudListStaff(accessToken)).users)
+        : await listUsers()
+      return sendJson(response, 200, { account, accessToken, refreshToken, users, staffRefreshed: localUser.role === 'owner' && account.role === 'owner' })
+    } catch (error) { return sendJson(response, 400, { error: error.message }) }
+  })
   if (request.method === 'POST' && request.url === '/api/auth/cloud-register') return readJson(request, response, async (input) => {
     try { return sendJson(response, 201, await cloudRegister(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) }
   })
@@ -189,8 +232,8 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       try {
         const configured = await getCloudConfiguration()
-        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
-        const cloud = await cloudCreateStaff(String(input.cloudAccessToken || ''), input)
+        await cloudOwnerForBusiness(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), configured.businessId)
+        const cloud = await cloudCreateStaff(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), input)
         return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id, createdAt: cloud.account.createdAt || new Date().toISOString() }))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
@@ -205,8 +248,8 @@ const server = createServer(async (request, response) => {
         if (!['admin', 'cashier'].includes(nextRole)) throw new Error('Role must be admin or cashier.')
         const operationalAccess = nextRole === 'admin' ? Boolean(input.operationalAccess ?? true) : Boolean(input.operationalAccess ?? false)
         const configured = await getCloudConfiguration()
-        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
-        const cloud = await cloudUpdateStaffRole(String(input.cloudAccessToken || ''), userRoleMatch[1], nextRole, operationalAccess, String(input.ownerPassword || ''))
+        await cloudOwnerForBusiness(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), configured.businessId)
+        const cloud = await cloudUpdateStaffRole(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), userRoleMatch[1], nextRole, operationalAccess, String(input.ownerPassword || ''))
         return sendJson(response, 200, updateUserRole(userRoleMatch[1], cloud.account.role, cloud.account.operationalAccess === true))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
@@ -218,8 +261,8 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       try {
         const configured = await getCloudConfiguration()
-        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
-        const cloud = await cloudSetCashierOperationalAccess(String(input.cloudAccessToken || ''), cashierAccessMatch[1], input.enabled === true, String(input.ownerPassword || ''))
+        await cloudOwnerForBusiness(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), configured.businessId)
+        const cloud = await cloudSetCashierOperationalAccess(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), cashierAccessMatch[1], input.enabled === true, String(input.ownerPassword || ''))
         return sendJson(response, 200, setCashierOperationalAccess(cashierAccessMatch[1], cloud.account.operationalAccess === true))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
@@ -232,8 +275,8 @@ const server = createServer(async (request, response) => {
       try {
         const password = String(input.password || '')
         const configured = await getCloudConfiguration()
-        await cloudOwnerForBusiness(String(input.cloudAccessToken || ''), configured.businessId)
-        await cloudResetCashierPassword(String(input.cloudAccessToken || ''), cashierPasswordMatch[1], password)
+        await cloudOwnerForBusiness(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), configured.businessId)
+        await cloudResetCashierPassword(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), cashierPasswordMatch[1], password)
         return sendJson(response, 200, resetCashierPassword(cashierPasswordMatch[1], password))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })

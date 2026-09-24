@@ -57,13 +57,26 @@ export async function cloudListStaff(accessToken) {
   if (!response.ok) throw new Error(body.error || 'Could not refresh cloud staff accounts.')
   return body
 }
-export async function cloudOwnerForBusiness(accessToken, businessId) {
+export async function cloudRefreshSession(refreshToken) {
   const { url } = await getCloudConfiguration()
-  if (!url || !accessToken || !businessId) throw new Error('Connect to the internet and sign in again before managing staff.')
+  if (!url || !refreshToken) throw new Error('Cloud session renewal is unavailable.')
+  const response = await fetch(`${url}/v1/auth/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Cloud session renewal failed.')
+  return body
+}
+export async function cloudAccountForBusiness(accessToken, businessId) {
+  const { url } = await getCloudConfiguration()
+  if (!url || !accessToken || !businessId) throw new Error('Cloud identity is unavailable.')
   const response = await fetch(`${url}/v1/auth/me`, { headers: { Authorization: `Bearer ${accessToken}` } })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok || body.account?.role !== 'owner' || body.account?.businessId !== businessId) throw new Error('Your cloud sign-in belongs to a different business. Sign in again on this enrolled device.')
+  if (!response.ok || !body.account?.id || body.account.businessId !== businessId) throw new Error('Your cloud sign-in belongs to a different business. Sign in again on this enrolled device.')
   return body.account
+}
+export async function cloudOwnerForBusiness(accessToken, businessId) {
+  const account = await cloudAccountForBusiness(accessToken, businessId)
+  if (account.role !== 'owner') throw new Error('A cloud owner account is required for this action.')
+  return account
 }
 export async function cloudSetCashierOperationalAccess(accessToken, userId, enabled, ownerPassword) {
   const { url } = await getCloudConfiguration()

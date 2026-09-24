@@ -213,3 +213,64 @@ test('restart preserves installed business data, modeling an application upgrade
   const products = await json(`${baseUrl}/api/products`, { headers: { Authorization: `Bearer ${login.body.token}` } })
   assert.equal(products.body.products.find((value) => value.id === item.id).stock, 7)
 })
+
+
+test('desktop subscription bridge uses enrolled cloud and preserves cloud authentication failures', async () => {
+  const cloud = createServer((request, response) => {
+    response.setHeader('Content-Type', 'application/json')
+    if (request.url === '/v1/subscriptions') {
+      response.writeHead(request.headers.authorization === 'Bearer cloud-owner' ? 200 : 403)
+      return response.end(JSON.stringify(request.headers.authorization === 'Bearer cloud-owner' ? { isDeveloper: false } : { error: 'Sign in with your cloud owner account.' }))
+    }
+    response.writeHead(404); response.end('{}')
+  })
+  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening'); subscriptionClouds.push(cloud)
+  const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
+  const token = await createOwner(baseUrl)
+  const url = `${baseUrl}/api/cloud/v1/subscriptions`
+  assert.equal((await fetch(url)).status, 401)
+  const headers = { 'X-Local-Session': token, Authorization: 'Bearer cloud-owner' }
+  const result = await json(url, { headers })
+  assert.equal(result.response.status, 200)
+  assert.equal(result.body.isDeveloper, false)
+  assert.equal((await fetch(url, { headers: { 'X-Local-Session': token } })).status, 403)
+  assert.equal((await fetch(`${baseUrl}/api/cloud/v1/staff`, { headers })).status, 404)
+})
+
+
+test('desktop downloads the complete staff directory, preserves owner login, and retains staff offline', async () => {
+  const ownerEmail = 'directory-owner@test.local'
+  let online = true
+  const users = [
+    { id: 'remote-owner', name: 'Owner', email: ownerEmail, role: 'owner' },
+    { id: 'remote-admin', name: 'Admin', username: 'manager', role: 'admin' },
+    { id: 'remote-cashier', name: 'Cashier', username: 'cashier', role: 'cashier', operationalAccess: true },
+  ]
+  const cloud = createServer((request, response) => {
+    response.setHeader('Content-Type', 'application/json')
+    if (!online) { response.writeHead(503); return response.end(JSON.stringify({ error: 'Cloud offline' })) }
+    if (request.url === '/v1/auth/me') return response.end(JSON.stringify({ account: { ...users[0], businessId: 'test-business' } }))
+    if (request.url === '/v1/staff') return response.end(JSON.stringify({ users }))
+    response.writeHead(404); response.end('{}')
+  })
+  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening'); subscriptionClouds.push(cloud)
+  const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
+  const token = await createOwner(baseUrl, ownerEmail)
+  const headers = { Authorization: `Bearer ${token}`, 'X-Cloud-Access-Token': 'cloud-owner' }
+  const load = () => json(`${baseUrl}/api/users`, { headers })
+  const fresh = await load()
+  assert.equal(fresh.response.status, 200)
+  assert.equal(fresh.body.refreshed, true, fresh.body.refreshError)
+  assert.equal(fresh.body.users.length, 3)
+  assert.deepEqual(fresh.body.users.map(user => user.role).sort(), ['admin', 'cashier', 'owner'])
+  assert.equal(fresh.body.users.find(user => user.id === 'remote-cashier').operationalAccess, true)
+  assert.equal((await load()).body.users.length, 3, 'repeated refresh must not duplicate the owner')
+  assert.equal((await fetch(`${baseUrl}/api/auth/session`, { headers })).status, 200)
+  const login = await json(`${baseUrl}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: ownerEmail, password: 'long-test-password' }) })
+  assert.equal(login.response.status, 200, 'refresh preserves the owner password')
+  online = false
+  const cached = await load()
+  assert.equal(cached.body.refreshed, false)
+  assert.equal(cached.body.users.length, 3)
+  assert.ok(cached.body.refreshError)
+})

@@ -401,8 +401,9 @@ export function listUsers() {
 // cloud never sends password hashes, so a newly cached account cannot be used
 // for an offline sign-in until that staff member has signed in on this device.
 export function cacheCloudUsers(accounts) {
-  const save = database.transaction((rows) => {
-    for (const account of rows) {
+  database.exec('BEGIN')
+  try {
+    for (const account of Array.isArray(accounts) ? accounts : []) {
       const remoteId = String(account?.id || '').trim()
       const name = String(account?.name || '').trim()
       const email = String(account?.email || '').trim().toLowerCase()
@@ -421,8 +422,8 @@ export function cacheCloudUsers(accounts) {
         ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, role = excluded.role, operational_access = excluded.operational_access, created_at = excluded.created_at`)
         .run(id, organizationId, name, storedEmail, username, hashPassword(crypto.randomUUID()), role, account.operationalAccess === true ? 1 : 0, normalizeCreatedAt(account.createdAt))
     }
-  })
-  save(Array.isArray(accounts) ? accounts : [])
+    database.exec('COMMIT')
+  } catch (error) { database.exec('ROLLBACK'); throw error }
   return listUsers()
 }
 

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AsyncButton } from './AsyncControls'
+import { cloudRequest, CloudAuthenticationError } from './lib/cloudRequest'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
 type Plan = { amount: number; currency: string; days: number; reminderDays: number; freeTrialDays: number; graceMonths?: number; firstReferralPercent?: number; recurringReferralPercent?: number }
@@ -22,24 +23,20 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
   const [showCloudSignIn, setShowCloudSignIn] = useState(false)
   const [cloudIdentifier, setCloudIdentifier] = useState('')
   const [cloudPassword, setCloudPassword] = useState('')
-  const request = async (path: string, init: RequestInit = {}, renewed = false, accessToken = token): Promise<any> => {
-    const response = await fetch(`${apiUrl}/v1/subscriptions${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}`, ...(init.headers || {}) } })
-    const data = await response.json().catch(() => ({}))
-    if (response.status === 401 || response.status === 403) {
-      const refreshToken = localStorage.getItem('stockroom-cloud-refresh-token') || ''
-      if (!renewed && refreshToken) {
-        const renewal = await fetch(`${apiUrl}/v1/auth/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }) })
-        const renewedSession = await renewal.json().catch(() => ({}))
-        if (renewal.ok && renewedSession.accessToken && renewedSession.refreshToken) {
-          onToken(renewedSession.accessToken, renewedSession.refreshToken)
-          return request(path, init, true, renewedSession.accessToken)
-        }
-      }
+  const [needsSignIn, setNeedsSignIn] = useState(false)
+  const loadVersion = useRef(0)
+  const request = async (path: string, init: RequestInit = {}): Promise<any> => {
+    try {
+      const data = await cloudRequest(apiUrl, `/v1/subscriptions${path}`, init, onToken, token)
+      setNeedsSignIn(false)
+      return data
+    } catch (caught) {
+      if (caught instanceof CloudAuthenticationError) setNeedsSignIn(true)
+      throw caught
     }
-    if (!response.ok) throw new Error(data.error || 'Subscription request failed.')
-    return data
   }
   const load = async () => {
+    const version = ++loadVersion.current
     setLoading(true); setError('')
     try {
       const next = await request('') as Summary
@@ -62,9 +59,9 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
         const cached = JSON.parse(localStorage.getItem(summaryCacheKey) || 'null') as Summary | null
         if (cached?.access) { setSummary(cached); onAccess(cached.access) }
       } catch { /* a missing/corrupt cache is handled by the visible error */ }
-      setError(caught instanceof Error ? caught.message : 'Could not load subscription details.')
+      if (version === loadVersion.current) setError(caught instanceof Error ? caught.message : 'Could not load subscription details.')
     }
-    finally { setLoading(false) }
+    finally { if (version === loadVersion.current) setLoading(false) }
   }
   useEffect(() => { void load() }, [apiUrl, token])
   useEffect(() => {
@@ -88,6 +85,7 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
       onToken(session.accessToken, session.refreshToken)
       setCloudPassword('')
       setShowCloudSignIn(false)
+      setNeedsSignIn(false)
       setMessage('Cloud owner session restored. Loading your subscription…')
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not sign in to the cloud account.') }
   }
@@ -127,7 +125,7 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
     <section className="panel full-panel subscription-panel">
       <div className="panel-heading"><div><h2>Subscription</h2><p>Choose a plan and manage your renewal.</p></div><AsyncButton className="text-button" busyLabel="Refreshing…" onClick={load}>Refresh</AsyncButton></div>
       {error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="settings-message" role="status">{message}</p>}
-      {(!token || /sign in with your cloud owner account|owner account not found|cloud session|access token/i.test(error)) && <div className="subscription-cloud-sign-in"><p>Subscription changes require the cloud owner account. This does not sign you out of the app.</p>{showCloudSignIn ? <form className="settings-form" onSubmit={restoreCloudOwnerSession}><label>Cloud owner email<input type="email" value={cloudIdentifier} onChange={event => setCloudIdentifier(event.target.value)} autoComplete="username" required /></label><label>Cloud owner password<input type="password" value={cloudPassword} onChange={event => setCloudPassword(event.target.value)} autoComplete="current-password" required /></label><div className="report-actions"><button className="primary-button" type="submit">Sign in to cloud</button><button type="button" className="filter-button" onClick={() => { setShowCloudSignIn(false); setCloudPassword('') }}>Cancel</button></div></form> : <button type="button" className="primary-button" onClick={() => setShowCloudSignIn(true)}>Sign in to cloud</button>}</div>}
+      {needsSignIn && <div className="subscription-cloud-sign-in"><p>Subscription changes require the cloud owner account. This does not sign you out of the app.</p>{showCloudSignIn ? <form className="settings-form" onSubmit={restoreCloudOwnerSession}><label>Cloud owner email<input type="email" value={cloudIdentifier} onChange={event => setCloudIdentifier(event.target.value)} autoComplete="username" required /></label><label>Cloud owner password<input type="password" value={cloudPassword} onChange={event => setCloudPassword(event.target.value)} autoComplete="current-password" required /></label><div className="report-actions"><button className="primary-button" type="submit">Sign in to cloud</button><button type="button" className="filter-button" onClick={() => { setShowCloudSignIn(false); setCloudPassword('') }}>Cancel</button></div></form> : <button type="button" className="primary-button" onClick={() => setShowCloudSignIn(true)}>Sign in to cloud</button>}</div>}
       {!plan ? <p className="subscription-status">A subscription plan has not been configured yet.</p> : <div className="subscription-summary"><div><span>Current base plan</span><strong>{plan.currency} {(plan.amount / 100).toFixed(2)}</strong><small>{plan.days} days of access</small></div><div><span>Status</span><strong>{summary?.access.status === 'active' ? 'Active' : summary?.access.status === 'grace' ? 'Grace period' : summary?.access.status === 'test' ? 'Enforcement off' : 'Payment needed'}</strong><small>{expires ? `Renews by ${new Date(expires).toLocaleDateString()}` : summary?.access.reason}</small></div></div>}
       {plans.length > 0 && <div className="subscription-plan-options">{plans.map(option => <article key={option.id}><strong>{option.name}</strong>{option.id !== 'enterprise' && <><span>{option.currency} {(option.amount / 100).toFixed(2)}</span><small>{option.days} days</small><AsyncButton className="primary-button" busyLabel="Opening secure checkout…" onClick={() => startCheckout(option.id)}>Choose {option.name}</AsyncButton></>}{option.id === 'enterprise' && <>{summary?.enterpriseRequest?.status === 'approved' ? <><span>{summary.enterpriseRequest.offeredCurrency} {((summary.enterpriseRequest.offeredAmount || 0) / 100).toFixed(2)}</span><small>{summary.enterpriseRequest.offeredDays} days · Your proposal is ready.</small>{summary.enterpriseRequest.offerNote && <small>{summary.enterpriseRequest.offerNote}</small>}<AsyncButton className="primary-button" busyLabel="Opening secure checkout…" onClick={startEnterpriseCheckout}>Pay approved proposal</AsyncButton></> : summary?.enterpriseRequest?.status === 'pending' ? <small>Your request is awaiting a proposal.</small> : <><small>Tell us what your business needs and we will send a custom proposal.</small><textarea aria-label="Enterprise requirements" value={enterpriseMessage} maxLength={1000} placeholder="Number of stores, users, integrations, support needs…" onChange={event => setEnterpriseMessage(event.target.value)} /><AsyncButton className="primary-button" busyLabel="Sending request…" onClick={requestEnterprise}>Request Enterprise proposal</AsyncButton></>}</>}</article>)}</div>}
       {referral && <div className="subscription-enforcement"><div><strong>Invite another business</strong><p>Share your invitation before they create their business account.</p></div><AsyncButton className="filter-button" busyLabel="Copying…" onClick={copyReferral}>Copy invitation</AsyncButton></div>}

@@ -7,6 +7,9 @@ import { AlertTriangle, ArrowDownToLine, ArrowLeft, ArrowUpToLine, BarChart3, Bo
 import type { Customer, Product, Sale, Stocktake } from './types'
 import { commitOfflineSale, getReceiptHistory, cacheProducts, getCachedProducts, getQueuedOperations, queueOperation, removeQueuedOperation, replaceQueuedProductId, saveSale, upsertCachedProducts } from './lib/offlineStore'
 import { installMobileApi } from './lib/mobileApi'
+import { localSessionFetch } from './lib/localSessionFetch'
+import { cloudRequest } from './lib/cloudRequest'
+import { teamSessionFetch } from './lib/teamSessionFetch'
 import { isNativeMobile } from './lib/mobileDatabase'
 import { isBrowserPwa } from './lib/platform'
 import { resolveStartupState } from './lib/startupState'
@@ -66,6 +69,13 @@ function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean
   </details>
 }
 
+if (!isNativeMobile() && !isBrowserPwa()) {
+  window.fetch = localSessionFetch(window.fetch.bind(window), window.location.origin, () => localStorage.getItem('stockroom-token') || '')
+  window.fetch = teamSessionFetch(window.fetch, window.location.origin, async () => {
+    await cloudRequest('/api/cloud', '/v1/auth/me', {}, () => {})
+    return localStorage.getItem('stockroom-cloud-access-token') || ''
+  })
+}
 installMobileApi()
 if (isBrowserPwa()) {
   const { installBrowserApi } = await import('./lib/installBrowserApi')
@@ -132,14 +142,19 @@ function InlinePrompt({ request, onClose }: { request: InlinePromptRequest; onCl
 
 function App() {
   const deriveSku = (name: string) => `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`
+  // A browser/PWA reload keeps its tab session. Electron creates a new window
+  // whenever the desktop application is launched, which discards
+  // sessionStorage and previously sent every relaunch to Overview. Persist
+  // only the desktop screen choice; logout below clears it for the next user.
+  const activeScreenStorage = !isBrowserPwa() && !isNativeMobile() ? localStorage : sessionStorage
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('stockroom-products')
     return saved ? JSON.parse(saved) : []
   })
   const [query, setQuery] = useState('')
-  const [active, setActive] = useState(() => sessionStorage.getItem('stockroom-active-screen') || 'Overview')
+  const [active, setActive] = useState(() => activeScreenStorage.getItem('stockroom-active-screen') || 'Overview')
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<'Sales' | 'Team' | null>(null)
-  useEffect(() => { sessionStorage.setItem('stockroom-active-screen', active) }, [active])
+  useEffect(() => { activeScreenStorage.setItem('stockroom-active-screen', active) }, [active, activeScreenStorage])
   const navigateToSection = (screen: 'Sales' | 'Team', heading: string) => {
     setActive(screen)
     setMobileMenuOpen(false)
@@ -320,6 +335,7 @@ function App() {
   }, [authToken, user?.organizationId])
   useEffect(() => { setCashReceived('') }, [authToken])
   const [cloudAccessToken, setCloudAccessToken] = useState(() => localStorage.getItem('stockroom-cloud-access-token') || '')
+  const [cloudSessionError, setCloudSessionError] = useState('')
   const [authError, setAuthError] = useState('')
   const [customers, setCustomers] = useState<Customer[]>([])
   const [walletCustomerId, setWalletCustomerId] = useState('')
@@ -399,12 +415,53 @@ function App() {
     return () => { cancelled = true }
   }, [settingsLoaded, authToken])
   const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
-  const subscriptionApiUrl = (import.meta.env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com').replace(/\/$/, '')
+  const subscriptionApiUrl = !isBrowserPwa() && !isNativeMobile() ? '/api/cloud' : (import.meta.env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com').replace(/\/$/, '')
   const subscriptionButtonLabel = posAccess.status === 'active' ? 'Subscribed' : posAccess.status === 'grace' ? 'Grace period' : 'Subscribe'
   const subscriptionButtonClass = posAccess.status === 'active' ? 'subscription-cta success' : posAccess.status === 'grace' ? 'subscription-cta warning' : 'subscription-cta'
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('screen') === 'subscription' && user?.role === 'owner') setActive('Subscription')
   }, [user?.role])
+
+  useEffect(() => {
+    // Restore cloud identity once per locally restored session. This is not a
+    // login and must not change routes: local SQLite/IndexedDB remains the
+    // offline source of truth. The bootstrap merely renews a cloud token and
+    // updates owner-only cloud caches (notably the Team directory).
+    // PWA and Android already restore this from their own IndexedDB/SQLite
+    // adapters. Desktop is the only platform that needs the local-server
+    // bridge below; keeping that boundary avoids changing working APK/PWA
+    // startup behavior.
+    if (isBrowserPwa() || isNativeMobile() || !authToken || !user || (!cloudAccessToken && !localStorage.getItem('stockroom-cloud-refresh-token'))) return
+    let cancelled = false
+    const bootstrap = async () => {
+      try {
+        await cloudRequest('/api/cloud', '/v1/auth/me', {}, (access, refresh) => {
+          setCloudAccessToken(access)
+          localStorage.setItem('stockroom-cloud-refresh-token', refresh)
+        }, cloudAccessToken)
+      } catch { return }
+      if (cancelled) return
+      const response = await fetch('/api/auth/cloud-bootstrap', {
+        method: 'POST', signal: AbortSignal.timeout(10_000),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ accessToken: localStorage.getItem('stockroom-cloud-access-token') || cloudAccessToken }),
+      }).catch(() => null)
+      if (cancelled || !response) return
+      const restored = await response.json().catch(() => null) as { accessToken?: string; refreshToken?: string; users?: StaffUser[]; error?: string } | null
+      if (!response.ok) {
+        if (!cancelled) setCloudSessionError(restored?.error || 'Cloud identity could not be restored.')
+        return
+      }
+      if (cancelled || !restored?.accessToken) return
+      setCloudSessionError('')
+      setCloudAccessToken(restored.accessToken)
+      localStorage.setItem('stockroom-cloud-access-token', restored.accessToken)
+      if (restored.refreshToken) localStorage.setItem('stockroom-cloud-refresh-token', restored.refreshToken)
+      if (restored.users && user.role === 'owner') setStaff(restored.users)
+    }
+    void bootstrap()
+    return () => { cancelled = true }
+  }, [authToken, cloudAccessToken, user?.id, user?.role])
 
   // Notices acknowledge an action; they are not permanent page content. Keep
   // unresolved sync work visible, but clear routine success/failure banners so
@@ -448,9 +505,16 @@ function App() {
     if (!authToken || user?.role !== 'owner') return
     let cancelled = false
     setStaffLoaded(false)
-    fetch('/api/users', { headers: { Authorization: `Bearer ${authToken}`, ...(cloudAccessToken ? { 'X-Cloud-Access-Token': cloudAccessToken } : {}) } }).then((response) => response.ok ? response.json() as Promise<{ users: StaffUser[] }> : Promise.reject()).then((data) => { if (!cancelled) setStaff(data.users) }).catch(() => undefined).finally(() => { if (!cancelled) setStaffLoaded(true) })
+    fetch('/api/users').then(async (response) => {
+      const data = await response.json() as { users: StaffUser[]; refreshed?: boolean; refreshError?: string; error?: string }
+      if (!response.ok) throw new Error(data.error || 'Could not load the staff directory.')
+      if (!cancelled) {
+        setStaff(data.users)
+        setCloudSessionError(data.refreshed === false ? `Showing saved staff. ${data.refreshError || 'The cloud directory could not be refreshed.'}` : '')
+      }
+    }).catch(error => { if (!cancelled) setCloudSessionError(error instanceof Error ? error.message : 'Could not load the staff directory.') }).finally(() => { if (!cancelled) setStaffLoaded(true) })
     return () => { cancelled = true }
-  }, [authToken, cloudAccessToken, user?.role, user?.organizationId])
+  }, [authToken, cloudAccessToken, user?.role, user?.organizationId, active === 'Team'])
   useEffect(() => {
     if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
     fetch('/api/sync/conflicts', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<{ conflicts: SyncConflict[] }> : Promise.reject()).then((data) => setSyncConflicts(data.conflicts)).catch(() => undefined)
@@ -561,6 +625,16 @@ function App() {
     setRefreshingView(true)
     setSyncFeedback('Downloading changes from the cloud…')
     try {
+        if (active === 'Team' && user?.role === 'owner') {
+          const response = await fetch('/api/users')
+          const data = await response.json() as { users: StaffUser[]; refreshed?: boolean; refreshError?: string; error?: string }
+          if (!response.ok) throw new Error(data.error || 'Could not load the staff directory.')
+          setStaff(data.users)
+          setStaffLoaded(true)
+          setCloudSessionError(data.refreshed === false ? `Showing saved staff. ${data.refreshError || 'The cloud directory could not be refreshed.'}` : '')
+          setSyncFeedback(data.refreshed === false ? 'Showing the saved staff directory.' : `Team refreshed. ${data.users.length} member(s) loaded.`)
+          return
+        }
         const response = await fetch('/api/sync/pull', { method: 'POST', headers: authHeaders })
         const result = await response.json()
         if (!response.ok) throw new Error(result.error || `Refresh failed (${response.status}).`)
@@ -1019,12 +1093,11 @@ function App() {
     const password = String(form.get('password') || '')
     const passwordConfirmation = String(form.get('passwordConfirmation') || '')
     if (password !== passwordConfirmation) { setSettingsMessage('Temporary passwords do not match. No staff account was created.'); return }
-    if (!cloudAccessToken) { setSettingsMessage('Connect to the internet and sign in again before creating staff accounts.'); return }
     const username = (await requestInlinePrompt({ title: 'Choose staff username', message: 'Enter a unique username (3–32 characters; letters, numbers, dots, hyphens, and underscores).', minLength: 3 }))?.trim().toLowerCase()
     if (!username) return
     const ownerPassword = await requestInlinePrompt({ title: 'Confirm owner password', message: 'Enter your owner password to create this staff account. It is checked securely and is not stored.', inputType: 'password', minLength: 1 })
     if (!ownerPassword) return
-    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password, role: form.get('role'), cloudAccessToken, ownerPassword }) })
+    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password, role: form.get('role'), ownerPassword }) })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Could not add user.' })) as { error?: string }
       setSettingsMessage(error.error || 'Could not add user.')
@@ -1037,10 +1110,9 @@ function App() {
   }
 
   async function setCashierAccess(id: string, enabled: boolean) {
-    if (!cloudAccessToken) return setSettingsMessage('Connect to the internet and sign in again before changing cashier access.')
     const ownerPassword = await requestInlinePrompt({ title: 'Confirm owner password', message: `Enter your owner password to ${enabled ? 'grant' : 'remove'} operational access. It is not stored.`, inputType: 'password', minLength: 1 })
     if (!ownerPassword) return
-    const response = await fetch(`/api/users/${id}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ enabled, cloudAccessToken, ownerPassword }) })
+    const response = await fetch(`/api/users/${id}/operational-access`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ enabled, ownerPassword }) })
     if (!response.ok) { const error = await response.json().catch(() => ({})) as { error?: string }; return setSettingsMessage(error.error || 'Could not update cashier access.') }
     const updated = await response.json() as StaffUser
     setStaff((current) => current.map((member) => member.id === updated.id ? { ...member, ...updated, createdAt: updated.createdAt || member.createdAt || new Date().toISOString() } : member))
@@ -1048,13 +1120,12 @@ function App() {
   }
 
   async function updateStaffRole(id: string, role: 'admin' | 'cashier', operationalAccess?: boolean) {
-    if (!cloudAccessToken) { setSettingsMessage('Connect to the internet and sign in again before changing staff roles.'); return }
     const ownerPassword = await requestInlinePrompt({ title: 'Confirm owner password', message: `Enter your owner password to change this staff member to ${role}. It is not stored.`, inputType: 'password', minLength: 1 })
     if (!ownerPassword) return
     const response = await fetch(`/api/users/${id}/role`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ role, operationalAccess: typeof operationalAccess === 'boolean' ? operationalAccess : role === 'admin', cloudAccessToken, ownerPassword }),
+      body: JSON.stringify({ role, operationalAccess: typeof operationalAccess === 'boolean' ? operationalAccess : role === 'admin', ownerPassword }),
     })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Could not update staff role.' })) as { error?: string }
@@ -1066,13 +1137,12 @@ function App() {
   }
 
   async function resetCashierPassword(member: StaffUser) {
-    if (!cloudAccessToken) return setSettingsMessage('Connect to the internet and sign in again before resetting a cashier password.')
     const password = await requestInlinePrompt({ title: 'Reset cashier password', message: `Set a new temporary password for ${member.name}. It must have at least 10 characters.`, inputType: 'password', minLength: 10 })
     if (!password) return
     if (password.length < 10) return setSettingsMessage('Cashier passwords must be at least 10 characters long.')
     const confirmation = await requestInlinePrompt({ title: 'Confirm cashier password', message: `Re-enter the new password for ${member.name}.`, inputType: 'password', minLength: 10 })
     if (password !== confirmation) return setSettingsMessage('Passwords did not match. No change was made.')
-    const response = await fetch(`/api/users/${member.id}/password`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ password, cloudAccessToken }) })
+    const response = await fetch(`/api/users/${member.id}/password`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify({ password }) })
     if (!response.ok) { const error = await response.json().catch(() => ({})) as { error?: string }; return setSettingsMessage(error.error || 'Could not reset cashier password.') }
     setSettingsMessage(`Password reset for ${member.name}. Give them the temporary password privately.`)
   }
@@ -1192,16 +1262,26 @@ function App() {
 
   async function login(identifier: string, password: string) {
     const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) })
-    const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) }).catch(() => null)
-    const cloudData = cloudResponse?.ok ? await cloudResponse.json() as { token: string; user: User; cloudAccessToken: string; refreshToken?: string } : null
-    if (!response.ok && !cloudResponse?.ok) {
-      if (isBrowserPwa()) {
-        const failure = await cloudResponse?.json().catch(() => null)
-        throw new Error(failure?.error || 'Connect to the internet to sign in. An existing signed-in session can work offline.')
+    // Desktop local authentication must complete without the network. PWA and
+    // Android deliberately return no local login response and use the cloud
+    // fallback below; a desktop only uses that fallback when SQLite does not
+    // recognise the account yet.
+    let cloudData: { token: string; user: User; cloudAccessToken: string; refreshToken?: string } | null = null
+    let data: { token: string; user: User }
+    if (response.ok) {
+      data = await response.json() as { token: string; user: User }
+    } else {
+      const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', signal: AbortSignal.timeout(10_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) }).catch(() => null)
+      cloudData = cloudResponse?.ok ? await cloudResponse.json() as { token: string; user: User; cloudAccessToken: string; refreshToken?: string } : null
+      if (!cloudData) {
+        if (isBrowserPwa() || isNativeMobile()) {
+          const failure = await cloudResponse?.json().catch(() => null)
+          throw new Error(failure?.error || 'Connect to the internet to sign in. An existing signed-in session can work offline.')
+        }
+        throw new Error('Email or password is incorrect.')
       }
-      throw new Error('Email or password is incorrect.')
+      data = cloudData
     }
-    const data = response.ok ? await response.json() as { token: string; user: User } : cloudData!
     const fallbackCloudToken = localStorage.getItem('stockroom-cloud-access-token') || ''
     const resolvedCloudToken = resolveCloudAccessToken(cloudData?.cloudAccessToken || '', fallbackCloudToken)
     if (cloudData || resolvedCloudToken) {
@@ -1216,16 +1296,25 @@ function App() {
     setSetupRequired(false)
     localStorage.setItem('stockroom-token', data.token)
     localStorage.setItem('stockroom-user', JSON.stringify(data.user))
+    // Keep local login immediate/offline; obtain cloud credentials using the
+    // same login while online, as APK/PWA do, without replacing local identity.
+    if (!cloudData && data.user.role === 'owner' && !isNativeMobile() && !isBrowserPwa()) {
+      void signInToCloud(identifier, password).catch(() => undefined)
+    }
   }
 
   async function signInToCloud(identifier: string, password: string) {
-    const response = await fetch('/api/auth/cloud-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) }).catch(() => null)
-    const data = response ? await response.json().catch(() => ({})) as { accessToken?: string; refreshToken?: string; user?: User; error?: string } : {}
-    if (!response?.ok || !data.accessToken || !data.refreshToken || data.user?.role !== 'owner') throw new Error(data.error || 'Could not sign in with the cloud owner account.')
-    setCloudAccessToken(data.accessToken)
-    localStorage.setItem('stockroom-cloud-access-token', data.accessToken)
+    const localSession = localStorage.getItem('stockroom-token')
+    const response = await fetch('/api/auth/cloud-session', { method: 'POST', signal: AbortSignal.timeout(10_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) }).catch(() => null)
+    const data = response ? await response.json().catch(() => ({})) as { accessToken?: string; cloudAccessToken?: string; refreshToken?: string; user?: User; error?: string } : {}
+    const accessToken = data.accessToken || data.cloudAccessToken || ''
+    if (!response?.ok || !accessToken || !data.refreshToken || data.user?.role !== 'owner') throw new Error(data.error || 'Could not sign in with the cloud owner account.')
+    if (localStorage.getItem('stockroom-token') !== localSession) throw new Error('The signed-in user changed.')
+    setCloudAccessToken(accessToken)
+    setCloudSessionError('')
+    localStorage.setItem('stockroom-cloud-access-token', accessToken)
     localStorage.setItem('stockroom-cloud-refresh-token', data.refreshToken)
-    return { accessToken: data.accessToken, refreshToken: data.refreshToken }
+    return { accessToken, refreshToken: data.refreshToken }
   }
 
   async function completeSetup(event: React.FormEvent<HTMLFormElement>) {
@@ -1262,7 +1351,7 @@ function App() {
       if (result.refreshToken) localStorage.setItem('stockroom-cloud-refresh-token', result.refreshToken)
       const referralCode = sessionStorage.getItem('stockroom-referral-code') || ''
       if (/^[a-f0-9]{32}$/.test(referralCode)) {
-        const referral = await fetch(`${subscriptionApiUrl}/v1/subscriptions/referrals`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ code: referralCode }) }).catch(() => null)
+        const referral = await fetch(`${subscriptionApiUrl}/v1/subscriptions/referrals`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}`, ...(subscriptionApiUrl === '/api/cloud' ? { 'X-Local-Session': data.token } : {}) }, body: JSON.stringify({ code: referralCode }) }).catch(() => null)
         if (referral?.ok) sessionStorage.removeItem('stockroom-referral-code')
       }
     }
@@ -1282,6 +1371,7 @@ function App() {
     localStorage.removeItem('stockroom-cloud-access-token')
     localStorage.removeItem('stockroom-cloud-refresh-token')
     sessionStorage.removeItem('stockroom-active-screen')
+    localStorage.removeItem('stockroom-active-screen')
     setCloudAccessToken('')
   }
 
@@ -1346,7 +1436,7 @@ function App() {
       {active === 'Owner' && <OwnerDashboard token={authToken} currency={currency} />}
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
       {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} />}
-      {active === 'Team' && <><StaffActivity staff={staff} sales={sales} money={formatMoney} /><TeamManagement staff={staff} loaded={staffLoaded} addStaff={addStaff} updateStaffRole={updateStaffRole} setCashierAccess={setCashierAccess} resetCashierPassword={resetCashierPassword} canCreateStaff={user.role === 'owner'} message={settingsMessage} />{user.role === 'owner' && <CashierPasswordReset staff={staff} resetCashierPassword={resetCashierPassword} />}</>}
+      {active === 'Team' && <><StaffActivity staff={staff} sales={sales} money={formatMoney} /><TeamManagement staff={staff} loaded={staffLoaded} addStaff={addStaff} updateStaffRole={updateStaffRole} setCashierAccess={setCashierAccess} resetCashierPassword={resetCashierPassword} canCreateStaff={user.role === 'owner'} message={settingsMessage || cloudSessionError} />{user.role === 'owner' && <CashierPasswordReset staff={staff} resetCashierPassword={resetCashierPassword} />}</>}
       {active === 'Device' && canManageDeviceSetup && <section className="panel full-panel"><div className="panel-heading"><div><h2>Device setup</h2><p>These settings apply only to this checkout device, not the whole business.</p></div><Printer size={20} /></div><DeviceSetup key={`${user.organizationId}-${deviceSetupKind || 'all'}`} businessId={user.organizationId} defaultProvider={posProvider} onTerminalSaved={() => setTerminalRevision(value => value + 1)} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} pairing={displayPairing} scan={() => scanBarcode('setup')} initialKind={deviceSetupKind} /></section>}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel logo-settings"><h3>Business logo</h3><p>PNG, JPEG, or WebP up to 1 MB. It syncs to enrolled devices when you save business settings.</p>{logoData && <img src={logoData} alt="Business logo preview" className="settings-logo-preview" />}<label className="logo-upload-control"><strong>Upload logo</strong><input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseLogo} /></label></section>}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div><AsyncForm className="settings-form" busyLabel="Saving settings..." onSubmit={saveAppName}><label>App name<span>This appears in the sidebar and installed app.</span><input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<span>Used for product prices, wallets, sales, and receipts.</span><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label><label>Default payment-terminal provider<span>Shared business default. Each checkout can override it in Device setup.</span><input value={posProvider} placeholder="e.g. OPay" maxLength={100} onChange={(event) => setPosProvider(event.target.value)} /></label><PaymentPolicySettings value={extraPaymentPolicy} onChange={setExtraPaymentPolicy} /><SubmitButton className="primary-button">Save business settings <ArrowUpToLine size={17} /></SubmitButton>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</AsyncForm>{!isBrowserPwa() && <AsyncForm className="settings-form" busyLabel="Updating password..." onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" placeholder="New password" /></label><label>Confirm password<input name="confirmPassword" type="password" placeholder="Confirm new password" /></label><SubmitButton className="primary-button" type="submit">Update password</SubmitButton>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</AsyncForm>}{isBrowserPwa() && <p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p>}</section>}
