@@ -34,7 +34,7 @@ import { applyLogoTheme } from './lib/logoTheme'
 import { resolveCloudAccessToken } from './lib/cloudSession'
 import { SubscriptionSettings } from './SubscriptionSettings'
 
-function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean }) {
+function PageOptions({ onRefresh, busy, refreshing }: { onRefresh: () => void; busy: boolean; refreshing: boolean }) {
   const menu = useRef<HTMLDetailsElement>(null)
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -53,7 +53,7 @@ function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean
       document.removeEventListener('keydown', escape)
     }
   }, [])
-  return <details className="page-options" ref={menu} onBlur={(event) => {
+  return <><span className="page-refresh-status" role="status" aria-live="polite">{refreshing && <><RefreshCw size={16} className="spin" aria-hidden="true" />Refreshing?</>}</span><details className="page-options" ref={menu} onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node)) event.currentTarget.open = false
   }}>
     <summary className="icon-button" aria-label="Page options" title="Page options"><MoreHorizontal size={19} /></summary>
@@ -66,7 +66,7 @@ function PageOptions({ onRefresh, busy }: { onRefresh: () => void; busy: boolean
         onRefresh()
       }}><RefreshCw size={16} className={busy ? 'spin' : ''} />{busy ? 'Refreshing…' : 'Refresh'}</button>
     </div>
-  </details>
+  </details></>
 }
 
 if (!isNativeMobile() && !isBrowserPwa()) {
@@ -619,7 +619,7 @@ function App() {
     }
     window.addEventListener('keydown', handleDesktopReload)
     return () => window.removeEventListener('keydown', handleDesktopReload)
-  }, [online, syncStatus.configured, syncing, refreshingView, authToken])
+  }, [online, syncStatus.configured, syncing, refreshingView, authToken, active, user?.role])
   async function refreshLocalView() {
     if (refreshingView || syncing) return
     setRefreshingView(true)
@@ -1411,7 +1411,7 @@ function App() {
     </aside>
     {isBrowserPwa() && <div className="mobile-pwa-sync"><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button>{syncFeedback && <p className="mobile-sync-feedback" role="status" aria-live="polite">{syncFeedback}</p>}</div>}
     <main className="main-content">
-      <header className="topbar"><div><p className="eyebrow">{user.name} Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Subscription' ? 'Subscription' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><button type="button" className="icon-button" title="Back" onClick={goBackInApp} disabled={active === 'Overview'} aria-label="Go back"><ArrowLeft size={18} /></button><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
+      <header className="topbar"><div><p className="eyebrow">{user.name} Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Subscription' ? 'Subscription' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><button type="button" className="icon-button" title="Back" onClick={goBackInApp} disabled={active === 'Overview'} aria-label="Go back"><ArrowLeft size={18} /></button><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} refreshing={refreshingView} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
       {active === 'Overview' && canManageOperations && <>
         <section className="hero-row"><div><h2>Business at a glance</h2><p>Keep your shelves moving and your team in the know.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}><Plus size={18} />Add product</button></section>
         <section className="metric-grid"><div className="metric-card"><span>Inventory value</span><strong>{formatMoney(totalValue)}</strong><small>Based on current local stock and unit prices</small></div><div className="metric-card"><span>Items in stock</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}</strong><small>Across {products.length} products</small></div><div className="metric-card alert-card"><span>Needs attention</span><strong>{lowStock.length}</strong><small>{lowStock.length ? 'Products below reorder point' : 'All stock levels healthy'}</small></div></section>

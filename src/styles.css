@@ -51,6 +51,8 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 
 .top-actions { flex-wrap: wrap; }
 .page-options { position: relative; flex-shrink: 0; }
+.page-refresh-status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; }
+.page-refresh-status:empty { display: none; }
 .page-options summary { list-style: none; cursor: pointer; }
 .page-options summary::-webkit-details-marker { display: none; }
 .page-options-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 4; width: 180px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); box-shadow: 0 8px 24px #17352d26; }
