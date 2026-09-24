@@ -1,11 +1,12 @@
 import { subscriptionAccess } from './subscription-policy.mjs'
 
 // Shared by desktop, Android and PWA. Cache only within the enrolled business.
-export async function loadSubscriptionAccess({ config, read, write, fetcher = fetch, force = false }) {
+export async function loadSubscriptionAccess({ config, read, write, fetcher = fetch, force = false, cacheOnly = false }) {
   if (!config?.url || !config?.token || !config?.businessId) return subscriptionAccess(null)
   const key = `subscription:${config.url}:${config.businessId}`
   let cached = null
   try { cached = JSON.parse(await read(key) || 'null') } catch { /* No usable cached entitlement. */ }
+  if (cacheOnly) return subscriptionAccess(cached?.businessId === config.businessId ? cached : null)
   const now = Date.now()
   if (!force && cached?.businessId === config.businessId && cached.checkedAt <= now && now - cached.checkedAt < 60000) return subscriptionAccess(cached)
   try {

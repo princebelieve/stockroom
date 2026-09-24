@@ -28,8 +28,8 @@ self.addEventListener('fetch', event => {
     return
   }
   if (!APP_SHELL.includes(url.pathname)) return
-  event.respondWith(fetch(event.request).then(async response => {
+  event.respondWith(caches.open(CACHE_NAME).then(cache => cache.match(event.request)).then(cached => cached || fetch(event.request).then(async response => {
     if (response.ok) (await caches.open(CACHE_NAME)).put(event.request, response.clone())
     return response
-  }).catch(() => caches.open(CACHE_NAME).then(cache => cache.match(event.request)).then(cached => cached || Response.error())))
+  }).catch(() => Response.error())))
 })

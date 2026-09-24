@@ -10,6 +10,7 @@ import { installMobileApi } from './lib/mobileApi'
 import { localSessionFetch } from './lib/localSessionFetch'
 import { cloudRequest } from './lib/cloudRequest'
 import { teamSessionFetch } from './lib/teamSessionFetch'
+import { refreshDeadline } from './lib/refreshDeadline'
 import { isNativeMobile } from './lib/mobileDatabase'
 import { isBrowserPwa } from './lib/platform'
 import { resolveStartupState } from './lib/startupState'
@@ -502,7 +503,7 @@ function App() {
   useEffect(() => { let cancelled = false; if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => { if (!cancelled) setSales(data.sales) }).catch(() => undefined); return () => { cancelled = true } }, [authToken, user?.organizationId, user?.operationalAccess, user?.role])
   useEffect(() => { if (canManageOperations) fetch('/api/movements', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ movements: Movement[] }> : Promise.reject()).then((data) => setMovements(data.movements)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
   useEffect(() => {
-    if (!authToken || user?.role !== 'owner') return
+    if (!authToken || user?.role !== 'owner' || (isBrowserPwa() && active !== 'Team')) return
     let cancelled = false
     setStaffLoaded(false)
     fetch('/api/users').then(async (response) => {
@@ -527,10 +528,11 @@ function App() {
     if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
     fetch('/api/reports', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<Reports> : Promise.reject()).then(setReports).catch(() => undefined)
   }, [authToken, user?.role])
-  async function refreshBusinessSettings() {
-    const response = await fetch('/api/settings').catch(() => null)
+  async function refreshBusinessSettings(signal?: AbortSignal) {
+    const response = await fetch('/api/settings', { signal }).catch(() => null)
     if (!response?.ok) return
     const settings = await response.json() as AppSettings
+    signal?.throwIfAborted()
     if (settingsDraftDirty.current) return
     const cachedName = localStorage.getItem('stockroom-app-name') || ''
     const cachedCurrency = localStorage.getItem('stockroom-currency') || ''
@@ -622,12 +624,13 @@ function App() {
   }, [online, syncStatus.configured, syncing, refreshingView, authToken, active, user?.role])
   async function refreshLocalView() {
     if (refreshingView || syncing) return
+    const deadline = refreshDeadline()
     setRefreshingView(true)
     setSyncFeedback('Downloading changes from the cloud…')
     try {
         if (active === 'Team' && user?.role === 'owner') {
-          const response = await fetch('/api/users')
-          const data = await response.json() as { users: StaffUser[]; refreshed?: boolean; refreshError?: string; error?: string }
+          const response = await deadline.wait(fetch('/api/users', { signal: deadline.signal }))
+          const data = await deadline.wait(response.json()) as { users: StaffUser[]; refreshed?: boolean; refreshError?: string; error?: string }
           if (!response.ok) throw new Error(data.error || 'Could not load the staff directory.')
           setStaff(data.users)
           setStaffLoaded(true)
@@ -635,33 +638,33 @@ function App() {
           setSyncFeedback(data.refreshed === false ? 'Showing the saved staff directory.' : `Team refreshed. ${data.users.length} member(s) loaded.`)
           return
         }
-        const response = await fetch('/api/sync/pull', { method: 'POST', headers: authHeaders })
-        const result = await response.json()
+        const response = await deadline.wait(fetch('/api/sync/pull', { method: 'POST', headers: authHeaders, signal: deadline.signal }))
+        const result = await deadline.wait(response.json())
         if (!response.ok) throw new Error(result.error || `Refresh failed (${response.status}).`)
         setSyncStatus(result as SyncStatus)
         if (result.lastError) throw new Error(result.lastError)
         if (!result.configured) throw new Error('Cloud sync is not configured for this device.')
-        if (!isBrowserPwa() && (await getQueuedOperations()).length) {
+        if (!isBrowserPwa() && (await deadline.wait(getQueuedOperations())).length) {
           setSyncFeedback('Download complete. Sync local edits before reloading the catalogue.')
           return
         }
-        const productsResponse = await fetch('/api/products', { headers: authHeaders })
+        const productsResponse = await deadline.wait(fetch('/api/products', { headers: authHeaders, signal: deadline.signal }))
         if (!productsResponse.ok) throw new Error('Changes downloaded, but the product list could not be loaded. Refresh again.')
-        const catalogue = await productsResponse.json() as { products: Product[] }
+        const catalogue = await deadline.wait(productsResponse.json()) as { products: Product[] }
         setProducts(catalogue.products)
         setSyncFeedback(`Refresh complete. ${catalogue.products.length} product(s) loaded. No local changes uploaded.`)
         if (isBrowserPwa() && 'serviceWorker' in navigator) {
-          const registration = await navigator.serviceWorker.getRegistration()
-          await registration?.update().catch(() => undefined)
+          const registration = await deadline.wait(navigator.serviceWorker.getRegistration())
+          if (registration) await deadline.wait(registration.update().catch(() => undefined))
           if (registration?.waiting) {
             navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true })
             registration.waiting.postMessage('ACTIVATE_UPDATE')
           }
         }
-        await refreshBusinessSettings()
+        await deadline.wait(refreshBusinessSettings(deadline.signal))
     } catch (error) {
       setSyncFeedback(`Refresh failed: ${error instanceof Error ? error.message : 'Could not download changes.'}`)
-    } finally { setRefreshingView(false) }
+    } finally { deadline.dispose(); setRefreshingView(false) }
   }
   useEffect(() => {
     if (!isNativeMobile() && !isBrowserPwa()) return

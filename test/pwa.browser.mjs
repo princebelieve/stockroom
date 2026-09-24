@@ -89,8 +89,15 @@ try {
   const rejected = await api('/api/sales', { ...sale, id: 'too-many', total: 500, items: [{ ...sale.items[0], quantity: 100 }] })
   assert.equal(rejected.status, 400)
   assert.equal((await api('/api/products')).data.products[0].stock, 8)
+  const startupCloudRequests = []
+  const recordStartupCloud = request => { if (new URL(request.url()).pathname.startsWith('/v1/')) startupCloudRequests.push(request.url()) }
+  page.on('request', recordStartupCloud)
   await page.reload()
   await page.getByRole('button', { name: 'Log out' }).waitFor()
+  await api('/api/products')
+  await api('/api/subscriptions/access')
+  assert.deepEqual(startupCloudRequests, [], 'offline startup and local reads must not attempt cloud requests')
+  page.off('request', recordStartupCloud)
   const savedCash = (await api('/api/sales')).data.sales.find(row => row.id === sale.id)
   assert.equal(savedCash.cashReceived, 20)
   assert.equal(savedCash.changeGiven, 10)

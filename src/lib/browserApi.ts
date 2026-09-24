@@ -27,7 +27,7 @@ async function setSetting(key: string, value: string) {
 }
 async function subscriptionStatus(force = false) {
   const config = await getMobileSyncConfiguration()
-  return loadSubscriptionAccess({ config: config ? { url: config.syncApiUrl, token: config.deviceToken, businessId: config.businessId } : null, read: setting, write: setSetting, fetcher: originalFetch, force })
+  return loadSubscriptionAccess({ config: config ? { url: config.syncApiUrl, token: config.deviceToken, businessId: config.businessId } : null, read: setting, write: setSetting, fetcher: originalFetch, force, cacheOnly: !force })
 }
 async function browserDeviceId() {
   const existing = await setting('browserDeviceId')
@@ -44,42 +44,6 @@ async function sessionUser(): Promise<MobileUser | null> {
   const user = result.values?.[0]
   const config = await getMobileSyncConfiguration()
   return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId: config?.businessId || 'mobile-shop' } as MobileUser : null
-}
-async function restoreCloudSession(): Promise<MobileUser | null> {
-  let config = await getMobileSyncConfiguration()
-  // Keep a second copy of the short-lived cloud token with the app session.
-  // If IndexedDB is repaired or migrated but localStorage survives, an owner
-  // can securely restore the lost device enrollment without a logout.
-  const token = await setting('cloudAccessToken') || localStorage.getItem('stockroom-cloud-access-token') || ''
-  const syncApiUrl = config?.syncApiUrl || cloudUrl
-  if (!token) return null
-  const response = await originalFetch(`${syncApiUrl}/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-  const result = await response.json().catch(() => ({}))
-  if (!response.ok || !result.account?.id) return null
-  const account = result.account
-  if (config && account.businessId !== config.businessId) {
-    await setSetting('cloudAccessToken', '')
-    localStorage.removeItem('stockroom-cloud-access-token')
-    return null
-  }
-  if (!config) {
-    // Only an owner may restore an enrollment that has been lost locally.
-    // Staff still need an owner-enrolled browser to begin using the device.
-    if (account.role !== 'owner') return null
-    const deviceId = await browserDeviceId()
-    const enrolled = await originalFetch(`${syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ deviceId, label: `PWA ${deviceId.slice(-8)}` }) })
-    const device = await enrolled.json().catch(() => ({}))
-    if (!enrolled.ok || !device.businessId || !device.deviceToken) return null
-    config = { syncApiUrl, businessId: String(device.businessId), deviceId: String(device.deviceId || deviceId), deviceToken: String(device.deviceToken) }
-    await saveMobileSyncConfiguration(config)
-  }
-  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
-  const db = await openMobileDatabase()
-  await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
-  const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
-  if (!stored) return null
-  await setSetting('sessionUserId', String(stored.id))
-  return { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId } as MobileUser
 }
 async function restoreSavedSession(): Promise<MobileUser | null> {
   const config = await getMobileSyncConfiguration()
@@ -291,16 +255,14 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, headers: { 'Content-Type': 'application/json' }, body: init?.body })
   }
   const savedUser = await sessionUser() || await restoreSavedSession()
-  // A saved local session is the offline source of truth. Do not contact the
-  // cloud before returning it, even when enrollment metadata was repaired or
-  // lost. Cloud restoration is only a recovery path when no local session
-  // exists at all.
-  const user = savedUser || await restoreCloudSession()
+  // Local routes never recover identity over the network. A missing saved
+  // session goes to sign-in, where the user explicitly requests cloud access.
+  const user = savedUser
   const db = await openMobileDatabase()
   if (path === '/api/health') return json({ ok: true, storage: 'Browser SQLite / IndexedDB' })
   if (path === '/api/settings' && method === 'GET') {
     const config = await getMobileSyncConfiguration()
-    const row = await hydrateBusinessSettings(config)
+    const row = await hydrateBusinessSettings()
     return json({ ...row, paymentPolicy: paymentPolicy(row?.paymentPolicy), ownerConfigured: Boolean((await db.query('SELECT id FROM users LIMIT 1')).values?.length), cloudConfigured: Boolean(config), existingBusiness: Boolean(config) })
   }
   if (path === '/api/installer/activate' && method === 'POST') {
@@ -351,6 +313,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     await setSetting('cloudRefreshToken', String(result.refreshToken || ''))
     const pulled = await pullLatest(config)
     await setSetting('lastSyncError', pulled.lastError)
+    await subscriptionStatus(true)
     const initialized = await hydrateBusinessSettings(config)
     await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [initialized.appName || 'My Business', initialized.currency || 'USD', initialized.posProvider || '', initialized.posTerminalId || '', initialized.posConnection || 'manual', initialized.logoData || '', initialized.updatedAt || now()])
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken, refreshToken: result.refreshToken })
@@ -379,6 +342,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   }
   if ((path === '/api/sync/pull' || path === '/api/sync/now') && method === 'POST') {
     const status = path === '/api/sync/pull' ? await pullLatest() : await syncNow()
+    await subscriptionStatus(true)
     await setSetting('lastSyncError', status.lastError)
     return json(status)
   }

@@ -3,6 +3,20 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
+test('cached startup assets load without waiting for the network', async () => {
+  const listeners = {}
+  const cached = new Response('cached asset')
+  vm.runInNewContext(readFileSync('public/sw.js', 'utf8'), {
+    URL, Response,
+    fetch: () => { throw new Error('Cached assets must not use the network') },
+    caches: { open: async () => ({ match: async () => cached }) },
+    self: { location: { origin: 'https://shop.example' }, addEventListener: (event, handler) => listeners[event] = handler },
+  })
+  let result
+  listeners.fetch({ request: { url: 'https://shop.example/icon.svg', method: 'GET' }, respondWith: value => { result = value } })
+  assert.equal(await result, cached)
+})
+
 test('service worker excludes APIs, external requests and writes from caching', () => {
   const listeners = {}
   vm.runInNewContext(readFileSync('public/sw.js', 'utf8'), {
