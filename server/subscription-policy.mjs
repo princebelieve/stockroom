@@ -15,6 +15,10 @@ export function subscriptionAccess(snapshot, now = Date.now()) {
   if (!snapshot) return { blocked: true, reason: 'Connect to the internet to check subscription access.', status: 'unknown' }
   if (snapshot.testMode === true) return { ...snapshot, blocked: false, status: 'test', reason: 'Developer test mode is on. Subscription blocks are disabled.' }
   if (!snapshot.expiresAt) return { ...snapshot, blocked: true, status: 'unpaid', reason: 'A subscription is required. Ask the owner to renew.' }
+  if (snapshot.isTrial === true) {
+    const active = now < +new Date(snapshot.expiresAt)
+    return { ...snapshot, blocked: !active, graceEndsAt: snapshot.expiresAt, status: active ? 'trial' : 'trial-expired', reason: active ? `Free trial ends ${snapshot.expiresAt.slice(0, 10)} (UTC).` : 'Your free trial has ended. Please subscribe to continue using the POS.' }
+  }
   const months = Number.isInteger(Number(snapshot.graceMonths)) ? Number(snapshot.graceMonths) : 1
   const end = graceEndsAt(snapshot.expiresAt, months)
   if (!end) return { ...snapshot, blocked: true, status: 'unknown', reason: 'Connect to refresh subscription access.' }

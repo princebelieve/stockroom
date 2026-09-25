@@ -30,7 +30,7 @@ Import this repository as a Vite project. The checked-in `vercel.json` selects:
 - Output directory: `dist`
 
 If using a cloud API other than the existing Render service, add the public
-environment variable `VITE_SYNC_API_URL=https://your-api.example.com` and redeploy.
+environment variable `SYNC_API_URL=https://your-api.example.com` and redeploy.
 Do not set `VITE_APP_MODE` globally on your workstation; `.env.pwa` enables it only
 for the PWA build. Leave MongoDB, JWT, installer and email secrets on Render.
 

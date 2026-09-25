@@ -23,7 +23,7 @@ services:
       - key: DEVELOPER_EMAIL
         sync: false
       - key: PWA_ALLOWED_ORIGINS
-        sync: false
+        value: https://stockroom.globalcreest.com
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET

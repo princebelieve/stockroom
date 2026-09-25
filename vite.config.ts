@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -10,7 +10,13 @@ const ocrFiles: Record<string, string> = Object.fromEntries([
   ...['tesseract-core', 'tesseract-core-simd', 'tesseract-core-lstm', 'tesseract-core-simd-lstm'].flatMap(name => ['wasm.js', 'wasm'].map(ext => [`${name}.${ext}`, `node_modules/tesseract.js-core/${name}.${ext}`])),
 ])
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  // The API base URL is public client configuration. Inject only this one
+  // setting; never expose device tokens or other SYNC_* environment values.
+  const syncApiUrl = env.SYNC_API_URL || env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com'
+  return {
+  define: { __STOCKROOM_SYNC_API_URL__: JSON.stringify(syncApiUrl) },
   build: { target: 'es2022', rollupOptions: { input: { app: resolve('index.html'), welcome: resolve('welcome.html') } } },
   plugins: [react(), {
     name: 'local-receipt-ocr',
@@ -40,4 +46,5 @@ export default defineConfig({
       '/api': 'http://localhost:8787',
     },
   },
+  }
 })

@@ -10,7 +10,7 @@ type Operation = { operationId: string; entityType: string; entityId: string; ac
 
 const networkFetch = window.fetch.bind(window)
 const originalFetch: typeof fetch = (input, init = {}) => networkFetch(input, { ...init, signal: init.signal || AbortSignal.timeout(20000) })
-const cloudUrl = (import.meta.env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com').replace(/\/$/, '')
+const cloudUrl = __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
 const now = () => new Date().toISOString()
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const error = (message: string, status = 400) => json({ error: message }, status)

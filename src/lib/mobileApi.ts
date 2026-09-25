@@ -249,7 +249,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase()
   if (path === '/api/auth/register-business' && method === 'POST') {
     if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
-    return originalFetch(`${(import.meta.env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com')}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
+    return originalFetch(`${__STOCKROOM_SYNC_API_URL__}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
   }
   // Logout must also clear stale sessions whose user record no longer exists.
   // Device enrollment lives in separate settings and is preserved.

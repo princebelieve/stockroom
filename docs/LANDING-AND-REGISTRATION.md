@@ -2,11 +2,11 @@
 
 This updates the existing Render service and Vercel project; do not create a second business backend or replace the live database.
 
-The public page is available after deployment at `https://stockroom.globalcreest.com/welcome.html` using the app's existing domain. This works without adding another domain. `sbi.globalcreest.com` already serves a separate website and should remain attached to that deployment.
+The public page is available after deployment at `https://stockroom.globalcreest.com/welcome` using the app's existing domain. Vercel clean URLs hide the `.html` suffix. This works without adding another domain. `sbi.globalcreest.com` already serves a separate website and should remain attached to that deployment.
 
 The build contains two entry points:
 
-- `https://stockroom.globalcreest.com/welcome.html`: public landing page for Stockroom Business by S. B. Ibhadode technology.
+- `https://stockroom.globalcreest.com/welcome`: public landing page for Stockroom Business by S. B. Ibhadode technology.
 - `https://stockroom.globalcreest.com/`: existing PWA and sign-in page.
 
 Do not add `sbi.globalcreest.com` to this Vercel project or change its DNS while it serves the existing website. The landing page stays on the Stockroom app domain; it links visitors to the app for registration and sign-in.
@@ -17,7 +17,7 @@ Vercel builds with `npm run build:pwa`. Configure:
 
 ```text
 VITE_PUBLIC_APP_URL=https://stockroom.globalcreest.com/
-VITE_SYNC_API_URL=https://stockroom-0vm5.onrender.com
+SYNC_API_URL=https://stockroom-0vm5.onrender.com
 VITE_APK_DOWNLOAD_URL=<HTTPS URL of your published production APK>
 VITE_DESKTOP_DOWNLOAD_URL=<HTTPS URL of your published Windows installer>
 ```
@@ -43,11 +43,11 @@ Deploy the cloud API before the frontend. Keep existing MongoDB and secrets. Reg
 
 ## Everyday use
 
-- For advertising, share `https://stockroom.globalcreest.com/welcome.html`. The page identifies Stockroom as a product of S. B. Ibhadode technology.
+- For advertising, share `https://stockroom.globalcreest.com/welcome`. The page identifies Stockroom as a product of S. B. Ibhadode technology.
 - For key generation, open `https://stockroom.globalcreest.com/?screen=subscription` and sign in with the owner account matching Render's existing `DEVELOPER_EMAIL`. The Business registration keys section is developer-only.
 - Generate the key and copy the customer instructions from that screen. Send those privately yourself.
 - A new customer's installed app starts with **New business with a key** and **Existing business**. Manual admin-key installation is under **Developer installation tools**, not in the ordinary customer path.
-- The PWA login screen offers **Register a new business**. The customer can also follow `https://stockroom.globalcreest.com/?screen=register` directly.
+- New visitors to the app root are sent to `/welcome`; **Start business registration** opens the request form in the app. The customer may also follow `https://stockroom.globalcreest.com/?screen=register` directly. The form provides WhatsApp, `info@sbi.globalcreest.com`, and `sbi.globalcreest.com` contact options to request a registration link.
 - Returning customers use their saved workspace. Adding another device uses the existing owner credentials, not a new key. Subscription selection and payment stay in Stockroom.
 
 ## Generate and redeem a key
@@ -64,6 +64,6 @@ The old owner-registration endpoint now requires a valid enrolled device token f
 
 ## Referrals and installation
 
-The public page fetches only the two configured referral percentages from `/v1/public/landing`. If unavailable, it says so rather than advertising a guessed percentage. Invitation links retain the existing app destination: `https://stockroom.globalcreest.com/?screen=subscription&ref=<code>`. New visitors can choose Register a new business and keep the referral code; existing owners keep the current Subscription flow. A referral code arriving on the public page is carried into the app when its registration or subscription link is followed.
+The public page fetches only the two configured referral percentages from `/v1/public/landing`. If unavailable, it says so rather than advertising a guessed percentage. Invitation links open new-business registration: `https://stockroom.globalcreest.com/?screen=register&ref=<code>`. The code is retained and prefilled in the registration screen. Existing owners sign in normally and keep access to the Subscription flow.
 
 PWA installation belongs to the **app origin**. On the separate public domain the PWA button opens the app, where supported browsers expose installation. On iOS use Safari's Share → Add to Home Screen. Do not install a second copy on the marketing origin and expect it to share the app origin's local database.

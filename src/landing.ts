@@ -1,7 +1,7 @@
 import './landing.css'
 
 const appUrl = import.meta.env.VITE_PUBLIC_APP_URL || 'https://stockroom.globalcreest.com/'
-const cloud = (import.meta.env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com').replace(/\/$/, '')
+const cloud = __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
 const text = (id: string, value: string) => { document.getElementById(id)!.textContent = value }
 for (const [id, configured, label] of [['apk', import.meta.env.VITE_APK_DOWNLOAD_URL, 'Download Android APK'], ['desktop', import.meta.env.VITE_DESKTOP_DOWNLOAD_URL, 'Download Windows installer']]) {
   if (!configured) continue
@@ -28,18 +28,24 @@ if (new URL(appUrl).origin === location.origin && 'serviceWorker' in navigator) 
   const manifest = document.createElement('link'); manifest.rel = 'manifest'; manifest.href = '/manifest.webmanifest'; document.head.append(manifest)
   void navigator.serviceWorker.register('/sw.js').catch(() => undefined)
 }
-void fetch(`${cloud}/v1/public/landing`, { signal: AbortSignal.timeout(8000) }).then(async response => {
-  if (!response.ok) throw new Error()
+async function loadReferralRates() {
+  const response = await fetch(`${cloud}/v1/public/landing`, { signal: AbortSignal.timeout(65000), cache: 'no-store' })
+  if (!response.ok) throw new Error(`Referral rates returned HTTP ${response.status}.`)
   const data = await response.json()
   for (const [id, value] of [['first-rate', data.firstReferralPercent], ['recurring-rate', data.recurringReferralPercent]] as const) {
-    if (!Number.isFinite(value) || value < 0 || value > 100) throw new Error()
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) throw new Error('Referral rates are not valid percentages.')
     text(id, `${value}%`)
   }
   text('referral-status', 'Current configured referral rates. See your referral records in the app.')
-}).catch(() => text('referral-status', 'Current rates are unavailable. Check Subscription in the app for the configured percentages.'))
+}
+void loadReferralRates().catch(async () => {
+  text('referral-status', 'Connecting to load the current referral rates…')
+  await new Promise(resolve => setTimeout(resolve, 2500))
+  return loadReferralRates()
+}).catch(() => text('referral-status', 'Referral rates could not be loaded. Please try again later or check Subscription in the app.'))
 
 const referral = new URLSearchParams(location.search).get('ref') || ''
-for (const [id, screen] of [['register-app', 'register'], ['subscription-app', 'subscription']]) {
+for (const [id, screen] of [['register-app', 'register'], ['subscription-app', referral ? 'register' : 'subscription']]) {
   const destination = new URL(appUrl)
   destination.searchParams.set('screen', screen)
   if (/^[a-f0-9]{32}$/.test(referral)) destination.searchParams.set('ref', referral)

@@ -44,14 +44,18 @@ export async function createRegistration({ database, client, accounts, hashPassw
           referrer = await database.collection('subscription_referrals').findOne({ code }, { session })
           if (!referrer || referrer._id === grant.businessId) throw new Error('The referral code is invalid.')
         }
-        const account = { businessId: grant.businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash, createdAt: new Date() }
+        const accountCreatedAt = new Date()
+        const account = { businessId: grant.businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash, createdAt: accountCreatedAt }
         await accounts.insertOne(account, { session })
         const settings = { appName: grant.businessName, currency, updatedAt: new Date().toISOString() }
         await database.collection('business_settings').updateOne({ businessId: grant.businessId }, { $set: { businessId: grant.businessId, settings } }, { upsert: true, session })
         // Every client hydrates its new local workspace through the sync log.
         await database.collection('sync_operations').insertOne({ businessId: grant.businessId, deviceId: 'registration', operationId: randomUUID(), entityType: 'settings', entityId: 'business', action: 'upsert', payload: settings, createdAt: settings.updatedAt, receivedAt: new Date() }, { session })
-        if (referrer) await database.collection('subscriptions').updateOne({ _id: grant.businessId }, { $setOnInsert: { referrerId: referrer._id, expiresAt: null, references: [], commissionEvents: [], createdAt: new Date() } }, { upsert: true, session })
-        return { businessId: grant.businessId, businessName: grant.businessName, email }
+        const plan = await database.collection('subscription_settings').findOne({ _id: 'plan' }, { session })
+        const trialDays = Number(plan?.freeTrialDays ?? 0)
+        const trialEndsAt = trialDays > 0 ? new Date(accountCreatedAt.getTime() + trialDays * 86400000) : null
+        await database.collection('subscriptions').updateOne({ _id: grant.businessId }, { $setOnInsert: { ...(referrer ? { referrerId: referrer._id } : {}), expiresAt: null, trialEndsAt, trialConfigured: true, planId: trialEndsAt ? 'trial' : null, references: [], commissionEvents: [], createdAt: accountCreatedAt } }, { upsert: true, session })
+        return { businessId: grant.businessId, businessName: grant.businessName, email, trialEndsAt }
       }))
     },
   }

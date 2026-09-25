@@ -111,6 +111,9 @@ const subscriptionHandler = await createSubscriptions({ database, accounts, veri
 const registration = await createRegistration({ database, client, accounts, hashPassword })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
+  // Referral percentages are intentionally public. They are displayed on the
+  // marketing site, whose origin can differ from configured app origins.
+  if (request.method === 'GET' && request.url === '/v1/public/landing') corsHeaders['Access-Control-Allow-Origin'] = '*'
   for (const [name, value] of Object.entries(corsHeaders)) response.setHeader(name, value)
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })

@@ -58,30 +58,33 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const [control, subscription, plan, owner] = await Promise.all([getControl(), subscriptions.findOne({ _id: businessId }), getPlan(), accounts.findOne({ businessId, role: 'owner' })])
     const trialDays = Number(plan?.freeTrialDays ?? 0)
     const createdAtTime = owner?.createdAt ? new Date(owner.createdAt).getTime() : 0
-    const trialEndsAt = trialDays > 0 && Number.isFinite(createdAtTime) && createdAtTime > 0
+    const legacyTrialEndsAt = subscription?.trialConfigured !== true && !subscription?.expiresAt && trialDays > 0 && Number.isFinite(createdAtTime) && createdAtTime > 0
       ? new Date(createdAtTime + trialDays * 86400000).toISOString()
       : null
-    const effectiveExpiresAt = subscription?.expiresAt || (trialEndsAt && new Date(trialEndsAt) > new Date() ? trialEndsAt : null)
-    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, graceMonths: Number(plan?.graceMonths ?? 1), portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
+    const trialEndsAt = subscription?.trialEndsAt || legacyTrialEndsAt
+    const isTrial = !subscription?.expiresAt && Boolean(trialEndsAt)
+    const effectiveExpiresAt = subscription?.expiresAt || trialEndsAt
+    const graceMonths = isTrial ? 0 : Number(subscription?.graceMonths ?? (subscription?.planId === 'monthly' ? plan?.monthlyGraceMonths ?? plan?.graceMonths : plan?.graceMonths) ?? 1)
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId: subscription?.planId || (isTrial ? 'trial' : null), graceMonths, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
   }
   const developerEmail = String(process.env.DEVELOPER_EMAIL || '').trim().toLowerCase()
   const isDeveloper = claims => Boolean(developerEmail && claims?.kind === 'access' && claims.role === 'owner' && String(claims.email || '').trim().toLowerCase() === developerEmail)
-  const appUrl = () => {
+  const appUrl = (screen = 'subscription') => {
     const url = new URL(process.env.SUBSCRIPTION_PUBLIC_URL)
     if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('Configure an HTTPS SUBSCRIPTION_PUBLIC_URL.')
     url.pathname = '/'
     url.search = ''
-    url.searchParams.set('screen', 'subscription')
+    url.searchParams.set('screen', screen)
     return url.href
   }
   async function referralInfo(businessId) {
     await referrals.updateOne({ _id: businessId }, { $setOnInsert: { code: randomBytes(16).toString('hex') } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
     const referral = await referrals.findOne({ _id: businessId })
     const rows = await commissions.find({ referrerId: businessId }).sort({ createdAt: -1 }).limit(100).toArray()
-    const link = new URL(appUrl()); link.searchParams.set('ref', referral.code)
+    const link = new URL(appUrl('register')); link.searchParams.set('ref', referral.code)
     return { link: link.href, commissions: rows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amount, currency, percent, kind, createdAt })) }
   }
   async function listBusinesses(limit = 10, skip = 0) {
@@ -106,7 +109,8 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const percent = { $cond: [first, payment.firstReferralPercent || 0, payment.recurringReferralPercent || 0] }
     const basisPoints = { $cond: [first, Math.round((payment.firstReferralPercent || 0) * 100), Math.round((payment.recurringReferralPercent || 0) * 100)] }
     const commission = { reference, referrerId: payment.referrerId || null, currency: payment.currency, percent, kind: { $cond: [first, 'first', 'recurring'] }, amount: { $floor: { $divide: [{ $multiply: [payment.amount, basisPoints] }, 10000] } }, createdAt: '$$NOW' }
-    await subscriptions.updateOne({ _id: payment.businessId, references: { $ne: reference } }, [{ $set: { expiresAt: { $add: [{ $max: ['$expiresAt', '$$NOW'] }, payment.days * 86400000] }, references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] }, commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] } } }])
+    const paymentAccess = { ...(payment.planId ? { planId: payment.planId } : {}), ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}), trialEndsAt: null }
+    await subscriptions.updateOne({ _id: payment.businessId, references: { $ne: reference } }, [{ $set: { expiresAt: { $add: [{ $max: [{ $ifNull: ['$expiresAt', '$trialEndsAt'] }, '$$NOW'] }, payment.days * 86400000] }, references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] }, commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] }, ...paymentAccess } }])
     // The same atomic update selects the first paid renewal, even with concurrent checkouts.
     const settled = await subscriptions.findOne({ _id: payment.businessId })
     const entry = settled.commissionEvents?.find(item => item.reference === reference)
@@ -145,7 +149,8 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       } catch (error) { await notices.updateOne({ _id: id }, { $set: { lockedUntil: new Date(0) } }); console.error('Subscription reminder failed:', error.message) }
     }
     for await (const subscription of subscriptions.find({ expiresAt: { $lte: now } })) {
-      const end = graceEndsAt(subscription.expiresAt, Number(plan.graceMonths ?? 1))
+      const graceMonths = subscription.graceMonths ?? (subscription.planId === 'monthly' ? plan.monthlyGraceMonths ?? plan.graceMonths : plan.graceMonths)
+      const end = graceEndsAt(subscription.expiresAt, Number(graceMonths ?? 1))
       if (!end || new Date(end) <= now) continue
       const owner = await accounts.findOne({ businessId: subscription._id, role: 'owner' })
       if (!owner?.email) continue
@@ -178,7 +183,17 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           const referral = referralPercentages(input)
           const plan = input.monthlyAmount === undefined
             ? { ...validatePlan(input), ...referral }
-            : (() => { const base = { currency: input.currency, reminderDays: input.reminderDays, freeTrialDays: input.freeTrialDays, graceMonths: input.graceMonths }; const plans = [{ ...validatePlan({ ...base, amount: input.monthlyAmount, days: 30 }), id: 'monthly', name: 'Monthly' }, { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365 }), id: 'yearly', name: 'Yearly' }, { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365) }), id: 'enterprise', name: 'Enterprise' }]; return { ...plans[0], ...referral, plans } })()
+            : (() => {
+              const monthlyGraceMonths = Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1)
+              const otherGraceMonths = Number(input.graceMonths ?? 1)
+              const base = { currency: input.currency, reminderDays: input.reminderDays, freeTrialDays: input.freeTrialDays }
+              const plans = [
+                { ...validatePlan({ ...base, amount: input.monthlyAmount, days: 30, graceMonths: monthlyGraceMonths }), id: 'monthly', name: 'Monthly' },
+                { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365, graceMonths: otherGraceMonths }), id: 'yearly', name: 'Yearly' },
+                { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365), graceMonths: otherGraceMonths }), id: 'enterprise', name: 'Enterprise' },
+              ]
+              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceMonths, ...referral, plans }
+            })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
@@ -245,7 +260,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const callback = appUrl()
         await ensureSubscription(claims.businessId)
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
-        await payments.insertOne({ ...validatePlan(plan), ...referralPercentages(plan), referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        await payments.insertOne({ ...validatePlan(plan), ...referralPercentages(plan), planId: plan.id || 'monthly', referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
         const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: callback })
         return reply(200, { authorizationUrl: result.authorization_url, reference })
       }
@@ -265,7 +280,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const reference = `sub-${randomBytes(20).toString('hex')}`
         await ensureSubscription(claims.businessId)
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
-        await payments.insertOne({ ...plan, ...referralPercentages(configured || {}), enterpriseRequestId: requestRow._id, referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        await payments.insertOne({ ...plan, ...referralPercentages(configured || {}), planId: 'enterprise', enterpriseRequestId: requestRow._id, referrerId: subscription.referrerId || null, _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
         const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: appUrl() })
         return reply(200, { authorizationUrl: result.authorization_url, reference })
       }
