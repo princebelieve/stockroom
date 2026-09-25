@@ -15,6 +15,7 @@
     "desktop:package": "npm run build && electron-builder --win nsis",
     "android:sync": "npm run build && npx cap sync android",
     "android:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug && (if not exist ..\\release\\android mkdir ..\\release\\android) && copy /Y app\\build\\outputs\\apk\\debug\\app-debug.apk ..\\release\\android\\Stockroom-debug.apk",
+    "android:release": "npm run android:sync && cd android && gradlew.bat assembleRelease && (if not exist ..\\release\\android mkdir ..\\release\\android) && copy /Y app\\build\\outputs\\apk\\release\\app-release.apk ..\\release\\android\\Stockroom-release.apk",
     "sync-api": "node cloud/index.mjs",
     "test": "node --test test/**/*.test.mjs"
   },

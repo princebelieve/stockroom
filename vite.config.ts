@@ -11,7 +11,7 @@ const ocrFiles: Record<string, string> = Object.fromEntries([
 ])
 
 export default defineConfig({
-  build: { target: 'es2022' },
+  build: { target: 'es2022', rollupOptions: { input: { app: resolve('index.html'), welcome: resolve('welcome.html') } } },
   plugins: [react(), {
     name: 'local-receipt-ocr',
     configureServer(server) {
@@ -27,7 +27,7 @@ export default defineConfig({
     name: 'offline-shell',
     writeBundle(options, bundle) {
       const assets = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', ...Object.keys(bundle).filter(name => name !== 'index.html').map(name => `/${name}`)]
-      const hash = createHash('sha256').update(JSON.stringify(assets)).update(readFileSync(resolve(options.dir || 'dist', 'index.html'))).digest('hex').slice(0, 16)
+      const hash = createHash('sha256').update(JSON.stringify(assets)).update(readFileSync(resolve(options.dir || 'dist', 'index.html'))).update(readFileSync(resolve(options.dir || 'dist', 'welcome.html'))).digest('hex').slice(0, 16)
       // A unique shell name lets a newly deployed worker discard every older
       // app shell. Keep this in sync with the declaration in public/sw.js,
       // rather than relying on a historical hard-coded cache name.

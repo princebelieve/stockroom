@@ -5,6 +5,7 @@ import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './
 import { sendPasswordReset } from './mailer.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
+import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -35,6 +36,7 @@ await accounts.createIndex({ email: 1 }, { unique: true, partialFilterExpression
 // and surfaced as a misleading email/username collision on staff creation.
 await accounts.dropIndex('businessId_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
 await accounts.createIndex({ businessId: 1 })
+await accounts.createIndex({ businessId: 1, role: 1 }, { unique: true, partialFilterExpression: { role: 'owner' }, name: 'one_owner_per_business' })
 await accounts.createIndex({ businessId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } })
 await devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true })
 await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
@@ -81,10 +83,11 @@ function verifyToken(request) {
     return claims.exp > Math.floor(Date.now() / 1000) ? claims : null
   } catch { return null }
 }
-function readJson(request) {
+function readJson(request, maxBytes = Infinity) {
   return new Promise((resolve, reject) => {
     let body = ''
-    request.on('data', (chunk) => { body += chunk })
+    let size = 0
+    request.on('data', (chunk) => { size += chunk.length; if (size > maxBytes) { reject(new Error('Request too large.')); return }; body += chunk })
     request.on('end', () => { try { resolve(JSON.parse(body || '{}')) } catch { reject(new Error('Invalid JSON.')) } })
   })
 }
@@ -105,12 +108,27 @@ async function ownerPasswordIsValid(claims, value) {
 }
 
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send })
+const registration = await createRegistration({ database, client, accounts, hashPassword })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   for (const [name, value] of Object.entries(corsHeaders)) response.setHeader(name, value)
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   try {
+    if (request.method === 'GET' && request.url === '/v1/public/landing') {
+      const plan = await database.collection('subscription_settings').findOne({ _id: 'plan' })
+      return send(response, 200, { firstReferralPercent: Number(plan?.firstReferralPercent || 0), recurringReferralPercent: Number(plan?.recurringReferralPercent || 0) })
+    }
+    if (request.method === 'POST' && request.url === '/v1/registration-keys') {
+      const claims = verifyToken(request)
+      if (!await canIssueRegistrationKey(claims, process.env.DEVELOPER_EMAIL, accounts)) return send(response, 403, { error: 'Developer account required.' })
+      response.setHeader('Cache-Control', 'no-store')
+      try { return send(response, 201, await registration.issue(await readJson(request, 8192))) } catch (error) { return send(response, 400, { error: error.message }) }
+    }
+    if (request.method === 'POST' && request.url === '/v1/business-registration') {
+      response.setHeader('Cache-Control', 'no-store')
+      try { return send(response, 201, await registration.redeem(await readJson(request, 8192))) } catch (error) { return send(response, error.code === 11000 ? 409 : 400, { error: error.code === 11000 ? 'This business or owner email is already registered. Sign in with your existing account.' : error.message }) }
+    }
     if (await subscriptionHandler(request, response)) return
     if (request.method === 'POST' && request.url === '/v1/auth/register') {
       const input = await readJson(request)
@@ -118,6 +136,8 @@ const server = createServer(async (request, response) => {
       const ownerName = String(input.ownerName || '').trim()
       const email = String(input.email || '').trim().toLowerCase()
       const password = String(input.password || '')
+      const enrollment = verifyToken(request)
+      if (enrollment?.kind !== 'device' || enrollment.businessId !== businessId || !await devices.findOne({ businessId, deviceId: enrollment.deviceId, revokedAt: null })) return send(response, 403, { error: 'Use a business registration key or an installer-enrolled device to register.' })
       if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId) || !ownerName || !/^\S+@\S+\.\S+$/.test(email) || password.length < 10) return send(response, 400, { error: 'Provide a valid business ID, owner name, email, and password of at least 10 characters.' })
       const account = { businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash: hashPassword(password), createdAt: new Date() }
       try { const created = await accounts.insertOne(account); account._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That business ID or email already exists.' }); throw error }

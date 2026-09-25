@@ -243,6 +243,10 @@ function reportWindow(sales: Array<Record<string, unknown>>, since: number) {
 
 export async function handleBrowserApi(path: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase()
+  if (path === '/api/auth/register-business' && method === 'POST') {
+    if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
+    return originalFetch(`${cloudUrl}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
+  }
   // Logout must also clear stale sessions whose user record no longer exists.
   // Device enrollment lives in separate settings and is preserved.
   if (path === '/api/auth/logout' && method === 'POST') {

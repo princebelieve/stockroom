@@ -274,3 +274,21 @@ test('desktop downloads the complete staff directory, preserves owner login, and
   assert.equal(cached.body.users.length, 3)
   assert.ok(cached.body.refreshError)
 })
+
+
+test('existing installer registration sends its enrolled device credential to cloud', async () => {
+  let received
+  const cloud = createServer(async (request, response) => {
+    response.setHeader('Content-Type', 'application/json')
+    if (request.url !== '/v1/auth/register') { response.writeHead(503); response.end('{}'); return }
+    let body = ''; for await (const chunk of request) body += chunk
+    received = { authorization: request.headers.authorization, body: JSON.parse(body) }
+    response.end(JSON.stringify({ accessToken: 'owner-access' }))
+  })
+  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening'); subscriptionClouds.push(cloud)
+  const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
+  const result = await json(`${baseUrl}/api/auth/cloud-register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerName: 'Owner', email: 'owner@test.com', password: 'long-password' }) })
+  assert.equal(result.response.status, 201)
+  assert.equal(received.authorization, 'Bearer test-device-token')
+  assert.equal(received.body.businessId, 'test-business')
+})

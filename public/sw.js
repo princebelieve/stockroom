@@ -24,7 +24,7 @@ self.addEventListener('fetch', event => {
     // have. The replacement worker is activated immediately and reloads the
     // client, so cache-first navigation does not leave the app on an old
     // release once the new shell is ready.
-    event.respondWith(caches.open(CACHE_NAME).then(cache => cache.match('/index.html')).then(cached => cached || fetch(event.request)))
+    event.respondWith(caches.open(CACHE_NAME).then(cache => cache.match(url.pathname === '/welcome.html' ? '/welcome.html' : '/index.html')).then(cached => cached || fetch(event.request)))
     return
   }
   if (!APP_SHELL.includes(url.pathname)) return

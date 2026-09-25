@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AsyncButton } from './AsyncControls'
+import { RegistrationKeys } from './RegistrationKeys'
 import { cloudRequest, CloudAuthenticationError } from './lib/cloudRequest'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
@@ -122,6 +123,7 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
   const configuredPlan = (id: string) => setup?.plan?.plans?.find(item => item.id === id) || (id === 'monthly' ? setup?.plan : null)
   const copyReferral = async () => { if (!referral) return; await navigator.clipboard.writeText(referral.link); setMessage('Invitation link copied.') }
   return <>
+    {summary?.isDeveloper && <RegistrationKeys apiUrl={apiUrl} onToken={onToken} />}
     <section className="panel full-panel subscription-panel">
       <div className="panel-heading"><div><h2>Subscription</h2><p>Choose a plan and manage your renewal.</p></div><AsyncButton className="text-button" busyLabel="Refreshing…" onClick={load}>Refresh</AsyncButton></div>
       {error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="settings-message" role="status">{message}</p>}

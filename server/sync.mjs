@@ -43,6 +43,9 @@ export async function getCloudConfiguration() {
   return { url, businessId }
 }
 
+// Used only by the server's existing installer registration bridge.
+export async function getCloudRegistrationToken() { return (await configuration()).token || '' }
+
 export async function getSubscriptionAccess(force = false) {
   const config = await configuration()
   const path = `${configurationPath()}.subscription.json`

@@ -27,7 +27,7 @@ const server = createServer(async (request, response) => {
     const user = savedSessionUser(String(request.headers['x-local-session'] || ''))
     if (!user || user.role !== 'owner') return sendJson(response, 401, { error: 'Local owner authentication required.' })
     const path = request.url.slice('/api/cloud'.length)
-    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me'].includes(path)) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys'].includes(path)) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
@@ -45,6 +45,16 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/health') {
     return sendJson(response, 200, { ok: true, storage: storageName })
   }
+
+  if (request.method === 'POST' && request.url === '/api/auth/register-business') return readJson(request, response, async input => {
+    const config = await getCloudConfiguration()
+    if (config.businessId || (await getSettings()).ownerConfigured) return sendJson(response, 409, { error: 'This installation already belongs to a business. Sign in to continue.' })
+    try {
+      if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
+      const result = await fetch(`${config.url}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(20000) })
+      return sendJson(response, result.status, await result.json())
+    } catch { return sendJson(response, 503, { error: 'Registration could not be confirmed. Try signing in first; if no account exists, retry your key.' }) }
+  })
 
   if (request.method === 'GET' && request.url === '/api/subscriptions/access') {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })

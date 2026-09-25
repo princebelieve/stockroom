@@ -1,5 +1,10 @@
 apply plugin: 'com.android.application'
 
+def releaseStoreFile = System.getenv('ANDROID_RELEASE_KEYSTORE')
+def releaseStorePassword = System.getenv('ANDROID_RELEASE_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('ANDROID_RELEASE_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('ANDROID_RELEASE_KEY_PASSWORD')
+
 android {
     namespace = "com.stockroom.business"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,8 +21,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    if (releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+        signingConfigs {
+            production {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+                signingConfig signingConfigs.production
+            } else {
+                throw new GradleException('Release APK requires ANDROID_RELEASE_KEYSTORE, ANDROID_RELEASE_STORE_PASSWORD, ANDROID_RELEASE_KEY_ALIAS, and ANDROID_RELEASE_KEY_PASSWORD. The development/debug key is not used for production releases.')
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

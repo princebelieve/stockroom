@@ -1,4 +1,4 @@
-import { getCloudConfiguration } from './sync.mjs'
+import { getCloudConfiguration, getCloudRegistrationToken } from './sync.mjs'
 
 const defaultCloudApiUrl = process.env.STOCKROOM_CLOUD_API_URL || 'https://stockroom-0vm5.onrender.com'
 export function getDefaultCloudApiUrl() { return defaultCloudApiUrl }
@@ -10,8 +10,9 @@ function cloudUrl(value) {
 
 async function request(path, payload) {
   const { url } = await getCloudConfiguration()
+  const token = path === '/v1/auth/register' ? await getCloudRegistrationToken() : ''
   if (!url) throw new Error('Cloud authentication has not been configured for this installation.')
-  const response = await fetch(`${url}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  const response = await fetch(`${url}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(path === '/v1/auth/register' ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(payload) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Cloud authentication request failed.')
   return { ...body, syncApiUrl: url }
