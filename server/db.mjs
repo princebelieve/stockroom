@@ -342,13 +342,13 @@ export function changePassword(userId, currentPassword, newPassword) {
 
 // Cloud password resets are authorized by the owner, but each installed
 // desktop keeps its own offline credential verifier. Update that verifier and
-// revoke the cashier's local sessions at the same time so an old password
+// revoke the staff member's local sessions at the same time so an old password
 // cannot continue to work on this device.
 export function resetCashierPassword(userId, newPassword) {
   const password = String(newPassword || '').trim()
   if (password.length < 10) throw new Error('New password must be at least 10 characters long.')
-  const user = database.prepare("SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND role = 'cashier'").get(userId, organizationId)
-  if (!user) throw new Error('Cashier account not found on this device.')
+  const user = database.prepare("SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND role IN ('admin', 'cashier')").get(userId, organizationId)
+  if (!user) throw new Error('Staff account not found on this device.')
   database.prepare('UPDATE users SET password_hash = ? WHERE id = ? AND organization_id = ?').run(hashPassword(password), user.id, organizationId)
   database.prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(user.id)
   return { ...user, operationalAccess: Boolean(user.operationalAccess) }

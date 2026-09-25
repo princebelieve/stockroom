@@ -31,7 +31,7 @@ Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/devices/enroll' 
 
 List devices with `GET /v1/devices`; revoke one with `POST /v1/devices/DEVICE_ID/revoke`. A revoked device can no longer push or pull data.
 
-Password recovery uses `POST /v1/auth/password-reset/request` and `POST /v1/auth/password-reset/confirm`, and is available only to the business owner. Staff emails cannot reset an account. An authenticated owner resets a cashier password through `PUT /v1/staff/:id/password`; this action cannot target owners or admins. Resetting an owner password revokes every enrolled device, requiring deliberate re-enrollment.
+Email password recovery uses `POST /v1/auth/password-reset/request` and `POST /v1/auth/password-reset/confirm`, and is available only to the business owner. Staff emails cannot reset an account. Staff sign in with their username; owners can see usernames in Team management and reset either an admin or cashier password through `PUT /v1/staff/:id/password`. This action cannot target owners and revokes the staff account's refresh tokens. Resetting an owner password revokes every enrolled device, requiring deliberate re-enrollment.
 
 ### Gmail OAuth mail setup
 

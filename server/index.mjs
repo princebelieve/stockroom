@@ -277,17 +277,17 @@ const server = createServer(async (request, response) => {
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
-  const cashierPasswordMatch = request.url?.match(/^\/api\/users\/([^/]+)\/password$/)
-  if (request.method === 'PUT' && cashierPasswordMatch) {
+  const staffPasswordMatch = request.url?.match(/^\/api\/users\/([^/]+)\/password$/)
+  if (request.method === 'PUT' && staffPasswordMatch) {
     const user = sessionUser(request)
-    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner can reset a cashier password.' })
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner can reset staff passwords.' })
     return readJson(request, response, async (input) => {
       try {
         const password = String(input.password || '')
         const configured = await getCloudConfiguration()
         await cloudOwnerForBusiness(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), configured.businessId)
-        await cloudResetCashierPassword(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), cashierPasswordMatch[1], password)
-        return sendJson(response, 200, resetCashierPassword(cashierPasswordMatch[1], password))
+        await cloudResetCashierPassword(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), staffPasswordMatch[1], password)
+        return sendJson(response, 200, resetCashierPassword(staffPasswordMatch[1], password))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }

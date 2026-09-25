@@ -97,10 +97,10 @@ export async function cloudUpdateStaffRole(accessToken, userId, role, operationa
 }
 export async function cloudResetCashierPassword(accessToken, userId, password) {
   const { url } = await getCloudConfiguration()
-  if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before resetting a cashier password.')
+  if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before resetting a staff password.')
   const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/password`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ password }) })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.error || 'Could not reset cashier password.')
+  if (!response.ok) throw new Error(body.error || 'Could not reset staff password.')
   return body
 }
 export async function cloudEnrollDevice(syncApiUrl, accessToken, input) {

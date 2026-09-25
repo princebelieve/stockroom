@@ -291,8 +291,9 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request)
       const password = String(input.password || '')
       if (password.length < 10) return send(response, 400, { error: 'Password must be at least 10 characters.' })
-      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(passwordMatch[1]), businessId: claims.businessId, role: 'cashier' }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
-      if (!updated) return send(response, 404, { error: 'Cashier account not found.' })
+      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(passwordMatch[1]), businessId: claims.businessId, role: { $in: ['admin', 'cashier'] } }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
+      if (!updated) return send(response, 404, { error: 'Staff account not found.' })
+      await refreshTokens.deleteMany({ accountId: updated._id })
       return send(response, 200, { account: publicAccount(updated) })
     }
     if (request.method === 'GET' && request.url === '/v1/devices') {

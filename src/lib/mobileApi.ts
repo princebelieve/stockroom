@@ -408,8 +408,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   const staffPassword = path.match(/^\/api\/users\/([^/]+)\/password$/)
   if (staffPassword && method === 'PUT') {
-    if (user.role !== 'owner') return error('Only the owner can reset a cashier password.', 403)
-    try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffPassword[1])}/password`, { method: 'PUT', body: JSON.stringify({ password: input.password }) }); return json(result.account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not reset cashier password.', 400) }
+    if (user.role !== 'owner') return error('Only the owner can reset staff passwords.', 403)
+    try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffPassword[1])}/password`, { method: 'PUT', body: JSON.stringify({ password: input.password }) }); return json(result.account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not reset staff password.', 400) }
   }
   if (path === '/api/settings' && method === 'PUT') {
     if (user.role !== 'owner') return error('Only the owner can change business settings.', 403)
