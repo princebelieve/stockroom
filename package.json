@@ -1,7 +1,7 @@
 {
   "name": "stockroom-business-app",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Offline-first stock and inventory management app",
   "type": "module",
   "scripts": {

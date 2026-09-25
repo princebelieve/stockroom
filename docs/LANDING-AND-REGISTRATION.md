@@ -26,7 +26,7 @@ Download controls remain visibly unavailable until valid HTTPS release URLs are 
 
 ```powershell
 vercel blob put .\release\android\Stockroom-release.apk --pathname downloads/Stockroom-release.apk --access public
-vercel blob put ".\release\Stockroom Business Setup 1.0.5.exe" --pathname downloads/Stockroom-Business-Setup-1.0.5.exe --access public
+vercel blob put ".\release\Stockroom Business Setup 1.0.6.exe" --pathname downloads/Stockroom-Business-Setup-1.0.6.exe --access public
 ```
 
 Copy the public HTTPS URLs printed by the CLI into `VITE_APK_DOWNLOAD_URL` and `VITE_DESKTOP_DOWNLOAD_URL` in the Vercel project environment settings, then redeploy the frontend. Link the Windows `.exe` directly. Use Blob rather than the Hobby static deployment because this installer is about 188 MB, above the 100 MB static file limit. Vercel Blob is available on Hobby with a free allowance; monitor storage and download transfer in the Vercel dashboard because use beyond included quotas may be restricted on Hobby. The Android release command requires a production keystore through `ANDROID_RELEASE_KEYSTORE`, `ANDROID_RELEASE_STORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD`; it fails rather than silently shipping a debug-signed or unsigned APK. Keep the keystore and passwords private and backed up. Never put signing secrets or the cloud admin key in a `VITE_` variable.
@@ -53,7 +53,7 @@ Deploy the cloud API before the frontend. Keep existing MongoDB and secrets. Reg
 ## Generate and redeem a key
 
 1. Sign in as the configured developer owner. Open **Subscription → Business registration keys**.
-2. Enter a unique business ID, business name, owner email, and 1–30 days of validity (default 7).
+2. Enter a business name, owner email, and 1–30 days of validity (default 7). Stockroom generates a unique business ID automatically.
 3. Copy the displayed key and send it privately with `https://stockroom.globalcreest.com/?screen=register`. The server stores only a SHA-256 hash, never the usable key. It is not an admin/device token.
 4. The customer uses **Register a new business** in Stockroom. The existing **Set up your shop** screen accepts the key, matching owner email, password, currency and optional referral code. The public landing page only links to this app screen.
 5. Successful key registration reuses the app?s existing device enrollment and sign-in flows. Additional devices use **Existing business / Add another device**. Subscription selection, payments and referral management stay in the app?s existing Subscription screen. No installer admin key is shared.
@@ -64,6 +64,6 @@ The old owner-registration endpoint now requires a valid enrolled device token f
 
 ## Referrals and installation
 
-The public page fetches only the two configured referral percentages from `/v1/public/landing`. If unavailable, it says so rather than advertising a guessed percentage. Invitation links open new-business registration: `https://stockroom.globalcreest.com/?screen=register&ref=<code>`. The code is retained and prefilled in the registration screen. Existing owners sign in normally and keep access to the Subscription flow.
+The public page fetches only the two configured referral percentages from `/v1/public/landing`. Each referred business can generate rewards on up to four successful subscription payments. Every payment counts once regardless of whether it grants monthly, yearly or Enterprise access. If unavailable, it says so rather than advertising a guessed percentage. Invitation links open new-business registration: `https://stockroom.globalcreest.com/?screen=register&ref=<code>`. The code is retained and prefilled in the registration screen. Existing owners sign in normally and keep access to the Subscription flow.
 
 PWA installation belongs to the **app origin**. On the separate public domain the PWA button opens the app, where supported browsers expose installation. On iOS use Safari's Share → Add to Home Screen. Do not install a second copy on the marketing origin and expect it to share the app origin's local database.

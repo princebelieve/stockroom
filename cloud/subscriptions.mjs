@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { mailConfigured, sendReferralBonusNotice, sendSubscriptionConfirmation, sendSubscriptionGraceNotice, sendSubscriptionReminder } from './mailer.mjs'
-import { graceEndsAt, subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
+import { graceDaysEndsAt, graceEndsAt, subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
 
 export function validatePlan(input) {
   const plan = {
@@ -9,10 +9,15 @@ export function validatePlan(input) {
     days: Number(input.days),
     reminderDays: Number(input.reminderDays),
     freeTrialDays: Number(input.freeTrialDays ?? 0),
-    graceMonths: Number(input.graceMonths ?? 1),
   }
   if (!Number.isSafeInteger(plan.amount) || plan.amount < 1 || plan.amount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(plan.currency) || !Number.isInteger(plan.days) || plan.days < 1 || plan.days > 730 || !Number.isInteger(plan.reminderDays) || plan.reminderDays < 1 || plan.reminderDays > 30 || !Number.isInteger(plan.freeTrialDays) || plan.freeTrialDays < 0 || plan.freeTrialDays > 365) throw new Error('Enter a valid amount in minor units, currency, duration (1–730 days), reminder window (1–30 days), and free-trial days (0–365).')
-  if (!Number.isInteger(plan.graceMonths) || plan.graceMonths < 0 || plan.graceMonths > 12) throw new Error('Grace period must be between 0 and 12 calendar months.')
+  if (input.graceDays !== undefined) {
+    plan.graceDays = Number(input.graceDays)
+    if (!Number.isInteger(plan.graceDays) || plan.graceDays < 0 || plan.graceDays > 365) throw new Error('Monthly grace period must be between 0 and 365 days.')
+  } else {
+    plan.graceMonths = Number(input.graceMonths ?? 1)
+    if (!Number.isInteger(plan.graceMonths) || plan.graceMonths < 0 || plan.graceMonths > 12) throw new Error('Yearly and Enterprise grace period must be between 0 and 12 months.')
+  }
   return plan
 }
 export function validSignature(raw, signature, secret) {
@@ -64,8 +69,10 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const trialEndsAt = subscription?.trialEndsAt || legacyTrialEndsAt
     const isTrial = !subscription?.expiresAt && Boolean(trialEndsAt)
     const effectiveExpiresAt = subscription?.expiresAt || trialEndsAt
-    const graceMonths = isTrial ? 0 : Number(subscription?.graceMonths ?? (subscription?.planId === 'monthly' ? plan?.monthlyGraceMonths ?? plan?.graceMonths : plan?.graceMonths) ?? 1)
-    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId: subscription?.planId || (isTrial ? 'trial' : null), graceMonths, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
+    const planId = subscription?.planId || (isTrial ? 'trial' : null)
+    const graceDays = isTrial ? 0 : planId === 'monthly' && subscription?.graceMonths === undefined ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? Number(plan?.monthlyGraceMonths ?? plan?.graceMonths ?? 1) * 30) : undefined
+    const graceMonths = isTrial ? undefined : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
@@ -106,10 +113,11 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     // One atomic document update makes concurrent callbacks and retries idempotent.
     await ensureSubscription(payment.businessId)
     const first = { $eq: [{ $size: { $ifNull: ['$references', []] } }, 0] }
-    const percent = { $cond: [first, payment.firstReferralPercent || 0, payment.recurringReferralPercent || 0] }
-    const basisPoints = { $cond: [first, Math.round((payment.firstReferralPercent || 0) * 100), Math.round((payment.recurringReferralPercent || 0) * 100)] }
-    const commission = { reference, referrerId: payment.referrerId || null, currency: payment.currency, percent, kind: { $cond: [first, 'first', 'recurring'] }, amount: { $floor: { $divide: [{ $multiply: [payment.amount, basisPoints] }, 10000] } }, createdAt: '$$NOW' }
-    const paymentAccess = { ...(payment.planId ? { planId: payment.planId } : {}), ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}), trialEndsAt: null }
+    const underRewardLimit = { $lt: [{ $size: { $ifNull: ['$references', []] } }, 4] }
+    const percent = { $cond: [underRewardLimit, { $cond: [first, payment.firstReferralPercent || 0, payment.recurringReferralPercent || 0] }, 0] }
+    const basisPoints = { $cond: [underRewardLimit, { $cond: [first, Math.round((payment.firstReferralPercent || 0) * 100), Math.round((payment.recurringReferralPercent || 0) * 100)] }, 0] }
+    const commission = { reference, referrerId: { $cond: [underRewardLimit, payment.referrerId || null, null] }, currency: payment.currency, percent, kind: { $cond: [underRewardLimit, { $cond: [first, 'first', 'recurring'] }, 'exhausted'] }, amount: { $floor: { $divide: [{ $multiply: [payment.amount, basisPoints] }, 10000] } }, createdAt: '$$NOW' }
+    const paymentAccess = { ...(payment.planId ? { planId: payment.planId } : {}), ...(Number.isInteger(payment.graceDays) ? { graceDays: payment.graceDays } : {}), ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}), trialEndsAt: null }
     await subscriptions.updateOne({ _id: payment.businessId, references: { $ne: reference } }, [{ $set: { expiresAt: { $add: [{ $max: [{ $ifNull: ['$expiresAt', '$trialEndsAt'] }, '$$NOW'] }, payment.days * 86400000] }, references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] }, commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] }, ...paymentAccess } }])
     // The same atomic update selects the first paid renewal, even with concurrent checkouts.
     const settled = await subscriptions.findOne({ _id: payment.businessId })
@@ -149,8 +157,9 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       } catch (error) { await notices.updateOne({ _id: id }, { $set: { lockedUntil: new Date(0) } }); console.error('Subscription reminder failed:', error.message) }
     }
     for await (const subscription of subscriptions.find({ expiresAt: { $lte: now } })) {
-      const graceMonths = subscription.graceMonths ?? (subscription.planId === 'monthly' ? plan.monthlyGraceMonths ?? plan.graceMonths : plan.graceMonths)
-      const end = graceEndsAt(subscription.expiresAt, Number(graceMonths ?? 1))
+      const end = subscription.planId === 'monthly' && Number.isInteger(subscription.graceDays)
+        ? graceDaysEndsAt(subscription.expiresAt, subscription.graceDays)
+        : graceEndsAt(subscription.expiresAt, Number(subscription.graceMonths ?? (subscription.planId === 'monthly' ? plan.monthlyGraceMonths ?? plan.graceMonths : plan.graceMonths) ?? 1))
       if (!end || new Date(end) <= now) continue
       const owner = await accounts.findOne({ businessId: subscription._id, role: 'owner' })
       if (!owner?.email) continue
@@ -184,15 +193,15 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           const plan = input.monthlyAmount === undefined
             ? { ...validatePlan(input), ...referral }
             : (() => {
-              const monthlyGraceMonths = Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1)
+              const monthlyGraceDays = Number(input.monthlyGraceDays ?? Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1) * 30)
               const otherGraceMonths = Number(input.graceMonths ?? 1)
               const base = { currency: input.currency, reminderDays: input.reminderDays, freeTrialDays: input.freeTrialDays }
               const plans = [
-                { ...validatePlan({ ...base, amount: input.monthlyAmount, days: 30, graceMonths: monthlyGraceMonths }), id: 'monthly', name: 'Monthly' },
+                { ...validatePlan({ ...base, amount: input.monthlyAmount, days: 30, graceDays: monthlyGraceDays }), id: 'monthly', name: 'Monthly' },
                 { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365, graceMonths: otherGraceMonths }), id: 'yearly', name: 'Yearly' },
                 { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365), graceMonths: otherGraceMonths }), id: 'enterprise', name: 'Enterprise' },
               ]
-              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceMonths, ...referral, plans }
+              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, ...referral, plans }
             })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })

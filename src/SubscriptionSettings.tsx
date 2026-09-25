@@ -4,11 +4,11 @@ import { RegistrationKeys } from './RegistrationKeys'
 import { cloudRequest, CloudAuthenticationError } from './lib/cloudRequest'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
-type Plan = { amount: number; currency: string; days: number; reminderDays: number; freeTrialDays: number; graceMonths?: number; firstReferralPercent?: number; recurringReferralPercent?: number }
+type Plan = { amount: number; currency: string; days: number; reminderDays: number; freeTrialDays: number; graceMonths?: number; graceDays?: number; firstReferralPercent?: number; recurringReferralPercent?: number }
 type NamedPlan = Plan & { id: string; name: string }
 type EnterpriseRequest = { id: string; status: 'pending' | 'approved' | 'paid'; message?: string; offeredAmount?: number; offeredCurrency?: string; offeredDays?: number; offerNote?: string; businessId?: string; ownerName?: string; email?: string; createdAt?: string }
 type Summary = { plan: Plan | null; plans?: NamedPlan[]; access: SubscriptionAccess; subscription: { expiresAt?: string | null } | null; enterpriseRequest?: EnterpriseRequest | null; isDeveloper: boolean }
-type Setup = { plan: (Plan & { plans?: NamedPlan[]; monthlyGraceMonths?: number }) | null; testMode: boolean; paystackConfigured: boolean; emailConfigured: boolean; publicUrlConfigured: boolean }
+type Setup = { plan: (Plan & { plans?: NamedPlan[]; monthlyGraceDays?: number; monthlyGraceMonths?: number }) | null; testMode: boolean; paystackConfigured: boolean; emailConfigured: boolean; publicUrlConfigured: boolean }
 type Referral = { link: string }
 const summaryCacheKey = 'stockroom-subscription-summary'
 
@@ -144,7 +144,7 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
           <label>Enterprise access duration (days)<input name="enterpriseDays" type="number" min="1" max="730" required defaultValue={configuredPlan('enterprise')?.days || 365} /></label>
           <label>Currency<select name="currency" defaultValue={setup.plan?.currency || 'NGN'}>{['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].map(currency => <option key={currency}>{currency}</option>)}</select></label>
           <label>Free trial (days)<input name="freeTrialDays" type="number" min="0" max="365" required defaultValue={setup.plan?.freeTrialDays || 0} /></label>
-          <label>Monthly subscription grace period (calendar months)<input name="monthlyGraceMonths" type="number" min="0" max="12" required defaultValue={configuredPlan('monthly')?.graceMonths ?? setup.plan?.monthlyGraceMonths ?? setup.plan?.graceMonths ?? 1} /><span>After a monthly subscription expires, POS remains available for this long. Set 0 to block it immediately.</span></label>
+          <label>Monthly subscription grace period (days)<input name="monthlyGraceDays" type="number" min="0" max="365" required defaultValue={configuredPlan('monthly')?.graceDays ?? setup.plan?.monthlyGraceDays ?? (setup.plan?.monthlyGraceMonths ?? setup.plan?.graceMonths ?? 1) * 30} /><span>After a monthly subscription expires, POS remains available for this many days. Set 0 to block it immediately.</span></label>
           <label>Yearly and Enterprise grace period (calendar months)<input name="graceMonths" type="number" min="0" max="12" required defaultValue={setup.plan?.graceMonths ?? 1} /><span>This applies to yearly and Enterprise subscriptions.</span></label>
           <label>Reminder window (days)<input name="reminderDays" type="number" min="1" max="30" required defaultValue={setup.plan?.reminderDays || 7} /></label>
           <label>First referral reward (%)<input name="firstReferralPercent" type="number" min="0" max="100" step="0.01" required defaultValue={setup.plan?.firstReferralPercent || 0} /></label>

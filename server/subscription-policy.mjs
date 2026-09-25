@@ -11,6 +11,14 @@ export function graceEndsAt(expiresAt, months = 1) {
   return date.toISOString()
 }
 
+export function graceDaysEndsAt(expiresAt, days = 30) {
+  const date = new Date(expiresAt)
+  const graceDays = Number(days)
+  if (!Number.isFinite(+date) || !Number.isInteger(graceDays) || graceDays < 0 || graceDays > 365) return null
+  date.setTime(date.getTime() + graceDays * 86400000)
+  return date.toISOString()
+}
+
 export function subscriptionAccess(snapshot, now = Date.now()) {
   if (!snapshot) return { blocked: true, reason: 'Connect to the internet to check subscription access.', status: 'unknown' }
   if (snapshot.testMode === true) return { ...snapshot, blocked: false, status: 'test', reason: 'Developer test mode is on. Subscription blocks are disabled.' }
@@ -19,12 +27,14 @@ export function subscriptionAccess(snapshot, now = Date.now()) {
     const active = now < +new Date(snapshot.expiresAt)
     return { ...snapshot, blocked: !active, graceEndsAt: snapshot.expiresAt, status: active ? 'trial' : 'trial-expired', reason: active ? `Free trial ends ${snapshot.expiresAt.slice(0, 10)} (UTC).` : 'Your free trial has ended. Please subscribe to continue using the POS.' }
   }
+  const monthly = snapshot.planId === 'monthly' && snapshot.graceDays !== undefined && snapshot.graceDays !== null && Number.isInteger(Number(snapshot.graceDays))
+  const days = monthly ? Number(snapshot.graceDays) : null
   const months = Number.isInteger(Number(snapshot.graceMonths)) ? Number(snapshot.graceMonths) : 1
-  const end = graceEndsAt(snapshot.expiresAt, months)
+  const end = monthly ? graceDaysEndsAt(snapshot.expiresAt, days) : graceEndsAt(snapshot.expiresAt, months)
   if (!end) return { ...snapshot, blocked: true, status: 'unknown', reason: 'Connect to refresh subscription access.' }
   const active = now < +new Date(snapshot.expiresAt)
   const blocked = now >= +new Date(end)
-  const graceLabel = months === 0 ? 'No grace period' : `${months} calendar month${months === 1 ? '' : 's'} of grace`
+  const graceLabel = monthly ? days === 0 ? 'No grace period' : `${days} day${days === 1 ? '' : 's'} of grace` : months === 0 ? 'No grace period' : `${months} calendar month${months === 1 ? '' : 's'} of grace`
   return { ...snapshot, graceEndsAt: end, blocked, status: active ? 'active' : blocked ? 'expired' : 'grace', reason: active ? 'Subscription active.' : blocked ? `${graceLabel} has ended. Ask the owner to renew to use POS.` : `Subscription expired. POS remains available until ${end.slice(0, 10)} (UTC).` }
 }
 

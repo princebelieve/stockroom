@@ -6,9 +6,10 @@ export async function canIssueRegistrationKey(claims, developerEmail, accounts) 
   return Boolean(developer && claims?.kind === 'access' && claims.role === 'owner' && String(claims.email).toLowerCase() === developer && await accounts.findOne({ email: developer, businessId: claims.businessId, role: 'owner' }))
 }
 export function registrationInput(input) {
-  const businessId = String(input.businessId || '').trim().toLowerCase()
   const email = String(input.email || '').trim().toLowerCase()
   const businessName = String(input.businessName || '').trim()
+  const slug = businessName.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'business'
+  const businessId = `${slug}-${randomBytes(5).toString('hex')}`
   const expiresInDays = Number(input.expiresInDays ?? 7)
   if (!/^[a-z0-9][a-z0-9-]{2,80}$/.test(businessId) || !/^\S+@\S+\.\S+$/.test(email) || email.length > 254 || !businessName || businessName.length > 60 || !Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 30) throw new Error('Enter a business ID, business name, owner email, and validity of 1–30 days.')
   return { businessId, email, businessName, expiresInDays }
@@ -20,7 +21,18 @@ export async function createRegistration({ database, client, accounts, hashPassw
   return {
     async issue(input) {
       const details = registrationInput(input)
-      if (await accounts.findOne({ $or: [{ businessId: details.businessId, role: 'owner' }, { email: details.email }] })) throw new Error('This business or owner email is already registered. Use existing-business sign-in.')
+      if (await accounts.findOne({ email: details.email })) throw new Error('This owner email is already registered. Use existing-business sign-in.')
+      const prefix = details.businessId.slice(0, details.businessId.lastIndexOf('-'))
+      let uniqueId = false
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const candidate = `${prefix}-${randomBytes(5).toString('hex')}`
+        if (!(await accounts.findOne({ businessId: candidate })) && !(await keys.findOne({ businessId: candidate }))) {
+          details.businessId = candidate
+          uniqueId = true
+          break
+        }
+      }
+      if (!uniqueId) throw new Error('Could not generate a unique business ID. Please try again.')
       const key = `SBIT-${randomBytes(24).toString('hex')}`
       const expiresAt = new Date(Date.now() + details.expiresInDays * 86400000)
       await keys.insertOne({ _id: registrationKeyHash(key), ...details, expiresAt, createdAt: new Date(), usedAt: null })
