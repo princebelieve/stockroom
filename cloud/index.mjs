@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { sendPasswordReset } from './mailer.mjs'
+import { mailConfigured, sendPasswordReset } from './mailer.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
@@ -191,7 +191,13 @@ const server = createServer(async (request, response) => {
       await passwordResets.insertOne({ accountId: account._id, tokenHash: createHmac('sha256', jwtSecret).update(rawToken).digest('hex'), expiresAt: new Date(Date.now() + 30 * 60_000), usedAt: null })
       // Configure an email provider webhook outside this code. In non-production
       // development only, return the token to permit end-to-end testing.
-      const delivered = await sendPasswordReset({ to: account.email, token: rawToken }).catch(() => false)
+      let delivered = false
+      if (!mailConfigured()) {
+        console.error('Password reset email was not sent: SMTP OAuth is not configured.')
+      } else {
+        try { delivered = await sendPasswordReset({ to: account.email, token: rawToken }) }
+        catch (error) { console.error('Password reset email delivery failed:', error instanceof Error ? error.message : 'Unknown mail transport error.') }
+      }
       const responseBody = { ok: true, delivered, ...(process.env.NODE_ENV !== 'production' ? { resetToken: rawToken } : {}) }
       return send(response, 202, responseBody)
     }

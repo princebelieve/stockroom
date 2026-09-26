@@ -791,13 +791,15 @@ function App() {
   }, [online])
   useEffect(() => {
     fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }> : Promise.reject()).then((settings) => {
-      setRegistrationAvailable(!settings.ownerConfigured)
-      setFreshVisitor(!settings.ownerConfigured && !settings.cloudConfigured && !settings.existingBusiness)
-      const startupState = resolveStartupState(settings)
+      const cachedName = localStorage.getItem('stockroom-app-name') || ''
+      const rememberedBusiness = Boolean(cachedName && cachedName !== 'My Business')
+      const hasOwner = Boolean(settings.ownerConfigured || rememberedBusiness)
+      setRegistrationAvailable(!hasOwner)
+      setFreshVisitor(!hasOwner && !settings.cloudConfigured && !settings.existingBusiness)
+      const startupState = resolveStartupState({ ...settings, ownerConfigured: hasOwner })
       const browserStartupState = isBrowserPwa() && !settings.cloudConfigured
         ? { ...startupState, installerRequired: false, setupRequired: false }
         : startupState
-      const cachedName = localStorage.getItem('stockroom-app-name') || ''
       const cachedCurrency = localStorage.getItem('stockroom-currency') || ''
       const isPlaceholder = settings.appName === 'My Business' && settings.currency === 'USD'
       const keepCachedIdentity = isPlaceholder && cachedName && cachedName !== 'My Business'
@@ -821,9 +823,13 @@ function App() {
       try {
         const response = await fetch('/api/sync/status')
         const status = response.ok ? await response.json() as { configured?: boolean; existingBusiness?: boolean } : {}
-        const startupState = resolveStartupState({ cloudConfigured: status.configured, existingBusiness: status.existingBusiness })
+        // A failed settings read cannot establish that this is an absolute
+        // visitor. Keep returning local users on the sign-in path and let the
+        // app show the real storage/startup error if the workspace is broken.
+        const rememberedBusiness = Boolean(localStorage.getItem('stockroom-user') || (localStorage.getItem('stockroom-app-name') && localStorage.getItem('stockroom-app-name') !== 'My Business'))
+        const startupState = resolveStartupState({ ownerConfigured: rememberedBusiness, cloudConfigured: status.configured, existingBusiness: status.existingBusiness })
         setRegistrationAvailable(!startupState.hasExistingDevice)
-        setFreshVisitor(!startupState.hasExistingDevice)
+        setFreshVisitor(false)
         if (startupState.hasExistingDevice || isBrowserPwa()) {
           setSetupRequired(false)
           setInstallerRequired(false)
@@ -842,7 +848,8 @@ function App() {
     // Business-specific staff links must stay in the app. A brand-new browser
     // profile has no local account yet, but `?business=...` identifies the
     // existing tenant and should open the sign-in form instead of the landing page.
-    if (!settingsLoaded || !freshVisitor || user || authToken || registrationRequested || location.pathname !== '/' || query.has('screen') || query.has('business')) return
+    const rememberedBusiness = Boolean(localStorage.getItem('stockroom-user') || (localStorage.getItem('stockroom-app-name') && localStorage.getItem('stockroom-app-name') !== 'My Business'))
+    if (!settingsLoaded || !freshVisitor || rememberedBusiness || user || authToken || registrationRequested || location.pathname !== '/' || query.has('screen') || query.has('business')) return
     const destination = new URL('/welcome', location.origin)
     const referral = query.get('ref') || ''
     if (/^[a-f0-9]{32}$/.test(referral)) destination.searchParams.set('ref', referral)
