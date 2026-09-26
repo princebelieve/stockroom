@@ -1,80 +1,73 @@
 # Stockroom Business
 
-Stockroom Business is an offline-first inventory, point-of-sale, and business-operations app for small businesses. It supports Windows Desktop, browser/PWA, and Android clients.
+Stockroom Business is an offline-first business operations app for organizations that manage products, stock, sales, customers, and staff. It is not limited to a particular business size or industry. It supports Windows desktop, Android, and browser/PWA use.
 
-## Offline-first by design
+## What the app does
 
-Each client has its own local workspace and saves operational work locally before cloud sync:
+- **Inventory:** maintain products, SKUs and barcodes, categories, costs, prices, quantities, and reorder points; record stock movements and stocktakes.
+- **Point of sale:** record cash, bank transfer, manually confirmed external-terminal, split, and supported wallet payments. Sales reduce stock and produce receipts.
+- **Customers and wallets:** keep customer records, record deposits, repayments, and withdrawals, and track balances owed or prepaid. Wallet checkout availability depends on the client; it is not currently offered in the PWA.
+- **Sales operations:** review sales, receipts, payment evidence, cashier activity, and reports. Import provider CSV data for reconciliation without changing the original sales.
+- **Staff and access:** owners manage admin and cashier accounts. Cashiers can be limited to POS; owners can grant additional operational access.
+- **Business and device setup:** set the business name, logo, currency, payment policy, and device-specific printer or checkout settings. The device wizard records setup and test status; it does not provide direct payment-terminal integration.
+- **Subscriptions and referrals:** owners can manage subscription payments and share referral invitations. The tracked referral program currently credits existing business owners; independent referral-partner accounts are not available.
 
-- **Windows Desktop:** local SQLite managed by the desktop app.
-- **Browser/PWA:** Browser SQLite backed by IndexedDB in the browser profile that opened the app URL. Opening the URL is enough; browser installation is optional.
-- **Android:** native SQLite on the phone.
+See [hardware setup](docs/hardware-setup.md), [subscription behavior](docs/subscriptions.md), and [PWA deployment and platform limitations](PWA-DEPLOYMENT.md) for details.
 
-Products, sales, stock takes, customers, receipts, and business settings remain available from the local database after a successful sign-in. When internet is available, queued changes synchronize through the hosted cloud sync API.
+## Offline work and synchronization
 
-## Businesses, devices, and identity
+Each client keeps its own local database:
 
-Cloud records are tenant-separated with `businessId`. A browser profile or app installation is enrolled for one business at a time, preventing it from reading or writing another business's data. This enrollment identifies a local app workspace; it does not make a physical device the owner of a business.
+- **Windows desktop:** SQLite managed by the desktop app.
+- **Browser/PWA:** SQLite stored in IndexedDB for that browser profile. Installing the PWA is optional; a browser tab uses the same profile workspace.
+- **Android:** native SQLite on the device.
 
-The app uses two different credentials:
+A new device or browser profile needs internet for its initial sign-in, business enrollment, and download of business data. After setup, the saved workspace can reopen offline. Local sales and other supported changes are saved on the device first and queued for synchronization. Use **Sync now** when online to upload queued work; **Refresh** downloads cloud changes without discarding local work. Sync regularly, especially before changing or clearing browser/device storage.
 
-- A **local app session** restores the already signed-in user for offline use.
-- A **cloud owner credential** authorizes sensitive online operations such as subscription checkout, referrals, and cloud team management. Its short-lived access token is renewed using a rotating refresh credential. Password reset deliberately revokes cloud refresh credentials and device enrollments.
+Each browser profile or installed client is connected to one business at a time. For a new browser/PWA, staff can use the business-specific sign-in link shown to the owner in **Team management**, then sign in with their own username and password. The link identifies the business; it does not replace staff credentials. Each browser profile has separate storage and must download its own workspace.
 
-Staff usernames are unique within their business. Owner emails are globally unique. Do not manually alter cloud accounts, device records, or sync operations to resolve a local sign-in problem.
+Offline availability depends on data already downloaded and locally cached. New sign-ins, initial downloads, adding devices, cloud staff administration, subscription actions, and synchronization require internet. Some features also depend on platform hardware or operating-system services.
 
-## What needs internet
+## Platform differences and limitations
 
-Internet is not required to reopen a saved local workspace or perform normal local operations. It is required to:
+- **PWA:** supports browser-based inventory, POS, customers, expenses, reports, stocktakes, team functions, and sync, with some platform-specific limitations. Receipts use browser printing; physical terminal payments are recorded with manual references and confirmation. See the PWA guide for the current feature list and known limitations.
+- **Windows:** runs a local app service and SQLite database. Printer access uses installed Windows printer queues. The customer display and filesystem backup features are desktop-only.
+- **Android:** uses Capacitor and native SQLite. Printing opens Android's system print dialog and depends on a compatible print service.
+- **Payment terminals:** the app does not connect directly to payment providers. Staff confirm external payments from the provider's receipt or reference. OCR can suggest a reference from a receipt photo, but staff must verify payment status, amount, and currency.
+- **Device setup:** the wizard guides setup and records test status; unsupported hardware integrations remain unavailable. See [hardware setup](docs/hardware-setup.md).
 
-- enroll a new device or browser profile;
-- download cloud changes or upload queued changes;
-- create or change cloud staff accounts;
-- complete payment, subscription, referral, or developer subscription actions.
+## Business registration and sign-in
 
-The active screen is retained across a normal reload. **Refresh** downloads cloud changes into the local database without discarding local work. Subscription access and the last retrieved owner summary are cached locally for offline display.
+New businesses request a registration key from S. B. Ibhadode technology and redeem it in the app with the matching owner email. Registration and first data setup require internet. Owners use their email to sign in; staff use the username assigned in Team management. For a new PWA/browser profile, staff should open the business sign-in link supplied by the owner.
 
-## Client notes
+The public product and registration information is at [stockroom.globalcreest.com/welcome](https://stockroom.globalcreest.com/welcome). Subscription and account features are available inside the app after owner sign-in.
 
-### Windows Desktop
+## Development
 
-The installed desktop app starts its own local service and SQLite database; clients do not run `npm`.
-
-The normal database path is typically:
-
-`%APPDATA%\stockroom-business-app\data\stockroom.sqlite`
-
-Back up that file before upgrades, recovery work, or moving a workstation. Do not delete it merely to solve a cloud-session problem.
-
-### Browser / PWA
-
-The deployed URL runs in PWA mode. Browser tabs and an installed app window in the same browser profile share the same local workspace. A different browser profile has separate storage and needs its own enrollment.
-
-See [PWA deployment instructions](PWA-DEPLOYMENT.md) for hosting and service-worker details.
-
-### Android
-
-Android uses its own device-local SQLite database through Capacitor. The current project build path produces a debug APK for testing; it is not a Play Store release workflow.
-
-## Development and validation
+Requirements: Node.js and npm. Install dependencies and start the local Vite development server:
 
 ```powershell
-npm run build
-npm test
+npm install
+npm run dev
 ```
 
-For the PWA integration test:
+Available build commands:
 
 ```powershell
-npm run build:pwa
-node test/pwa.browser.mjs
-npm run build
+npm run build       # standard Windows/Android web assets
+npm run build:pwa   # browser/PWA build
+npm test            # automated Node tests
 ```
 
-Desktop packaging and Android APK generation are release operations, not routine validation commands.
+The browser integration flow is documented in [PWA deployment](PWA-DEPLOYMENT.md). Android and Windows packaging commands are in `package.json`; release Android builds require the configured private signing keystore and credentials. Do not distribute debug builds as production releases.
 
-## Cloud service and release checks
+## Cloud and secrets
 
-MongoDB is accessed only through the hosted cloud sync API. Connection strings, admin keys, and other server secrets must never be placed in the desktop build, PWA bundle, APK, or browser settings.
+The hosted cloud API uses MongoDB for accounts, business-scoped sync, subscriptions, and referral records. The desktop, Android, and PWA clients call the cloud API; database connection strings, JWT secrets, admin keys, payment secrets, and signing credentials must remain on the server or in the secure release environment. Never place them in `VITE_` variables or commit them to source control.
 
-Before public distribution, test local restart and identity restoration, offline work, Refresh, two-device sync, and rejection of a different business account on an enrolled client. Configure support, privacy, signing, and store-release details before distributing production installers or APKs.
+Deployment guides:
+
+- [PWA deployment](PWA-DEPLOYMENT.md)
+- [Public landing page and business registration](docs/LANDING-AND-REGISTRATION.md)
+- [Subscription configuration and behavior](docs/subscriptions.md)
+- [Hardware setup and limitations](docs/hardware-setup.md)
