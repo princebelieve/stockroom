@@ -8,11 +8,11 @@ function cloudUrl(value) {
   return url
 }
 
-async function request(path, payload) {
+async function request(path, payload, timeoutMs = 12_000) {
   const { url } = await getCloudConfiguration()
   const token = path === '/v1/auth/register' ? await getCloudRegistrationToken() : ''
   if (!url) throw new Error('Cloud authentication has not been configured for this installation.')
-  const response = await fetch(`${url}${path}`, { method: 'POST', signal: AbortSignal.timeout(12_000), headers: { 'Content-Type': 'application/json', ...(path === '/v1/auth/register' ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(payload) })
+  const response = await fetch(`${url}${path}`, { method: 'POST', signal: AbortSignal.timeout(timeoutMs), headers: { 'Content-Type': 'application/json', ...(path === '/v1/auth/register' ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(payload) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Cloud authentication request failed.')
   return { ...body, syncApiUrl: url }
@@ -119,5 +119,5 @@ export async function cloudEnrollDeviceAsInstaller(syncApiUrl, adminApiKey, inpu
   if (!response.ok) throw new Error(body.error || 'Could not activate this installation.')
   return body
 }
-export async function cloudPasswordResetRequest(email) { return request('/v1/auth/password-reset/request', { email }) }
-export async function cloudPasswordResetConfirm(token, password) { return request('/v1/auth/password-reset/confirm', { token, password }) }
+export async function cloudPasswordResetRequest(email) { return request('/v1/auth/password-reset/request', { email }, 30_000) }
+export async function cloudPasswordResetConfirm(token, password) { return request('/v1/auth/password-reset/confirm', { token, password }, 30_000) }

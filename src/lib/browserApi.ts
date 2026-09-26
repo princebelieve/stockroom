@@ -257,7 +257,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   }
   if (path === '/api/auth/login') return error('Use cloud sign-in on this device.', 401)
   if (['/api/auth/password-reset/request', '/api/auth/password-reset/confirm'].includes(path) && method === 'POST') {
-    return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, headers: { 'Content-Type': 'application/json' }, body: init?.body })
+    return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: init?.body })
   }
   if (path === '/api/users' || path.startsWith('/api/users/')) {
     const suppliedToken = new Headers(init?.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') || ''

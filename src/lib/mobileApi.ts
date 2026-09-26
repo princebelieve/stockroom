@@ -253,7 +253,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return originalFetch(`${cloudUrl}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
   }
   if (['/api/auth/password-reset/request', '/api/auth/password-reset/confirm'].includes(path) && method === 'POST') {
-    return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, headers: { 'Content-Type': 'application/json' }, body: init?.body })
+    return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: init?.body })
   }
   // Logout must also clear stale sessions whose user record no longer exists.
   // Device enrollment lives in separate settings and is preserved.

@@ -13,7 +13,7 @@ export function Reconciliation({ sales }: { sales: Sale[] }) {
   const [results, setResults] = useState<Comparison[]>([])
   const [error, setError] = useState('')
   const [reading, setReading] = useState(false)
-  return <section className="panel full-panel"><h2>Reconcile provider report</h2><p>Import a comma-separated CSV with a header row. Compare gross payment amounts in major units (e.g. 1250.00, without currency symbols or grouping separators). The file stays on this device; sales are never changed.</p>
+  return <section id="sales-reconciliation" className="panel full-panel"><h2>Reconcile provider report</h2><p>Import a comma-separated CSV with a header row. Compare gross payment amounts in major units (e.g. 1250.00, without currency symbols or grouping separators). The file stays on this device; sales are never changed.</p>
     <label>Provider CSV<input type="file" accept=".csv,text/csv" disabled={reading} onChange={async event => {
       const file = event.target.files?.[0]; setRows([]); setResults([]); setError(''); setFileName(''); if (!file) return
       setReading(true)

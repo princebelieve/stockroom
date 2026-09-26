@@ -129,6 +129,29 @@ type AppSettings = {
 }
 
 type User = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; organizationId: string }
+
+const navigableScreens = ['Overview', 'Inventory', 'Stocktake', 'POS', 'Display', 'Sales', 'Movements', 'Wallet', 'Owner', 'Reports', 'Sync', 'Team', 'Subscription', 'Device', 'Settings'] as const
+function navigationKey(user: User) { return `stockroom-active-screen:${user.organizationId}:${user.id}` }
+function defaultScreen(user: User) { return user.role === 'cashier' && !user.operationalAccess ? 'POS' : 'Overview' }
+function screenAllowedForUser(screen: string, user: User) {
+  if (!navigableScreens.includes(screen as typeof navigableScreens[number])) return false
+  if (user.role === 'cashier' && !user.operationalAccess) return screen === 'POS'
+  if (screen === 'Team' || screen === 'Subscription' || screen === 'Settings') return user.role === 'owner'
+  if (screen === 'Owner' || screen === 'Reports' || screen === 'Sync') return user.role === 'owner' || user.role === 'admin'
+  if (screen === 'Device') return user.role === 'owner' || user.role === 'admin'
+  if (screen === 'Display') return !isBrowserPwa() && !isNativeMobile()
+  return true
+}
+function preferredScreen(user: User) {
+  const saved = localStorage.getItem(navigationKey(user))
+  return saved && screenAllowedForUser(saved, user) ? saved : defaultScreen(user)
+}
+function initialScreen() {
+  try {
+    const user = JSON.parse(localStorage.getItem('stockroom-user') || 'null') as User | null
+    return user ? preferredScreen(user) : 'Overview'
+  } catch { return 'Overview' }
+}
 type SaleRecord = { id: string; total: number; paymentMethod: string; paymentReference: string; terminalProvider: string; paymentDetails?: Sale['paymentDetails']; cashReceived?: number | null; changeGiven?: number | null; staffId?: string; staffName?: string; createdAt: string; items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number }> }
 type Movement = { id: string; productName: string; sku: string; quantity: number; reason: string; createdAt: string }
 type SyncStatus = { configured: boolean; pending: number; conflicts?: number; lastError: string; existingBusiness?: boolean }
@@ -147,48 +170,53 @@ function InlinePrompt({ request, onClose }: { request: InlinePromptRequest; onCl
 
 function App() {
   const deriveSku = (name: string) => `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`
-  // A browser/PWA reload keeps its tab session. Electron creates a new window
-  // whenever the desktop application is launched, which discards
-  // sessionStorage and previously sent every relaunch to Overview. Persist
-  // only the desktop screen choice; logout below clears it for the next user.
-  const activeScreenStorage = !isBrowserPwa() && !isNativeMobile() ? localStorage : sessionStorage
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('stockroom-products')
     return saved ? JSON.parse(saved) : []
   })
   const [query, setQuery] = useState('')
-  const [active, setActive] = useState(() => activeScreenStorage.getItem('stockroom-active-screen') || 'Overview')
+  const [active, setActive] = useState(initialScreen)
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<'Sales' | 'Team' | null>(null)
-  useEffect(() => { activeScreenStorage.setItem('stockroom-active-screen', active) }, [active, activeScreenStorage])
-  const navigateToSection = (screen: 'Sales' | 'Team', heading: string) => {
-    setActive(screen)
+  useEffect(() => { if (user && screenAllowedForUser(active, user)) localStorage.setItem(navigationKey(user), active) }, [active])
+  const navigateToSection = (screen: 'Sales' | 'Team', sectionId: string) => {
     setMobileMenuOpen(false)
-    window.setTimeout(() => {
-      const target = [...document.querySelectorAll('main h2, main h3')].find(element => element.textContent?.trim() === heading)
-      target?.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 0)
+    const current = window.history.state as { stockroomNavigation?: boolean; screen?: string } | null
+    const url = new URL(window.location.href)
+    url.hash = sectionId
+    if (current?.stockroomNavigation && current.screen === screen && (window.history.state as { section?: string }).section === sectionId) {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    window.history.pushState({ stockroomNavigation: true, screen, section: sectionId, previousScreen: current?.screen || active }, '', url)
+    setActive(screen)
+    window.setTimeout(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
   }
   const goBackInApp = () => {
     if (active === 'Overview') return
-    const previousScreen = (window.history.state as { screen?: string } | null)?.screen
-    if (previousScreen && previousScreen !== active) {
+    const current = window.history.state as { stockroomNavigation?: boolean; previousScreen?: string } | null
+    if (current?.stockroomNavigation && current.previousScreen) {
       window.history.back()
       return
     }
     setActive('Overview')
   }
   useEffect(() => {
-    const state = window.history.state as { screen?: string } | null
-    if (!state || state.screen !== active) {
-      if (window.history.length <= 1) window.history.replaceState({ screen: active }, '', window.location.href)
-      else window.history.pushState({ screen: active }, '', window.location.href)
+    const state = window.history.state as { stockroomNavigation?: boolean; screen?: string } | null
+    if (!state?.stockroomNavigation) {
+      window.history.replaceState({ stockroomNavigation: true, screen: active, previousScreen: '' }, '', window.location.href)
+    } else if (state.screen !== active) {
+      const url = new URL(window.location.href)
+      url.hash = ''
+      window.history.pushState({ stockroomNavigation: true, screen: active, previousScreen: state.screen || '' }, '', url)
     }
   }, [active])
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      const nextScreen = event.state && typeof event.state === 'object' && 'screen' in event.state ? String((event.state as { screen?: string }).screen || '') : ''
-      if (nextScreen) setActive(nextScreen)
-      else setActive('Overview')
+      const state = event.state && typeof event.state === 'object' ? event.state as { stockroomNavigation?: boolean; screen?: string; section?: string } : null
+      setActive(state?.stockroomNavigation && state.screen ? state.screen : 'Overview')
+      if (state?.stockroomNavigation && state.section) {
+        window.setTimeout(() => document.getElementById(state.section!)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+      }
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -414,7 +442,6 @@ function App() {
       if (cancelled) return
       const token = saved.token || authToken
       setUser(saved.user)
-      if (location.pathname === '/' && !new URLSearchParams(location.search).has('screen')) setActive(saved.user.role === 'cashier' && !saved.user.operationalAccess ? 'POS' : 'Overview')
       if (token) {
         setAuthToken(token)
         localStorage.setItem('stockroom-token', token)
@@ -1349,7 +1376,7 @@ function App() {
     }
     setAuthToken(data.token)
     setUser(data.user)
-    setActive(data.user.role === 'cashier' && !data.user.operationalAccess ? 'POS' : 'Overview')
+    setActive(preferredScreen(data.user))
     setInstallerRequired(false)
     setSetupRequired(false)
     localStorage.setItem('stockroom-token', data.token)
@@ -1466,8 +1493,6 @@ function App() {
     localStorage.removeItem('stockroom-user')
     localStorage.removeItem('stockroom-cloud-access-token')
     localStorage.removeItem('stockroom-cloud-refresh-token')
-    sessionStorage.removeItem('stockroom-active-screen')
-    localStorage.removeItem('stockroom-active-screen')
     setCloudAccessToken('')
   }
 
@@ -1490,13 +1515,13 @@ function App() {
         {canManageInventory && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock take</button>}
         <button className={active === 'POS' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('POS')}><ShoppingCart size={18} />POS</button>
         {!isBrowserPwa() && !isNativeMobile() && <button className={active === 'Display' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Display')}><Store size={18} />Customer display</button>}
-        {canManageOperations && <div className="sidebar-nav-group"><button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Sales'} onClick={() => { setActive('Sales'); setExpandedSidebarGroup(group => group === 'Sales' ? null : 'Sales') }}><ShoppingCart size={18} />Sales <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Sales' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Sales' && <div className="sidebar-subnav"><button onClick={() => navigateToSection('Sales', 'Receipt history')}>Receipt history</button><button onClick={() => navigateToSection('Sales', 'Payment accountability')}>Payment evidence</button><button onClick={() => navigateToSection('Sales', 'Sales history')}>Sales history</button><button onClick={() => navigateToSection('Sales', 'Reconcile provider report')}>Reconciliation</button></div>}</div>}
+        {canManageOperations && <div className="sidebar-nav-group"><button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Sales'} onClick={() => { setActive('Sales'); setExpandedSidebarGroup(group => group === 'Sales' ? null : 'Sales') }}><ShoppingCart size={18} />Sales <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Sales' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Sales' && <div className="sidebar-subnav"><a href="#sales-receipt-history" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-receipt-history') }}>Receipt history</a><a href="#sales-payment-evidence" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-payment-evidence') }}>Payment evidence</a><a href="#sales-history" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-history') }}>Sales history</a><a href="#sales-reconciliation" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-reconciliation') }}>Reconciliation</a></div>}</div>}
         {canManageOperations && <button className={active === 'Movements' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Movements')}><ArrowDownToLine size={18} />Stock movements</button>}
         {canManageOperations && <button className={active === 'Wallet' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Wallet')}><WalletCards size={18} />Wallet</button>}
         {!isBrowserPwa() && ['owner', 'admin'].includes(user.role) && <button className={active === 'Owner' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Owner')}><LayoutDashboard size={18} />Business dashboard</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Reports' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Reports')}><BarChart3 size={18} />Reports</button>}
         {['owner', 'admin'].includes(user.role) && <button className={active === 'Sync' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sync')}><RefreshCw size={18} />Sync issues {syncConflicts.length > 0 && <b>{syncConflicts.length}</b>}</button>}
-        {user.role === 'owner' && <div className="sidebar-nav-group"><button className={active === 'Team' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Team'} onClick={() => { setActive('Team'); setExpandedSidebarGroup(group => group === 'Team' ? null : 'Team') }}><UserRoundCog size={18} />Team management <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Team' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Team' && <div className="sidebar-subnav"><button onClick={() => navigateToSection('Team', 'Cashier activity')}>Cashier activity</button><button onClick={() => navigateToSection('Team', 'Team management')}>Team members</button><button onClick={() => navigateToSection('Team', 'Add team member')}>Add staff</button>{staff.some(member => member.role === 'cashier' || member.role === 'admin') && <button onClick={() => navigateToSection('Team', 'Staff password recovery')}>Staff passwords</button>}</div>}</div>}
+        {user.role === 'owner' && <div className="sidebar-nav-group"><button className={active === 'Team' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Team'} onClick={() => { setActive('Team'); setExpandedSidebarGroup(group => group === 'Team' ? null : 'Team') }}><UserRoundCog size={18} />Team management <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Team' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Team' && <div className="sidebar-subnav"><a href="#team-cashier-activity" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-cashier-activity') }}>Cashier activity</a><a href="#team-members" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-members') }}>Team members</a><a href="#team-add-staff" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-add-staff') }}>Add staff</a>{staff.some(member => member.role === 'cashier' || member.role === 'admin') && <a href="#team-password-recovery" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-password-recovery') }}>Staff passwords</a>}</div>}</div>}
         {user.role === 'owner' && <button className={active === 'Subscription' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Subscription')}><WalletCards size={18} />Subscription</button>}
         <a className="nav-item" href="https://stockroom.globalcreest.com/welcome#install" target="_blank" rel="noreferrer"><Download size={18} />Download / install Stockroom</a>
         {canManageDeviceSetup && <button className={active === 'Device' ? 'nav-item active' : 'nav-item'} onClick={() => { setDeviceSetupKind(undefined); setActive('Device') }}><Printer size={18} />Device setup</button>}
@@ -1529,7 +1554,7 @@ function App() {
       {active === 'Display' && <CustomerDisplayPairing pairing={displayPairing} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} prompt={requestInlinePrompt} />}
       {(active === 'POS' || active === 'Display') && displayError && <div role="alert" className="auth-error">{displayError}<button className="filter-button" onClick={() => setDisplayRetry(value => value + 1)}>Retry display update</button></div>}
       {receiptError && <p role="alert" className="auth-error">{receiptError}</p>}
-      {(active === 'POS' || active === 'Sales') && <section className="panel full-panel"><h2>Receipt history</h2><p>Saved receipts on this device, newest first. Older receipts without snapshots use current business and currency settings.</p>{allReceipts.length ? allReceipts.map(receipt => <div className="customer-row" key={receipt.id}><div><strong>{new Date(receipt.createdAt).toLocaleString()}</strong><small>{receipt.id} ? {receipt.paymentReference || receipt.paymentMethod}</small></div><AsyncButton className="filter-button" busyLabel="Printing..." onClick={() => printReceipt(receipt)}>Reprint receipt</AsyncButton></div>) : <p>No saved receipts yet.</p>}</section>}
+      {(active === 'POS' || active === 'Sales') && <section id="sales-receipt-history" className="panel full-panel"><h2>Receipt history</h2><p>Saved receipts on this device, newest first. Older receipts without snapshots use current business and currency settings.</p>{allReceipts.length ? allReceipts.map(receipt => <div className="customer-row" key={receipt.id}><div><strong>{new Date(receipt.createdAt).toLocaleString()}</strong><small>{receipt.id} ? {receipt.paymentReference || receipt.paymentMethod}</small></div><AsyncButton className="filter-button" busyLabel="Printing..." onClick={() => printReceipt(receipt)}>Reprint receipt</AsyncButton></div>) : <p>No saved receipts yet.</p>}</section>}
       {active === 'Sales' && canManageOperations && <Reconciliation key={user.organizationId} sales={allReceipts} />}
       {active === 'Sales' && <><PaymentEvidence sales={allReceipts} money={formatMoney} /><SalesHistory sales={sales} money={formatMoney} /></>}
       {active === 'Movements' && <MovementHistory movements={movements} />}
@@ -1579,7 +1604,7 @@ function LoginScreen({ onLogin, error, setError, onRegister }: { onRegister?: ()
   if (mode === 'request') return <main className="login-screen"><AsyncForm busyLabel="Sending reset code..." className="login-card" onSubmit={async (event) => {
     event.preventDefault(); if (submitting) return; setSubmitting(true); resetView()
     try {
-      const response = await fetch('/api/auth/password-reset/request', { method: 'POST', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
+      const response = await fetch('/api/auth/password-reset/request', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to request a reset email.')
       if (data.delivered !== true) throw new Error('No reset email was sent, and your password has not changed. If this is the owner’s correct email, ask the service administrator to check the Render log for this attempt.')
@@ -1650,7 +1675,7 @@ function SalesHistory({ sales, money }: { sales: SaleRecord[]; money: (amount: n
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const filtered = sales.filter(sale => `${sale.id} ${sale.staffName || ''} ${sale.paymentMethod} ${sale.paymentReference || ''} ${sale.items.map(item => item.productName).join(' ')}`.toLowerCase().includes(query.toLowerCase()) && isInDateRange(sale.createdAt, from, to))
-  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Sales history</h2><p>Search by receipt, cashier, product, payment reference, or date range.</p></div></div><RecordFilters query={query} setQuery={setQuery} from={from} setFrom={setFrom} to={to} setTo={setTo} placeholder="Search sales, receipts, cashiers" /><div className="table-wrap"><table><thead><tr><th>Date</th><th>Items</th><th>Payment</th><th>Total</th></tr></thead><tbody>{filtered.length ? filtered.map(sale => <tr key={sale.id}><td>{new Date(sale.createdAt).toLocaleString()}<span className="table-subtext">{sale.staffName || sale.id}</span></td><td>{sale.items.map(item => `${item.quantity} × ${item.productName}`).join(', ') || 'Legacy sale'}</td><td>{sale.paymentMethod}{sale.paymentReference ? ` · ${sale.paymentReference}` : ''}</td><td>{money(sale.total)}</td></tr>) : <tr><td colSpan={4} className="empty-state">No sales match these filters.</td></tr>}</tbody></table></div></section>
+  return <section id="sales-history" className="panel full-panel"><div className="panel-heading"><div><h2>Sales history</h2><p>Search by receipt, cashier, product, payment reference, or date range.</p></div></div><RecordFilters query={query} setQuery={setQuery} from={from} setFrom={setFrom} to={to} setTo={setTo} placeholder="Search sales, receipts, cashiers" /><div className="table-wrap"><table><thead><tr><th>Date</th><th>Items</th><th>Payment</th><th>Total</th></tr></thead><tbody>{filtered.length ? filtered.map(sale => <tr key={sale.id}><td>{new Date(sale.createdAt).toLocaleString()}<span className="table-subtext">{sale.staffName || sale.id}</span></td><td>{sale.items.map(item => `${item.quantity} × ${item.productName}`).join(', ') || 'Legacy sale'}</td><td>{sale.paymentMethod}{sale.paymentReference ? ` · ${sale.paymentReference}` : ''}</td><td>{money(sale.total)}</td></tr>) : <tr><td colSpan={4} className="empty-state">No sales match these filters.</td></tr>}</tbody></table></div></section>
 }
 
 function MovementHistory({ movements }: { movements: Movement[] }) {
@@ -1676,7 +1701,7 @@ function TeamManagement({ staff, loaded, addStaff, updateStaffRole, setCashierAc
     if (Number.isNaN(parsed.getTime())) return '—'
     return parsed.toLocaleDateString()
   }
-  return <section className="panel full-panel team-management"><div className="panel-heading"><div><h2>Team management</h2><p>Staff sign in with the username shown below. Owners sign in with email. Cashiers start POS-only; admins can manage operations.</p></div><UserRoundCog size={20} /></div><div className="team-grid"><section><h3>Current team</h3><div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Username</th><th>Role</th><th>Access</th><th>Created</th></tr></thead><tbody>{staff.length ? staff.map((member) => <tr key={member.id}><td><strong>{member.name}</strong></td><td>{member.email || '—'}</td><td>{member.role === 'owner' ? '—' : <strong>{member.username || 'Not assigned'}</strong>}</td><td>{member.role === 'owner' ? <span className={`role-badge ${member.role}`}>{member.role}</span> : <select value={member.role} onChange={(event) => { const nextRole = event.target.value as 'admin' | 'cashier'; if (nextRole !== member.role) void updateStaffRole(member.id, nextRole, nextRole === 'admin' ? true : false) }}><option value="admin">Admin</option><option value="cashier">Cashier</option></select>}</td><td>{member.role === 'cashier' ? <label><input type="checkbox" checked={Boolean(member.operationalAccess)} onChange={(event) => setCashierAccess(member.id, event.target.checked)} /> Operational</label> : member.role === 'admin' ? 'Manage operations' : 'Owner access'}</td><td>{formatCreatedDate(member.createdAt)}</td></tr>) : <tr><td colSpan={6} className="empty-state">Loading team accounts…</td></tr>}</tbody></table></div></section>{canCreateStaff && <AsyncForm className="settings-form team-form" busyLabel="Creating account..." onSubmit={addStaff}><h3>Add team member</h3><label>Full name<input name="name" required maxLength={100} placeholder="e.g. Ada Okafor" /></label><label>Email address <span>Optional contact information; it cannot control this staff account.</span><input name="email" type="email" placeholder="ada@yourbusiness.com (optional)" /></label><label>Access role<select name="role" defaultValue="cashier"><option value="cashier">Cashier — POS only by default</option><option value="admin">Admin — manage stock and operations</option></select></label><label>Temporary password<div className="password-wrap"><input name="password" type={showPassword ? 'text' : 'password'} minLength={10} required autoComplete="new-password" placeholder="At least 10 characters" /><button type="button" className="icon-button password-toggle" onClick={() => setShowPassword(current => !current)} aria-label={showPassword ? 'Hide temporary password' : 'Show temporary password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><label>Confirm temporary password<div className="password-wrap"><input name="passwordConfirmation" type={showConfirmation ? 'text' : 'password'} minLength={10} required autoComplete="new-password" placeholder="Re-enter temporary password" /><button type="button" className="icon-button password-toggle" onClick={() => setShowConfirmation(current => !current)} aria-label={showConfirmation ? 'Hide confirmation password' : 'Show confirmation password'}>{showConfirmation ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><SubmitButton className="primary-button" type="submit">Create account <UserRoundCog size={17} /></SubmitButton></AsyncForm>}</div>{message && <p className="settings-message">{message}</p>}</section>
+  return <section id="team-members" className="panel full-panel team-management"><div className="panel-heading"><div><h2>Team management</h2><p>Staff sign in with the username shown below. Owners sign in with email. Cashiers start POS-only; admins can manage operations.</p></div><UserRoundCog size={20} /></div><div className="team-grid"><section><h3>Current team</h3><div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Username</th><th>Role</th><th>Access</th><th>Created</th></tr></thead><tbody>{staff.length ? staff.map((member) => <tr key={member.id}><td><strong>{member.name}</strong></td><td>{member.email || '—'}</td><td>{member.role === 'owner' ? '—' : <strong>{member.username || 'Not assigned'}</strong>}</td><td>{member.role === 'owner' ? <span className={`role-badge ${member.role}`}>{member.role}</span> : <select value={member.role} onChange={(event) => { const nextRole = event.target.value as 'admin' | 'cashier'; if (nextRole !== member.role) void updateStaffRole(member.id, nextRole, nextRole === 'admin' ? true : false) }}><option value="admin">Admin</option><option value="cashier">Cashier</option></select>}</td><td>{member.role === 'cashier' ? <label><input type="checkbox" checked={Boolean(member.operationalAccess)} onChange={(event) => setCashierAccess(member.id, event.target.checked)} /> Operational</label> : member.role === 'admin' ? 'Manage operations' : 'Owner access'}</td><td>{formatCreatedDate(member.createdAt)}</td></tr>) : <tr><td colSpan={6} className="empty-state">Loading team accounts…</td></tr>}</tbody></table></div></section>{canCreateStaff && <AsyncForm id="team-add-staff" className="settings-form team-form" busyLabel="Creating account..." onSubmit={addStaff}><h3>Add team member</h3><label>Full name<input name="name" required maxLength={100} placeholder="e.g. Ada Okafor" /></label><label>Email address <span>Optional contact information; it cannot control this staff account.</span><input name="email" type="email" placeholder="ada@yourbusiness.com (optional)" /></label><label>Access role<select name="role" defaultValue="cashier"><option value="cashier">Cashier — POS only by default</option><option value="admin">Admin — manage stock and operations</option></select></label><label>Temporary password<div className="password-wrap"><input name="password" type={showPassword ? 'text' : 'password'} minLength={10} required autoComplete="new-password" placeholder="At least 10 characters" /><button type="button" className="icon-button password-toggle" onClick={() => setShowPassword(current => !current)} aria-label={showPassword ? 'Hide temporary password' : 'Show temporary password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><label>Confirm temporary password<div className="password-wrap"><input name="passwordConfirmation" type={showConfirmation ? 'text' : 'password'} minLength={10} required autoComplete="new-password" placeholder="Re-enter temporary password" /><button type="button" className="icon-button password-toggle" onClick={() => setShowConfirmation(current => !current)} aria-label={showConfirmation ? 'Hide confirmation password' : 'Show confirmation password'}>{showConfirmation ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><SubmitButton className="primary-button" type="submit">Create account <UserRoundCog size={17} /></SubmitButton></AsyncForm>}</div>{message && <p className="settings-message">{message}</p>}</section>
 }
 
 function StaffPasswordReset({ staff, resetStaffPassword }: { staff: StaffUser[]; resetStaffPassword: (member: StaffUser) => Promise<void> }) {
@@ -1684,12 +1709,12 @@ function StaffPasswordReset({ staff, resetStaffPassword }: { staff: StaffUser[];
   const [staffId, setStaffId] = useState('')
   useEffect(() => { if (!staffAccounts.some(member => member.id === staffId)) setStaffId(staffAccounts[0]?.id || '') }, [staffId, staffAccounts])
   if (!staffAccounts.length) return null
-  return <section className="panel full-panel cashier-password-control"><div className="panel-heading"><div><h2>Staff password recovery</h2><p>Reset an admin or cashier password here. Staff email addresses are contact details; staff sign in with their username.</p></div></div><label>Staff member<select value={staffId} onChange={(event) => setStaffId(event.target.value)}>{staffAccounts.map((member) => <option key={member.id} value={member.id}>{member.name} (@{member.username || 'username unavailable'}) — {member.role}</option>)}</select></label><button type="button" className="primary-button" onClick={() => { const member = staffAccounts.find((item) => item.id === staffId); if (member) void resetStaffPassword(member) }}>Reset staff password</button></section>
+  return <section id="team-password-recovery" className="panel full-panel cashier-password-control"><div className="panel-heading"><div><h2>Staff password recovery</h2><p>Reset an admin or cashier password here. Staff email addresses are contact details; staff sign in with their username.</p></div></div><label>Staff member<select value={staffId} onChange={(event) => setStaffId(event.target.value)}>{staffAccounts.map((member) => <option key={member.id} value={member.id}>{member.name} (@{member.username || 'username unavailable'}) — {member.role}</option>)}</select></label><button type="button" className="primary-button" onClick={() => { const member = staffAccounts.find((item) => item.id === staffId); if (member) void resetStaffPassword(member) }}>Reset staff password</button></section>
 }
 
 function StaffActivity({ staff, sales, money }: { staff: StaffUser[]; sales: SaleRecord[]; money: (amount: number) => string }) {
   const cashiers = staff.filter(member => member.role === 'cashier')
-  return <section className="panel full-panel staff-activity"><div className="panel-heading"><div><h2>Cashier activity</h2><p>Completed sales are grouped by the cashier who recorded them.</p></div></div><div className="table-wrap"><table><thead><tr><th>Cashier</th><th>Role</th><th>Sales</th><th>Sales total</th><th>Latest sale</th></tr></thead><tbody>{cashiers.length ? cashiers.map(cashier => { const recorded = sales.filter(sale => sale.staffId === cashier.id || (!sale.staffId && sale.staffName === cashier.name)); const latest = recorded[0]; return <tr key={cashier.id}><td><strong>{cashier.name}</strong><span className="table-subtext">{cashier.email}</span></td><td>Cashier</td><td>{recorded.length}</td><td>{money(recorded.reduce((sum, sale) => sum + sale.total, 0))}</td><td>{latest ? <>{new Date(latest.createdAt).toLocaleString()}<span className="table-subtext">{money(latest.total)} · {latest.paymentMethod}</span></> : 'No recorded sales'}</td></tr> }) : <tr><td colSpan={5} className="empty-state">No cashier accounts have been added yet.</td></tr>}</tbody></table></div></section>
+  return <section id="team-cashier-activity" className="panel full-panel staff-activity"><div className="panel-heading"><div><h2>Cashier activity</h2><p>Completed sales are grouped by the cashier who recorded them.</p></div></div><div className="table-wrap"><table><thead><tr><th>Cashier</th><th>Role</th><th>Sales</th><th>Sales total</th><th>Latest sale</th></tr></thead><tbody>{cashiers.length ? cashiers.map(cashier => { const recorded = sales.filter(sale => sale.staffId === cashier.id || (!sale.staffId && sale.staffName === cashier.name)); const latest = recorded[0]; return <tr key={cashier.id}><td><strong>{cashier.name}</strong><span className="table-subtext">{cashier.email}</span></td><td>Cashier</td><td>{recorded.length}</td><td>{money(recorded.reduce((sum, sale) => sum + sale.total, 0))}</td><td>{latest ? <>{new Date(latest.createdAt).toLocaleString()}<span className="table-subtext">{money(latest.total)} · {latest.paymentMethod}</span></> : 'No recorded sales'}</td></tr> }) : <tr><td colSpan={5} className="empty-state">No cashier accounts have been added yet.</td></tr>}</tbody></table></div></section>
 }
 
 function ReportsDashboard({ reports, currency, expenses, exportCsv, addExpense }: { reports: Reports | null; currency: string; expenses: Expense[]; exportCsv: () => Promise<void>; addExpense: (event: React.FormEvent<HTMLFormElement>) => Promise<void> }) {

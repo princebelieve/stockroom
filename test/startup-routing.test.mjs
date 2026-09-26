@@ -6,7 +6,7 @@ test('owner-configured device without cloud enrollment still routes to login ins
   const state = resolveStartupState({ ownerConfigured: true, cloudConfigured: false, existingBusiness: false })
   assert.equal(state.installerRequired, false)
   assert.equal(state.setupRequired, false)
-  assert.equal(state.hasExistingDevice, false)
+  assert.equal(state.hasExistingDevice, true)
 })
 
 test('new device without owner still requires installer/setup', () => {

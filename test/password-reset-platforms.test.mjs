@@ -20,6 +20,7 @@ for (const [platform, file, declaration, cutMarker] of [
     const requests = []
     const handler = vm.runInNewContext(stripTypeScriptTypes(`(${segment})`), {
       cloudUrl: 'https://cloud.example',
+      AbortSignal: { timeout: timeoutMs => ({ timeoutMs }) },
       originalFetch: async (url, init) => { requests.push({ url, init }); return new Response('{"ok":true,"delivered":true}') },
     })
 
@@ -31,7 +32,7 @@ for (const [platform, file, declaration, cutMarker] of [
       assert.equal(response.status, 200)
       assert.equal(JSON.stringify(requests.at(-1)), JSON.stringify({
         url: `https://cloud.example/v1/auth/password-reset/${action}`,
-        init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
+        init: { method: 'POST', signal: { timeoutMs: 30_000 }, headers: { 'Content-Type': 'application/json' }, body },
       }))
     }
   })
