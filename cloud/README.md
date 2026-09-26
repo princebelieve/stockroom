@@ -8,7 +8,7 @@ Set these Render environment variables:
 - `JWT_SECRET`: a long random secret. Render can generate it from `render.yaml`.
 - `ADMIN_API_KEY`: a long random secret used only by you to enroll a device.
 - `MONGODB_DATABASE`: optional; defaults to `stockroom_sync`.
-- `SMTP_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: optional Gmail OAuth 2.0 SMTP transport. All four are required before reset and staff-invitation emails are delivered.
+- `SMTP_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: optional Gmail OAuth 2.0 credentials. All four are required before reset and staff-invitation emails are delivered.
 
 After deployment, verify `https://YOUR-RENDER-URL/health` returns `{"ok":true}`.
 
@@ -35,9 +35,9 @@ Email password recovery uses `POST /v1/auth/password-reset/request` and `POST /v
 
 ### Gmail OAuth mail setup
 
-Create a Google Cloud project, configure the OAuth consent screen, create a **Web application** OAuth client, and obtain a refresh token for the Gmail account that will send Stockroom messages. Store only the resulting values in Render environment variables—never in the desktop app, `sync-config.json`, Git, or MongoDB. The service uses Gmail SMTP with OAuth 2.0, not a Gmail password or app password.
+Create a Google Cloud project, enable the Gmail API, configure the OAuth consent screen, create a **Web application** OAuth client, and obtain a refresh token for the Gmail account that will send Stockroom messages. The token must include Gmail send permission (the existing `https://mail.google.com/` scope also works). Store only the resulting values in Render environment variables—never in the desktop app, `sync-config.json`, Git, or MongoDB. The service sends through the Gmail API over HTTPS using OAuth 2.0; it does not use SMTP ports or require a Gmail password or app password.
 
-At startup, the service logs the Gmail SMTP preset's host, port, TLS mode, and whether each required environment variable is present or missing. It never logs OAuth credential values, the recipient address, or reset codes. Password-reset attempts log whether delivery succeeded, failed, or was skipped because no eligible owner account matched. Render's `Rndr-Id` is included when available to help locate the corresponding request.
+At startup, the service logs the Gmail API transport and whether each required environment variable is present or missing. It never logs OAuth credential values, the recipient address, or reset codes. Password-reset attempts log whether Gmail accepted the send request, failed, or were skipped because no eligible owner account matched. Render's `Rndr-Id` is included when available to help locate the corresponding request.
 
 The legacy admin-key enrollment endpoint remains for your operational setup only. For normal client onboarding, prefer the owner account flow above.
 

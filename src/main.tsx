@@ -1582,8 +1582,8 @@ function LoginScreen({ onLogin, error, setError, onRegister }: { onRegister?: ()
       const response = await fetch('/api/auth/password-reset/request', { method: 'POST', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to request a reset email.')
-      if (data.delivered !== true) throw new Error('No reset email was delivered. Check the owner email and spam folder. If they are correct, contact support to check cloud email delivery. Your password has not changed.')
-      setMessage('If this email has a cloud account, a reset code has been sent. Check your inbox and spam folder.')
+      if (data.delivered !== true) throw new Error('No reset email was sent, and your password has not changed. If this is the owner’s correct email, ask the service administrator to check the Render log for this attempt.')
+      setMessage(`The mail service accepted a reset email for ${email}. Check your inbox and spam folder. The code expires in 30 minutes. If it does not arrive, contact support to check email delivery.`)
       setMode('confirm')
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to request a reset email.') } finally { setSubmitting(false) }
   }}><div className="brand-mark"><Boxes size={21} /></div><h1>Reset your password</h1><p>Email recovery is for the owner account. Admins and cashiers should ask the owner to reset their password in Team management.</p><label>Owner email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@yourshop.com" /></label>{error && <div className="auth-error">{error}</div>}<SubmitButton className="primary-button login-button">Send reset code</SubmitButton><button type="button" className="text-button" onClick={returnToLogin}>Back to sign in</button></AsyncForm></main>
