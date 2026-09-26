@@ -12,7 +12,7 @@ async function request(path, payload) {
   const { url } = await getCloudConfiguration()
   const token = path === '/v1/auth/register' ? await getCloudRegistrationToken() : ''
   if (!url) throw new Error('Cloud authentication has not been configured for this installation.')
-  const response = await fetch(`${url}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(path === '/v1/auth/register' ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(payload) })
+  const response = await fetch(`${url}${path}`, { method: 'POST', signal: AbortSignal.timeout(12_000), headers: { 'Content-Type': 'application/json', ...(path === '/v1/auth/register' ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(payload) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Cloud authentication request failed.')
   return { ...body, syncApiUrl: url }
@@ -45,7 +45,7 @@ export async function cloudRegister(input) {
 export async function cloudCreateStaff(accessToken, input) {
   const { url } = await getCloudConfiguration()
   if (!url) throw new Error('Cloud authentication has not been configured for this installation.')
-  const response = await fetch(`${url}/v1/staff`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) })
+  const response = await fetch(`${url}/v1/staff`, { method: 'POST', signal: AbortSignal.timeout(12_000), headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Could not create cloud staff account.')
   return body
@@ -53,7 +53,7 @@ export async function cloudCreateStaff(accessToken, input) {
 export async function cloudListStaff(accessToken) {
   const { url } = await getCloudConfiguration()
   if (!url || !accessToken) throw new Error('Connect to the internet and sign in again before refreshing team accounts.')
-  const response = await fetch(`${url}/v1/staff`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const response = await fetch(`${url}/v1/staff`, { signal: AbortSignal.timeout(12_000), headers: { Authorization: `Bearer ${accessToken}` } })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Could not refresh cloud staff accounts.')
   return body
@@ -61,7 +61,7 @@ export async function cloudListStaff(accessToken) {
 export async function cloudRefreshSession(refreshToken) {
   const { url } = await getCloudConfiguration()
   if (!url || !refreshToken) throw new Error('Cloud session renewal is unavailable.')
-  const response = await fetch(`${url}/v1/auth/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }) })
+  const response = await fetch(`${url}/v1/auth/refresh`, { method: 'POST', signal: AbortSignal.timeout(10_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Cloud session renewal failed.')
   return body
@@ -69,7 +69,7 @@ export async function cloudRefreshSession(refreshToken) {
 export async function cloudAccountForBusiness(accessToken, businessId) {
   const { url } = await getCloudConfiguration()
   if (!url || !accessToken || !businessId) throw new Error('Cloud identity is unavailable.')
-  const response = await fetch(`${url}/v1/auth/me`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const response = await fetch(`${url}/v1/auth/me`, { signal: AbortSignal.timeout(10_000), headers: { Authorization: `Bearer ${accessToken}` } })
   const body = await response.json().catch(() => ({}))
   if (!response.ok || !body.account?.id || body.account.businessId !== businessId) throw new Error('Your cloud sign-in belongs to a different business. Sign in again on this enrolled device.')
   return body.account

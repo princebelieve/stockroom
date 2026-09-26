@@ -32,6 +32,9 @@ export async function sendReferralBonusNotice({ to, amount, currency, kind }) {
 function transport() {
   return nodemailer.createTransport({
     service: 'gmail',
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 10_000,
     auth: { type: 'OAuth2', user: process.env.SMTP_USER, clientId: process.env.GMAIL_CLIENT_ID, clientSecret: process.env.GMAIL_CLIENT_SECRET, refreshToken: process.env.GMAIL_REFRESH_TOKEN },
   })
 }

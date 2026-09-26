@@ -792,7 +792,7 @@ function App() {
   useEffect(() => {
     fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }> : Promise.reject()).then((settings) => {
       setRegistrationAvailable(!settings.ownerConfigured)
-      setFreshVisitor(!settings.ownerConfigured)
+      setFreshVisitor(!settings.ownerConfigured && !settings.cloudConfigured && !settings.existingBusiness)
       const startupState = resolveStartupState(settings)
       const browserStartupState = isBrowserPwa() && !settings.cloudConfigured
         ? { ...startupState, installerRequired: false, setupRequired: false }
@@ -838,9 +838,13 @@ function App() {
     })
   }, [])
   useEffect(() => {
-    if (!settingsLoaded || !freshVisitor || user || authToken || registrationRequested || location.pathname !== '/' || new URLSearchParams(location.search).has('screen')) return
+    const query = new URLSearchParams(location.search)
+    // Business-specific staff links must stay in the app. A brand-new browser
+    // profile has no local account yet, but `?business=...` identifies the
+    // existing tenant and should open the sign-in form instead of the landing page.
+    if (!settingsLoaded || !freshVisitor || user || authToken || registrationRequested || location.pathname !== '/' || query.has('screen') || query.has('business')) return
     const destination = new URL('/welcome', location.origin)
-    const referral = new URLSearchParams(location.search).get('ref') || ''
+    const referral = query.get('ref') || ''
     if (/^[a-f0-9]{32}$/.test(referral)) destination.searchParams.set('ref', referral)
     location.replace(destination.href)
   }, [settingsLoaded, freshVisitor, user, authToken, registrationRequested])
@@ -1120,16 +1124,40 @@ function App() {
     if (!username) return
     const ownerPassword = await requestInlinePrompt({ title: 'Confirm owner password', message: 'Enter your owner password to create this staff account. It is checked securely and is not stored.', inputType: 'password', minLength: 1 })
     if (!ownerPassword) return
-    const response = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password, role: form.get('role'), ownerPassword }) })
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Could not add user.' })) as { error?: string }
-      setSettingsMessage(error.error || 'Could not add user.')
-      return
+    setSettingsMessage('Creating the staff account…')
+    try {
+      // The desktop API has a local app session and a separate cloud owner
+      // credential. Refresh/validate the latter before asking it to create staff.
+      let cloudHeaders: Record<string, string> = {}
+      if (!isBrowserPwa() && !isNativeMobile()) {
+        const bootstrap = await fetch('/api/auth/cloud-bootstrap', {
+          method: 'POST', signal: AbortSignal.timeout(12_000),
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+          body: JSON.stringify({
+            accessToken: localStorage.getItem('stockroom-cloud-access-token') || cloudAccessToken,
+            refreshToken: localStorage.getItem('stockroom-cloud-refresh-token') || '',
+          }),
+        })
+        const session = await bootstrap.json().catch(() => ({})) as { accessToken?: string; refreshToken?: string; error?: string }
+        if (!bootstrap.ok || !session.accessToken) throw new Error(session.error || 'Reconnect the owner account to manage staff.')
+        setCloudAccessToken(session.accessToken)
+        localStorage.setItem('stockroom-cloud-access-token', session.accessToken)
+        if (session.refreshToken) localStorage.setItem('stockroom-cloud-refresh-token', session.refreshToken)
+        cloudHeaders = { 'X-Cloud-Access-Token': session.accessToken }
+      }
+      const response = await fetch('/api/users', {
+        method: 'POST', signal: AbortSignal.timeout(15_000),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}`, ...cloudHeaders },
+        body: JSON.stringify({ name: form.get('name'), email: form.get('email'), username, password, role: form.get('role'), ownerPassword }),
+      })
+      const result = await response.json().catch(() => ({})) as StaffUser & { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Could not add the staff account.')
+      setStaff((current) => [...current, result])
+      submittedForm.reset()
+      setSettingsMessage(`${result.name} was added as ${result.role}.`)
+    } catch (caught) {
+      setSettingsMessage(caught instanceof Error ? caught.message : 'Could not add the staff account. Please try again.')
     }
-    const created = await response.json() as StaffUser
-    setStaff((current) => [...current, created])
-    submittedForm.reset()
-    setSettingsMessage(`${created.name} was added as ${created.role}.`)
   }
 
   async function setCashierAccess(id: string, enabled: boolean) {
@@ -1297,11 +1325,11 @@ function App() {
       const cloudResponse = await fetch('/api/auth/cloud-session', { method: 'POST', signal: AbortSignal.timeout(10_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password }) }).catch(() => null)
       cloudData = cloudResponse?.ok ? await cloudResponse.json() as { token: string; user: User; cloudAccessToken: string; refreshToken?: string } : null
       if (!cloudData) {
+        const failure = await cloudResponse?.json().catch(() => null) as { error?: string } | null
         if (isBrowserPwa() || isNativeMobile()) {
-          const failure = await cloudResponse?.json().catch(() => null)
           throw new Error(failure?.error || 'Connect to the internet to sign in. An existing signed-in session can work offline.')
         }
-        throw new Error('Email or password is incorrect.')
+        throw new Error(failure?.error || 'Sign-in failed. Owners must use their business email; staff must use their username and business sign-in link.')
       }
       data = cloudData
     }
@@ -1423,6 +1451,7 @@ function App() {
     // Ending an active session does not undo device enrollment or shop setup.
     setInstallerRequired(false)
     setSetupRequired(false)
+    setFreshVisitor(false)
     setAuthError('')
     setAuthToken('')
     setUser(null)
@@ -1543,9 +1572,10 @@ function LoginScreen({ onLogin, error, setError, onRegister }: { onRegister?: ()
   if (mode === 'request') return <main className="login-screen"><AsyncForm busyLabel="Sending reset code..." className="login-card" onSubmit={async (event) => {
     event.preventDefault(); if (submitting) return; setSubmitting(true); resetView()
     try {
-      const response = await fetch('/api/auth/password-reset/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
+      const response = await fetch('/api/auth/password-reset/request', { method: 'POST', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to request a reset email.')
+      if (data.delivered !== true) throw new Error('No reset email was delivered. Check the owner email and spam folder. If they are correct, contact support to check cloud email delivery. Your password has not changed.')
       setMessage('If this email has a cloud account, a reset code has been sent. Check your inbox and spam folder.')
       setMode('confirm')
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to request a reset email.') } finally { setSubmitting(false) }
@@ -1625,8 +1655,9 @@ function MovementHistory({ movements }: { movements: Movement[] }) {
 }
 
 function BusinessSignInLink({ businessId }: { businessId: string }) {
-  const url = `${window.location.origin}/?business=${encodeURIComponent(businessId)}`
-  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Staff sign-in link</h2><p>Share this business-specific link with staff. It works in any browser or PWA.</p></div></div><input aria-label="Business sign-in URL" readOnly onFocus={event => event.currentTarget.select()} value={url} /></section>
+  const url = new URL('/', import.meta.env.VITE_PUBLIC_APP_URL || 'https://stockroom.globalcreest.com/')
+  url.searchParams.set('business', businessId)
+  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Staff sign-in link</h2><p>Share this business-specific link with staff. It works in any browser or PWA.</p></div></div><input aria-label="Business sign-in URL" readOnly onFocus={event => event.currentTarget.select()} value={url.toString()} /></section>
 }
 
 function TeamManagement({ staff, loaded, addStaff, updateStaffRole, setCashierAccess, canCreateStaff, message }: { staff: StaffUser[]; loaded: boolean; addStaff: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; updateStaffRole: (id: string, role: 'admin' | 'cashier', operationalAccess?: boolean) => Promise<void>; setCashierAccess: (id: string, enabled: boolean) => Promise<void>; canCreateStaff: boolean; message: string }) {
