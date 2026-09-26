@@ -515,7 +515,7 @@ function App() {
     if (!authToken || user?.role !== 'owner' || (isBrowserPwa() && active !== 'Team')) return
     let cancelled = false
     setStaffLoaded(false)
-    fetch('/api/users').then(async (response) => {
+    fetch('/api/users', { headers: authHeaders }).then(async (response) => {
       const data = await response.json() as { users: StaffUser[]; refreshed?: boolean; refreshError?: string; error?: string }
       if (!response.ok) throw new Error(data.error || 'Could not load the staff directory.')
       if (!cancelled) {
@@ -638,7 +638,7 @@ function App() {
     setSyncFeedback('Downloading changes from the cloud…')
     try {
         if (active === 'Team' && user?.role === 'owner') {
-          const response = await deadline.wait(fetch('/api/users', { signal: deadline.signal }))
+          const response = await deadline.wait(fetch('/api/users', { headers: authHeaders, signal: deadline.signal }))
           const data = await deadline.wait(response.json()) as { users: StaffUser[]; refreshed?: boolean; refreshError?: string; error?: string }
           if (!response.ok) throw new Error(data.error || 'Could not load the staff directory.')
           setStaff(data.users)

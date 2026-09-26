@@ -3,6 +3,7 @@ import { normalizeCashSale } from '../../server/cash.mjs'
 import { loadSubscriptionAccess } from '../../server/subscription-client.mjs'
 // Browser API: separate from native Android so PWA changes cannot alter its storage path.
 import { browserStocktake } from './browserStocktake'
+import { cloudRequest as requestCloud } from './cloudRequest'
 import { getBrowserSyncConfiguration as getMobileSyncConfiguration, openBrowserDatabase as openMobileDatabase, saveBrowserSyncConfiguration as saveMobileSyncConfiguration, type BrowserSyncConfiguration as MobileSyncConfiguration } from './browserDatabase'
 
 type MobileUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
@@ -225,11 +226,10 @@ async function localSyncStatus() {
 async function cloudRequest(path: string, init: RequestInit = {}) {
   const config = await getMobileSyncConfiguration()
   const token = await setting('cloudAccessToken')
-  if (!config || !token) throw new Error('Connect to the internet and sign in again to manage staff.')
-  const response = await originalFetch(`${config.syncApiUrl}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers || {}), Authorization: `Bearer ${token}` } })
-  const result = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(result.error || 'Cloud request failed.')
-  return result
+  if (!config) throw new Error('Connect this browser to a business before managing staff.')
+  return requestCloud(config.syncApiUrl, path, init, (accessToken, refreshToken) => {
+    void Promise.all([setSetting('cloudAccessToken', accessToken), setSetting('cloudRefreshToken', refreshToken)])
+  }, token)
 }
 async function cachedStaff(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
   const rows = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users ORDER BY created_at ASC')).values || []
@@ -252,11 +252,16 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   if (path === '/api/auth/logout' && method === 'POST') {
     await setSetting('sessionUserId', '')
     await setSetting('cloudAccessToken', '')
+    await setSetting('cloudRefreshToken', '')
     return json({})
   }
   if (path === '/api/auth/login') return error('Use cloud sign-in on this device.', 401)
   if (['/api/auth/password-reset/request', '/api/auth/password-reset/confirm'].includes(path) && method === 'POST') {
     return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, headers: { 'Content-Type': 'application/json' }, body: init?.body })
+  }
+  if (path === '/api/users' || path.startsWith('/api/users/')) {
+    const suppliedToken = new Headers(init?.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') || ''
+    if (!suppliedToken || suppliedToken !== localStorage.getItem('stockroom-token')) return error('Your app session expired. Sign in again to manage the team.', 401)
   }
   const savedUser = await sessionUser() || await restoreSavedSession()
   // Local routes never recover identity over the network. A missing saved
