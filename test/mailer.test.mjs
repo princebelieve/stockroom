@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mailConfigured, mailDiagnostics } from '../cloud/mailer.mjs'
 
-const names = ['SMTP_USER', 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
+const names = ['GMAIL_USER', 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
 
 function withEnvironment(values, run) {
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]))
@@ -17,18 +17,16 @@ function withEnvironment(values, run) {
   }
 }
 
-test('mail diagnostics report effective SMTP settings and credential presence without exposing values', () => {
+test('mail diagnostics report Gmail API transport and credential presence without exposing values', () => {
   withEnvironment({
-    SMTP_USER: 'owner@example.test',
+    GMAIL_USER: 'owner@example.test',
     GMAIL_CLIENT_ID: 'client-id-secret',
     GMAIL_CLIENT_SECRET: 'client-secret-value',
     GMAIL_REFRESH_TOKEN: 'refresh-token-value',
   }, () => {
     const status = mailDiagnostics()
     assert.equal(mailConfigured(), true)
-    assert.equal(status.host, 'smtp.gmail.com')
-    assert.equal(status.port, 465)
-    assert.equal(status.tls, 'implicit TLS (Nodemailer Gmail preset)')
+    assert.equal(status.provider, 'Gmail API OAuth2 over HTTPS')
     assert.deepEqual(status.missing, [])
     assert.ok(Object.values(status.credentials).every(value => value === 'present'))
     const log = JSON.stringify(status)
@@ -37,11 +35,11 @@ test('mail diagnostics report effective SMTP settings and credential presence wi
 })
 
 test('mail diagnostics name missing credentials without exposing their values', () => {
-  withEnvironment({ SMTP_USER: 'owner@example.test' }, () => {
+  withEnvironment({ GMAIL_USER: 'owner@example.test' }, () => {
     const status = mailDiagnostics()
     assert.equal(mailConfigured(), false)
-    assert.equal(status.port, 465)
+    assert.equal(status.provider, 'Gmail API OAuth2 over HTTPS')
     assert.deepEqual(status.missing, ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN'])
-    assert.equal(status.credentials.SMTP_USER, 'present')
+    assert.equal(status.credentials.GMAIL_USER, 'present')
   })
 })

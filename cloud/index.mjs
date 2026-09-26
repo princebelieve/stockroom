@@ -207,7 +207,7 @@ const server = createServer(async (request, response) => {
           else console.error(`Password reset email was not delivered.${requestTag}`)
         } catch (error) {
           const detail = error instanceof Error ? error.message : 'Unknown mail transport error.'
-          const sensitiveValues = [account.email, rawToken, process.env.SMTP_USER, process.env.GMAIL_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET, process.env.GMAIL_REFRESH_TOKEN].filter(Boolean)
+          const sensitiveValues = [account.email, rawToken, process.env.GMAIL_USER, process.env.GMAIL_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET, process.env.GMAIL_REFRESH_TOKEN].filter(Boolean)
           const safeDetail = sensitiveValues.reduce((message, value) => message.replaceAll(value, '[redacted]'), detail)
           console.error(`Password reset email delivery failed.${requestTag}`, JSON.stringify({ message: safeDetail, code: error?.code || '', command: error?.command || '', responseCode: error?.responseCode || '' }))
         }

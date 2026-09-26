@@ -10,7 +10,7 @@ Set these server environment variables in Render:
 - `SUBSCRIPTION_PUBLIC_URL`: the public HTTPS origin of the Vercel Business App, for example `https://stockroom.globalcreest.com`.
 - `DEVELOPER_EMAIL`: the email address of your developer owner account.
 - `PWA_ALLOWED_ORIGINS`: the same Vercel origin, so the deployed app may call the Render API.
-- Existing `SMTP_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: reused for Gmail OAuth email delivery.
+- Existing `GMAIL_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: reused for Gmail API email delivery.
 
 In Paystack, set the webhook URL to `https://YOUR-CLOUD-HOST/v1/subscriptions/webhook`. Checkout returns to the in-app Subscription screen on Vercel. No Paystack recurring plan or reusable authorization is created or charged by the app. Each renewal starts a separate checkout. Only verified successful payments matching the stored reference, owner email, currency, and amount extend the expiry. Repeated notifications do not extend it twice. Early renewals add days to the current expiry; expired subscriptions restart from payment processing time.
 

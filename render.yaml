@@ -14,7 +14,7 @@ services:
         generateValue: true
       - key: MONGODB_DATABASE
         value: stockroom_sync
-      - key: SMTP_USER
+      - key: GMAIL_USER
         sync: false
       - key: PAYSTACK_SECRET_KEY
         sync: false

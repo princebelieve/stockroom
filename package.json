@@ -27,7 +27,6 @@
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
     "mongodb": "latest",
-    "nodemailer": "^10.0.10",
     "react": "latest",
     "react-dom": "latest",
     "sql.js": "^1.14.2",
