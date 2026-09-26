@@ -21,7 +21,7 @@ $body = @{ businessId = 'client-001'; ownerName = 'Client Owner'; email = 'owner
 Invoke-RestMethod -Method Post -Uri 'https://YOUR-RENDER-URL/v1/auth/register' -ContentType 'application/json' -Body $body
 ```
 
-Owners sign in with their email and password through `POST /v1/auth/login`. Staff sign in with their unique username and password; staff email addresses are contact-only and cannot authenticate. Existing staff receive a username derived from their email prefix the next time the owner opens Team management. Use the owner's returned `accessToken` to enroll, list, or revoke devices. Enroll a device:
+Owners sign in with their email and password through `POST /v1/auth/login`. Staff sign in with their username and password; staff email addresses are contact-only and cannot authenticate. Staff usernames are unique within a business, so use the business-specific sign-in URL shown in Team management when signing in on a new browser. The URL passes the business ID as a tenant selector; the username and password still authenticate the staff account. An authenticated staff account can enroll its own browser, so the owner does not need to enroll each staff browser. Existing staff receive a username derived from their email prefix the next time the owner opens Team management. Owners use their returned `accessToken` to enroll, list, or revoke devices. Enroll a device:
 
 ```powershell
 $headers = @{ Authorization = 'Bearer OWNER_ACCESS_TOKEN'; 'Content-Type' = 'application/json' }

@@ -6,6 +6,13 @@
   "outputDirectory": "dist",
   "headers": [
     {
+      "source": "/app-update.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    },
+    {
       "source": "/sw.js",
       "headers": [
         {

@@ -152,9 +152,10 @@ const server = createServer(async (request, response) => {
       const staffUsername = username(input.username)
       const businessId = String(input.businessId || '').trim()
       if ((email && staffUsername) || (!email && !staffUsername)) return send(response, 400, { error: 'Use an owner email or staff username.' })
-      // Owner email is globally unique. Staff usernames are unique only within
-      // a business, so clients must send their enrolled business ID for staff.
-      if (staffUsername && !businessId) return send(response, 400, { error: 'This device must identify its business before staff can sign in.' })
+      // Owner email is globally unique. Staff usernames are unique only
+      // within a business, so staff clients must supply the business ID from
+      // their business-specific sign-in URL or existing enrollment.
+      if (staffUsername && !businessId) return send(response, 400, { error: 'Open your business sign-in link before signing in with a staff username.' })
       const account = email
         ? await accounts.findOne({ email, role: 'owner' })
         : await accounts.findOne({ businessId, username: staffUsername, role: { $in: ['admin', 'cashier'] } })
@@ -231,7 +232,7 @@ const server = createServer(async (request, response) => {
       return send(response, 200, { settings: latest?.payload || null })
     }
     if (request.method === 'POST' && request.url === '/v1/devices/enroll') {
-      if (!isAccess(claims)) return send(response, 403, { error: 'Owner access token required.' })
+      if (!isAccess(claims)) return send(response, 403, { error: 'Sign-in required.' })
       const input = await readJson(request)
       const deviceId = String(input.deviceId || '').trim()
       if (!/^[a-z0-9][a-z0-9-]{2,100}$/i.test(deviceId)) return send(response, 400, { error: 'A valid device ID is required.' })

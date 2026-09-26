@@ -12,11 +12,18 @@ const ocrFiles: Record<string, string> = Object.fromEntries([
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const appPackage = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
+  const androidBuild = readFileSync(resolve('android/app/build.gradle'), 'utf8')
+  const androidVersion = androidBuild.match(/versionName\s+"([^"]+)"/)?.[1] || appPackage.version
   // The API base URL is public client configuration. Inject only this one
   // setting; never expose device tokens or other SYNC_* environment values.
   const syncApiUrl = env.SYNC_API_URL || env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com'
   return {
-  define: { __STOCKROOM_SYNC_API_URL__: JSON.stringify(syncApiUrl) },
+  define: {
+    __STOCKROOM_SYNC_API_URL__: JSON.stringify(syncApiUrl),
+    __STOCKROOM_WINDOWS_VERSION__: JSON.stringify(appPackage.version),
+    __STOCKROOM_ANDROID_VERSION__: JSON.stringify(androidVersion),
+  },
   build: { target: 'es2022', rollupOptions: { input: { app: resolve('index.html'), welcome: resolve('welcome.html') } } },
   plugins: [react(), {
     name: 'local-receipt-ocr',

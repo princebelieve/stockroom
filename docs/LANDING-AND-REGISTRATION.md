@@ -26,7 +26,7 @@ Download controls remain visibly unavailable until valid HTTPS release URLs are 
 
 ```powershell
 vercel blob put .\release\android\Stockroom-release.apk --pathname downloads/Stockroom-release.apk --access public
-vercel blob put ".\release\Stockroom Business Setup 1.0.6.exe" --pathname downloads/Stockroom-Business-Setup-1.0.6.exe --access public
+vercel blob put ".\release\Stockroom Business Setup 1.0.7.exe" --pathname downloads/Stockroom-Business-Setup-1.0.7.exe --access public
 ```
 
 Copy the public HTTPS URLs printed by the CLI into `VITE_APK_DOWNLOAD_URL` and `VITE_DESKTOP_DOWNLOAD_URL` in the Vercel project environment settings, then redeploy the frontend. Link the Windows `.exe` directly. Use Blob rather than the Hobby static deployment because this installer is about 188 MB, above the 100 MB static file limit. Vercel Blob is available on Hobby with a free allowance; monitor storage and download transfer in the Vercel dashboard because use beyond included quotas may be restricted on Hobby. The Android release command requires a production keystore through `ANDROID_RELEASE_KEYSTORE`, `ANDROID_RELEASE_STORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD`; it fails rather than silently shipping a debug-signed or unsigned APK. Keep the keystore and passwords private and backed up. Never put signing secrets or the cloud admin key in a `VITE_` variable.

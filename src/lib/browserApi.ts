@@ -285,11 +285,14 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   if (path === '/api/auth/cloud-session' && method === 'POST') {
     const input = await body(init); let config = await getMobileSyncConfiguration()
     const syncApiUrl = config?.syncApiUrl || cloudUrl
+    const requestedBusinessId = String(new URLSearchParams(window.location.search).get('business') || '').trim()
+    if (config && requestedBusinessId && requestedBusinessId !== config.businessId) return error('This browser is already connected to a different business. Sign out and use a separate browser profile to join another business.', 403)
+    const businessId = config?.businessId || requestedBusinessId
     const identifier = String(input.identifier || input.email || '').trim()
-    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId: config?.businessId }) })
+    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId }) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
     const account = result.account
-    if (!config && account.role !== 'owner') return error('An owner must sign in on this browser once before staff can use it.', 403)
+    if (businessId && account.businessId !== businessId) return error('These credentials belong to a different business than this sign-in link.', 403)
     if (config && account.businessId !== config.businessId) return error('This account belongs to a different business.', 403)
     if (!config) {
       const deviceId = await browserDeviceId()

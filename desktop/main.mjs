@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sendHardwareCommand } from './hardware.mjs'
@@ -26,6 +26,13 @@ async function createWindow() {
   const window = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1024, minHeight: 700, autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)) },
+  })
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const external = new URL(url)
+      if (external.origin === 'https://stockroom.globalcreest.com' && external.pathname === '/welcome') void shell.openExternal(url)
+    } catch {}
+    return { action: 'deny' }
   })
   window.loadURL(`http://127.0.0.1:${port}`)
 }
