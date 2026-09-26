@@ -6,6 +6,7 @@ import { mailConfigured, mailDiagnostics, sendPasswordReset } from './mailer.mjs
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
+import { completeOwnerPasswordReset } from './password-reset.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -216,16 +217,12 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'POST' && request.url === '/v1/auth/password-reset/confirm') {
       const input = await readJson(request)
-      const password = String(input.password || '')
-      if (password.length < 10) return send(response, 400, { error: 'Password must be at least 10 characters.' })
-      const tokenHash = createHmac('sha256', jwtSecret).update(String(input.token || '')).digest('hex')
-      const reset = await passwordResets.findOneAndUpdate({ tokenHash, usedAt: null, expiresAt: { $gt: new Date() } }, { $set: { usedAt: new Date() } }, { returnDocument: 'after' })
-      if (!reset) return send(response, 400, { error: 'The reset link is invalid or has expired.' })
-      const account = await accounts.findOneAndUpdate({ _id: reset.accountId, role: 'owner' }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
-      if (!account) return send(response, 400, { error: 'Only an owner password can be reset by email.' })
-      await devices.updateMany({ businessId: account.businessId }, { $set: { revokedAt: new Date(), revokeReason: 'Owner password reset' } })
-      await refreshTokens.deleteMany({ accountId: account._id })
-      return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account), message: 'Password updated. Re-enroll each device.' })
+      try {
+        const result = await completeOwnerPasswordReset({ token: input.token, password: input.password, jwtSecret, passwordResets, accounts, refreshTokens, hashPassword, createAccessToken: accessToken })
+        return send(response, 200, { account: publicAccount(result.account), accessToken: result.accessToken, message: 'Password updated. Existing devices remain connected.' })
+      } catch (error) {
+        return send(response, 400, { error: error instanceof Error ? error.message : 'Unable to reset owner password.' })
+      }
     }
     if (request.method === 'POST' && request.url === '/v1/admin/devices') {
       if (request.headers['x-admin-key'] !== adminApiKey) return send(response, 401, { error: 'Unauthorized.' })

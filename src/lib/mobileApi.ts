@@ -10,6 +10,7 @@ type Operation = { operationId: string; entityType: string; entityId: string; ac
 
 const networkFetch = window.fetch.bind(window)
 const originalFetch: typeof fetch = (input, init = {}) => networkFetch(input, { ...init, signal: init.signal || AbortSignal.timeout(20000) })
+const cloudUrl = __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
 const now = () => new Date().toISOString()
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const error = (message: string, status = 400) => json({ error: message }, status)
@@ -249,7 +250,10 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase()
   if (path === '/api/auth/register-business' && method === 'POST') {
     if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
-    return originalFetch(`${__STOCKROOM_SYNC_API_URL__}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
+    return originalFetch(`${cloudUrl}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
+  }
+  if (['/api/auth/password-reset/request', '/api/auth/password-reset/confirm'].includes(path) && method === 'POST') {
+    return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, headers: { 'Content-Type': 'application/json' }, body: init?.body })
   }
   // Logout must also clear stale sessions whose user record no longer exists.
   // Device enrollment lives in separate settings and is preserved.
