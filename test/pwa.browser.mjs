@@ -8,7 +8,8 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname
   try {
-    const file = resolve('dist', path === '/' ? 'index.html' : `.${path}`)
+    // Mirror Vercel's cleanUrls behavior for the app's canonical /welcome URL.
+    const file = resolve('dist', path === '/' ? 'index.html' : path === '/welcome' ? 'welcome.html' : `.${path}`)
     if (!file.startsWith(resolve('dist'))) throw new Error('Invalid path')
     res.setHeader('Content-Type', types[extname(file)] || 'application/octet-stream')
     res.end(await readFile(file))
@@ -52,7 +53,8 @@ try {
   })
   const registrationPage = await registrationContext.newPage()
   await registrationPage.goto(`http://127.0.0.1:${server.address().port}/?screen=register&ref=${'a'.repeat(32)}`)
-  await registrationPage.waitForFunction(() => navigator.serviceWorker.controller && performance.getEntriesByType('navigation')[0]?.type === 'reload')
+  await registrationPage.waitForFunction(() => navigator.serviceWorker.controller)
+  await registrationPage.getByRole('button', { name: 'I have a registration key' }).click()
   await registrationPage.getByRole('heading', { name: 'Set up your shop' }).waitFor()
   await registrationPage.getByLabel('Business registration key').fill(`SBIT-${'b'.repeat(48)}`)
   await registrationPage.getByLabel('Owner name', { exact: true }).fill('Owner')
@@ -81,8 +83,8 @@ try {
   }
   const errors = []
   page.on('pageerror', error => { errors.push(error.message); console.error(error.message) })
-  await page.goto(`http://127.0.0.1:${server.address().port}`)
-  await page.waitForFunction(() => navigator.serviceWorker.controller && performance.getEntriesByType('navigation')[0]?.type === 'reload')
+  await page.goto(`http://127.0.0.1:${server.address().port}/?business=shop`)
+  await page.waitForFunction(() => navigator.serviceWorker.controller)
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   console.log('PWA loaded')
   const api = (path, body) => page.evaluate(async ({ path, body }) => {
@@ -166,7 +168,7 @@ try {
   await newDevice.route('https://stockroom-0vm5.onrender.com/**', cloudRoute)
   const newPage = await newDevice.newPage()
   await newPage.goto(page.url())
-  await newPage.waitForFunction(() => navigator.serviceWorker.controller && performance.getEntriesByType('navigation')[0]?.type === 'reload')
+  await newPage.waitForFunction(() => navigator.serviceWorker.controller)
   await newPage.getByLabel('Owner email or staff username', { exact: true }).fill('owner@test.com')
   await newPage.getByLabel('Password', { exact: true }).fill('test-password')
   await newPage.getByRole('button', { name: 'Sign in', exact: true }).click()

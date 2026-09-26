@@ -47,18 +47,19 @@ function fixture() {
   return { database, client, accounts: database.collection('accounts'), hashPassword: value => `hashed:${value}`, rows: name => state[name] || [] }
 }
 const registrationService = db => createRegistration({ database: db.database, client: db.client, accounts: db.accounts, hashPassword: db.hashPassword })
-const details = { businessId: 'new-shop', businessName: 'New Shop', email: 'owner@test.com', expiresInDays: 7 }
+const details = { businessName: 'New Shop', email: 'owner@test.com', expiresInDays: 7 }
 const owner = { ownerName: 'Shop Owner', email: 'owner@test.com', password: 'strong-password', currency: 'NGN' }
 
 test('keys are unpredictable, hashed at rest and bound to email and business', async () => {
   const db = fixture(); const service = await registrationService(db)
   const issued = await service.issue(details)
+  assert.match(issued.businessId, /^new-shop-[a-f0-9]{10}$/)
   assert.match(issued.key, /^SBIT-[a-f0-9]{48}$/)
   assert.equal(db.rows('business_registration_keys')[0]._id, registrationKeyHash(issued.key))
   assert.ok(!JSON.stringify(db.rows('business_registration_keys')).includes(issued.key))
   await assert.rejects(service.redeem({ ...owner, email: 'other@test.com', key: issued.key }), /another email/)
   const result = await service.redeem({ ...owner, key: issued.key, businessId: 'attacker-chosen' })
-  assert.equal(result.businessId, details.businessId)
+  assert.equal(result.businessId, issued.businessId)
   assert.equal(db.rows('accounts')[0].passwordHash, 'hashed:strong-password')
   assert.equal(db.rows('business_settings')[0].settings.appName, details.businessName)
   assert.equal(db.rows('sync_operations')[0].payload.currency, 'NGN')
@@ -89,8 +90,9 @@ test('failed registration rolls back key use and referral binding is committed w
   assert.deepEqual(db.rows('subscriptions')[0].references, [])
 })
 
-test('registration input rejects invalid key scope and excessive expiry', () => {
+test('registration generates a safe business ID and rejects invalid email and excessive expiry', () => {
   assert.throws(() => registrationInput({ ...details, expiresInDays: 31 }))
-  assert.throws(() => registrationInput({ ...details, businessId: '../other' }))
   assert.throws(() => registrationInput({ ...details, email: '' }))
+  const generated = registrationInput({ ...details, businessId: '../other' })
+  assert.match(generated.businessId, /^new-shop-[a-f0-9]{10}$/)
 })

@@ -35,7 +35,7 @@ test('service worker serves its matching cached shell before attempting navigati
   vm.runInNewContext(readFileSync('public/sw.js', 'utf8'), {
     URL,
     fetch: () => { throw new Error('Navigation must not replace the cached shell') },
-    caches: { open: async () => ({ match: async path => path === '/index.html' ? shell : undefined }) },
+    caches: { open: async () => ({ match: async path => path === '/' ? shell : undefined }) },
     self: { location: { origin: 'https://shop.example' }, addEventListener: (event, handler) => listeners[event] = handler },
   })
   let response

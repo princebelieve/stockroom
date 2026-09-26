@@ -37,6 +37,8 @@ Email password recovery uses `POST /v1/auth/password-reset/request` and `POST /v
 
 Create a Google Cloud project, configure the OAuth consent screen, create a **Web application** OAuth client, and obtain a refresh token for the Gmail account that will send Stockroom messages. Store only the resulting values in Render environment variables—never in the desktop app, `sync-config.json`, Git, or MongoDB. The service uses Gmail SMTP with OAuth 2.0, not a Gmail password or app password.
 
+At startup, the service logs the Gmail SMTP preset's host, port, TLS mode, and whether each required environment variable is present or missing. It never logs OAuth credential values, the recipient address, or reset codes. Password-reset attempts log whether delivery succeeded, failed, or was skipped because no eligible owner account matched. Render's `Rndr-Id` is included when available to help locate the corresponding request.
+
 The legacy admin-key enrollment endpoint remains for your operational setup only. For normal client onboarding, prefer the owner account flow above.
 
 For each installed client device, create a unique business ID and device ID, then issue its JWT from a secure terminal (replace all example values):

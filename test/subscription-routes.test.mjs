@@ -30,6 +30,7 @@ function expression(value, row, now) {
   if (op === '$ifNull') { const [a, b] = evaluate(input); return a ?? b }
   if (op === '$size') return evaluate(input).length
   if (op === '$eq') { const [a, b] = evaluate(input); return a === b }
+  if (op === '$lt') { const [a, b] = evaluate(input); return a < b }
   if (op === '$cond') return evaluate(input[0]) ? evaluate(input[1]) : evaluate(input[2])
   if (op === '$max') return evaluate(input).reduce((a, b) => a > b ? a : b)
   if (op === '$concatArrays') return evaluate(input).flat()
@@ -109,7 +110,9 @@ test('cloud routes enforce developer authorization and attribute first/recurring
     assert.equal((await call('/referrals', { method: 'POST', input: { code } })).status, 409)
     const first = (await call('/checkout', { method: 'POST' })).data.reference
     const second = (await call('/checkout', { method: 'POST' })).data.reference
-    await Promise.all([call('/verify', { method: 'POST', input: { reference: first } }), call('/verify', { method: 'POST', input: { reference: second } })])
+    const [firstVerification, secondVerification] = await Promise.all([call('/verify', { method: 'POST', input: { reference: first } }), call('/verify', { method: 'POST', input: { reference: second } })])
+    assert.equal(firstVerification.status, 200)
+    assert.equal(secondVerification.status, 200)
     const before = await database.collection('subscriptions').findOne({ _id: 'buyer' })
     await Promise.all([call('/verify', { method: 'POST', input: { reference: first } }), call('/verify', { method: 'POST', input: { reference: first } })])
     const after = await database.collection('subscriptions').findOne({ _id: 'buyer' })

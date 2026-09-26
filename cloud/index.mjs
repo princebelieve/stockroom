@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { mailConfigured, sendPasswordReset } from './mailer.mjs'
+import { mailConfigured, mailDiagnostics, sendPasswordReset } from './mailer.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
@@ -182,21 +182,34 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'POST' && request.url === '/v1/auth/password-reset/request') {
       const input = await readJson(request)
+      const renderRequestId = String(request.headers['rndr-id'] || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
+      const requestTag = renderRequestId ? ` requestId=${renderRequestId}` : ''
       const account = await accounts.findOne({ email: String(input.email || '').trim().toLowerCase() })
       // Always return the same response so email addresses cannot be discovered.
       // Staff accounts deliberately cannot recover access from their own email.
       // Only the business owner's recovery address is an account-control channel.
-      if (!account || account.role !== 'owner') return send(response, 202, { ok: true })
+      if (!account || account.role !== 'owner') {
+        console.info(`Password reset request skipped: no eligible owner account matched.${requestTag}`)
+        return send(response, 202, { ok: true, delivered: false })
+      }
       const rawToken = randomBytes(32).toString('base64url')
       await passwordResets.insertOne({ accountId: account._id, tokenHash: createHmac('sha256', jwtSecret).update(rawToken).digest('hex'), expiresAt: new Date(Date.now() + 30 * 60_000), usedAt: null })
       // Configure an email provider webhook outside this code. In non-production
       // development only, return the token to permit end-to-end testing.
       let delivered = false
       if (!mailConfigured()) {
-        console.error('Password reset email was not sent: SMTP OAuth is not configured.')
+        console.error(`Password reset email was not sent: mail configuration is incomplete or invalid.${requestTag}`, JSON.stringify(mailDiagnostics()))
       } else {
-        try { delivered = await sendPasswordReset({ to: account.email, token: rawToken }) }
-        catch (error) { console.error('Password reset email delivery failed:', error instanceof Error ? error.message : 'Unknown mail transport error.') }
+        try {
+          delivered = await sendPasswordReset({ to: account.email, token: rawToken })
+          if (delivered) console.info(`Password reset email delivered.${requestTag}`)
+          else console.error(`Password reset email was not delivered.${requestTag}`)
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : 'Unknown mail transport error.'
+          const sensitiveValues = [account.email, rawToken, process.env.SMTP_USER, process.env.GMAIL_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET, process.env.GMAIL_REFRESH_TOKEN].filter(Boolean)
+          const safeDetail = sensitiveValues.reduce((message, value) => message.replaceAll(value, '[redacted]'), detail)
+          console.error(`Password reset email delivery failed.${requestTag}`, JSON.stringify({ message: safeDetail, code: error?.code || '', command: error?.command || '', responseCode: error?.responseCode || '' }))
+        }
       }
       const responseBody = { ok: true, delivered, ...(process.env.NODE_ENV !== 'production' ? { resetToken: rawToken } : {}) }
       return send(response, 202, responseBody)
@@ -371,4 +384,7 @@ const server = createServer(async (request, response) => {
   }
 })
 
-server.listen(port, () => console.log(`Sync API listening on ${port}`))
+server.listen(port, () => {
+  console.log(`Sync API listening on ${port}`)
+  console.info('Mail transport configuration:', JSON.stringify(mailDiagnostics()))
+})

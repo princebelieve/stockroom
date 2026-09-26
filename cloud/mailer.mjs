@@ -1,7 +1,23 @@
 import nodemailer from 'nodemailer'
 
+const credentialNames = ['SMTP_USER', 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
+
+export function mailDiagnostics() {
+  const credentials = Object.fromEntries(credentialNames.map(name => [name, process.env[name]?.trim() ? 'present' : 'missing']))
+  const missing = credentialNames.filter(name => credentials[name] === 'missing')
+  return {
+    provider: 'Gmail SMTP OAuth2',
+    host: 'smtp.gmail.com',
+    port: 465,
+    tls: 'implicit TLS (Nodemailer Gmail preset)',
+    credentials,
+    missing,
+    configured: missing.length === 0,
+  }
+}
+
 export function mailConfigured() {
-  return Boolean(process.env.SMTP_USER && process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN)
+  return mailDiagnostics().configured
 }
 const configured = mailConfigured
 
