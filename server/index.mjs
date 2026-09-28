@@ -4,7 +4,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSyncConflicts, listUsers, provisionCloudUser, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
@@ -130,6 +130,18 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/sales') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
     return sendJson(response, 200, { sales: await listSales() })
+  }
+  if (request.method === 'GET' && request.url === '/api/sales/voids') {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return sendJson(response, 200, { voids: await listSaleItemVoids() })
+  }
+  if (request.method === 'POST' && request.url === '/api/sales/voids') {
+    return readJson(request, response, async (input) => {
+      const user = sessionUser(request)
+      if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
+      try { return sendJson(response, 201, recordSaleItemVoid(input, user)) }
+      catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Could not record the void.' }) }
+    })
   }
   if (request.method === 'GET' && request.url === '/api/expenses') {
     if (!isManager(sessionUser(request))) return sendJson(response, 403, { error: 'Owner or admin access required.' })

@@ -38,7 +38,7 @@ public class StockroomPrintingPlugin extends Plugin {
         String html = call.getString("html", "");
         String kind = call.getString("kind", "");
         int width = call.getInt("width", 80);
-        if (html.isEmpty() || html.length() > 2000000 || !(kind.equals("receipt") || kind.equals("report")) || (width != 58 && width != 80)) {
+        if (html.isEmpty() || html.length() > 2000000 || !(kind.equals("receipt") || kind.equals("order") || kind.equals("report")) || (width != 58 && width != 80)) {
             call.reject("Invalid print document."); return;
         }
         getActivity().runOnUiThread(() -> {

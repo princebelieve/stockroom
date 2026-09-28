@@ -93,6 +93,8 @@ async function applyOperation(operation: Operation) {
         await db.run('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?', [Number(item.quantity), item.productId])
       }
     }
+  } else if (operation.entityType === 'sale_void' && operation.action === 'create') {
+    await db.run('INSERT OR IGNORE INTO sale_item_voids (id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, payload.orderId, payload.productId, payload.productName, Number(payload.quantity), Number(payload.unitPrice), payload.reason, payload.staffId || '', payload.staffName || '', payload.createdAt || operation.createdAt])
   } else if (operation.entityType === 'customer' && operation.action === 'upsert') {
     await db.run('INSERT INTO customers (id, name, phone, balance) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, phone=excluded.phone', [payload.id, payload.name, payload.phone || '', Number(payload.balance) || 0])
   } else if (operation.entityType === 'wallet' && operation.action === 'adjust') {
@@ -394,6 +396,21 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     for (const sale of sales) sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
     for (const sale of sales) sale.items = (await db.query('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?', [sale.id])).values || []
     return json({ sales })
+  }
+  if (path === '/api/sales/voids' && method === 'POST') {
+    const input = await body(init)
+    const reason = String(input.reason || '').trim()
+    const quantity = Number(input.quantity)
+    const unitPrice = Number(input.unitPrice)
+    if (!String(input.id || '').trim() || !String(input.orderId || '').trim() || !String(input.productId || '').trim() || !String(input.productName || '').trim() || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3 || reason.length > 500) return error('Select a valid item and enter a void reason of 3 to 500 characters.')
+    const event = { id: String(input.id), orderId: String(input.orderId), productId: String(input.productId), productName: String(input.productName).trim().slice(0, 200), quantity, unitPrice, reason, staffId: user.id, staffName: user.name, createdAt: now() }
+    await db.run('INSERT OR IGNORE INTO sale_item_voids (id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [event.id, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt])
+    if ((await db.query('SELECT changes() AS changed')).values?.[0]?.changed) await queue('sale_void', event.id, 'create', event)
+    return json(event, 201)
+  }
+  if (path === '/api/sales/voids' && method === 'GET') {
+    if (!canOperate(user)) return error('Operational access is required.', 403)
+    return json({ voids: (await db.query('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids ORDER BY created_at DESC')).values || [] })
   }
   if (path === '/api/movements' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)

@@ -54,7 +54,11 @@ export async function createRegistration({ database, client, accounts, hashPassw
         let referrer = null
         if (code) {
           referrer = await database.collection('subscription_referrals').findOne({ code }, { session })
-          if (!referrer || referrer._id === grant.businessId) throw new Error('The referral code is invalid.')
+          if (!referrer || (referrer.type !== 'visitor' && referrer._id === grant.businessId)) throw new Error('The referral code is invalid.')
+          if (referrer.type === 'visitor') {
+            const visitor = await database.collection('referral_visitors').findOne({ _id: referrer.ownerId }, { session })
+            if (!visitor || visitor.email === email) throw new Error('You cannot use your own promoter referral link.')
+          }
         }
         const accountCreatedAt = new Date()
         const account = { businessId: grant.businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash, createdAt: accountCreatedAt }
@@ -66,7 +70,7 @@ export async function createRegistration({ database, client, accounts, hashPassw
         const plan = await database.collection('subscription_settings').findOne({ _id: 'plan' }, { session })
         const trialDays = Number(plan?.freeTrialDays ?? 0)
         const trialEndsAt = trialDays > 0 ? new Date(accountCreatedAt.getTime() + trialDays * 86400000) : null
-        await database.collection('subscriptions').updateOne({ _id: grant.businessId }, { $setOnInsert: { ...(referrer ? { referrerId: referrer._id } : {}), expiresAt: null, trialEndsAt, trialConfigured: true, planId: trialEndsAt ? 'trial' : null, references: [], commissionEvents: [], createdAt: accountCreatedAt } }, { upsert: true, session })
+        await database.collection('subscriptions').updateOne({ _id: grant.businessId }, { $setOnInsert: { ...(referrer ? { referrerId: referrer.ownerId || referrer._id, referrerType: referrer.type || 'business' } : {}), expiresAt: null, trialEndsAt, trialConfigured: true, planId: trialEndsAt ? 'trial' : null, references: [], commissionEvents: [], createdAt: accountCreatedAt } }, { upsert: true, session })
         return { businessId: grant.businessId, businessName: grant.businessName, email, trialEndsAt }
       }))
     },

@@ -98,6 +98,18 @@ export const browserSchema = `
       unit_price REAL NOT NULL,
       unit_cost REAL NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS sale_item_voids (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      quantity INTEGER NOT NULL CHECK(quantity > 0),
+      unit_price REAL NOT NULL CHECK(unit_price >= 0),
+      reason TEXT NOT NULL,
+      staff_id TEXT NOT NULL,
+      staff_name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS customers (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

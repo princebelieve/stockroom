@@ -13,6 +13,7 @@ backups/
 sync-config.json
 android/local.properties
 .gradle/
+/.gradle-user/
 
 # Environment secrets
 .env

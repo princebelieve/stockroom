@@ -2,7 +2,7 @@ import type { Product, Sale } from '../types'
 
 type SyncOperation = {
   id?: number
-  type: 'stock' | 'product' | 'sale' | 'settings'
+  type: 'stock' | 'product' | 'sale' | 'sale-void' | 'settings'
   payload: Record<string, unknown>
   createdAt: string
 }

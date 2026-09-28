@@ -76,7 +76,7 @@ app.whenReady().then(async () => {
     })
     ipcMain.handle('printers:print', async (event, options) => {
       trustedSender(event)
-      if (!options || !['receipt', 'report'].includes(options.kind) || typeof options.deviceName !== 'string' || ![58, 80].includes(options.width)) throw new Error('Invalid print settings.')
+      if (!options || !['receipt', 'order', 'report'].includes(options.kind) || typeof options.deviceName !== 'string' || ![58, 80].includes(options.width)) throw new Error('Invalid print settings.')
       if (options.deviceName && !(await event.sender.getPrintersAsync()).some(printer => printer.name === options.deviceName)) throw new Error('Selected printer is unavailable. Select another printer in Admin Settings.')
       await new Promise((resolve, reject) => event.sender.print({
         deviceName: options.deviceName, silent: Boolean(options.deviceName), printBackground: true,

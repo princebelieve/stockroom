@@ -7,6 +7,7 @@ import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
 import { completeOwnerPasswordReset } from './password-reset.mjs'
+import { createVisitorAccounts } from './visitor-accounts.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -24,6 +25,7 @@ const accounts = database.collection('accounts')
 const devices = database.collection('devices')
 const passwordResets = database.collection('password_resets')
 const refreshTokens = database.collection('auth_refresh_tokens')
+const referralVisitors = database.collection('referral_visitors')
 await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
@@ -43,6 +45,7 @@ await devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true })
 await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 await refreshTokens.createIndex({ tokenHash: 1 }, { unique: true })
 await refreshTokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+await referralVisitors.createIndex({ email: 1 }, { unique: true })
 
 // Sales, stock movements, wallet adjustments, expenses, and audit events are
 // immutable financial/inventory events: accept once by operation ID. Mutable
@@ -110,19 +113,29 @@ async function ownerPasswordIsValid(claims, value) {
 
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send })
 const registration = await createRegistration({ database, client, accounts, hashPassword })
+const visitorAccounts = createVisitorAccounts({ database, hashPassword, matchesPassword, signToken })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   // Referral percentages are intentionally public. They are displayed on the
   // marketing site, whose origin can differ from configured app origins.
-  if (request.method === 'GET' && request.url === '/v1/public/landing') corsHeaders['Access-Control-Allow-Origin'] = '*'
+  if (request.url?.startsWith('/v1/visitors/') || request.method === 'GET' && request.url === '/v1/public/landing') {
+    corsHeaders['Access-Control-Allow-Origin'] = '*'
+    corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+  }
   for (const [name, value] of Object.entries(corsHeaders)) response.setHeader(name, value)
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   try {
     if (request.method === 'GET' && request.url === '/v1/public/landing') {
       const plan = await database.collection('subscription_settings').findOne({ _id: 'plan' })
-      return send(response, 200, { firstReferralPercent: Number(plan?.firstReferralPercent || 0), recurringReferralPercent: Number(plan?.recurringReferralPercent || 0) })
+      return send(response, 200, {
+        firstReferralPercent: Number(plan?.firstReferralPercent || 0),
+        recurringReferralPercent: Number(plan?.recurringReferralPercent || 0),
+        visitorFirstReferralPercent: plan?.visitorFirstReferralPercent == null ? null : Number(plan.visitorFirstReferralPercent),
+        visitorRecurringReferralPercent: plan?.visitorRecurringReferralPercent == null ? null : Number(plan.visitorRecurringReferralPercent),
+      })
     }
+    if (await visitorAccounts(request, response, verifyToken, readJson)) return
     if (request.method === 'POST' && request.url === '/v1/registration-keys') {
       const claims = verifyToken(request)
       if (!await canIssueRegistrationKey(claims, process.env.DEVELOPER_EMAIL, accounts)) return send(response, 403, { error: 'Developer account required.' })

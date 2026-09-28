@@ -75,6 +75,19 @@ database.exec(`
     unit_price REAL NOT NULL CHECK(unit_price >= 0)
     ,unit_cost REAL NOT NULL DEFAULT 0 CHECK(unit_cost >= 0)
   );
+  CREATE TABLE IF NOT EXISTS sale_item_voids (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    order_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL CHECK(quantity > 0),
+    unit_price REAL NOT NULL CHECK(unit_price >= 0),
+    reason TEXT NOT NULL,
+    staff_id TEXT NOT NULL,
+    staff_name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -526,6 +539,29 @@ export function listSales(limit = 100) {
   return sales.map((sale) => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: itemQuery.all(sale.id) }))
 }
 
+export function recordSaleItemVoid(input, staff, shouldSync = true) {
+  const id = String(input.id || '').trim()
+  const orderId = String(input.orderId || '').trim()
+  const productId = String(input.productId || '').trim()
+  const productName = String(input.productName || '').trim().slice(0, 200)
+  const quantity = Number(input.quantity)
+  const unitPrice = Number(input.unitPrice)
+  const reason = String(input.reason || '').trim().slice(0, 500)
+  if (!id || !orderId || !productId || !productName || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3) {
+    throw new Error('A void needs an item, quantity, price, order, and reason of at least 3 characters.')
+  }
+  const event = { id, orderId, productId, productName, quantity, unitPrice, reason, staffId: String(staff.id || ''), staffName: String(staff.name || ''), createdAt: shouldSync ? now() : String(input.createdAt || now()) }
+  const result = database.prepare('INSERT OR IGNORE INTO sale_item_voids (id, organization_id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(event.id, organizationId, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt)
+  if (result.changes && shouldSync) queueSync('sale_void', event.id, 'create', event)
+  return event
+}
+
+export function listSaleItemVoids(limit = 500) {
+  return database.prepare('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?')
+    .all(organizationId, Math.min(Math.max(Number(limit) || 500, 1), 1000))
+}
+
 export function listMovements(limit = 200) {
   return database.prepare(`SELECT m.id, p.name AS productName, p.sku, m.quantity, m.reason, m.created_at AS createdAt
     FROM inventory_movements m JOIN products p ON p.id = m.product_id
@@ -572,6 +608,8 @@ export function applyRemoteOperations(operations) {
         adjustStock(payload.productId, Number(payload.amount), payload.reason || 'remote-adjustment', false)
       } else if (operation.entityType === 'sale' && operation.action === 'create') {
         createSale(payload, false)
+      } else if (operation.entityType === 'sale_void' && operation.action === 'create') {
+        recordSaleItemVoid(payload, { id: payload.staffId, name: payload.staffName }, false)
       } else if (operation.entityType === 'customer' && operation.action === 'upsert') {
         database.prepare('INSERT INTO customers (id, organization_id, name, phone, balance, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, phone = excluded.phone')
           .run(payload.id, organizationId, payload.name, payload.phone || '', Number(payload.balance) || 0, now())
