@@ -1,22 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { AsyncButton } from './AsyncControls'
-import { RegistrationKeys } from './RegistrationKeys'
 import { cloudRequest, CloudAuthenticationError } from './lib/cloudRequest'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
 type Plan = { amount: number; currency: string; days: number; reminderDays: number; freeTrialDays: number; graceMonths?: number; graceDays?: number; firstReferralPercent?: number; recurringReferralPercent?: number; visitorFirstReferralPercent?: number; visitorRecurringReferralPercent?: number }
 type NamedPlan = Plan & { id: string; name: string }
-type EnterpriseRequest = { id: string; status: 'pending' | 'approved' | 'paid'; message?: string; offeredAmount?: number; offeredCurrency?: string; offeredDays?: number; offerNote?: string; businessId?: string; ownerName?: string; email?: string; createdAt?: string }
+type EnterpriseRequest = { id: string; status: 'pending' | 'approved' | 'paid'; message?: string; offeredAmount?: number; offeredCurrency?: string; offeredDays?: number; offerNote?: string }
 type Summary = { plan: Plan | null; plans?: NamedPlan[]; access: SubscriptionAccess; subscription: { expiresAt?: string | null } | null; enterpriseRequest?: EnterpriseRequest | null; isDeveloper: boolean }
-type Setup = { plan: (Plan & { plans?: NamedPlan[]; monthlyGraceDays?: number; monthlyGraceMonths?: number }) | null; testMode: boolean; paystackConfigured: boolean; emailConfigured: boolean; publicUrlConfigured: boolean }
 type Referral = { link: string }
+type ReferralWallet = { referredBusinesses: number; automaticTransfersEnabled: boolean; balances: Array<{currency:string;earnedMinor:number;paidMinor:number;pendingMinor:number;availableMinor:number}>; commissions: Array<{reference:string;amountMinor:number;currency:string;percent:number;kind:string;createdAt:string}>; payouts: Array<{id:string;amountMinor:number;currency:string;status:string;method:string;createdAt:string}> }
 const summaryCacheKey = 'stockroom-subscription-summary'
 
 export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInToCloud }: { apiUrl: string; token: string; onAccess: (access: SubscriptionAccess) => void; onToken: (token: string, refreshToken: string) => void; signInToCloud: (identifier: string, password: string) => Promise<{ accessToken: string; refreshToken: string }> }) {
   const [summary, setSummary] = useState<Summary | null>(null)
-  const [setup, setSetup] = useState<Setup | null>(null)
   const [referral, setReferral] = useState<Referral | null>(null)
-  const [enterpriseRequests, setEnterpriseRequests] = useState<EnterpriseRequest[]>([])
+  const [referralWallet, setReferralWallet] = useState<ReferralWallet | null>(null)
+  const [payoutCurrency, setPayoutCurrency] = useState('NGN')
+  const [payoutBanks, setPayoutBanks] = useState<Array<{name:string;code:string}>>([])
   const [enterpriseMessage, setEnterpriseMessage] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -44,14 +44,13 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
       setSummary(next); onAccess(next.access)
       localStorage.setItem(summaryCacheKey, JSON.stringify(next))
       setReferral(await request('/referrals') as Referral)
+      setReferralWallet(await cloudRequest(apiUrl, '/v1/referral-wallet/me', {}, onToken, token) as ReferralWallet)
       const code = sessionStorage.getItem('stockroom-referral-code') || ''
       if (/^[a-f0-9]{32}$/.test(code)) {
         await request('/referrals', { method: 'POST', body: JSON.stringify({ code }) })
         sessionStorage.removeItem('stockroom-referral-code')
         setMessage('Your referral was applied.')
       }
-      setSetup(next.isDeveloper ? await request('/setup') as Setup : null)
-      setEnterpriseRequests(next.isDeveloper ? (await request('/enterprise-requests') as { requests: EnterpriseRequest[] }).requests : [])
     } catch (caught) {
       // Subscription status already downloaded for this local business remains
       // useful offline. Cloud is required to refresh or change it, not to
@@ -65,6 +64,7 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
     finally { if (version === loadVersion.current) setLoading(false) }
   }
   useEffect(() => { void load() }, [apiUrl, token])
+  useEffect(() => { if (!referralWallet?.automaticTransfersEnabled) return; let cancelled = false; void cloudRequest(apiUrl, `/v1/referral-wallet/banks?currency=${payoutCurrency}`, {}, onToken, token).then(data => { if (!cancelled) setPayoutBanks(data.banks || []) }).catch(() => { if (!cancelled) setPayoutBanks([]) }); return () => { cancelled = true } }, [apiUrl, token, payoutCurrency, referralWallet?.automaticTransfersEnabled])
   useEffect(() => {
     const reference = new URLSearchParams(window.location.search).get('reference')
     if (!reference || !token) return
@@ -100,63 +100,40 @@ export function SubscriptionSettings({ apiUrl, token, onAccess, onToken, signInT
     try { const data = await request('/enterprise-checkout', { method: 'POST', body: '{}' }) as { authorizationUrl: string }; window.location.assign(data.authorizationUrl) }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not open your Enterprise payment link.') }
   }
-  const approveEnterprise = async (event: React.FormEvent<HTMLFormElement>, requestId: string) => {
-    event.preventDefault(); setError(''); setMessage('')
-    try { const input = Object.fromEntries(new FormData(event.currentTarget)); await request('/enterprise-requests/approve', { method: 'POST', body: JSON.stringify({ ...input, requestId }) }); setMessage('Enterprise proposal approved and ready for the business to pay.'); await load() }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not approve the Enterprise proposal.') }
-  }
-  const saveSetup = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setError(''); setMessage('')
-    try { const input = Object.fromEntries(new FormData(event.currentTarget)); const next = await request('/setup', { method: 'PUT', body: JSON.stringify(input) }) as Setup; setSetup(next); await load(); setMessage('All three subscription plans were saved.') }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save the plans.') }
-  }
-  const toggleEnforcement = async () => {
-    if (!setup) return
-    setError(''); setMessage('')
-    try { const data = await request('/test-mode', { method: 'PUT', body: JSON.stringify({ testMode: !setup.testMode }) }) as { testMode: boolean }; setSetup({ ...setup, testMode: data.testMode }); setMessage(data.testMode ? 'Subscription enforcement is off.' : 'Subscription enforcement is on.') }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not change subscription enforcement.') }
-  }
   if (loading) return <section className="panel full-panel"><h2>Subscription</h2><p>Loading subscription details…</p></section>
   const plan = summary?.plan
   const plans = summary?.plans?.length ? summary.plans : plan ? [{ ...plan, id: 'monthly', name: 'Monthly' }] : []
   const expires = summary?.subscription?.expiresAt
-  const configuredPlan = (id: string) => setup?.plan?.plans?.find(item => item.id === id) || (id === 'monthly' ? setup?.plan : null)
-  const copyReferral = async () => { if (!referral) return; await navigator.clipboard.writeText(referral.link); setMessage('Invitation link copied.') }
+  const copyReferral = async () => { if (!referral) return; try { await navigator.clipboard.writeText(referral.link); setMessage('Invitation link copied.') } catch { const input = document.getElementById('owner-referral-link') as HTMLInputElement | null; input?.focus(); input?.select(); setMessage('The invitation link is selected. Copy it and share it before the business registers.') } }
+  const requestReferralPayout = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setError(''); setMessage('')
+    try {
+      const input = Object.fromEntries(new FormData(event.currentTarget))
+      const result = await cloudRequest(apiUrl, '/v1/referral-wallet/payouts', { method: 'POST', body: JSON.stringify({ currency: input.currency, amountMinor: Math.round(Number(input.amount) * 100), note: input.note }) }, onToken, token) as { message: string }
+      setMessage(result.message)
+      const updated = await cloudRequest(apiUrl, '/v1/referral-wallet/me', {}, onToken, token) as ReferralWallet
+      setReferralWallet(updated)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not request a referral payout.') }
+  }
+  const savePayoutDestination = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setError(''); setMessage('')
+    try {
+      const input = Object.fromEntries(new FormData(event.currentTarget))
+      await cloudRequest(apiUrl, '/v1/referral-wallet/profile', { method: 'POST', body: JSON.stringify(input) }, onToken, token)
+      const updated = await cloudRequest(apiUrl, '/v1/referral-wallet/me', {}, onToken, token) as ReferralWallet
+      setReferralWallet(updated); setMessage('Paystack payout destination saved.')
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save payout destination.') }
+  }
   return <>
-    {summary?.isDeveloper && <RegistrationKeys apiUrl={apiUrl} onToken={onToken} />}
+    {summary?.isDeveloper && <section className="panel full-panel subscription-panel"><div className="panel-heading"><div><h2>Developer Control Centre</h2><p>Business records, referral attribution, promoter wallets, and payout requests have their own workspace.</p></div><a className="primary-button" href="/developer">Open Control Centre</a></div></section>}
     <section className="panel full-panel subscription-panel">
       <div className="panel-heading"><div><h2>Subscription</h2><p>Choose a plan and manage your renewal.</p></div><AsyncButton className="text-button" busyLabel="Refreshing…" onClick={load}>Refresh</AsyncButton></div>
       {error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="settings-message" role="status">{message}</p>}
       {needsSignIn && <div className="subscription-cloud-sign-in"><p>Subscription changes require the cloud owner account. This does not sign you out of the app.</p>{showCloudSignIn ? <form className="settings-form" onSubmit={restoreCloudOwnerSession}><label>Cloud owner email<input type="email" value={cloudIdentifier} onChange={event => setCloudIdentifier(event.target.value)} autoComplete="username" required /></label><label>Cloud owner password<input type="password" value={cloudPassword} onChange={event => setCloudPassword(event.target.value)} autoComplete="current-password" required /></label><div className="report-actions"><button className="primary-button" type="submit">Sign in to cloud</button><button type="button" className="filter-button" onClick={() => { setShowCloudSignIn(false); setCloudPassword('') }}>Cancel</button></div></form> : <button type="button" className="primary-button" onClick={() => setShowCloudSignIn(true)}>Sign in to cloud</button>}</div>}
       {!plan ? <p className="subscription-status">A subscription plan has not been configured yet.</p> : <div className="subscription-summary"><div><span>Current base plan</span><strong>{plan.currency} {(plan.amount / 100).toFixed(2)}</strong><small>{plan.days} days of access</small></div><div><span>Status</span><strong>{summary?.access.status === 'active' ? 'Active' : summary?.access.status === 'trial' ? 'Free trial' : summary?.access.status === 'trial-expired' ? 'Trial ended' : summary?.access.status === 'grace' ? 'Grace period' : summary?.access.status === 'test' ? 'Enforcement off' : 'Payment needed'}</strong><small>{summary?.access.status === 'trial' ? `Trial ends ${new Date(summary.access.expiresAt || '').toLocaleDateString()}` : expires ? `Renews by ${new Date(expires).toLocaleDateString()}` : summary?.access.reason}</small></div></div>}
       {plans.length > 0 && <div className="subscription-plan-options">{plans.map(option => <article key={option.id}><strong>{option.name}</strong>{option.id !== 'enterprise' && <><span>{option.currency} {(option.amount / 100).toFixed(2)}</span><small>{option.days} days</small><AsyncButton className="primary-button" busyLabel="Opening secure checkout…" onClick={() => startCheckout(option.id)}>Choose {option.name}</AsyncButton></>}{option.id === 'enterprise' && <>{summary?.enterpriseRequest?.status === 'approved' ? <><span>{summary.enterpriseRequest.offeredCurrency} {((summary.enterpriseRequest.offeredAmount || 0) / 100).toFixed(2)}</span><small>{summary.enterpriseRequest.offeredDays} days · Your proposal is ready.</small>{summary.enterpriseRequest.offerNote && <small>{summary.enterpriseRequest.offerNote}</small>}<AsyncButton className="primary-button" busyLabel="Opening secure checkout…" onClick={startEnterpriseCheckout}>Pay approved proposal</AsyncButton></> : summary?.enterpriseRequest?.status === 'pending' ? <small>Your request is awaiting a proposal.</small> : <><small>Tell us what your business needs and we will send a custom proposal.</small><textarea aria-label="Enterprise requirements" value={enterpriseMessage} maxLength={1000} placeholder="Number of stores, users, integrations, support needs…" onChange={event => setEnterpriseMessage(event.target.value)} /><AsyncButton className="primary-button" busyLabel="Sending request…" onClick={requestEnterprise}>Request Enterprise proposal</AsyncButton></>}</>}</article>)}</div>}
-      {referral && <div className="subscription-enforcement"><div><strong>Invite another business</strong><p>Share your invitation before they create their business account.</p></div><AsyncButton className="filter-button" busyLabel="Copying…" onClick={copyReferral}>Copy invitation</AsyncButton></div>}
+      {referral && <div className="subscription-enforcement"><div><strong>Invite another business</strong><p>Share your invitation before they create their business account.</p><input id="owner-referral-link" readOnly value={referral.link} onFocus={event => event.currentTarget.select()} aria-label="Business-owner referral link" /></div><AsyncButton className="filter-button" busyLabel="Copying…" onClick={copyReferral}>Copy invitation</AsyncButton></div>}
     </section>
-    {summary?.isDeveloper && <section className="panel full-panel subscription-panel">
-      <div className="panel-heading"><div><h2>Subscription administration</h2><p>Configure the plans available to every business.</p></div></div>
-      {!setup ? <p>Loading developer controls…</p> : <>
-        <p className="subscription-status">Payments: {setup.paystackConfigured ? 'configured' : 'missing configuration'} · App URL: {setup.publicUrlConfigured ? 'configured' : 'missing'} · Email reminders: {setup.emailConfigured ? 'configured' : 'not configured'}</p>
-        <div className="subscription-enforcement"><div><strong>Subscription enforcement</strong><p>{setup.testMode ? 'Off — businesses can continue using POS without a paid subscription.' : 'On — unpaid or expired businesses are restricted according to the grace-period policy.'}</p></div><AsyncButton className={setup.testMode ? 'primary-button' : 'filter-button'} busyLabel="Updating…" onClick={toggleEnforcement}>{setup.testMode ? 'Turn enforcement on' : 'Turn enforcement off'}</AsyncButton></div>
-        <form className="settings-form" onSubmit={saveSetup}><h3>Plan settings</h3>
-          <label>Monthly price (minor units)<input name="monthlyAmount" type="number" min="1" step="1" required defaultValue={configuredPlan('monthly')?.amount || ''} /></label>
-          <label>Yearly price (minor units)<input name="yearlyAmount" type="number" min="1" step="1" required defaultValue={configuredPlan('yearly')?.amount || ''} /></label>
-          <label>Enterprise price (minor units)<input name="enterpriseAmount" type="number" min="1" step="1" required defaultValue={configuredPlan('enterprise')?.amount || ''} /></label>
-          <label>Enterprise access duration (days)<input name="enterpriseDays" type="number" min="1" max="730" required defaultValue={configuredPlan('enterprise')?.days || 365} /></label>
-          <label>Currency<select name="currency" defaultValue={setup.plan?.currency || 'NGN'}>{['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].map(currency => <option key={currency}>{currency}</option>)}</select></label>
-          <label>Free trial (days)<input name="freeTrialDays" type="number" min="0" max="365" required defaultValue={setup.plan?.freeTrialDays || 0} /></label>
-          <label>Monthly subscription grace period (days)<input name="monthlyGraceDays" type="number" min="0" max="365" required defaultValue={configuredPlan('monthly')?.graceDays ?? setup.plan?.monthlyGraceDays ?? (setup.plan?.monthlyGraceMonths ?? setup.plan?.graceMonths ?? 1) * 30} /><span>After a monthly subscription expires, POS remains available for this many days. Set 0 to block it immediately.</span></label>
-          <label>Yearly and Enterprise grace period (calendar months)<input name="graceMonths" type="number" min="0" max="12" required defaultValue={setup.plan?.graceMonths ?? 1} /><span>This applies to yearly and Enterprise subscriptions.</span></label>
-          <label>Reminder window (days)<input name="reminderDays" type="number" min="1" max="30" required defaultValue={setup.plan?.reminderDays || 7} /></label>
-          <label>First referral reward (%)<input name="firstReferralPercent" type="number" min="0" max="100" step="0.01" required defaultValue={setup.plan?.firstReferralPercent || 0} /></label>
-          <label>Renewal referral reward (%)<input name="recurringReferralPercent" type="number" min="0" max="100" step="0.01" required defaultValue={setup.plan?.recurringReferralPercent || 0} /></label>
-          <h3>Visitor promoter rewards</h3>
-          <p>These rates apply to referrals from visitor promoter accounts. Existing business owner rates remain separate.</p>
-          <label>Visitor first payment reward (%)<input name="visitorFirstReferralPercent" type="number" min="0" max="100" step="0.01" required defaultValue={setup.plan?.visitorFirstReferralPercent || 0} /></label>
-          <label>Visitor renewal reward (%)<input name="visitorRecurringReferralPercent" type="number" min="0" max="100" step="0.01" required defaultValue={setup.plan?.visitorRecurringReferralPercent || 0} /></label>
-          <button className="primary-button" type="submit">Save all plans</button>
-        </form>
-        <div className="enterprise-request-list"><h3>Enterprise requests</h3>{enterpriseRequests.length === 0 ? <p className="subscription-status">No Enterprise requests yet.</p> : enterpriseRequests.map(request => <article key={request.id}><strong>{request.ownerName || request.businessId}</strong><small>{request.email} · {request.businessId}</small>{request.message && <p>{request.message}</p>}{request.status === 'pending' ? <form className="settings-form enterprise-quote-form" onSubmit={event => approveEnterprise(event, request.id)}><label>Quoted price (minor units)<input name="amount" type="number" min="1" required defaultValue={configuredPlan('enterprise')?.amount || ''} /></label><label>Currency<select name="currency" defaultValue={setup.plan?.currency || 'NGN'}>{['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].map(currency => <option key={currency}>{currency}</option>)}</select></label><label>Access duration (days)<input name="days" type="number" min="1" max="730" required defaultValue={configuredPlan('enterprise')?.days || 365} /></label><label>Proposal note (optional)<textarea name="note" maxLength={1000} placeholder="What this proposal includes" /></label><button className="primary-button" type="submit">Approve proposal</button></form> : <p className="subscription-status">{request.status === 'approved' ? `Approved: ${request.offeredCurrency} ${((request.offeredAmount || 0) / 100).toFixed(2)} for ${request.offeredDays} days.` : 'Paid'}</p>}</article>)}</div>
-      </>}
-    </section>}
+    <section className="panel full-panel subscription-panel"><div className="panel-heading"><div><h2>Referral wallet</h2><p>{referralWallet?.referredBusinesses || 0} registered business(es) attributed to your invitation.</p></div></div>{!referralWallet ? <p>Referral wallet is unavailable right now.</p> : <><div className="subscription-summary">{referralWallet.balances.length ? referralWallet.balances.map(row => <div key={row.currency}><span>{row.currency} available</span><strong>{row.currency} {(row.availableMinor / 100).toFixed(2)}</strong><small>Earned {(row.earnedMinor / 100).toFixed(2)} · paid {(row.paidMinor / 100).toFixed(2)} · pending {(row.pendingMinor / 100).toFixed(2)}</small></div>) : <p>No verified referral rewards yet.</p>}</div><p className="subscription-status">Payout mode: {referralWallet.automaticTransfersEnabled ? 'Paystack automatic transfers are enabled when a payout destination is saved.' : 'Manual payout request. The developer records payment in the Control Centre.'}</p>{referralWallet.automaticTransfersEnabled && <form className="settings-form" onSubmit={savePayoutDestination}><h3>Paystack payout destination</h3><label>Currency<select name="currency" value={payoutCurrency} onChange={event => setPayoutCurrency(event.target.value)}>{['NGN','GHS','ZAR','KES','USD'].map(code => <option key={code}>{code}</option>)}</select></label><label>Account holder name<input name="name" required maxLength={100} /></label><label>Bank<select name="bankCode" required><option value="">Select your bank</option>{payoutBanks.map(bank => <option key={bank.code} value={bank.code}>{bank.name}</option>)}</select></label><label>Account number<input name="accountNumber" inputMode="numeric" pattern="[0-9]{6,20}" minLength={6} maxLength={20} required /></label><button className="primary-button" type="submit">Save payout destination</button><p>Full account numbers are sent to Paystack and not retained by Stockroom.</p></form>}{referralWallet.balances.some(row => row.availableMinor > 0) && <form className="settings-form" onSubmit={requestReferralPayout}><h3>Request referral payout</h3><label>Currency<select name="currency" required>{referralWallet.balances.filter(row => row.availableMinor > 0).map(row => <option key={row.currency}>{row.currency}</option>)}</select></label><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Note for developer (optional)<input name="note" maxLength={300} /></label><button className="primary-button" type="submit">Request payout</button></form>}<div className="table-wrap"><table><thead><tr><th>Reward</th><th>Amount</th><th>Rate</th><th>Date</th></tr></thead><tbody>{referralWallet.commissions.map(row => <tr key={row.reference}><td>{row.kind === 'first' ? 'First payment' : 'Renewal'}</td><td>{row.currency} {(row.amountMinor / 100).toFixed(2)}</td><td>{row.percent}%</td><td>{new Date(row.createdAt).toLocaleDateString()}</td></tr>)}</tbody></table></div></>}</section>
   </>
 }

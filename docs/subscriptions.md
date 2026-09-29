@@ -1,31 +1,39 @@
-# Manual subscriptions
+# Subscriptions, referrals and Control Centre
 
-Subscriptions live inside the Vercel Business App. Owners open **Subscription** from the app navigation to view their status and renew with Paystack. There is no separate Render subscription website or second sign-in screen.
+## Where each role goes
 
-Set `DEVELOPER_EMAIL` in Render to your developer owner-account email. When you sign in to the app using that same email, the Subscription screen also shows plan setup and the **Turn enforcement on/off** button. Other owners never see those controls. `ADMIN_API_KEY` remains the private installer/handover key for enrolling client devices; it is not used for subscriptions.
+- Business owners open **Subscription** inside the Stockroom app to renew, copy an owner referral link, review referral rewards and request a payout.
+- Visitor promoters use `/visitor` to register or sign in, share their personal referral link, see attributed businesses and manage their reward wallet.
+- The developer uses `/developer` to manage businesses, referrals, payouts, Enterprise requests, subscription plans, reward rates and global subscription enforcement.
 
-Set these server environment variables in Render:
+Configure `DEVELOPER_EMAIL` in Render to the email of the developer's Stockroom cloud owner account. The developer signs in to `/developer` with that account. Other owners are denied developer API access. `ADMIN_API_KEY` remains for device enrollment and is unrelated to subscriptions.
 
-- `PAYSTACK_SECRET_KEY`: your Paystack test key first, then your live secret key.
-- `SUBSCRIPTION_PUBLIC_URL`: the public HTTPS origin of the Vercel Business App, for example `https://stockroom.globalcreest.com`.
-- `DEVELOPER_EMAIL`: the email address of your developer owner account.
-- `PWA_ALLOWED_ORIGINS`: the same Vercel origin, so the deployed app may call the Render API.
-- Existing `GMAIL_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: reused for Gmail API email delivery.
+## Subscription configuration
 
-In Paystack, set the webhook URL to `https://YOUR-CLOUD-HOST/v1/subscriptions/webhook`. Checkout returns to the in-app Subscription screen on Vercel. No Paystack recurring plan or reusable authorization is created or charged by the app. Each renewal starts a separate checkout. Only verified successful payments matching the stored reference, owner email, currency, and amount extend the expiry. Repeated notifications do not extend it twice. Early renewals add days to the current expiry; expired subscriptions restart from payment processing time.
+Set these cloud environment variables in Render:
 
-The cloud service checks hourly and on startup for subscriptions expiring within the configured reminder window. It sends one reminder per expiry date and retries failed sends. Use an always-running service for timely reminders; a sleeping Render instance cannot run the hourly job. A crash after email delivery but before recording success may cause a duplicate reminder. Plan changes affect new checkouts, including existing owners' next renewal.
+- `PAYSTACK_SECRET_KEY`: Paystack test key during setup, then the live secret key.
+- `SUBSCRIPTION_PUBLIC_URL`: the public HTTPS origin of the Vercel app, such as `https://stockroom.globalcreest.com`.
+- `DEVELOPER_EMAIL`: the developer owner's account email.
+- `PWA_ALLOWED_ORIGINS`: the Vercel origin allowed to call the Render API.
+- Existing Gmail API credentials for email notifications.
 
-The developer sets separate grace periods in the in-app plan settings: monthly subscriptions use days (0–365), while yearly and Enterprise subscriptions use calendar months (0–12). Monthly grace is measured as exact 24-hour days. Yearly and Enterprise grace is measured in UTC and clamped to the last day of shorter months; one month after expiry on January 31 at noon is February 28 at noon (February 29 in leap years). At the applicable deadline, POS and new sale requests are blocked. Renewal restores access. Inventory, reports, and sign-in remain available.
+Configure Paystack's webhook URL as `https://YOUR-CLOUD-HOST/v1/subscriptions/webhook`. Each renewal uses a new checkout; the app does not create recurring charges. Only verified successful payments matching the stored reference, owner email, currency and amount extend the subscription. Repeated notifications do not extend twice. Early renewals add time to the current expiry.
 
-**Subscription enforcement starts OFF** on first deployment of this feature. In the in-app developer-only Subscription section, save a plan and use **Turn enforcement on** when ready. The same button turns enforcement off again and immediately lifts all blocks. This mode affects access only; Paystack still uses whichever test/live secret you configured. New businesses receive the configured free-trial duration when their registration key is redeemed. Their trial starts then, and POS is blocked as soon as it expires; subscription grace does not extend a free trial. Businesses without a trial or paid subscription are blocked immediately.
+The developer sets monthly grace in days and yearly/Enterprise grace in calendar months in Control Centre plan settings. Subscription enforcement starts off for a first rollout. New businesses receive the configured free trial when their registration key is redeemed. Trial time starts then; subscription grace does not extend a free trial. Business-specific POS suspension is separate from global subscription enforcement and remains in force if global enforcement is turned off.
 
-Desktop, Android and PWA fetch business-scoped access from the cloud and cache it for offline use. Online devices normally pick up mode changes or renewals within one minute. Offline devices evaluate the cached expiry locally, so grace still ends without internet. An offline device cannot learn about a new renewal or developer-mode change until it reconnects; a cached test-mode bypass persists until then. A first-time device must connect once to obtain access. Local caches are not a tamper-proof licensing system against users modifying their own app/storage or clock. Deploy the cloud service before distributing updated clients. Previously queued sales are retained when blocked and can retry after renewal or test-mode activation.
+Desktop, Android and PWA fetch the business-specific access decision from the cloud and cache it for offline use. Connected clients normally refresh within one minute. An offline client cannot learn about a new renewal or suspension until it reconnects. The Control Centre manages subscription and POS access, referral attribution, registration keys and payouts; it does not expose a business's sales or inventory records or let the developer sign in as its owner.
 
-## Referrals
+## Referrals and wallets
 
-Set separate first payment and renewal rewards for **business owners** and **visitor promoters** in developer setup (0–100%, up to two decimal places). A referred business earns at most four referral commissions, one per verified subscription payment. A yearly or Enterprise payment counts once regardless of its duration; switching plans counts only when another payment succeeds. After four paid subscriptions, further renewals earn no referral commission. Business owners copy invitations in the in-app Subscription screen. Visitors create a promoter account on the public Welcome page, then share their tracked link and can review their verified rewards there. Both kinds of link open the business registration flow; the referrer is bound after valid key redemption creates the owner account. Self-referrals and later reassignment are rejected. Rewards are direct referrals, not a multi-level referral scheme. Payouts remain manual.
+Control Centre stores separate first-payment and renewal reward percentages for business owners and visitor promoters (0–100%, up to two decimal places). A referred business earns at most four commissions, one per verified subscription payment. Attribution is bound when a registration key is redeemed to create a business. Self-referrals and later reassignment are rejected. Referral links are direct referrals, not a multi-level scheme.
 
-Referral attribution is locked when the first checkout starts, including if that checkout is abandoned. The first successfully verified payment earns the first-payment rate; subsequent verified payments earn the recurring rate. Rates are saved with each checkout, so later settings edits do not change pending payments. Commission is based on the paid subscription amount in its original currency, rounded down to a minor unit. A single atomic subscription update decides the first payment and records its credit, preventing duplicate credits on concurrent callback/webhook retries. When a non-zero credit is first recorded, the referring owner receives an email stating the amount and asking them to contact support for payout. Payouts and any refund/chargeback adjustments remain manual; there is no automatic transfer or wallet credit.
+Referral attribution is locked when the first checkout starts, even if that checkout is abandoned. The first successfully verified payment uses the first-payment rate; later payments use the renewal rate. Rates are saved with the checkout, and commission uses the original payment currency. A single atomic subscription update prevents duplicate commission credits on concurrent webhook/callback retries.
 
-Before production, complete a test checkout, confirm callback and webhook produce only one extension, verify a second renewal extends the current period, and verify Gmail reminder delivery with a short-duration test plan. Automated unit tests cover price validation, webhook signatures, and payment matching; provider delivery requires configured credentials.
+Owner and visitor wallets show registered businesses, earned, paid, pending and available totals by currency, plus reward and payout history. Payout requests appear in Control Centre. For manual payment, the developer records the payment and its reference. Reconcile any referral amounts already paid outside Stockroom before treating wallet balances as payable.
+
+## Paystack referral transfers
+
+Automatic referral payouts are disabled by default. Keep `PAYSTACK_REFERRAL_AUTO_PAYOUTS=false` and `PAYSTACK_REFERRAL_WEBHOOK_READY=false` until Paystack transfers from balance are available and the transfer webhook is configured at `/v1/subscriptions/webhook`. Set both to `true` only with `PAYSTACK_SECRET_KEY` configured. Promoters then need to save a supported bank destination before automatic transfer can start. Transfers require sufficient Paystack balance and can require OTP approval. A rejected transfer is queued for manual payment; if Paystack's response is ambiguous, Stockroom holds the funds for review to avoid duplicate payment. XOF payouts remain manual.
+
+Paystack receives full account details to create a transfer recipient. Stockroom stores the Paystack recipient code and the account's last four digits. Configure the payout flags only after confirming the account's transfer setup and webhook behavior.

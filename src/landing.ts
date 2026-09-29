@@ -84,63 +84,6 @@ void loadReferralRates().catch(async () => {
   text('visitor-referral-status', 'Could not reach the settings to check visitor promoter rewards.')
 })
 
-const visitorForm = document.getElementById('visitor-form') as HTMLFormElement | null
-const visitorAccount = document.getElementById('visitor-account') as HTMLElement | null
-const visitorReferButton = document.getElementById('visitor-refer') as HTMLButtonElement | null
-visitorReferButton?.addEventListener('click', () => {
-  if (!visitorAccount) return
-  visitorAccount.hidden = !visitorAccount.hidden
-  const expanded = !visitorAccount.hidden
-  visitorReferButton.setAttribute('aria-expanded', String(expanded))
-  visitorReferButton.textContent = expanded ? 'Hide referral details' : 'Refer'
-  if (expanded) visitorAccount.querySelector<HTMLInputElement>('input:not([type="hidden"])')?.focus()
-})
-if (visitorForm) {
-  const tokenKey = 'stockroom-visitor-token'
-  let registering = true
-  const message = (value: string) => { document.getElementById('visitor-message')!.textContent = value }
-  const visitorRequest = async (path: string, token = '', init: RequestInit = {}) => {
-    const headers = new Headers(init.headers); headers.set('Content-Type', 'application/json'); if (token) headers.set('Authorization', `Bearer ${token}`)
-    const response = await fetch(`${cloud}/v1/visitors/${path}`, { ...init, headers })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error || 'Could not load promoter account.')
-    return data
-  }
-  const showDashboard = async (token: string) => {
-    const data = await visitorRequest('me', token)
-    ;(document.getElementById('visitor-account') as HTMLElement).querySelector('form')!.hidden = true
-    const dashboard = document.getElementById('visitor-dashboard')!; dashboard.removeAttribute('hidden')
-    const link = document.getElementById('visitor-link') as HTMLInputElement; link.value = data.link
-    const rows = document.getElementById('visitor-rewards')!; rows.replaceChildren()
-    if (!data.commissions.length) rows.textContent = 'No verified referral rewards yet.'
-    else for (const item of data.commissions) {
-      const row = document.createElement('p'); row.textContent = `${item.currency} ${(item.amount / 100).toFixed(2)} | ${item.kind === 'first' ? 'First payment' : 'Renewal'} | ${new Date(item.createdAt).toLocaleDateString()}`; rows.append(row)
-    }
-  }
-  document.getElementById('visitor-mode')!.addEventListener('click', () => {
-    registering = !registering
-    document.getElementById('visitor-form-title')!.textContent = registering ? 'Create a promoter account' : 'Sign in to your promoter account'
-    document.getElementById('visitor-submit')!.textContent = registering ? 'Create account' : 'Sign in'
-    document.getElementById('visitor-mode')!.textContent = registering ? 'I already have an account' : 'Create an account'
-    ;(document.getElementById('visitor-name-label') as HTMLElement).hidden = !registering
-    ;(visitorForm.elements.namedItem('name') as HTMLInputElement).required = registering
-    ;(visitorForm.elements.namedItem('password') as HTMLInputElement).autocomplete = registering ? 'new-password' : 'current-password'
-  })
-  visitorForm.addEventListener('submit', async event => {
-    event.preventDefault(); message('')
-    const input = Object.fromEntries(new FormData(visitorForm))
-    try {
-      const data = await visitorRequest(registering ? 'register' : 'login', '', { method: 'POST', body: JSON.stringify(input) })
-      sessionStorage.setItem(tokenKey, data.accessToken)
-      await showDashboard(data.accessToken)
-    } catch (error) { message(error instanceof Error ? error.message : 'Could not sign in.') }
-  })
-  document.getElementById('visitor-copy')!.addEventListener('click', async () => { await navigator.clipboard.writeText((document.getElementById('visitor-link') as HTMLInputElement).value); message('Promoter link copied.') })
-  document.getElementById('visitor-logout')!.addEventListener('click', () => { sessionStorage.removeItem(tokenKey); (document.getElementById('visitor-dashboard') as HTMLElement).hidden = true; visitorForm.hidden = false })
-  const token = sessionStorage.getItem(tokenKey)
-  if (token) void showDashboard(token).catch(() => sessionStorage.removeItem(tokenKey))
-}
-
 const referral = new URLSearchParams(location.search).get('ref') || ''
 for (const [id, screen] of [['register-app', 'register'], ['subscription-app', referral ? 'register' : 'subscription']]) {
   const destination = new URL(appUrl)

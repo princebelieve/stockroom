@@ -21,6 +21,7 @@ export function graceDaysEndsAt(expiresAt, days = 30) {
 
 export function subscriptionAccess(snapshot, now = Date.now()) {
   if (!snapshot) return { blocked: true, reason: 'Connect to the internet to check subscription access.', status: 'unknown' }
+  if (snapshot.suspended === true) return { ...snapshot, blocked: true, status: 'suspended', reason: snapshot.suspensionReason || 'This business has been suspended by the developer.' }
   if (snapshot.testMode === true) return { ...snapshot, blocked: false, status: 'test', reason: 'Developer test mode is on. Subscription blocks are disabled.' }
   if (!snapshot.expiresAt) return { ...snapshot, blocked: true, status: 'unpaid', reason: 'A subscription is required. Ask the owner to renew.' }
   if (snapshot.isTrial === true) {

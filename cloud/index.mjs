@@ -8,6 +8,7 @@ import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
 import { completeOwnerPasswordReset } from './password-reset.mjs'
 import { createVisitorAccounts } from './visitor-accounts.mjs'
+import { createReferralWallet } from './referral-wallet.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -111,9 +112,10 @@ async function ownerPasswordIsValid(claims, value) {
   return Boolean(owner && matchesPassword(String(value || ''), owner.passwordHash))
 }
 
-const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send })
 const registration = await createRegistration({ database, client, accounts, hashPassword })
 const visitorAccounts = createVisitorAccounts({ database, hashPassword, matchesPassword, signToken })
+const referralWallet = await createReferralWallet({ database, accounts, verifyToken })
+const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   // Referral percentages are intentionally public. They are displayed on the
@@ -136,6 +138,7 @@ const server = createServer(async (request, response) => {
       })
     }
     if (await visitorAccounts(request, response, verifyToken, readJson)) return
+    if (await referralWallet.handle(request, response)) return
     if (request.method === 'POST' && request.url === '/v1/registration-keys') {
       const claims = verifyToken(request)
       if (!await canIssueRegistrationKey(claims, process.env.DEVELOPER_EMAIL, accounts)) return send(response, 403, { error: 'Developer account required.' })
@@ -346,6 +349,11 @@ const server = createServer(async (request, response) => {
       const deviceId = String(input.deviceId || '')
       const incoming = Array.isArray(input.operations) ? input.operations.slice(0, 500) : []
       if (!businessId || !deviceId || !incoming.length || claims.businessId !== businessId || claims.deviceId !== deviceId) return send(response, 403, { error: 'Token does not authorize this business/device.' })
+      const containsNewSale = await Promise.all(incoming.filter(operation => operation.entityType === 'sale' && operation.action === 'create').map(operation => operations.findOne({ businessId, operationId: String(operation.operationId) }, { projection: { _id: 1 } }).then(existing => !existing)))
+      if (containsNewSale.some(Boolean)) {
+        const access = await subscriptionHandler.access(businessId)
+        if (access.blocked) return send(response, 402, { error: access.reason, status: access.status })
+      }
       const documents = incoming.map((operation) => ({ businessId, deviceId, operationId: String(operation.operationId), entityType: String(operation.entityType), entityId: String(operation.entityId), action: String(operation.action), payload: operation.payload || {}, createdAt: operation.createdAt || new Date().toISOString(), receivedAt: new Date() }))
       const acceptedOperationIds = []
       const conflicts = []

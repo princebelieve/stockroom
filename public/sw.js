@@ -2,7 +2,7 @@
 // an old index.html (and therefore old authentication code) alive indefinitely
 // after a deployment.
 const CACHE_NAME = 'stockroom-shell-v2'
-const APP_SHELL = ['/', '/welcome', '/manifest.webmanifest', '/icon.svg']
+const APP_SHELL = ['/', '/welcome', '/developer', '/visitor', '/manifest.webmanifest', '/icon.svg']
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()))
 })
@@ -24,7 +24,9 @@ self.addEventListener('fetch', event => {
     // have. The replacement worker is activated immediately and reloads the
     // client, so cache-first navigation does not leave the app on an old
     // release once the new shell is ready.
-    const shellUrl = ['/welcome', '/welcome.html'].includes(url.pathname) ? '/welcome' : '/'
+    const shellUrl = ['/welcome', '/welcome.html'].includes(url.pathname) ? '/welcome'
+      : ['/developer', '/developer.html'].includes(url.pathname) ? '/developer'
+        : ['/visitor', '/visitor.html'].includes(url.pathname) ? '/visitor' : '/'
     event.respondWith(caches.open(CACHE_NAME).then(async cache => {
       const cached = await cache.match(shellUrl)
       // Fetch canonical clean URLs, not the incoming navigation Request. On

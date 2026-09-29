@@ -34,7 +34,7 @@ async function body(request) {
   return Buffer.concat(chunks)
 }
 
-export async function createSubscriptions({ database, accounts, verifyToken, send, fetcher = fetch }) {
+export async function createSubscriptions({ database, accounts, verifyToken, send, fetcher = fetch, handlePayoutWebhook = async () => false }) {
   const settings = database.collection('subscription_settings')
   const subscriptions = database.collection('subscriptions')
   const payments = database.collection('subscription_payments')
@@ -72,7 +72,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const planId = subscription?.planId || (isTrial ? 'trial' : null)
     const graceDays = isTrial ? 0 : planId === 'monthly' && subscription?.graceMonths === undefined ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? Number(plan?.monthlyGraceMonths ?? plan?.graceMonths ?? 1) * 30) : undefined
     const graceMonths = isTrial ? undefined : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
-    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, suspended: Boolean(subscription?.suspendedAt), suspensionReason: subscription?.suspensionReason || '', portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
@@ -171,7 +171,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
   const timer = setInterval(() => reminders().catch(error => console.error('Reminder scan failed:', error.message)), 3600000)
   timer.unref()
   void reminders().catch(error => console.error('Reminder scan failed:', error.message))
-  return async (request, response) => {
+  async function handle(request, response) {
     const url = new URL(request.url, 'http://localhost')
     if (!url.pathname.startsWith('/v1/subscriptions')) return false
     response.setHeader('Cache-Control', 'no-store')
@@ -182,6 +182,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         if (!validSignature(raw, request.headers['x-paystack-signature'], process.env.PAYSTACK_SECRET_KEY)) return reply(401, { error: 'Invalid signature.' })
         const event = JSON.parse(raw)
         if (event.event === 'charge.success' && await payments.findOne({ _id: event.data.reference })) await settle(event.data.reference)
+        await handlePayoutWebhook(event)
         return reply(200, { ok: true })
       }
       const claims = verifyToken(request)
@@ -304,4 +305,6 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       return reply(404, { error: 'Not found.' })
     } catch (error) { return reply(url.pathname.endsWith('/webhook') ? 503 : 400, { error: error.message }) }
   }
+  handle.access = access
+  return handle
 }
