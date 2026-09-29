@@ -166,7 +166,7 @@ const server = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/expenses') {
     const user = sessionUser(request)
     if (!isManager(user)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    return readJson(request, response, async (input) => { try { return sendJson(response, 201, await createExpense(input, requestBranch(request))) } catch (error) { return sendJson(response, 400, { error: error.message }) } })
+    return readJson(request, response, async (input) => { try { return sendJson(response, 201, await createExpense(input, requestBranch(request), user)) } catch (error) { return sendJson(response, 400, { error: error.message }) } })
   }
 
   if (request.method === 'POST' && request.url === '/api/auth/cloud-session') return readJson(request, response, async (input) => {
@@ -229,6 +229,13 @@ const server = createServer(async (request, response) => {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
     return sendJson(response, 200, await getReports(requestBranch(request)))
+  }
+  if (request.method === 'GET' && request.url?.startsWith('/api/staff/activity')) {
+    const user = sessionUser(request)
+    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    const from = String(request.headers['x-activity-from'] || ''), to = String(request.headers['x-activity-to'] || '')
+    if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) return sendJson(response, 400, { error: 'A valid start and end date are required.' })
+    return sendJson(response, 200, getStaffActivity(requestBranch(request), new Date(from).toISOString(), new Date(to).toISOString()))
   }
   if (request.method === 'GET' && request.url === '/api/reports/sales.csv') {
     const user = sessionUser(request)

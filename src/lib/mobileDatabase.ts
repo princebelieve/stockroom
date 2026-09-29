@@ -152,7 +152,9 @@ export async function openMobileDatabase() {
       amount REAL NOT NULL,
       incurred_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      branch_id TEXT NOT NULL DEFAULT 'main'
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      staff_id TEXT NOT NULL DEFAULT '',
+      staff_name TEXT NOT NULL DEFAULT ''
     );
   `)
   try { await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
@@ -163,6 +165,10 @@ export async function openMobileDatabase() {
   for (const table of ['inventory_movements', 'sales', 'expenses']) {
     try { await connection.execute(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`) } catch {}
   }
+  const expenseColumns = await connection.query('PRAGMA table_info(expenses)')
+  if (!expenseColumns.values?.some(row => row.name === 'staff_id')) await connection.execute("ALTER TABLE expenses ADD COLUMN staff_id TEXT NOT NULL DEFAULT ''")
+  const expenseColumnsAfter = await connection.query('PRAGMA table_info(expenses)')
+  if (!expenseColumnsAfter.values?.some(row => row.name === 'staff_name')) await connection.execute("ALTER TABLE expenses ADD COLUMN staff_name TEXT NOT NULL DEFAULT ''")
   const userColumns = await connection.query('PRAGMA table_info(users)')
   if (!userColumns.values?.some(row => row.name === 'username')) await connection.execute("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
   const policyColumns = await connection.query('PRAGMA table_info(app_settings)')

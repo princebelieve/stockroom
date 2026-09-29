@@ -172,7 +172,9 @@ database.exec(`
     description TEXT NOT NULL,
     amount REAL NOT NULL CHECK(amount > 0),
     incurred_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    staff_id TEXT NOT NULL DEFAULT '',
+    staff_name TEXT NOT NULL DEFAULT ''
   );
   CREATE TABLE IF NOT EXISTS sync_outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -243,6 +245,8 @@ try { database.exec("ALTER TABLE users ADD COLUMN operational_access INTEGER NOT
 try { database.exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec('ALTER TABLE branches ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1') } catch {}
 try { database.exec("ALTER TABLE branches ADD COLUMN assigned_user_ids TEXT NOT NULL DEFAULT '[]'") } catch {}
+try { database.exec("ALTER TABLE expenses ADD COLUMN staff_id TEXT NOT NULL DEFAULT ''") } catch {}
+try { database.exec("ALTER TABLE expenses ADD COLUMN staff_name TEXT NOT NULL DEFAULT ''") } catch {}
 // Existing inventory becomes the stock of Main branch during the upgrade.
 database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT \'main\', id, stock, reorder_point, updated_at FROM products WHERE organization_id = ?').run(organizationId)
 for (const table of ['inventory_movements', 'sales', 'sale_item_voids', 'expenses', 'stocktakes']) {
@@ -535,19 +539,38 @@ export function provisionCloudUser(input) {
 }
 
 export function listExpenses(limit = 200, branchId = 'main') {
-  return database.prepare('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt FROM expenses WHERE organization_id = ? AND branch_id = ? ORDER BY incurred_at DESC LIMIT ?').all(organizationId, branchId, Math.min(Math.max(Number(limit) || 200, 1), 500))
+  return database.prepare('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt, staff_id AS staffId, staff_name AS staffName FROM expenses WHERE organization_id = ? AND branch_id = ? ORDER BY incurred_at DESC LIMIT ?').all(organizationId, branchId, Math.min(Math.max(Number(limit) || 200, 1), 500))
 }
 
-export function createExpense(input, branchId = 'main') {
+export function createExpense(input, branchId = 'main', staff = {}) {
   const category = String(input.category || '').trim()
   const description = String(input.description || '').trim()
   const amount = Number(input.amount)
   const incurredAt = String(input.incurredAt || now())
   if (!category || !description || !Number.isFinite(amount) || amount <= 0) throw new Error('Expense category, description, and a positive amount are required.')
-  const expense = { id: crypto.randomUUID(), category, description, amount, incurredAt, createdAt: now(), branchId }
-  database.prepare('INSERT INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(expense.id, organizationId, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId)
+  const expense = { id: crypto.randomUUID(), category, description, amount, incurredAt, createdAt: now(), branchId, staffId: String(staff.id || ''), staffName: String(staff.name || '') }
+  database.prepare('INSERT INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at, branch_id, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(expense.id, organizationId, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId, expense.staffId, expense.staffName)
   queueSync('expense', expense.id, 'create', expense)
   return expense
+}
+
+export function getStaffActivity(branchId, from, to) {
+  const sales = database.prepare("SELECT staff_id AS staffId, staff_name AS staffName, id, total AS amount, created_at AS occurredAt, payment_method AS detail FROM sales WHERE organization_id = ? AND branch_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC").all(organizationId, branchId, from, to)
+  const expenses = database.prepare("SELECT staff_id AS staffId, staff_name AS staffName, id, amount, incurred_at AS occurredAt, category || ': ' || description AS detail, created_at AS recordedAt FROM expenses WHERE organization_id = ? AND branch_id = ? AND incurred_at >= ? AND incurred_at < ? ORDER BY incurred_at DESC").all(organizationId, branchId, from, to)
+  const voids = database.prepare("SELECT staff_id AS staffId, staff_name AS staffName, id, quantity * unit_price AS amount, created_at AS occurredAt, quantity || ' x ' || product_name || ': ' || reason AS detail FROM sale_item_voids WHERE organization_id = ? AND branch_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC").all(organizationId, branchId, from, to)
+  const users = database.prepare("SELECT id, name, role FROM users WHERE organization_id = ? ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, name").all(organizationId)
+  const summary = new Map(users.map(user => [user.id, { staffId: user.id, staffName: user.name, role: user.role, salesCount: 0, salesTotal: 0, expensesCount: 0, expensesTotal: 0, voidsCount: 0, voidsTotal: 0 }]))
+  const events = []
+  for (const [type, records] of [['sale', sales], ['expense', expenses], ['void', voids]]) for (const record of records) {
+    const staffId = record.staffId || `legacy:${record.staffName || 'unknown'}`
+    if (!summary.has(staffId)) summary.set(staffId, { staffId, staffName: record.staffName || 'Unassigned / older record', role: 'unknown', salesCount: 0, salesTotal: 0, expensesCount: 0, expensesTotal: 0, voidsCount: 0, voidsTotal: 0 })
+    const row = summary.get(staffId), amount = Number(record.amount) || 0
+    if (type === 'sale') { row.salesCount++; row.salesTotal += amount }
+    if (type === 'expense') { row.expensesCount++; row.expensesTotal += amount }
+    if (type === 'void') { row.voidsCount++; row.voidsTotal += amount }
+    events.push({ id: `${type}:${record.id}`, staffId, staffName: record.staffName || row.staffName, type, amount, occurredAt: record.occurredAt, detail: type === 'sale' ? `Sale · ${record.detail}` : type === 'expense' ? `Expense recorded · ${record.detail}` : `Item void · ${record.detail}`, ...(record.recordedAt ? { recordedAt: record.recordedAt } : {}) })
+  }
+  return { from, to, staff: [...summary.values()], events: events.sort((a, b) => String(b.occurredAt).localeCompare(String(a.occurredAt))).slice(0, 300) }
 }
 
 export function createCustomer(input) {
@@ -663,7 +686,7 @@ export function applyRemoteOperations(operations) {
       } else if (operation.entityType === 'wallet' && operation.action === 'adjust') {
         adjustCustomerWallet(payload.customerId, Number(payload.amount), payload.reason || 'remote-wallet', false)
       } else if (operation.entityType === 'expense' && operation.action === 'create') {
-        database.prepare('INSERT OR IGNORE INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(payload.id, organizationId, payload.category, payload.description, Number(payload.amount), payload.incurredAt, payload.createdAt || now(), payload.branchId || 'main')
+        database.prepare('INSERT OR IGNORE INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at, branch_id, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(payload.id, organizationId, payload.category, payload.description, Number(payload.amount), payload.incurredAt, payload.createdAt || now(), payload.branchId || 'main', payload.staffId || '', payload.staffName || '')
       } else if (operation.entityType === 'user' && operation.action === 'upsert') {
         // Password hashes remain device-local until hosted account authentication is enabled.
         const existing = database.prepare('SELECT id FROM users WHERE id = ?').get(payload.id)

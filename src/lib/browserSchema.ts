@@ -135,6 +135,8 @@ export const browserSchema = `
       amount REAL NOT NULL,
       incurred_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      branch_id TEXT NOT NULL DEFAULT 'main'
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      staff_id TEXT NOT NULL DEFAULT '',
+      staff_name TEXT NOT NULL DEFAULT ''
     );
 `

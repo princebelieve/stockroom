@@ -4,6 +4,7 @@ import { loadSubscriptionAccess } from '../../server/subscription-client.mjs'
 import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, saveMobileSyncConfiguration, type MobileSyncConfiguration } from './mobileDatabase'
 import { mobileStocktake } from './mobileStocktake'
 import { cloudRequest as requestCloud } from './cloudRequest'
+import { collectStaffActivity } from './staffActivityData'
 
 type MobileUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
 type Operation = { operationId: string; entityType: string; entityId: string; action: string; payload: Record<string, unknown>; createdAt: string }
@@ -160,7 +161,7 @@ async function applyOperation(operation: Operation) {
       await db.run('INSERT INTO wallet_transactions (id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), payload.customerId, Number(payload.amount) || 0, payload.reason || 'remote-wallet', payload.createdAt || operation.createdAt])
     }
   } else if (operation.entityType === 'expense' && operation.action === 'create') {
-    await db.run('INSERT OR IGNORE INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)', [payload.id, payload.category, payload.description, Number(payload.amount) || 0, payload.incurredAt || operation.createdAt, payload.createdAt || operation.createdAt, payload.branchId || 'main'])
+    await db.run('INSERT OR IGNORE INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, payload.category, payload.description, Number(payload.amount) || 0, payload.incurredAt || operation.createdAt, payload.createdAt || operation.createdAt, payload.branchId || 'main', payload.staffId || '', payload.staffName || ''])
   } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
     if (payload.paymentPolicy !== undefined) await db.run('UPDATE app_settings SET payment_policy = ? WHERE id = 1', [JSON.stringify(paymentPolicy(payload.paymentPolicy))])
     await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.logoData || '', payload.updatedAt || operation.createdAt])
@@ -481,13 +482,19 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === '/api/expenses' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    return json({ expenses: (await db.query('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt FROM expenses WHERE branch_id = ? ORDER BY incurred_at DESC', [branchId])).values || [] })
+    return json({ expenses: (await db.query('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt, staff_id AS staffId, staff_name AS staffName FROM expenses WHERE branch_id = ? ORDER BY incurred_at DESC', [branchId])).values || [] })
   }
   if (path === '/api/expenses' && method === 'POST') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    const input = await body(init); const expense = { id: id(), category: String(input.category || '').trim(), description: String(input.description || '').trim(), amount: Number(input.amount), incurredAt: String(input.incurredAt || now()), createdAt: now(), branchId }
+    const input = await body(init); const expense = { id: id(), category: String(input.category || '').trim(), description: String(input.description || '').trim(), amount: Number(input.amount), incurredAt: String(input.incurredAt || now()), createdAt: now(), branchId, staffId: user.id, staffName: user.name }
     if (!expense.category || !expense.description || !Number.isFinite(expense.amount) || expense.amount <= 0) return error('Expense category, description, and a positive amount are required.')
-    await db.run('INSERT INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId]); await queue('expense', expense.id, 'create', expense); return json(expense, 201)
+    await db.run('INSERT INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId, expense.staffId, expense.staffName]); await queue('expense', expense.id, 'create', expense); return json(expense, 201)
+  }
+  if (path === '/api/staff/activity' && method === 'GET') {
+    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    const headers = new Headers(init?.headers), from = headers.get('X-Activity-From') || '', to = headers.get('X-Activity-To') || ''
+    if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) return error('A valid start and end date are required.')
+    return json(await collectStaffActivity(db, branchId, new Date(from).toISOString(), new Date(to).toISOString()))
   }
   if (path === '/api/reports' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
