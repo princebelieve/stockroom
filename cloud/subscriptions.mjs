@@ -18,6 +18,7 @@ export function validatePlan(input) {
     plan.graceMonths = Number(input.graceMonths ?? 1)
     if (!Number.isInteger(plan.graceMonths) || plan.graceMonths < 0 || plan.graceMonths > 12) throw new Error('Yearly and Enterprise grace period must be between 0 and 12 months.')
   }
+  if (plan.currency === 'USD' && plan.amount < 200) throw new Error('USD subscription prices must be at least 200 cents ($2.00).')
   return plan
 }
 export function validSignature(raw, signature, secret) {
@@ -102,7 +103,11 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     if (!process.env.PAYSTACK_SECRET_KEY) throw new Error('Paystack is not configured.')
     const response = await fetcher(`https://api.paystack.co${path}`, { method: input ? 'POST' : 'GET', headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' }, ...(input ? { body: JSON.stringify(input) } : {}), signal: AbortSignal.timeout(20000) })
     const result = await response.json()
-    if (!response.ok || !result.status) throw new Error('Paystack request failed. Please try again.')
+    if (!response.ok || !result.status) {
+      const reason = String(result.message || '').toLowerCase()
+      if (reason.includes('currency') && (reason.includes('support') || reason.includes('enabled'))) throw new Error('This subscription currency is not enabled for the payment account. Please contact Stockroom support.')
+      throw new Error('Paystack request failed. Please try again.')
+    }
     return result.data
   }
   async function settle(reference, businessId) {
