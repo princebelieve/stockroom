@@ -1,7 +1,7 @@
 import { openBrowserDatabase } from './browserDatabase'
 import type { Stocktake } from '../types'
 
-type Session = Stocktake & { approvedAt?: string }
+type Session = Stocktake & { approvedAt?: string; branchId?: string }
 type Queue = (entity: string, id: string, action: string, payload: Record<string, unknown>) => Promise<void>
 
 export async function browserStocktake(path: string, init: RequestInit | undefined, allowed: boolean, queue: Queue): Promise<Response | null> {
@@ -9,19 +9,21 @@ export async function browserStocktake(path: string, init: RequestInit | undefin
   const fail = (error: string, status = 400) => Response.json({ error }, { status })
   if (!allowed) return fail('Operational access is required.', 403)
   const db = await openBrowserDatabase()
+  const requestedBranchId = new Headers(init?.headers).get('X-Stockroom-Branch') || 'main'
+  const branchId = (await db.query('SELECT id FROM branches WHERE id = ?', [requestedBranchId])).values?.length ? requestedBranchId : 'main'
   const method = init?.method || 'GET'
   const all = async () => (await db.query('SELECT payload FROM pwa_stocktakes ORDER BY created_at DESC, rowid DESC')).values.map(row => JSON.parse(row.payload) as Session)
   const save = async (session: Session) => db.run('INSERT INTO pwa_stocktakes (id, created_at, payload) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload', [session.id, session.createdAt, JSON.stringify(session)])
   if (path === '/api/stocktakes' && method === 'GET') {
-    const sessions = await all()
+    const sessions = (await all()).filter(session => (session.branchId || 'main') === branchId)
     return Response.json({ stocktake: sessions.find(session => session.status === 'draft') || sessions[0] || null, stocktakes: sessions })
   }
   if (path === '/api/stocktakes' && method === 'POST') {
-    const draft = (await all()).find(session => session.status === 'draft')
+    const draft = (await all()).find(session => session.status === 'draft' && (session.branchId || 'main') === branchId)
     if (draft) return Response.json(draft)
-    const products = (await db.query('SELECT id, name, sku, stock FROM products ORDER BY name')).values
+    const products = (await db.query('SELECT p.id, p.name, p.sku, COALESCE(i.stock, 0) AS stock FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=? ORDER BY p.name', [branchId])).values
     if (!products.length) return fail('Add or synchronize inventory before starting a stocktake.')
-    const session: Session = { id: crypto.randomUUID(), status: 'draft', createdAt: new Date().toISOString(), counts: products.map(product => ({ id: crypto.randomUUID(), productId: product.id, name: product.name, sku: product.sku, expected: product.stock, counted: product.stock, variance: 0 })), history: [] }
+    const session: Session = { id: crypto.randomUUID(), status: 'draft', createdAt: new Date().toISOString(), branchId, counts: products.map(product => ({ id: crypto.randomUUID(), productId: product.id, name: product.name, sku: product.sku, expected: product.stock, counted: product.stock, variance: 0 })), history: [] }
     await save(session)
     return Response.json(session, { status: 201 })
   }
@@ -49,7 +51,7 @@ export async function browserStocktake(path: string, init: RequestInit | undefin
     const approvedAt = new Date().toISOString()
     for (const count of session.counts) {
       if (!count.variance) continue
-      const product = (await db.query('SELECT stock FROM products WHERE id = ?', [count.productId])).values[0]
+      const product = (await db.query('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?', [count.productId, branchId])).values[0]
       if (!product || Number(product.stock) + count.variance < 0) return fail(`Cannot approve: insufficient current stock for ${count.name}. Review the count.`)
     }
     // Publish only completed sessions. Drafts stay on their originating browser,
@@ -58,9 +60,9 @@ export async function browserStocktake(path: string, init: RequestInit | undefin
     session.history = []
     for (const count of session.counts) {
       if (!count.variance) continue
-      await db.run('UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?', [count.variance, approvedAt, count.productId])
+      await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [count.variance, approvedAt, count.productId, branchId])
       const movementId = crypto.randomUUID()
-      await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?)', [movementId, count.productId, count.variance, reason, approvedAt])
+      await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [movementId, count.productId, count.variance, reason, approvedAt, branchId])
       session.history.push({ ...count, id: movementId, reason, createdAt: approvedAt })
     }
     session.status = 'approved'

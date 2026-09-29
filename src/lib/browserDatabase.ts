@@ -43,6 +43,10 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
       const SQL = await (sql ||= engine())
       current = new SQL.Database(await snapshot())
       current.run(browserSchema)
+      for (const table of ['inventory_movements', 'sales', 'expenses', 'sale_item_voids']) {
+        const columns = current.exec(`PRAGMA table_info(${table})`)[0]?.values || []
+        if (!columns.some(row => row[1] === 'branch_id')) current.run(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`)
+      }
       try { current.run("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
       if (!current.exec('PRAGMA table_info(users)')[0].values.some(row => row[1] === 'username')) current.run("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
       try { current.run("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''") } catch {}

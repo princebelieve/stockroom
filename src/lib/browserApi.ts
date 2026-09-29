@@ -69,28 +69,44 @@ async function queue(entityType: string, entityId: string, action: string, paylo
   await db.run('INSERT INTO sync_outbox (operation_id, entity_type, entity_id, action, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)', [id(), entityType, entityId, action, JSON.stringify(payload), now()])
 }
 
+async function ensureBranches(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
+  const timestamp = now()
+  await db.run("INSERT OR IGNORE INTO branches (id, name, address, is_default, created_at, updated_at) VALUES ('main', 'Main branch', '', 1, ?, ?)", [timestamp, timestamp])
+  await db.run("INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT 'main', id, stock, reorder_point, updated_at FROM products")
+}
+
 async function applyOperation(operation: Operation) {
   const db = await openMobileDatabase()
+  await ensureBranches(db)
   const seen = await db.query('SELECT operation_id FROM sync_inbox WHERE operation_id = ?', [operation.operationId])
   if (seen.values?.length) return
   const payload = operation.payload
-  if (operation.entityType === 'product' && operation.action === 'upsert') {
+  if (operation.entityType === 'branch' && operation.action === 'upsert') {
+    await db.run('INSERT INTO branches (id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, updated_at=excluded.updated_at', [payload.id, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.createdAt || operation.createdAt, payload.updatedAt || operation.createdAt])
+    await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [payload.id, operation.createdAt])
+  } else if (operation.entityType === 'product' && operation.action === 'upsert') {
     await db.run(`INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sku=excluded.sku, barcode=excluded.barcode, category=excluded.category, reorder_point=excluded.reorder_point, price=excluded.price, cost_price=excluded.cost_price, unit=excluded.unit, updated_at=excluded.updated_at`,
     [payload.id, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, Number(payload.cost) || 0, payload.unit, payload.updated || operation.createdAt])
+    await db.run("INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES ('main', ?, ?, ?, ?)", [payload.id, Number(payload.stock) || 0, Number(payload.reorder) || 0, payload.updated || operation.createdAt])
   } else if (operation.entityType === 'stock' && operation.action === 'adjust') {
     if (!(await db.query('SELECT id FROM products WHERE id = ?', [payload.productId])).values?.length) throw new Error('A stock change references a missing product. Refresh again after the product is synchronized.')
-    await db.run('UPDATE products SET stock = MAX(0, stock + ?), updated_at = ? WHERE id = ?', [Number(payload.amount) || 0, operation.createdAt, payload.productId])
-    await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?)', [operation.operationId, payload.productId, Number(payload.amount) || 0, payload.reason || 'remote-adjustment', operation.createdAt])
+    const branchId = String(payload.branchId || 'main')
+    await db.run('INSERT OR IGNORE INTO branches (id, name, address, is_default, created_at, updated_at) VALUES (?, ?, \'\', 0, ?, ?)', [branchId, branchId === 'main' ? 'Main branch' : 'Branch', operation.createdAt, operation.createdAt])
+    await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE id = ?', [branchId, operation.createdAt, payload.productId])
+    await db.run('UPDATE branch_inventory SET stock = MAX(0, stock + ?), updated_at = ? WHERE product_id = ? AND branch_id = ?', [Number(payload.amount) || 0, operation.createdAt, payload.productId, branchId])
+    await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [operation.operationId, payload.productId, Number(payload.amount) || 0, payload.reason || 'remote-adjustment', operation.createdAt, String(payload.branchId || 'main')])
   } else if (operation.entityType === 'sale' && operation.action === 'create') {
     const existing = await db.query('SELECT id FROM sales WHERE id = ?', [payload.id])
     if (!existing.values?.length) {
       if (payload.paymentMethod === 'wallet') await debitSaleWallet(db, payload)
-      await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, Number(payload.total), payload.paymentMethod || 'cash', payload.paymentReference || '', payload.terminalProvider || '', payload.staffId || '', payload.staffName || '', payload.createdAt || operation.createdAt, normalizeCashSale(payload).cashReceived, (payload.paymentDetails as { changeGiven?: unknown } | undefined)?.changeGiven ?? normalizeCashSale(payload).changeGiven, payload.paymentDetails ? JSON.stringify(payload.paymentDetails) : null])
+      const branchId = String(payload.branchId || 'main')
+      await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, Number(payload.total), payload.paymentMethod || 'cash', payload.paymentReference || '', payload.terminalProvider || '', payload.staffId || '', payload.staffName || '', payload.createdAt || operation.createdAt, normalizeCashSale(payload).cashReceived, (payload.paymentDetails as { changeGiven?: unknown } | undefined)?.changeGiven ?? normalizeCashSale(payload).changeGiven, payload.paymentDetails ? JSON.stringify(payload.paymentDetails) : null, branchId])
       for (const item of Array.isArray(payload.items) ? payload.items as Array<Record<string, unknown>> : []) {
         const product = await db.query('SELECT name, cost_price AS cost FROM products WHERE id = ?', [item.productId])
         await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), payload.id, item.productId, product.values?.[0]?.name || 'Product', Number(item.quantity), Number(item.price), Number(product.values?.[0]?.cost) || 0])
-        await db.run('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?', [Number(item.quantity), item.productId])
+        await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE id = ?', [branchId, operation.createdAt, item.productId])
+        await db.run('UPDATE branch_inventory SET stock = MAX(0, stock - ?) WHERE branch_id = ? AND product_id = ?', [Number(item.quantity), branchId, item.productId])
       }
     }
   } else if (operation.entityType === 'sale_void' && operation.action === 'create') {
@@ -104,14 +120,16 @@ async function applyOperation(operation: Operation) {
       await db.run('INSERT INTO wallet_transactions (id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), payload.customerId, Number(payload.amount) || 0, payload.reason || 'remote-wallet', payload.createdAt || operation.createdAt])
     } else throw new Error('A wallet change references a missing customer.')
   } else if (operation.entityType === 'expense' && operation.action === 'create') {
-    await db.run('INSERT OR IGNORE INTO expenses (id, category, description, amount, incurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?)', [payload.id, payload.category, payload.description, Number(payload.amount) || 0, payload.incurredAt || operation.createdAt, payload.createdAt || operation.createdAt])
+    await db.run('INSERT OR IGNORE INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)', [payload.id, payload.category, payload.description, Number(payload.amount) || 0, payload.incurredAt || operation.createdAt, payload.createdAt || operation.createdAt, payload.branchId || 'main'])
   } else if (operation.entityType === 'stocktake' && operation.action === 'approved') {
+    const branchId = String(payload.branchId || 'main')
     for (const count of (payload.counts || []) as Array<Record<string, unknown>>) {
       const amount = Number(count.variance) || 0
       if (!amount) continue
       if (!(await db.query('SELECT id FROM products WHERE id = ?', [count.productId])).values?.length) throw new Error('A stocktake references a missing product.')
-      await db.run('UPDATE products SET stock = MAX(0, stock + ?), updated_at = ? WHERE id = ?', [amount, operation.createdAt, count.productId])
-      await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), count.productId, amount, `Stocktake: ${payload.approvalReason || 'approved'}`, operation.createdAt])
+      await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE id = ?', [branchId, operation.createdAt, count.productId])
+      await db.run('UPDATE branch_inventory SET stock = MAX(0, stock + ?), updated_at = ? WHERE branch_id = ? AND product_id = ?', [amount, operation.createdAt, branchId, count.productId])
+      await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [id(), count.productId, amount, `Stocktake: ${payload.approvalReason || 'approved'}`, operation.createdAt, branchId])
     }
   } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
     if (payload.paymentPolicy !== undefined) await db.run('UPDATE app_settings SET payment_policy = ? WHERE id = 1', [JSON.stringify(paymentPolicy(payload.paymentPolicy))])
@@ -337,6 +355,19 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken, refreshToken: result.refreshToken })
   }
   if (!user) return error('Authentication required.', 401)
+  await ensureBranches(db)
+  const requestedBranchId = new Headers(init?.headers).get('X-Stockroom-Branch') || 'main'
+  const branchId = (await db.query('SELECT id FROM branches WHERE id = ?', [requestedBranchId])).values?.length ? requestedBranchId : 'main'
+  if (path === '/api/branches' && method === 'GET') return json({ branches: (await db.query('SELECT id, name, address, is_default AS isDefault, created_at AS createdAt, updated_at AS updatedAt FROM branches ORDER BY is_default DESC, name')).values || [] })
+  if (path === '/api/branches' && method === 'POST') {
+    if (user.role !== 'owner') return error('Owner access required.', 403)
+    const input = await body(init); const name = String(input.name || '').trim().slice(0, 100); const address = String(input.address || '').trim().slice(0, 250)
+    if (name.length < 2) return error('Branch name must contain at least 2 characters.')
+    if ((await db.query('SELECT id FROM branches WHERE lower(name)=lower(?)', [name])).values?.length) return error('A branch with that name already exists.')
+    const branch = { id: id(), name, address, isDefault: false, createdAt: now(), updatedAt: now() }
+    await db.run('INSERT INTO branches (id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)', [branch.id, name, address, branch.createdAt, branch.updatedAt]); await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [branch.id, branch.createdAt]); await queue('branch', branch.id, 'upsert', branch)
+    return json(branch, 201)
+  }
   if (path === '/api/auth/session' && method === 'GET') {
     const token = new Headers(init?.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') || id()
     return json({ user, token })
@@ -364,39 +395,41 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     await setSetting('lastSyncError', status.lastError)
     return json(status)
   }
-  if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT id, name, sku, barcode, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products ORDER BY updated_at DESC')).values || [] })
+  if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? ORDER BY p.updated_at DESC', [branchId])).values || [] })
   if (path === '/api/products' && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
     const input = await body(init); const name = String(input.name || '').trim(); const product = { id: id(), name, sku: String(input.sku || '').trim() || `${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(), stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(), updated: now() }
     if (!product.name || !product.sku || !product.category || !product.unit || [product.stock, product.reorder, product.price, product.cost].some((value) => !Number.isFinite(value) || value < 0)) return error('Product fields are invalid.')
-    await db.run('INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [product.id, product.name, product.sku, product.barcode, product.category, product.stock, product.reorder, product.price, product.cost, product.unit, product.updated])
-    await queue('product', product.id, 'upsert', product)
+    await db.run('INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)', [product.id, product.name, product.sku, product.barcode, product.category, product.reorder, product.price, product.cost, product.unit, product.updated])
+    await db.run('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, ?, ?)', [branchId, product.id, product.stock, product.reorder, product.updated])
+    await queue('product', product.id, 'upsert', { ...product, stock: 0 })
+    if (product.stock) await queue('stock', product.id, 'adjust', { productId: product.id, branchId, amount: product.stock, reason: 'initial-stock', updatedAt: product.updated })
     return json(product, 201)
   }
   const stock = path.match(/^\/api\/products\/([^/]+)\/stock$/)
   if (stock && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
     const input = await body(init); const amount = Number(input.amount); if (!Number.isInteger(amount) || amount === 0) return error('Stock amount must be a non-zero integer.')
-    const product = (await db.query('SELECT id, stock FROM products WHERE id = ?', [stock[1]])).values?.[0]; if (!product || Number(product.stock) + amount < 0) return error('Stock cannot be negative.')
-    const updated = now(); await db.run('UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?', [amount, updated, stock[1]]); await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?)', [id(), stock[1], amount, 'manual-adjustment', updated]); await queue('stock', stock[1], 'adjust', { productId: stock[1], amount, reason: 'manual-adjustment', updatedAt: updated })
-    return json((await db.query('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?', [stock[1]])).values?.[0])
+    const product = (await db.query('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?', [stock[1], branchId])).values?.[0]; if (!product || Number(product.stock) + amount < 0) return error('Stock cannot be negative.')
+    const updated = now(); await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [amount, updated, stock[1], branchId]); await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [id(), stock[1], amount, 'manual-adjustment', updated, branchId]); await queue('stock', stock[1], 'adjust', { productId: stock[1], branchId, amount, reason: 'manual-adjustment', updatedAt: updated })
+    return json((await db.query('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [stock[1], branchId])).values?.[0])
   }
   if (path === '/api/sales' && method === 'POST') {
     const subscription = await subscriptionStatus()
     if (subscription.blocked) return error(subscription.reason, 402)
-    let sale = await body(init); if (sale.paymentMethod === 'wallet' && (sale.paymentDetails as { creditApproved?: boolean } | undefined)?.creditApproved && user.role !== 'owner') return error('Only the owner may approve credit purchases.', 403); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
+    let sale = await body(init); sale.branchId = branchId; if (sale.paymentMethod === 'wallet' && (sale.paymentDetails as { creditApproved?: boolean } | undefined)?.creditApproved && user.role !== 'owner') return error('Only the owner may approve credit purchases.', 403); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
     if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'pending' })
     if (!sale.items.length || sale.items.some((item: Record<string, unknown>) => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) <= 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) return error('Sale quantities and prices are invalid.')
     const total = sale.items.reduce((sum: number, item: Record<string, unknown>) => sum + Number(item.quantity) * Number(item.price), 0)
     if (Math.abs(total - Number(sale.total)) > 0.01) return error('Sale total does not match its items.')
     if (sale.paymentMethod === 'wallet' && !(sale.paymentDetails as { customerId?: unknown } | undefined)?.customerId) return error('Select the customer wallet.')
     if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'synced' })
-    await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT name, stock, cost_price AS cost FROM products WHERE id = ?', [item.productId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); await db.run('UPDATE products SET stock = stock - ? WHERE id = ?', [Number(item.quantity), item.productId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
+    await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null, branchId]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT p.name, i.stock, p.cost_price AS cost FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [item.productId, branchId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); await db.run('UPDATE branch_inventory SET stock = stock - ? WHERE product_id = ? AND branch_id = ?', [Number(item.quantity), item.productId, branchId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
     const payload = { ...sale, staffId: user.id, staffName: user.name }; await queue('sale', String(sale.id), 'create', payload); return json({ ...payload, syncStatus: 'pending' }, 201)
   }
   if (path === '/api/sales' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const sales = (await db.query('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_name AS staffName, created_at AS createdAt FROM sales ORDER BY created_at DESC')).values || []
+    const sales = (await db.query('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_name AS staffName, created_at AS createdAt FROM sales WHERE branch_id = ? ORDER BY created_at DESC', [branchId])).values || []
     for (const sale of sales) sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
     for (const sale of sales) sale.items = (await db.query('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?', [sale.id])).values || []
     return json({ sales })
@@ -407,18 +440,18 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const quantity = Number(input.quantity)
     const unitPrice = Number(input.unitPrice)
     if (!String(input.id || '').trim() || !String(input.orderId || '').trim() || !String(input.productId || '').trim() || !String(input.productName || '').trim() || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3 || reason.length > 500) return error('Select a valid item and enter a void reason of 3 to 500 characters.')
-    const event = { id: String(input.id), orderId: String(input.orderId), productId: String(input.productId), productName: String(input.productName).trim().slice(0, 200), quantity, unitPrice, reason, staffId: user.id, staffName: user.name, createdAt: now() }
-    await db.run('INSERT OR IGNORE INTO sale_item_voids (id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [event.id, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt])
+    const event = { id: String(input.id), orderId: String(input.orderId), productId: String(input.productId), productName: String(input.productName).trim().slice(0, 200), quantity, unitPrice, reason, branchId, staffId: user.id, staffName: user.name, createdAt: now() }
+    await db.run('INSERT OR IGNORE INTO sale_item_voids (id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [event.id, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt, branchId])
     if ((await db.query('SELECT changes() AS changed')).values?.[0]?.changed) await queue('sale_void', event.id, 'create', event)
     return json(event, 201)
   }
   if (path === '/api/sales/voids' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    return json({ voids: (await db.query('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids ORDER BY created_at DESC')).values || [] })
+    return json({ voids: (await db.query('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE branch_id = ? ORDER BY created_at DESC', [branchId])).values || [] })
   }
   if (path === '/api/movements' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    return json({ movements: (await db.query('SELECT m.id, p.name AS productName, p.sku, m.quantity, m.reason, m.created_at AS createdAt FROM inventory_movements m JOIN products p ON p.id = m.product_id ORDER BY m.created_at DESC')).values || [] })
+    return json({ movements: (await db.query('SELECT m.id, p.name AS productName, p.sku, m.quantity, m.reason, m.created_at AS createdAt FROM inventory_movements m JOIN products p ON p.id = m.product_id WHERE m.branch_id = ? ORDER BY m.created_at DESC', [branchId])).values || [] })
   }
   if (path === '/api/customers' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
@@ -449,24 +482,24 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   }
   if (path === '/api/expenses' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    return json({ expenses: (await db.query('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt FROM expenses ORDER BY incurred_at DESC')).values || [] })
+    return json({ expenses: (await db.query('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt FROM expenses WHERE branch_id = ? ORDER BY incurred_at DESC', [branchId])).values || [] })
   }
   if (path === '/api/expenses' && method === 'POST') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    const input = await body(init); const expense = { id: id(), category: String(input.category || '').trim(), description: String(input.description || '').trim(), amount: Number(input.amount), incurredAt: String(input.incurredAt || now()), createdAt: now() }
+    const input = await body(init); const expense = { id: id(), category: String(input.category || '').trim(), description: String(input.description || '').trim(), amount: Number(input.amount), incurredAt: String(input.incurredAt || now()), createdAt: now(), branchId }
     if (!expense.category || !expense.description || !Number.isFinite(expense.amount) || expense.amount <= 0) return error('Expense category, description, and a positive amount are required.')
-    await db.run('INSERT INTO expenses (id, category, description, amount, incurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?)', [expense.id, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt]); await queue('expense', expense.id, 'create', expense); return json(expense, 201)
+    await db.run('INSERT INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId]); await queue('expense', expense.id, 'create', expense); return json(expense, 201)
   }
   if (path === '/api/reports' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    const sales = (await db.query('SELECT total, created_at AS createdAt FROM sales')).values || []; const items = (await db.query('SELECT quantity, unit_price AS unitPrice, unit_cost AS unitCost FROM sale_items')).values || []; const products = (await db.query('SELECT stock, reorder_point AS reorder, price FROM products')).values || []; const expenses = (await db.query('SELECT amount FROM expenses')).values || []
+    const sales = (await db.query('SELECT total, created_at AS createdAt FROM sales WHERE branch_id = ?', [branchId])).values || []; const items = (await db.query('SELECT si.quantity, si.unit_price AS unitPrice, si.unit_cost AS unitCost FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.branch_id = ?', [branchId])).values || []; const products = (await db.query('SELECT COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder, p.price FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=?', [branchId])).values || []; const expenses = (await db.query('SELECT amount FROM expenses WHERE branch_id = ?', [branchId])).values || []
     const today = new Date(); today.setHours(0, 0, 0, 0); const week = new Date(today); week.setDate(today.getDate() - 6); const month = new Date(today.getFullYear(), today.getMonth(), 1)
     const revenue = sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0); const cost = items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitCost || 0), 0); const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
     return json({ daily: reportWindow(sales, today.getTime()), weekly: reportWindow(sales, week.getTime()), monthly: reportWindow(sales, month.getTime()), inventory: { value: products.reduce((sum, product) => sum + Number(product.stock || 0) * Number(product.price || 0), 0), products: products.length, lowStock: products.filter((product) => Number(product.stock) <= Number(product.reorder)).length }, profit: { revenue, cost, expenses: expenseTotal, amount: revenue - cost - expenseTotal } })
   }
   if (path === '/api/reports/sales.csv' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    const rows = (await db.query('SELECT id, created_at, total, payment_method, staff_name FROM sales ORDER BY created_at DESC')).values || []
+    const rows = (await db.query('SELECT id, created_at, total, payment_method, staff_name FROM sales WHERE branch_id = ? ORDER BY created_at DESC', [branchId])).values || []
     const cell = (value: unknown) => `"${String(value ?? '').replace(/^[=+@-]/, "'$&").replace(/"/g, '""')}"`
     const csv = [['ID', 'Date', 'Total', 'Payment', 'Staff'], ...rows.map(row => [row.id, row.created_at, row.total, row.payment_method, row.staff_name])].map(row => row.map(cell).join(',')).join('\r\n')
     return new Response(csv, { headers: { 'Content-Type': 'text/csv;charset=utf-8' } })

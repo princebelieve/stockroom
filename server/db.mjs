@@ -38,6 +38,24 @@ database.exec(`
     app_name TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS branches (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    address TEXT NOT NULL DEFAULT '',
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(organization_id, name)
+  );
+  CREATE TABLE IF NOT EXISTS branch_inventory (
+    branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    stock INTEGER NOT NULL DEFAULT 0 CHECK(stock >= 0),
+    reorder_point INTEGER NOT NULL DEFAULT 0 CHECK(reorder_point >= 0),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(branch_id, product_id)
+  );
   CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -191,6 +209,7 @@ const organizationId = 'local-shop-organization'
 const now = () => new Date().toISOString()
 const initialShop = await readShopConfig()
 database.prepare('INSERT OR IGNORE INTO organizations (id, name, created_at) VALUES (?, ?, ?)').run(organizationId, initialShop.shopName || 'My Business', now())
+database.prepare("INSERT OR IGNORE INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES ('main', ?, 'Main branch', '', 1, ?, ?)").run(organizationId, now(), now())
 const settingsFile = join(dataDirectory, 'settings.json')
 let appName = initialShop.appName || 'My Business'
 try {
@@ -220,6 +239,11 @@ try { database.exec("ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DE
 try { database.exec("ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0") } catch {}
 try { database.exec("ALTER TABLE users ADD COLUMN operational_access INTEGER NOT NULL DEFAULT 0") } catch {}
 try { database.exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''") } catch {}
+// Existing inventory becomes the stock of Main branch during the upgrade.
+database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT \'main\', id, stock, reorder_point, updated_at FROM products WHERE organization_id = ?').run(organizationId)
+for (const table of ['inventory_movements', 'sales', 'sale_item_voids', 'expenses', 'stocktakes']) {
+  try { database.exec(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`) } catch {}
+}
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex')
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
@@ -367,9 +391,9 @@ export function resetCashierPassword(userId, newPassword) {
   return { ...user, operationalAccess: Boolean(user.operationalAccess) }
 }
 
-export function getOwnerMetrics() {
-  const sales = database.prepare('SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count FROM sales WHERE organization_id = ?').get(organizationId)
-  const stock = database.prepare('SELECT COALESCE(SUM(stock * price), 0) AS value, COUNT(*) AS products, SUM(CASE WHEN stock <= reorder_point THEN 1 ELSE 0 END) AS lowStock FROM products WHERE organization_id = ?').get(organizationId)
+export function getOwnerMetrics(branchId = 'main') {
+  const sales = database.prepare('SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count FROM sales WHERE organization_id = ? AND branch_id = ?').get(organizationId, branchId)
+  const stock = database.prepare('SELECT COALESCE(SUM(COALESCE(i.stock, 0) * p.price), 0) AS value, COUNT(*) AS products, SUM(CASE WHEN COALESCE(i.stock, 0) <= COALESCE(i.reorder_point, p.reorder_point) THEN 1 ELSE 0 END) AS lowStock FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? WHERE p.organization_id = ?').get(branchId, organizationId)
   return { salesToday: sales.total, saleCount: sales.count, inventoryValue: stock.value, productCount: stock.products, lowStock: stock.lowStock }
 }
 
@@ -377,24 +401,24 @@ export function listCustomers() {
   return database.prepare('SELECT id, name, phone, balance FROM customers WHERE organization_id = ? ORDER BY name').all(organizationId).map(customer => ({ ...customer, transactions: database.prepare('SELECT id, amount, reason, created_at AS createdAt FROM wallet_transactions WHERE customer_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT 50').all(customer.id, organizationId) }))
 }
 
-export function getReports() {
-  const totals = (start) => database.prepare('SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count FROM sales WHERE organization_id = ? AND created_at >= ?').get(organizationId, start)
+export function getReports(branchId = 'main') {
+  const totals = (start) => database.prepare('SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count FROM sales WHERE organization_id = ? AND branch_id = ? AND created_at >= ?').get(organizationId, branchId, start)
   const date = new Date()
   const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString()
   const startOfWeek = new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7)).toISOString()
   const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1).toISOString()
-  const inventory = database.prepare('SELECT COALESCE(SUM(stock * price), 0) AS value, COUNT(*) AS products, COALESCE(SUM(CASE WHEN stock <= reorder_point THEN 1 ELSE 0 END), 0) AS lowStock FROM products WHERE organization_id = ?').get(organizationId)
+  const inventory = database.prepare('SELECT COALESCE(SUM(COALESCE(i.stock, 0) * p.price), 0) AS value, COUNT(*) AS products, COALESCE(SUM(CASE WHEN COALESCE(i.stock, 0) <= COALESCE(i.reorder_point, p.reorder_point) THEN 1 ELSE 0 END), 0) AS lowStock FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? WHERE p.organization_id = ?').get(branchId, organizationId)
   // Gross profit is estimated from sale price because purchase cost is not yet recorded per product.
   const profit = database.prepare(`SELECT COALESCE(SUM(s.total), 0) AS revenue, COALESCE(SUM(si.quantity * si.unit_cost), 0) AS cost
-    FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id WHERE s.organization_id = ? AND s.created_at >= ?`).get(organizationId, startOfMonth)
-  const expenses = database.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE organization_id = ? AND incurred_at >= ?').get(organizationId, startOfMonth)
+    FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id WHERE s.organization_id = ? AND s.branch_id = ? AND s.created_at >= ?`).get(organizationId, branchId, startOfMonth)
+  const expenses = database.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE organization_id = ? AND branch_id = ? AND incurred_at >= ?').get(organizationId, branchId, startOfMonth)
   return { daily: totals(startOfDay), weekly: totals(startOfWeek), monthly: totals(startOfMonth), inventory, profit: { revenue: profit.revenue, cost: profit.cost, expenses: expenses.total, amount: profit.revenue - profit.cost - expenses.total } }
 }
 
-export function exportSalesCsv() {
+export function exportSalesCsv(branchId = 'main') {
   const rows = database.prepare(`SELECT s.id, s.created_at AS createdAt, s.total, s.payment_method AS paymentMethod, s.payment_reference AS paymentReference,
     GROUP_CONCAT(si.quantity || ' x ' || si.product_name, '; ') AS items
-    FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id WHERE s.organization_id = ? GROUP BY s.id ORDER BY s.created_at DESC`).all(organizationId)
+    FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id WHERE s.organization_id = ? AND s.branch_id = ? GROUP BY s.id ORDER BY s.created_at DESC`).all(organizationId, branchId)
   const escape = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`
   return ['Sale ID,Date,Items,Payment method,Payment reference,Total', ...rows.map((row) => [row.id, row.createdAt, row.items || '', row.paymentMethod, row.paymentReference, row.total].map(escape).join(','))].join('\n')
 }
@@ -506,18 +530,18 @@ export function provisionCloudUser(input) {
   return authenticateUser(role === 'owner' ? email : username, password)
 }
 
-export function listExpenses(limit = 200) {
-  return database.prepare('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt FROM expenses WHERE organization_id = ? ORDER BY incurred_at DESC LIMIT ?').all(organizationId, Math.min(Math.max(Number(limit) || 200, 1), 500))
+export function listExpenses(limit = 200, branchId = 'main') {
+  return database.prepare('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt FROM expenses WHERE organization_id = ? AND branch_id = ? ORDER BY incurred_at DESC LIMIT ?').all(organizationId, branchId, Math.min(Math.max(Number(limit) || 200, 1), 500))
 }
 
-export function createExpense(input) {
+export function createExpense(input, branchId = 'main') {
   const category = String(input.category || '').trim()
   const description = String(input.description || '').trim()
   const amount = Number(input.amount)
   const incurredAt = String(input.incurredAt || now())
   if (!category || !description || !Number.isFinite(amount) || amount <= 0) throw new Error('Expense category, description, and a positive amount are required.')
-  const expense = { id: crypto.randomUUID(), category, description, amount, incurredAt, createdAt: now() }
-  database.prepare('INSERT INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(expense.id, organizationId, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt)
+  const expense = { id: crypto.randomUUID(), category, description, amount, incurredAt, createdAt: now(), branchId }
+  database.prepare('INSERT INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(expense.id, organizationId, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId)
   queueSync('expense', expense.id, 'create', expense)
   return expense
 }
@@ -533,8 +557,8 @@ export function createCustomer(input) {
   return customer
 }
 
-export function listSales(limit = 100) {
-  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, Math.min(Math.max(Number(limit) || 100, 1), 500))
+export function listSales(limit = 100, branchId = 'main') {
+  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? AND branch_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, branchId, Math.min(Math.max(Number(limit) || 100, 1), 500))
   const itemQuery = database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?')
   return sales.map((sale) => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: itemQuery.all(sale.id) }))
 }
@@ -550,22 +574,22 @@ export function recordSaleItemVoid(input, staff, shouldSync = true) {
   if (!id || !orderId || !productId || !productName || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3) {
     throw new Error('A void needs an item, quantity, price, order, and reason of at least 3 characters.')
   }
-  const event = { id, orderId, productId, productName, quantity, unitPrice, reason, staffId: String(staff.id || ''), staffName: String(staff.name || ''), createdAt: shouldSync ? now() : String(input.createdAt || now()) }
-  const result = database.prepare('INSERT OR IGNORE INTO sale_item_voids (id, organization_id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(event.id, organizationId, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt)
+  const event = { id, orderId, productId, productName, quantity, unitPrice, reason, branchId: String(input.branchId || 'main'), staffId: String(staff.id || ''), staffName: String(staff.name || ''), createdAt: shouldSync ? now() : String(input.createdAt || now()) }
+  const result = database.prepare('INSERT OR IGNORE INTO sale_item_voids (id, organization_id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(event.id, organizationId, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt, event.branchId)
   if (result.changes && shouldSync) queueSync('sale_void', event.id, 'create', event)
   return event
 }
 
-export function listSaleItemVoids(limit = 500) {
-  return database.prepare('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?')
-    .all(organizationId, Math.min(Math.max(Number(limit) || 500, 1), 1000))
+export function listSaleItemVoids(limit = 500, branchId = 'main') {
+  return database.prepare('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE organization_id = ? AND branch_id = ? ORDER BY created_at DESC LIMIT ?')
+    .all(organizationId, branchId, Math.min(Math.max(Number(limit) || 500, 1), 1000))
 }
 
-export function listMovements(limit = 200) {
+export function listMovements(limit = 200, branchId = 'main') {
   return database.prepare(`SELECT m.id, p.name AS productName, p.sku, m.quantity, m.reason, m.created_at AS createdAt
     FROM inventory_movements m JOIN products p ON p.id = m.product_id
-    WHERE m.organization_id = ? ORDER BY m.created_at DESC LIMIT ?`).all(organizationId, Math.min(Math.max(Number(limit) || 200, 1), 500))
+    WHERE m.organization_id = ? AND m.branch_id = ? ORDER BY m.created_at DESC LIMIT ?`).all(organizationId, branchId, Math.min(Math.max(Number(limit) || 200, 1), 500))
 }
 
 export async function createBackup() {
@@ -604,10 +628,14 @@ export function applyRemoteOperations(operations) {
         database.prepare(`INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, unit, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sku = excluded.sku, barcode = excluded.barcode, category = excluded.category, reorder_point = excluded.reorder_point, price = excluded.price, unit = excluded.unit, updated_at = excluded.updated_at`)
           .run(payload.id, organizationId, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, payload.unit, payload.updated || now())
+        database.prepare("INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES ('main', ?, ?, ?, ?)").run(payload.id, Number(payload.stock) || 0, Number(payload.reorder) || 0, payload.updated || now())
+      } else if (operation.entityType === 'branch' && operation.action === 'upsert') {
+        database.prepare('INSERT INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, updated_at=excluded.updated_at').run(payload.id, organizationId, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.createdAt || now(), payload.updatedAt || now())
+        database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE organization_id = ?').run(payload.id, now(), organizationId)
       } else if (operation.entityType === 'stock' && operation.action === 'adjust') {
-        adjustStock(payload.productId, Number(payload.amount), payload.reason || 'remote-adjustment', false)
+        adjustStock(payload.productId, Number(payload.amount), payload.reason || 'remote-adjustment', false, payload.branchId || 'main')
       } else if (operation.entityType === 'sale' && operation.action === 'create') {
-        createSale(payload, false)
+        createSale(payload, false, payload.branchId || 'main')
       } else if (operation.entityType === 'sale_void' && operation.action === 'create') {
         recordSaleItemVoid(payload, { id: payload.staffId, name: payload.staffName }, false)
       } else if (operation.entityType === 'customer' && operation.action === 'upsert') {
@@ -616,7 +644,7 @@ export function applyRemoteOperations(operations) {
       } else if (operation.entityType === 'wallet' && operation.action === 'adjust') {
         adjustCustomerWallet(payload.customerId, Number(payload.amount), payload.reason || 'remote-wallet', false)
       } else if (operation.entityType === 'expense' && operation.action === 'create') {
-        database.prepare('INSERT OR IGNORE INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(payload.id, organizationId, payload.category, payload.description, Number(payload.amount), payload.incurredAt, payload.createdAt || now())
+        database.prepare('INSERT OR IGNORE INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(payload.id, organizationId, payload.category, payload.description, Number(payload.amount), payload.incurredAt, payload.createdAt || now(), payload.branchId || 'main')
       } else if (operation.entityType === 'user' && operation.action === 'upsert') {
         // Password hashes remain device-local until hosted account authentication is enabled.
         const existing = database.prepare('SELECT id FROM users WHERE id = ?').get(payload.id)
@@ -630,7 +658,7 @@ export function applyRemoteOperations(operations) {
       } else if (operation.entityType === 'stocktake' && operation.action === 'approved') {
         database.prepare('UPDATE stocktakes SET status = ?, approval_reason = ?, approved_at = ? WHERE id = ?').run('approved', payload.approvalReason || '', payload.approvedAt || now(), payload.id)
         for (const count of payload.counts || []) {
-          if (Number(count.variance)) adjustStock(count.productId, Number(count.variance), `Remote stocktake: ${payload.approvalReason || 'approved'}`, false)
+          if (Number(count.variance)) adjustStock(count.productId, Number(count.variance), `Remote stocktake: ${payload.approvalReason || 'approved'}`, false, payload.branchId || 'main')
         }
       } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
         if (payload.paymentPolicy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(payload.paymentPolicy)), organizationId)
@@ -644,11 +672,11 @@ export function applyRemoteOperations(operations) {
   }
 }
 
-export function createStocktake() {
+export function createStocktake(branchId = 'main') {
   const id = crypto.randomUUID()
   const createdAt = now()
-  database.prepare('INSERT INTO stocktakes (id, organization_id, status, approval_reason, created_at, approved_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, organizationId, 'draft', '', createdAt, null)
-  const products = listProducts()
+  database.prepare('INSERT INTO stocktakes (id, organization_id, status, approval_reason, created_at, approved_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, 'draft', '', createdAt, null, branchId)
+  const products = listProducts(branchId)
   const insert = database.prepare('INSERT INTO stocktake_counts (id, stocktake_id, product_id, expected_quantity, counted_quantity, variance) VALUES (?, ?, ?, ?, ?, ?)')
   for (const product of products) insert.run(crypto.randomUUID(), id, product.id, product.stock, product.stock, 0)
   const stocktake = getStocktake(id)
@@ -667,7 +695,7 @@ export function getStocktakeHistory(stocktakeId) {
 }
 
 export function getStocktake(id) {
-  const stocktake = database.prepare('SELECT id, status, approval_reason AS approvalReason, created_at AS createdAt, approved_at AS approvedAt FROM stocktakes WHERE id = ? AND organization_id = ?').get(id, organizationId)
+  const stocktake = database.prepare('SELECT id, status, branch_id AS branchId, approval_reason AS approvalReason, created_at AS createdAt, approved_at AS approvedAt FROM stocktakes WHERE id = ? AND organization_id = ?').get(id, organizationId)
   if (!stocktake) return null
   stocktake.counts = database.prepare('SELECT c.id, c.product_id AS productId, p.name, p.sku, c.expected_quantity AS expected, c.counted_quantity AS counted, c.variance FROM stocktake_counts c JOIN products p ON p.id = c.product_id WHERE c.stocktake_id = ? ORDER BY p.name').all(id)
   stocktake.history = getStocktakeHistory(id)
@@ -696,12 +724,12 @@ export function approveStocktake(id, reason = '') {
     for (const count of stocktake.counts) {
       if (count.variance === 0) continue
       const adjustmentReason = `${approvalReason} · ${count.name}`
-      const product = database.prepare('SELECT stock FROM products WHERE id = ? AND organization_id = ?').get(count.productId, organizationId)
+      const product = database.prepare('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?').get(count.productId, stocktake.branchId || 'main')
       if (!product) continue
       const nextStock = product.stock + count.variance
       if (nextStock < 0) throw new Error(`Stock cannot be negative for ${count.name}.`)
-      database.prepare('UPDATE products SET stock = ?, updated_at = ? WHERE id = ? AND organization_id = ?').run(nextStock, now(), count.productId, organizationId)
-      database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, count.productId, count.variance, adjustmentReason, now())
+      database.prepare('UPDATE branch_inventory SET stock = ?, updated_at = ? WHERE product_id = ? AND branch_id = ?').run(nextStock, now(), count.productId, stocktake.branchId || 'main')
+      database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, count.productId, count.variance, adjustmentReason, now(), stocktake.branchId || 'main')
       database.prepare('INSERT INTO stocktake_adjustments (id, stocktake_id, product_id, expected_quantity, counted_quantity, variance, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(crypto.randomUUID(), id, count.productId, count.expected, count.counted, count.variance, adjustmentReason, now())
     }
@@ -735,46 +763,69 @@ export async function queueInitialSettingsSnapshot() {
   return true
 }
 
-export function listProducts() {
-  return database.prepare(`SELECT id, name, sku, barcode, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE organization_id = ? ORDER BY name`).all(organizationId)
+export function listBranches() {
+  return database.prepare('SELECT id, name, address, is_default AS isDefault, created_at AS createdAt, updated_at AS updatedAt FROM branches WHERE organization_id = ? ORDER BY is_default DESC, name').all(organizationId).map(branch => ({ ...branch, isDefault: Boolean(branch.isDefault) }))
 }
 
-export function createProduct(input) {
+export function createBranch(input) {
+  const name = String(input.name || '').trim().slice(0, 100)
+  const address = String(input.address || '').trim().slice(0, 250)
+  if (name.length < 2) throw new Error('Branch name must contain at least 2 characters.')
+  if (database.prepare('SELECT 1 FROM branches WHERE organization_id = ? AND lower(name) = lower(?)').get(organizationId, name)) throw new Error('A branch with that name already exists.')
+  const id = crypto.randomUUID()
+  const timestamp = now()
+  database.prepare('INSERT INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)').run(id, organizationId, name, address, timestamp, timestamp)
+  database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE organization_id = ?').run(id, timestamp, organizationId)
+  const branch = { id, name, address, isDefault: false, createdAt: timestamp, updatedAt: timestamp }
+  queueSync('branch', id, 'upsert', branch)
+  return branch
+}
+
+export function listProducts(branchId = 'main') {
+  return database.prepare(`SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated
+    FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? WHERE p.organization_id = ? ORDER BY p.name`).all(branchId, organizationId)
+}
+
+export function createProduct(input, branchId = 'main') {
   const product = { id: crypto.randomUUID(), updated: now() }
-  database.prepare('INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(product.id, organizationId, input.name, input.sku, input.barcode || '', input.category, input.stock, input.reorder, input.price, input.cost || 0, input.unit, product.updated)
-  const saved = database.prepare('SELECT id, name, sku, barcode, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(product.id)
-  queueSync('product', saved.id, 'upsert', saved)
+  database.prepare('INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)').run(product.id, organizationId, input.name, input.sku, input.barcode || '', input.category, input.reorder, input.price, input.cost || 0, input.unit, product.updated)
+  database.prepare('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, ?, ?)').run(branchId, product.id, input.stock, input.reorder, product.updated)
+  const saved = database.prepare('SELECT id, name, sku, barcode, category, ? AS stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(input.stock, product.id)
+  queueSync('product', saved.id, 'upsert', { ...saved, stock: 0 })
+  if (Number(input.stock)) queueSync('stock', saved.id, 'adjust', { productId: saved.id, branchId, amount: Number(input.stock), reason: 'initial-stock', updatedAt: product.updated })
   return saved
 }
 
-export function adjustStock(productId, amount, reason = 'manual-adjustment', shouldSync = true) {
-  const product = database.prepare('SELECT stock FROM products WHERE id = ? AND organization_id = ?').get(productId, organizationId)
+export function adjustStock(productId, amount, reason = 'manual-adjustment', shouldSync = true, branchId = 'main') {
+  let product = database.prepare('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?').get(productId, branchId)
+  if (!product) { database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE id = ? AND organization_id = ?').run(branchId, now(), productId, organizationId); product = { stock: 0 } }
   if (!product) return null
   const nextStock = product.stock + amount
   if (nextStock < 0) throw new Error('Stock cannot be negative.')
   const updatedAt = now()
   database.exec('BEGIN')
   try {
-    database.prepare('UPDATE products SET stock = ?, updated_at = ? WHERE id = ? AND organization_id = ?').run(nextStock, updatedAt, productId, organizationId)
+    database.prepare('UPDATE branch_inventory SET stock = ?, updated_at = ? WHERE product_id = ? AND branch_id = ?').run(nextStock, updatedAt, productId, branchId)
     const movement = { id: crypto.randomUUID(), productId, quantity: amount, reason, createdAt: updatedAt }
-    database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(movement.id, organizationId, productId, amount, reason, updatedAt)
+    database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(movement.id, organizationId, productId, amount, reason, updatedAt, branchId)
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')
     throw error
   }
-  const saved = database.prepare('SELECT id, name, sku, category, stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(productId)
-  if (shouldSync) { queueSync('stock', productId, 'adjust', { productId, amount, reason, updatedAt }); queueSync('inventory_movement', productId, 'create', { productId, amount, reason, createdAt: updatedAt }) }
+  const saved = database.prepare('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND i.branch_id = ?').get(productId, branchId)
+  if (shouldSync) { queueSync('stock', productId, 'adjust', { productId, branchId, amount, reason, updatedAt }); queueSync('inventory_movement', productId, 'create', { productId, branchId, amount, reason, createdAt: updatedAt }) }
   return saved
 }
 
-export function createSale(sale, shouldSync = true) {
+export function createSale(sale, shouldSync = true, branchId = 'main') {
+  sale = { ...sale, branchId: sale.branchId || branchId }
   sale = sale.paymentDetails ? recordPayment(sale, shouldSync ? database.prepare('SELECT payment_policy FROM app_settings WHERE organization_id = ?').get(organizationId)?.payment_policy : sale.paymentDetails.policy, true) : normalizeCashSale(sale)
   if (sale.paymentMethod === 'wallet' && !sale.paymentDetails?.customerId) throw new Error('A wallet sale requires a selected customer.')
   if (database.prepare('SELECT id FROM sales WHERE id = ?').get(sale.id)) return { ...sale, syncStatus: 'synced' }
   database.exec('BEGIN')
   try {
-    database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.staffId || '', sale.staffName || '', sale.createdAt, sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null)
+    database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.staffId || '', sale.staffName || '', sale.createdAt, sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null, sale.branchId)
     if (sale.paymentMethod === 'wallet') {
       const customerId = sale.paymentDetails.customerId
       const changed = database.prepare('UPDATE customers SET balance = ROUND(balance - ?, 2) WHERE id = ? AND organization_id = ? AND (balance >= ? OR ? = 1)').run(sale.total, customerId, organizationId, sale.total, sale.paymentDetails.creditApproved === true ? 1 : 0)
@@ -783,11 +834,11 @@ export function createSale(sale, shouldSync = true) {
     }
     for (const item of sale.items) {
       const updatedAt = now()
-      const product = database.prepare('SELECT stock, cost_price AS costPrice, name FROM products WHERE id = ? AND organization_id = ?').get(item.productId, organizationId)
+      const product = database.prepare('SELECT i.stock, p.cost_price AS costPrice, p.name FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND p.organization_id = ? AND i.branch_id = ?').get(item.productId, organizationId, sale.branchId)
       if (!product || product.stock < item.quantity) throw new Error('Insufficient stock for sale.')
       database.prepare('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), sale.id, item.productId, product.name, item.quantity, item.price, product.costPrice || 0)
-      database.prepare('UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ? AND organization_id = ?').run(item.quantity, updatedAt, item.productId, organizationId)
-      database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, item.productId, -item.quantity, 'sale', updatedAt)
+      database.prepare('UPDATE branch_inventory SET stock = stock - ?, updated_at = ? WHERE product_id = ? AND branch_id = ?').run(item.quantity, updatedAt, item.productId, sale.branchId)
+      database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, item.productId, -item.quantity, 'sale', updatedAt, sale.branchId)
     }
     database.exec('COMMIT')
     if (shouldSync) queueSync('sale', sale.id, 'create', sale)

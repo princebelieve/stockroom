@@ -99,12 +99,15 @@ export async function openMobileDatabase() {
       unit TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS branches (id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS branch_inventory (branch_id TEXT NOT NULL, product_id TEXT NOT NULL REFERENCES products(id), stock INTEGER NOT NULL DEFAULT 0 CHECK(stock >= 0), reorder_point INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY(branch_id, product_id));
     CREATE TABLE IF NOT EXISTS inventory_movements (
       id TEXT PRIMARY KEY,
       product_id TEXT NOT NULL REFERENCES products(id),
       quantity INTEGER NOT NULL,
       reason TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      branch_id TEXT NOT NULL DEFAULT 'main'
     );
     CREATE TABLE IF NOT EXISTS sales (
       id TEXT PRIMARY KEY,
@@ -112,6 +115,7 @@ export async function openMobileDatabase() {
       payment_method TEXT NOT NULL,
       payment_reference TEXT NOT NULL DEFAULT '',
       payment_details TEXT,
+      branch_id TEXT NOT NULL DEFAULT 'main',
       cash_received REAL,
       change_given REAL,
       terminal_provider TEXT NOT NULL DEFAULT '',
@@ -147,10 +151,14 @@ export async function openMobileDatabase() {
       description TEXT NOT NULL,
       amount REAL NOT NULL,
       incurred_at TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      branch_id TEXT NOT NULL DEFAULT 'main'
     );
   `)
   try { await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+  for (const table of ['inventory_movements', 'sales', 'expenses']) {
+    try { await connection.execute(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`) } catch {}
+  }
   const userColumns = await connection.query('PRAGMA table_info(users)')
   if (!userColumns.values?.some(row => row.name === 'username')) await connection.execute("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
   const policyColumns = await connection.query('PRAGMA table_info(app_settings)')

@@ -129,6 +129,7 @@ type AppSettings = {
 }
 
 type User = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; organizationId: string }
+type Branch = { id: string; name: string; address: string; isDefault: boolean }
 
 const navigableScreens = ['Overview', 'Inventory', 'Stocktake', 'POS', 'Display', 'Sales', 'Movements', 'Wallet', 'Owner', 'Reports', 'Sync', 'Team', 'Subscription', 'Device', 'Settings'] as const
 function navigationKey(user: User) { return `stockroom-active-screen:${user.organizationId}:${user.id}` }
@@ -181,10 +182,7 @@ function PublicLandingLink() {
 
 function App() {
   const deriveSku = (name: string) => `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`
-  const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('stockroom-products')
-    return saved ? JSON.parse(saved) : []
-  })
+  const [products, setProducts] = useState<Product[]>([])
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(initialScreen)
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<'Sales' | 'Team' | null>(null)
@@ -368,6 +366,10 @@ function App() {
     paymentFields.filter(field => field.textContent?.trim().startsWith('Bank or transfer provider')).forEach(field => replaceWithSelector(field, transferProvider, setTransferProvider))
   }, [active, paymentMethod, extraPaymentPolicy.providers, posProvider, terminalProvider, transferProvider])
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('stockroom-token') || '')
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [activeBranchId, setActiveBranchId] = useState(() => localStorage.getItem(`stockroom-active-branch:${(JSON.parse(localStorage.getItem('stockroom-user') || 'null') as User | null)?.organizationId || 'local'}`) || 'main')
+  const [newBranchName, setNewBranchName] = useState('')
+  const [newBranchAddress, setNewBranchAddress] = useState('')
   useEffect(() => {
     let cancelled = false
     setPosAccess(subscriptionAccess(null))
@@ -416,7 +418,7 @@ function App() {
   useEffect(() => {
     if (!isBrowserPwa() || !authToken || active !== 'Stocktake') return
     let cancelled = false
-    fetch('/api/stocktakes', { headers: { Authorization: `Bearer ${authToken}` } }).then(async response => {
+    fetch('/api/stocktakes', { headers: authHeaders }).then(async response => {
       if (!response.ok) throw new Error((await response.json()).error)
       const data = await response.json()
       if (!cancelled) {
@@ -425,7 +427,7 @@ function App() {
       }
     }).catch(error => { if (!cancelled) window.alert(error.message || 'Could not restore stocktake.') })
     return () => { cancelled = true }
-  }, [authToken, active])
+  }, [authToken, active, activeBranchId])
   const [registrationAvailable, setRegistrationAvailable] = useState(false)
   const [registrationRequested, setRegistrationRequested] = useState(() => new URLSearchParams(location.search).get('screen') === 'register')
   const [registrationStage, setRegistrationStage] = useState<'request' | 'complete'>('request')
@@ -467,7 +469,27 @@ function App() {
     void restore()
     return () => { cancelled = true }
   }, [settingsLoaded, authToken])
-  const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+  const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}`, 'X-Stockroom-Branch': activeBranchId } : {}
+  useEffect(() => {
+    if (!authToken || !user) { setBranches([]); return }
+    let cancelled = false
+    fetch('/api/branches', { headers: authHeaders }).then(response => response.ok ? response.json() as Promise<{ branches: Branch[] }> : Promise.reject()).then(data => {
+      if (cancelled) return
+      const available = data.branches?.length ? data.branches : [{ id: 'main', name: 'Main branch', address: '', isDefault: true }]
+      setBranches(available)
+      if (!available.some(branch => branch.id === activeBranchId)) setActiveBranchId(available[0].id)
+    }).catch(() => setBranches(current => current.length ? current : [{ id: 'main', name: 'Main branch', address: '', isDefault: true }]))
+    return () => { cancelled = true }
+  }, [authToken, user?.organizationId])
+  useEffect(() => { if (user?.organizationId) localStorage.setItem(`stockroom-active-branch:${user.organizationId}`, activeBranchId) }, [activeBranchId, user?.organizationId])
+  const activeBranch = branches.find(branch => branch.id === activeBranchId) || branches[0]
+  async function addBranch(event: { preventDefault: () => void }) {
+    event.preventDefault()
+    const response = await fetch('/api/branches', { method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newBranchName, address: newBranchAddress }) })
+    const result = await response.json() as Branch & { error?: string }
+    if (!response.ok) { setSettingsMessage(result.error || 'Could not add branch.'); return }
+    setBranches(current => [...current, result]); setActiveBranchId(result.id); setNewBranchName(''); setNewBranchAddress(''); setSettingsMessage(`${result.name} is ready. Its stock starts at zero; your existing Main branch stock is unchanged.`)
+  }
   const subscriptionApiUrl = !isBrowserPwa() && !isNativeMobile() ? '/api/cloud' : __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
   const subscriptionButtonLabel = posAccess.status === 'active' ? 'Subscribed' : posAccess.status === 'grace' ? 'Grace period' : 'Subscribe'
   const subscriptionButtonClass = posAccess.status === 'active' ? 'subscription-cta success' : posAccess.status === 'grace' ? 'subscription-cta warning' : 'subscription-cta'
@@ -542,18 +564,21 @@ function App() {
 
   useEffect(() => { document.title = appName }, [appName])
   useEffect(() => { void applyLogoTheme(logoData) }, [logoData])
-  useEffect(() => localStorage.setItem('stockroom-products', JSON.stringify(products)), [products])
+  useEffect(() => { if (user?.organizationId) localStorage.setItem(`stockroom-products:${user.organizationId}:${activeBranchId}`, JSON.stringify(products)) }, [products, user?.organizationId, activeBranchId])
   useEffect(() => {
     if (!authToken) return
-    if (!isBrowserPwa()) getCachedProducts().then((cached) => { if (cached.length) setProducts(cached) }).catch(() => undefined)
+    const cachedBranch = localStorage.getItem(`stockroom-products:${user?.organizationId || 'local'}:${activeBranchId}`)
+    if (cachedBranch) { try { setProducts(JSON.parse(cachedBranch) as Product[]) } catch { setProducts([]) } }
+    else setProducts([])
+    if (!isBrowserPwa() && activeBranchId === 'main') getCachedProducts().then((cached) => { if (cached.length && activeBranchId === 'main') setProducts(cached) }).catch(() => undefined)
     fetch('/api/products', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ products: Product[] }> : Promise.reject()).then((data) => {
       setProducts(data.products)
       cacheProducts(data.products).catch(() => undefined)
     }).catch(() => undefined)
-  }, [authToken])
+  }, [authToken, activeBranchId])
   useEffect(() => { if (canManageOperations) fetch('/api/customers', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ customers: Customer[] }> : Promise.reject()).then((data) => setCustomers(data.customers)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
-  useEffect(() => { let cancelled = false; if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => { if (!cancelled) setSales(data.sales) }).catch(() => undefined); return () => { cancelled = true } }, [authToken, user?.organizationId, user?.operationalAccess, user?.role])
-  useEffect(() => { let cancelled = false; if (canManageOperations) fetch('/api/sales/voids', { headers: authHeaders }).then(response => response.ok ? response.json() as Promise<{ voids: SaleItemVoid[] }> : Promise.reject()).then(data => { if (!cancelled) setSaleVoids(data.voids) }).catch(() => undefined); return () => { cancelled = true } }, [authToken, user?.organizationId, user?.operationalAccess, user?.role])
+  useEffect(() => { let cancelled = false; if (canManageOperations) fetch('/api/sales', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ sales: SaleRecord[] }> : Promise.reject()).then((data) => { if (!cancelled) setSales(data.sales) }).catch(() => undefined); return () => { cancelled = true } }, [authToken, activeBranchId, user?.organizationId, user?.operationalAccess, user?.role])
+  useEffect(() => { let cancelled = false; if (canManageOperations) fetch('/api/sales/voids', { headers: authHeaders }).then(response => response.ok ? response.json() as Promise<{ voids: SaleItemVoid[] }> : Promise.reject()).then(data => { if (!cancelled) setSaleVoids(data.voids) }).catch(() => undefined); return () => { cancelled = true } }, [authToken, activeBranchId, user?.organizationId, user?.operationalAccess, user?.role])
   useEffect(() => {
     if (!canManageOperations || active !== 'Sales') return
     let cancelled = false
@@ -566,8 +591,8 @@ function App() {
     void refreshActivity().catch(() => undefined)
     const timer = window.setInterval(() => { void refreshActivity().catch(() => undefined) }, 15_000)
     return () => { cancelled = true; window.clearInterval(timer) }
-  }, [active, authToken, user?.organizationId, user?.operationalAccess, user?.role])
-  useEffect(() => { if (canManageOperations) fetch('/api/movements', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ movements: Movement[] }> : Promise.reject()).then((data) => setMovements(data.movements)).catch(() => undefined) }, [authToken, user?.operationalAccess, user?.role])
+  }, [active, authToken, activeBranchId, user?.organizationId, user?.operationalAccess, user?.role])
+  useEffect(() => { if (canManageOperations) fetch('/api/movements', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ movements: Movement[] }> : Promise.reject()).then((data) => setMovements(data.movements)).catch(() => undefined) }, [authToken, activeBranchId, user?.operationalAccess, user?.role])
   useEffect(() => {
     if (!authToken || user?.role !== 'owner' || (isBrowserPwa() && active !== 'Team')) return
     let cancelled = false
@@ -588,12 +613,12 @@ function App() {
   }, [authToken, user?.role, syncStatus.conflicts])
   useEffect(() => {
     if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
-    fetch('/api/expenses').then((response) => response.ok ? response.json() as Promise<{ expenses: Expense[] }> : Promise.reject()).then((data) => setExpenses(data.expenses)).catch(() => undefined)
-  }, [authToken, user?.role])
+    fetch('/api/expenses', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<{ expenses: Expense[] }> : Promise.reject()).then((data) => setExpenses(data.expenses)).catch(() => undefined)
+  }, [authToken, activeBranchId, user?.role])
   useEffect(() => {
     if (!authToken || !['owner', 'admin'].includes(user?.role || '')) return
-    fetch('/api/reports', { headers: { Authorization: `Bearer ${authToken}` } }).then((response) => response.ok ? response.json() as Promise<Reports> : Promise.reject()).then(setReports).catch(() => undefined)
-  }, [authToken, user?.role])
+    fetch('/api/reports', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<Reports> : Promise.reject()).then(setReports).catch(() => undefined)
+  }, [authToken, activeBranchId, user?.role])
   async function refreshBusinessSettings(signal?: AbortSignal) {
     const response = await fetch('/api/settings', { signal }).catch(() => null)
     if (!response?.ok) return
@@ -664,7 +689,7 @@ function App() {
         // Desktop/Android may still have local edits waiting for their API.
         // Do not replace those edits with an older database snapshot.
         if (!isBrowserPwa() && (await getQueuedOperations()).length) return
-        const productsResponse = await fetch('/api/products', { headers: { Authorization: `Bearer ${authToken}` } })
+        const productsResponse = await fetch('/api/products', { headers: authHeaders })
         if (productsResponse.ok) {
           const result = await productsResponse.json() as { products: Product[] }
           if (!cancelled) setProducts(result.products)
@@ -1294,7 +1319,7 @@ function App() {
   }
 
   async function exportSalesCsv() {
-    const response = await fetch('/api/reports/sales.csv', { headers: { Authorization: `Bearer ${authToken}` } })
+    const response = await fetch('/api/reports/sales.csv', { headers: authHeaders })
     if (!response.ok) return
     const url = URL.createObjectURL(await response.blob())
     const link = document.createElement('a')
@@ -1306,12 +1331,12 @@ function App() {
     event.preventDefault()
     const submittedForm = event.currentTarget
     const form = new FormData(event.currentTarget)
-    const response = await fetch('/api/expenses', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ category: form.get('category'), description: form.get('description'), amount: Number(form.get('amount')), incurredAt: new Date(String(form.get('incurredAt') || new Date().toISOString())).toISOString() }) })
+    const response = await fetch('/api/expenses', { method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ category: form.get('category'), description: form.get('description'), amount: Number(form.get('amount')), incurredAt: new Date(String(form.get('incurredAt') || new Date().toISOString())).toISOString() }) })
     if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || 'Could not save expense.') }
     const expense = await response.json() as Expense
     setExpenses((current) => [expense, ...current])
     submittedForm.reset()
-    const reportResponse = await fetch('/api/reports', { headers: { Authorization: `Bearer ${authToken}` } })
+    const reportResponse = await fetch('/api/reports', { headers: authHeaders })
     if (reportResponse.ok) setReports(await reportResponse.json() as Reports)
   }
 
@@ -1378,7 +1403,7 @@ function App() {
   }
 
   async function startStocktake() {
-    const response = await fetch('/api/stocktakes', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
+    const response = await fetch('/api/stocktakes', { method: 'POST', headers: authHeaders })
     const result = await response.json().catch(() => ({})) as Stocktake & { error?: string }
     if (!response.ok) throw new Error(result.error || 'Could not start stocktake.')
     setStocktake(result)
@@ -1387,7 +1412,7 @@ function App() {
 
   async function updateCount(countId: string, counted: number) {
     if (!stocktake) return
-    const response = await fetch(`/api/stocktakes/${stocktake.id}/counts/${countId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ counted }) })
+    const response = await fetch(`/api/stocktakes/${stocktake.id}/counts/${countId}`, { method: 'PUT', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ counted }) })
     if (response.ok) setStocktake(await response.json() as Stocktake)
     else if (isBrowserPwa()) window.alert((await response.json()).error || 'Could not save count.')
   }
@@ -1396,13 +1421,13 @@ function App() {
     if (!stocktake) return
     const response = await fetch(`/api/stocktakes/${stocktake.id}/approve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason: stocktakeReason.trim() || 'Approved after physical count' }),
     })
     if (response.ok) {
       const next = await response.json() as Stocktake
       setStocktake(next)
-      fetch('/api/products').then((result) => result.json()).then((data: { products: Product[] }) => setProducts(data.products))
+      fetch('/api/products', { headers: authHeaders }).then((result) => result.json()).then((data: { products: Product[] }) => setProducts(data.products))
     } else if (isBrowserPwa()) window.alert((await response.json()).error || 'Could not approve stocktake.')
   }
 
@@ -1598,7 +1623,7 @@ function App() {
     </aside>
     {isBrowserPwa() && <div className="mobile-pwa-sync"><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Sync now"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncingâ€¦' : 'Sync now'}</button>{syncFeedback && <p className="mobile-sync-feedback" role="status" aria-live="polite">{syncFeedback}</p>}</div>}
     <main className="main-content">
-      <header className="topbar"><div><p className="eyebrow">{user.name} Ã‚Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Subscription' ? 'Subscription' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><button type="button" className="icon-button" title="Back" onClick={goBackInApp} disabled={active === 'Overview'} aria-label="Go back"><ArrowLeft size={18} /></button><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} refreshing={refreshingView} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
+      <header className="topbar"><div><p className="eyebrow">{user.name} Ã‚Â· {user.role}</p><h1>{active === 'Inventory' ? 'Inventory' : active === 'POS' ? 'Point of sale' : active === 'Wallet' ? 'Wallet' : active === 'Owner' ? 'Owner dashboard' : active === 'Subscription' ? 'Subscription' : active === 'Settings' ? 'Admin settings' : 'Good morning'}</h1></div><div className="top-actions"><label className="branch-switcher"><Store size={16} /><span className="sr-only">Active branch</span><select aria-label="Active branch" value={activeBranchId} onChange={event => setActiveBranchId(event.target.value)}>{(branches.length ? branches : [{ id: 'main', name: 'Main branch', address: '', isDefault: true }]).map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><button type="button" className="icon-button" title="Back" onClick={goBackInApp} disabled={active === 'Overview'} aria-label="Go back"><ArrowLeft size={18} /></button><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} refreshing={refreshingView} /><button className="icon-button" title="Filter"><SlidersHorizontal size={18} /></button><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span><AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></div></header>
       {active === 'Overview' && canManageOperations && <>
         <section className="hero-row"><div><h2>Business at a glance</h2><p>Keep your shelves moving and your team in the know.</p></div><button className="primary-button" onClick={() => setShowAdd(true)}><Plus size={18} />Add product</button></section>
         <section className="metric-grid"><div className="metric-card"><span>Inventory value</span><strong>{formatMoney(totalValue)}</strong><small>Based on current local stock and unit prices</small></div><div className="metric-card"><span>Items in stock</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}</strong><small>Across {products.length} products</small></div><div className="metric-card alert-card"><span>Needs attention</span><strong>{lowStock.length}</strong><small>{lowStock.length ? 'Products below reorder point' : 'All stock levels healthy'}</small></div></section>
@@ -1611,6 +1636,7 @@ function App() {
       {active === 'POS' && !posAccess.blocked && <section className="panel full-panel"><h3>More payment options</h3><p>Use these options for bank transfers or a sale paid with more than one method.</p><div className="report-actions"><button type="button" className="filter-button" onClick={() => setPaymentMethod('bank-transfer')}>Bank transfer</button><button type="button" className="filter-button" onClick={() => setPaymentMethod('multiple')}>Split payment</button></div>{paymentMethod === 'bank-transfer' && <div className="payment-options"><label>Bank or transfer provider<input value={transferProvider} onChange={event => setTransferProvider(event.target.value)} placeholder="e.g. Bank name" /></label><label>Transfer reference<input value={transferReference} onChange={event => setTransferReference(event.target.value)} placeholder="Approved transfer reference" /></label><label>Amount received by transfer<input type="number" inputMode="decimal" min="0" step="0.01" value={transferAmountReceived} onChange={event => { setTransferAmountReceived(event.target.value); setTransferOverpayment(''); setExtraKept('0'); setExtraReason(''); setExtraNote('') }} placeholder={String(cartTotal)} /></label>{Number(transferAmountReceived) > cartTotal && <><label>Transfer overpayment<select value={transferOverpayment} onChange={event => { const choice = event.target.value as 'returned' | 'retained' | ''; setTransferOverpayment(choice); setExtraKept(choice === 'retained' ? String(Math.round((Number(transferAmountReceived) - cartTotal) * 100) / 100) : '0'); setExtraReason(''); setExtraNote('') }}><option value="">Select how it was handled</option><option value="returned">Returned to customer</option>{extraPaymentPolicy.allowExtras && <option value="retained">Retained under owner rules</option>}</select></label>{transferOverpayment === 'retained' && <><label>Reason<select value={extraReason} onChange={event => setExtraReason(event.target.value)}><option value="">Select a reason</option>{extraPaymentPolicy.reasons.map(reason => <option key={reason} value={reason}>{reason === 'tip' ? 'Voluntary tip' : reason === 'rounding' ? 'Agreed rounding' : reason === 'donation' ? 'Voluntary donation' : 'Other'}</option>)}</select></label>{extraReason === 'other' && <label>Explanation<input maxLength={500} value={extraNote} onChange={event => setExtraNote(event.target.value)} required /></label>}</>}</>}<small>Confirm the transfer amount and status before completing the sale.</small></div>}{paymentMethod === 'multiple' && <div className="payment-options"><p>Split amounts must add up to the sale total exactly. Cash change and retained extras are not available on split sales.</p><label>Cash portion<input type="number" min="0" step="0.01" value={splitCash} onChange={event => setSplitCash(event.target.value)} /></label><label>Terminal portion<input type="number" min="0" step="0.01" value={splitTerminal} onChange={event => setSplitTerminal(event.target.value)} /></label>{Number(splitTerminal) > 0 && <label>Terminal reference<input value={splitTerminalReference} onChange={event => setSplitTerminalReference(event.target.value)} /></label>}<label>Bank-transfer portion<input type="number" min="0" step="0.01" value={splitTransfer} onChange={event => setSplitTransfer(event.target.value)} /></label>{Number(splitTransfer) > 0 && <><label>Bank or transfer provider<input value={transferProvider} onChange={event => setTransferProvider(event.target.value)} /></label><label>Transfer reference<input value={transferReference} onChange={event => setTransferReference(event.target.value)} /></label></>}<p role="status">Split total: {formatMoney(Number(splitCash || 0) + Number(splitTerminal || 0) + Number(splitTransfer || 0))} / {formatMoney(cartTotal)}</p></div>}</section>}
       {active === 'Inventory' && <ProductIntake create={importProduct} products={products} defaultUnit={defaultUnit} scan={() => scanBarcode('intake')} />}
       {active === 'Subscription' && user.role === 'owner' && <SubscriptionSettings apiUrl={subscriptionApiUrl} token={cloudAccessToken} onAccess={setPosAccess} onToken={(nextToken, refreshToken) => { setCloudAccessToken(nextToken); localStorage.setItem('stockroom-cloud-access-token', nextToken); localStorage.setItem('stockroom-cloud-refresh-token', refreshToken) }} signInToCloud={signInToCloud} />}
+      {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel"><div className="panel-heading"><div><h2>Shop branches</h2><p>Products and prices are shared. Stock, sales, stock movements, and reports follow the selected branch.</p></div><Store size={20} /></div><div className="branch-list">{branches.map(branch => <div className="branch-row" key={branch.id}><strong>{branch.name}{branch.isDefault && <small>Default</small>}</strong><span>{branch.address || 'No address added'}</span><button type="button" className="text-button" onClick={() => setActiveBranchId(branch.id)}>Manage this branch</button></div>)}</div><form className="settings-form branch-create-form" onSubmit={addBranch}><h3>Add branch</h3><label>Branch name<input value={newBranchName} maxLength={100} onChange={event => setNewBranchName(event.target.value)} placeholder="e.g. Airport Road Shop" required /></label><label>Address<input value={newBranchAddress} maxLength={250} onChange={event => setNewBranchAddress(event.target.value)} placeholder="Optional street or area" /></label><button className="primary-button" type="submit"><Plus size={17} />Add branch</button>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</form></section>}
       {active === 'Settings' && user.role === 'owner' && <section className="panel full-panel"><h3>Business type</h3><p>Choose the kind of goods you primarily sell. It only sets the default unit for new products and imports; existing records stay unchanged.</p><div className="settings-form"><BusinessProfileSettings value={businessMode} onChange={value => { setBusinessMode(value); localStorage.setItem('stockroom-business-mode', value); setSettingsMessage('Business type saved on this device.') }} /></div></section>}
       {active === 'Display' && <CustomerDisplayPairing pairing={displayPairing} createPairing={createDisplayPairing} openSecondMonitor={openCustomerDisplayOnSecondMonitor} prompt={requestInlinePrompt} />}
       {(active === 'POS' || active === 'Display') && displayError && <div role="alert" className="auth-error">{displayError}<button className="filter-button" onClick={() => setDisplayRetry(value => value + 1)}>Retry display update</button></div>}

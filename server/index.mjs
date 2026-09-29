@@ -4,7 +4,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
@@ -14,6 +14,10 @@ const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
 const distDirectory = join(fileURLToPath(new URL('..', import.meta.url)), 'dist')
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' }
 const generatedDeviceId = () => `desktop-${randomUUID()}`
+const requestBranch = (request) => {
+  const requested = String(request.headers['x-stockroom-branch'] || 'main').slice(0, 80)
+  return listBranches().some(branch => branch.id === requested) ? requested : 'main'
+}
 
 function sendJson(response, status, payload) {
   response.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
@@ -126,7 +130,7 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/owner/metrics') {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Admin access required.' })
-    return sendJson(response, 200, await getOwnerMetrics())
+    return sendJson(response, 200, await getOwnerMetrics(requestBranch(request)))
   }
 
   if (request.method === 'GET' && request.url === '/api/customers') {
@@ -139,28 +143,28 @@ const server = createServer(async (request, response) => {
   })
   if (request.method === 'GET' && request.url === '/api/sales') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
-    return sendJson(response, 200, { sales: await listSales() })
+    return sendJson(response, 200, { sales: await listSales(100, requestBranch(request)) })
   }
   if (request.method === 'GET' && request.url === '/api/sales/voids') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
-    return sendJson(response, 200, { voids: await listSaleItemVoids() })
+    return sendJson(response, 200, { voids: await listSaleItemVoids(500, requestBranch(request)) })
   }
   if (request.method === 'POST' && request.url === '/api/sales/voids') {
     return readJson(request, response, async (input) => {
       const user = sessionUser(request)
       if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
-      try { return sendJson(response, 201, recordSaleItemVoid(input, user)) }
+      try { return sendJson(response, 201, recordSaleItemVoid({ ...input, branchId: requestBranch(request) }, user)) }
       catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Could not record the void.' }) }
     })
   }
   if (request.method === 'GET' && request.url === '/api/expenses') {
     if (!isManager(sessionUser(request))) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    return sendJson(response, 200, { expenses: await listExpenses() })
+    return sendJson(response, 200, { expenses: await listExpenses(200, requestBranch(request)) })
   }
   if (request.method === 'POST' && request.url === '/api/expenses') {
     const user = sessionUser(request)
     if (!isManager(user)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    return readJson(request, response, async (input) => { try { return sendJson(response, 201, await createExpense(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) } })
+    return readJson(request, response, async (input) => { try { return sendJson(response, 201, await createExpense(input, requestBranch(request))) } catch (error) { return sendJson(response, 400, { error: error.message }) } })
   }
 
   if (request.method === 'POST' && request.url === '/api/auth/cloud-session') return readJson(request, response, async (input) => {
@@ -212,7 +216,7 @@ const server = createServer(async (request, response) => {
   })
   if (request.method === 'GET' && request.url === '/api/movements') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
-    return sendJson(response, 200, { movements: await listMovements() })
+    return sendJson(response, 200, { movements: await listMovements(200, requestBranch(request)) })
   }
   if (request.method === 'POST' && request.url === '/api/backups') {
     const user = sessionUser(request)
@@ -222,13 +226,13 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/reports') {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    return sendJson(response, 200, await getReports())
+    return sendJson(response, 200, await getReports(requestBranch(request)))
   }
   if (request.method === 'GET' && request.url === '/api/reports/sales.csv') {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
     response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-sales.csv"' })
-    return response.end(await exportSalesCsv())
+    return response.end(await exportSalesCsv(requestBranch(request)))
   }
   if (request.method === 'GET' && request.url === '/api/customer-display') {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
@@ -366,7 +370,7 @@ const server = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/stocktakes') {
     const user = sessionUser(request)
     if (!canOperate(user)) return sendJson(response, 403, { error: 'Operational access is required.' })
-    return sendJson(response, 201, await createStocktake())
+    return sendJson(response, 201, await createStocktake(requestBranch(request)))
   }
   const stocktakeCountMatch = request.url?.match(/^\/api\/stocktakes\/([^/]+)\/counts\/([^/]+)$/)
   if (request.method === 'PUT' && stocktakeCountMatch) {
@@ -422,9 +426,22 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (request.method === 'GET' && request.url === '/api/branches') {
+    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
+    return sendJson(response, 200, { branches: listBranches() })
+  }
+  if (request.method === 'POST' && request.url === '/api/branches') {
+    return readJson(request, response, async (input) => {
+      const user = sessionUser(request)
+      if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
+      try { return sendJson(response, 201, await createBranch(input)) }
+      catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+
   if (request.method === 'GET' && request.url === '/api/products') {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
-    return sendJson(response, 200, { products: await listProducts() })
+    return sendJson(response, 200, { products: await listProducts(requestBranch(request)) })
   }
 
   if (request.method === 'POST' && request.url === '/api/sales') {
@@ -436,7 +453,7 @@ const server = createServer(async (request, response) => {
       if (input.paymentMethod === 'wallet' && input.paymentDetails?.creditApproved && user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner may approve credit purchases.' })
       if (!input?.id || !Array.isArray(input.items) || !Number.isFinite(Number(input.total))) return sendJson(response, 400, { error: 'Sale is invalid.' })
       try {
-        return sendJson(response, 201, await createSale({ ...input, staffId: user.id, staffName: user.name }))
+        return sendJson(response, 201, await createSale({ ...input, branchId: requestBranch(request), staffId: user.id, staffName: user.name }, true, requestBranch(request)))
       } catch (error) {
         return sendJson(response, 400, { error: error.message })
       }
@@ -447,7 +464,7 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
       const product = validateProduct(input)
-      return sendJson(response, 201, await createProduct(product))
+      return sendJson(response, 201, await createProduct(product, requestBranch(request)))
     })
   }
 
@@ -458,7 +475,7 @@ const server = createServer(async (request, response) => {
       const amount = Number(input.amount)
       if (!Number.isInteger(amount) || amount === 0) return sendJson(response, 400, { error: 'Stock amount must be a non-zero integer.' })
       try {
-        const product = await adjustStock(stockMatch[1], amount)
+        const product = await adjustStock(stockMatch[1], amount, String(input.reason || 'manual-adjustment'), true, requestBranch(request))
         return product ? sendJson(response, 200, product) : sendJson(response, 404, { error: 'Product not found.' })
       } catch (error) {
         return sendJson(response, 400, { error: error.message })
