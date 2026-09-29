@@ -44,6 +44,7 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
       current = new SQL.Database(await snapshot())
       current.run(browserSchema)
       if (!current.exec('PRAGMA table_info(branches)')[0]?.values?.some(row => row[1] === 'is_active')) current.run('ALTER TABLE branches ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1')
+      if (!current.exec('PRAGMA table_info(branches)')[0]?.values?.some(row => row[1] === 'assigned_user_ids')) current.run("ALTER TABLE branches ADD COLUMN assigned_user_ids TEXT NOT NULL DEFAULT '[]'")
       for (const table of ['inventory_movements', 'sales', 'expenses', 'sale_item_voids']) {
         const columns = current.exec(`PRAGMA table_info(${table})`)[0]?.values || []
         if (!columns.some(row => row[1] === 'branch_id')) current.run(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`)

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
+import { createProduct, adjustStock, createSale, getSettings, listProducts, exportProductCatalogCsv, updateSettings, storageName } from './repository.mjs'
 import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
@@ -16,7 +16,9 @@ const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascr
 const generatedDeviceId = () => `desktop-${randomUUID()}`
 const requestBranch = (request) => {
   const requested = String(request.headers['x-stockroom-branch'] || 'main').slice(0, 80)
-  return listBranches().some(branch => branch.id === requested && branch.isActive) ? requested : 'main'
+  const user = savedSessionUser(request)
+  const allowed = listBranches().filter(branch => branch.isActive && (user?.role === 'owner' || !branch.assignedUserIds?.length || branch.assignedUserIds.includes(user?.id)))
+  return allowed.find(branch => branch.id === requested)?.id || allowed[0]?.id || 'main'
 }
 
 function sendJson(response, status, payload) {
@@ -42,7 +44,7 @@ const server = createServer(async (request, response) => {
     } catch { return sendJson(response, 503, { error: 'Could not reach the cloud service. Check your connection and try again.' }) }
   }
   if (request.method === 'OPTIONS') {
-    response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' })
+    response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Local-Session' })
     return response.end()
   }
 
@@ -427,8 +429,10 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && request.url === '/api/branches') {
-    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
-    return sendJson(response, 200, { branches: listBranches() })
+    const user = sessionUser(request)
+    if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
+    const branches = listBranches().filter(branch => user.role === 'owner' || !branch.assignedUserIds?.length || branch.assignedUserIds.includes(user.id))
+    return sendJson(response, 200, { branches })
   }
   if (request.method === 'POST' && request.url === '/api/branches') {
     return readJson(request, response, async (input) => {
@@ -451,6 +455,7 @@ const server = createServer(async (request, response) => {
       const user = sessionUser(request)
       if (!user || !(user.role === 'owner' || user.role === 'admin' || user.operationalAccess)) return sendJson(response, 403, { error: 'Inventory access required.' })
       if (String(input.fromBranchId || '') !== requestBranch(request)) return sendJson(response, 400, { error: 'Select the source branch before transferring stock.' })
+      if (!listBranches().some(branch => branch.id === String(input.toBranchId || '') && branch.isActive && (user.role === 'owner' || !branch.assignedUserIds?.length || branch.assignedUserIds.includes(user.id)))) return sendJson(response, 403, { error: 'You do not have access to the destination branch.' })
       try { return sendJson(response, 201, transferBranchStock(input)) }
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
@@ -459,6 +464,19 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/products') {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, { products: await listProducts(requestBranch(request)) })
+  }
+  if (request.method === 'GET' && request.url === '/api/products/export') {
+    if (savedSessionUser(String(request.headers['x-local-session'] || ''))?.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
+    try {
+      const config = await getCloudConfiguration()
+      const cloudToken = String(request.headers.authorization || '')
+      if (!config.url || !cloudToken) return sendJson(response, 402, { error: 'Connect to Stockroom cloud and confirm the one-time export fee before downloading.' })
+      const access = await fetch(`${config.url}/v1/subscriptions/business-exit`, { headers: { Authorization: cloudToken }, signal: AbortSignal.timeout(8000) })
+      const status = await access.json()
+      if (!access.ok || status.closed || (Number(status.feeAmount) > 0 && !status.paid)) return sendJson(response, 402, { error: 'Complete the one-time product export payment before downloading.' })
+    } catch { return sendJson(response, 503, { error: 'Could not verify product export eligibility with Stockroom cloud.' }) }
+    response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-products.csv"' })
+    return response.end(exportProductCatalogCsv())
   }
 
   if (request.method === 'POST' && request.url === '/api/sales') {

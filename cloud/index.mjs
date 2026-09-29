@@ -27,6 +27,7 @@ const devices = database.collection('devices')
 const passwordResets = database.collection('password_resets')
 const refreshTokens = database.collection('auth_refresh_tokens')
 const referralVisitors = database.collection('referral_visitors')
+const businessExitPayments = database.collection('business_exit_payments')
 await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
@@ -185,6 +186,7 @@ const server = createServer(async (request, response) => {
         ? await accounts.findOne({ email, role: 'owner' })
         : await accounts.findOne({ businessId, username: staffUsername, role: { $in: ['admin', 'cashier'] } })
       if (!account || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Username or password is incorrect.' })
+      if (await businessExitPayments.findOne({ _id: account.businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       return send(response, 200, await cloudSession(account))
     }
     if (request.method === 'POST' && request.url === '/v1/auth/refresh') {
@@ -194,6 +196,7 @@ const server = createServer(async (request, response) => {
       if (!saved) return send(response, 401, { error: 'Cloud session renewal expired. Sign in again.' })
       const account = await accounts.findOne({ _id: saved.accountId })
       if (!account) return send(response, 401, { error: 'Cloud account is no longer available.' })
+      if (await businessExitPayments.findOne({ _id: account.businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       return send(response, 200, await cloudSession(account))
     }
     if (request.method === 'GET' && request.url === '/v1/auth/me') {
@@ -357,6 +360,7 @@ const server = createServer(async (request, response) => {
       const deviceId = String(input.deviceId || '')
       const incoming = Array.isArray(input.operations) ? input.operations.slice(0, 500) : []
       if (!businessId || !deviceId || !incoming.length || claims.businessId !== businessId || claims.deviceId !== deviceId) return send(response, 403, { error: 'Token does not authorize this business/device.' })
+      if (await businessExitPayments.findOne({ _id: businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       const containsNewSale = await Promise.all(incoming.filter(operation => operation.entityType === 'sale' && operation.action === 'create').map(operation => operations.findOne({ businessId, operationId: String(operation.operationId) }, { projection: { _id: 1 } }).then(existing => !existing)))
       if (containsNewSale.some(Boolean)) {
         const access = await subscriptionHandler.access(businessId)
@@ -395,6 +399,7 @@ const server = createServer(async (request, response) => {
       const deviceId = query.get('deviceId') || ''
       const cursor = query.get('cursor') || ''
       if (!businessId || !deviceId || claims.businessId !== businessId || claims.deviceId !== deviceId) return send(response, 403, { error: 'Token does not authorize this business/device.' })
+      if (await businessExitPayments.findOne({ _id: businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       // Newer clients request their own history during recovery. Older clients
       // retain the original behaviour until upgraded, preventing a deployment
       // from changing their replay semantics unexpectedly.

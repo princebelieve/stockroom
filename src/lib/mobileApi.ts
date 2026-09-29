@@ -112,7 +112,7 @@ async function applyOperation(operation: Operation) {
     return
   }
   if (operation.entityType === 'branch' && operation.action === 'upsert') {
-    await db.run('INSERT INTO branches (id, name, address, is_default, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, is_active=excluded.is_active, updated_at=excluded.updated_at', [payload.id, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.isActive === false ? 0 : 1, payload.createdAt || operation.createdAt, payload.updatedAt || operation.createdAt])
+    await db.run('INSERT INTO branches (id, name, address, is_default, is_active, assigned_user_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, is_active=excluded.is_active, assigned_user_ids=excluded.assigned_user_ids, updated_at=excluded.updated_at', [payload.id, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.isActive === false ? 0 : 1, JSON.stringify(Array.isArray(payload.assignedUserIds) ? payload.assignedUserIds : []), payload.createdAt || operation.createdAt, payload.updatedAt || operation.createdAt])
     await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [payload.id, operation.createdAt])
   } else if (operation.entityType === 'branch_transfer' && operation.action === 'create') {
     const exists = await db.query('SELECT id FROM inventory_movements WHERE id=?', [`${payload.id}:out`])
@@ -339,35 +339,40 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (!user) return error('Authentication required.', 401)
   const requestedBranchId = new Headers(init?.headers).get('X-Stockroom-Branch') || 'main'
-  const branchId = (await db.query('SELECT id FROM branches WHERE id = ? AND is_active = 1', [requestedBranchId])).values?.length ? requestedBranchId : 'main'
-  if (path === '/api/branches' && method === 'GET') return json({ branches: (await db.query('SELECT id, name, address, is_default AS isDefault, is_active AS isActive, created_at AS createdAt, updated_at AS updatedAt FROM branches ORDER BY is_default DESC, name')).values || [] })
+  const allBranches = (await db.query('SELECT id, name, address, is_default AS isDefault, is_active AS isActive, assigned_user_ids AS assignedUserIds, created_at AS createdAt, updated_at AS updatedAt FROM branches ORDER BY is_default DESC, name')).values || []
+  const permittedBranches = allBranches.filter(branch => user.role === 'owner' || !(JSON.parse(String(branch.assignedUserIds || '[]') || '[]') as string[]).length || (JSON.parse(String(branch.assignedUserIds || '[]') || '[]') as string[]).includes(user.id))
+  if (user.role !== 'owner' && !permittedBranches.some(branch => Number(branch.isActive))) return error('No active shop branch is assigned to this account.', 403)
+  const branchId = (permittedBranches.find(branch => branch.id === requestedBranchId && Number(branch.isActive)) || permittedBranches.find(branch => Number(branch.isActive)))?.id || 'main'
+  if (path === '/api/branches' && method === 'GET') return json({ branches: permittedBranches })
   if (path === '/api/branches' && method === 'POST') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
     const input = await body(init); const name = String(input.name || '').trim().slice(0, 100); const address = String(input.address || '').trim().slice(0, 250)
     if (name.length < 2) return error('Branch name must contain at least 2 characters.')
     if ((await db.query('SELECT id FROM branches WHERE lower(name)=lower(?)', [name])).values?.length) return error('A branch with that name already exists.')
-    const branch = { id: id(), name, address, isDefault: false, isActive: true, createdAt: now(), updatedAt: now() }
-    await db.run('INSERT INTO branches (id, name, address, is_default, is_active, created_at, updated_at) VALUES (?, ?, ?, 0, 1, ?, ?)', [branch.id, name, address, branch.createdAt, branch.updatedAt]); await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [branch.id, branch.createdAt]); await queue('branch', branch.id, 'upsert', branch)
+    const branch = { id: id(), name, address, isDefault: false, isActive: true, assignedUserIds: [], createdAt: now(), updatedAt: now() }
+    await db.run('INSERT INTO branches (id, name, address, is_default, is_active, assigned_user_ids, created_at, updated_at) VALUES (?, ?, ?, 0, 1, ?, ?, ?)', [branch.id, name, address, '[]', branch.createdAt, branch.updatedAt]); await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [branch.id, branch.createdAt]); await queue('branch', branch.id, 'upsert', branch)
     return json(branch, 201)
   }
   const branchPath = path.match(/^\/api\/branches\/([^/]+)$/)
   if (branchPath && method === 'PUT') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    const input = await body(init), branchId = decodeURIComponent(branchPath[1]), current = (await db.query('SELECT id, is_default AS isDefault, created_at AS createdAt FROM branches WHERE id = ?', [branchId])).values?.[0]
+    const input = await body(init), branchId = decodeURIComponent(branchPath[1]), current = (await db.query('SELECT id, is_default AS isDefault, created_at AS createdAt, assigned_user_ids AS assignedUserIds FROM branches WHERE id = ?', [branchId])).values?.[0]
     if (!current) return error('Branch not found.', 404)
     const name = String(input.name || '').trim().slice(0, 100), address = String(input.address || '').trim().slice(0, 250), isActive = input.isActive !== false
     if (name.length < 2) return error('Branch name must contain at least 2 characters.')
     if (!isActive && Number(current.isDefault)) return error('The Main branch cannot be deactivated.')
     if (!isActive && Number((await db.query('SELECT COUNT(*) AS count FROM branches WHERE is_active=1')).values?.[0]?.count) <= 1) return error('Keep at least one active branch.')
     if ((await db.query('SELECT id FROM branches WHERE lower(name)=lower(?) AND id<>?', [name, branchId])).values?.length) return error('A branch with that name already exists.')
-    const branch = { id: branchId, name, address, isDefault: Boolean(current.isDefault), isActive, createdAt: String(current.createdAt), updatedAt: now() }
-    await db.run('UPDATE branches SET name=?, address=?, is_active=?, updated_at=? WHERE id=?', [name, address, isActive ? 1 : 0, branch.updatedAt, branchId]); await queue('branch', branch.id, 'upsert', branch)
+    const assignedUserIds = Array.isArray(input.assignedUserIds) ? [...new Set(input.assignedUserIds.map(String))] : JSON.parse(String(current.assignedUserIds || '[]'))
+    const branch = { id: branchId, name, address, isDefault: Boolean(current.isDefault), isActive, assignedUserIds, createdAt: String(current.createdAt), updatedAt: now() }
+    await db.run('UPDATE branches SET name=?, address=?, is_active=?, assigned_user_ids=?, updated_at=? WHERE id=?', [name, address, isActive ? 1 : 0, JSON.stringify(assignedUserIds), branch.updatedAt, branchId]); await queue('branch', branch.id, 'upsert', branch)
     return json(branch)
   }
   if (path === '/api/branch-transfers' && method === 'POST') {
     if (!(user.role === 'owner' || user.role === 'admin' || user.operationalAccess)) return error('Inventory access required.', 403)
     const input = await body(init), fromBranchId = String(input.fromBranchId || ''), toBranchId = String(input.toBranchId || ''), productId = String(input.productId || ''), quantity = Number(input.quantity), reason = String(input.reason || '').trim().slice(0, 250)
     if (fromBranchId !== branchId) return error('Select the source branch before transferring stock.')
+    if (!permittedBranches.some(branch => branch.id === toBranchId && Number(branch.isActive))) return error('You do not have access to the destination branch.', 403)
     if (!fromBranchId || !toBranchId || fromBranchId === toBranchId || !Number.isSafeInteger(quantity) || quantity < 1 || reason.length < 3) return error('Choose two different branches, a whole quantity, and a reason.')
     if (Number((await db.query('SELECT COUNT(*) AS count FROM branches WHERE id IN (?, ?) AND is_active=1', [fromBranchId, toBranchId])).values?.[0]?.count) !== 2) return error('Both branches must be active.')
     const source = (await db.query('SELECT stock FROM branch_inventory WHERE branch_id=? AND product_id=?', [fromBranchId, productId])).values?.[0]
@@ -398,6 +403,18 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   if (path === '/api/sync/pull' && method === 'POST') return json(await pullLatest())
   if (path === '/api/sync/now' && method === 'POST') return json(await syncNow())
   if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? ORDER BY p.updated_at DESC', [branchId])).values || [] })
+  if (path === '/api/products/export' && method === 'GET') {
+    if (user.role !== 'owner') return error('Owner access required.', 403)
+    try {
+      const response = await cloudRequest('/v1/subscriptions/business-exit')
+      const status = await response.json() as { feeAmount?: number; paid?: boolean; closed?: boolean }
+      if (!response.ok || status.closed || (Number(status.feeAmount) > 0 && !status.paid)) return error('Complete the one-time product export payment before downloading.', 402)
+    } catch { return error('Could not verify product export eligibility with Stockroom cloud.', 503) }
+    const rows = (await db.query('SELECT p.name, p.sku, p.barcode, p.category, p.cost_price AS cost, p.price, p.unit, b.name AS branch, COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder FROM products p CROSS JOIN branches b LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=b.id ORDER BY p.name,b.is_default DESC,b.name')).values || []
+    const cell = (value: unknown) => `"${String(value ?? '').replace(/^[=+@-]/, "'$&").replace(/"/g, '""')}"`
+    const csv = [['Product','SKU','Barcode','Category','Cost price','Selling price','Unit','Branch','Stock','Reorder point'], ...rows.map(row => [row.name,row.sku,row.barcode,row.category,row.cost,row.price,row.unit,row.branch,row.stock,row.reorder])].map(row => row.map(cell).join(',')).join('\r\n')
+    return new Response(csv, { headers: { 'Content-Type': 'text/csv;charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-products.csv"' } })
+  }
   if (path === '/api/products' && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
     const input = await body(init); const name = String(input.name || '').trim(); const product = { id: id(), name, sku: String(input.sku || '').trim() || `${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(), stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(), updated: now() }

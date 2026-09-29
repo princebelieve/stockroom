@@ -41,6 +41,8 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
   const payments = database.collection('subscription_payments')
   const notices = database.collection('subscription_notices')
   const enterpriseRequests = database.collection('enterprise_subscription_requests')
+  const businessExits = database.collection('business_exit_payments')
+  await businessExits.createIndex({ reference: 1 }, { unique: true, sparse: true })
   await subscriptions.createIndex({ expiresAt: 1 })
   const getPlan = () => settings.findOne({ _id: 'plan' })
   const getPlans = async () => {
@@ -73,7 +75,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const planId = subscription?.planId || (isTrial ? 'trial' : null)
     const graceDays = isTrial ? 0 : planId === 'monthly' && subscription?.graceMonths === undefined ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? Number(plan?.monthlyGraceMonths ?? plan?.graceMonths ?? 1) * 30) : undefined
     const graceMonths = isTrial ? undefined : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
-    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, suspended: Boolean(subscription?.suspendedAt), suspensionReason: subscription?.suspensionReason || '', portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
+    return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, suspended: Boolean(subscription?.suspendedAt || subscription?.closedAt), suspensionReason: subscription?.closedAt ? 'This business has completed its Stockroom exit.' : subscription?.suspensionReason || '', portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
@@ -143,6 +145,14 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     }
     return { expiresAt: settled.expiresAt }
   }
+  async function settleBusinessExit(reference, businessId) {
+    const exit = await businessExits.findOne({ _id: businessId, reference, status: 'pending' })
+    if (!exit) { const prior = await businessExits.findOne({ _id: businessId }); if (prior?.paidAt && prior.reference === reference) return prior; throw new Error('Export payment reference not found.') }
+    const data = await paystack(`/transaction/verify/${encodeURIComponent(reference)}`)
+    if (data.status !== 'success' || data.reference !== reference || data.amount !== exit.amount || data.currency !== exit.currency || data.customer?.email?.toLowerCase() !== exit.email.toLowerCase()) throw new Error('Payment has not been confirmed for the export fee.')
+    await businessExits.updateOne({ _id: businessId, reference, status: 'pending' }, { $set: { status: 'paid', paidAt: new Date() } })
+    return businessExits.findOne({ _id: businessId })
+  }
   async function reminders() {
     const plan = await getPlan()
     if (!plan || !mailConfigured()) return
@@ -187,6 +197,11 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         if (!validSignature(raw, request.headers['x-paystack-signature'], process.env.PAYSTACK_SECRET_KEY)) return reply(401, { error: 'Invalid signature.' })
         const event = JSON.parse(raw)
         if (event.event === 'charge.success' && await payments.findOne({ _id: event.data.reference })) await settle(event.data.reference)
+        if (event.event === 'charge.success') {
+          const exit = await businessExits.findOne({ reference: event.data.reference, status: 'pending' })
+          if (exit) await settleBusinessExit(event.data.reference, exit.businessId)
+        }
+        if (event.event === 'charge.failed') await businessExits.updateOne({ reference: event.data.reference, status: 'pending' }, { $set: { status: 'failed' } })
         await handlePayoutWebhook(event)
         return reply(200, { ok: true })
       }
@@ -197,10 +212,13 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           const input = JSON.parse(await body(request))
           const registrationKeyDurationDays = Number(input.registrationKeyDurationDays ?? 7)
           if (!Number.isInteger(registrationKeyDurationDays) || registrationKeyDurationDays < 1 || registrationKeyDurationDays > 30) throw new Error('Registration key duration must be from 1 to 30 days.')
+          const productExportFeeAmount = Number(input.productExportFeeAmount ?? 0)
+          const productExportFeeCurrency = String(input.productExportFeeCurrency || input.currency || 'NGN').toUpperCase()
+          if (!Number.isSafeInteger(productExportFeeAmount) || productExportFeeAmount < 0 || productExportFeeAmount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(productExportFeeCurrency)) throw new Error('Product export fee must be a non-negative minor-unit amount and supported currency.')
           const referral = { ...referralPercentages(input), visitorFirstReferralPercent: Number(input.visitorFirstReferralPercent ?? 0), visitorRecurringReferralPercent: Number(input.visitorRecurringReferralPercent ?? 0) }
           for (const value of [referral.visitorFirstReferralPercent, referral.visitorRecurringReferralPercent]) if (!Number.isFinite(value) || value < 0 || value > 100 || Math.round(value * 100) !== value * 100) throw new Error('Visitor referral rates must be from 0 to 100 with up to two decimal places.')
           const plan = input.monthlyAmount === undefined
-            ? { ...validatePlan(input), registrationKeyDurationDays, ...referral }
+            ? { ...validatePlan(input), registrationKeyDurationDays, productExportFeeAmount, productExportFeeCurrency, ...referral }
             : (() => {
               const monthlyGraceDays = Number(input.monthlyGraceDays ?? Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1) * 30)
               const otherGraceMonths = Number(input.graceMonths ?? 1)
@@ -210,12 +228,12 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
                 { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365, graceMonths: otherGraceMonths }), id: 'yearly', name: 'Yearly' },
                 { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365), graceMonths: otherGraceMonths }), id: 'enterprise', name: 'Enterprise' },
               ]
-              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, registrationKeyDurationDays, ...referral, plans }
+              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, registrationKeyDurationDays, productExportFeeAmount, productExportFeeCurrency, ...referral, plans }
             })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         const plan = await getPlan()
-        return reply(200, { plan, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+        return reply(200, { plan, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
       }
       if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
@@ -260,6 +278,57 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
       if (!owner) return reply(403, { error: 'Owner account not found.' })
       if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), plans: await getPlans(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }), enterpriseRequest: await currentEnterpriseRequest(claims.businessId), isDeveloper: isDeveloper(claims) })
+      if (url.pathname === '/v1/subscriptions/business-exit' && request.method === 'GET') {
+        const configured = await getPlan(), record = await businessExits.findOne({ _id: claims.businessId })
+        const business = await database.collection('business_settings').findOne({ businessId: claims.businessId })
+        const hasStarted = Boolean(record?.reference || record?.exportedAt)
+        return reply(200, { businessName: business?.settings?.appName || owner.businessName || '', feeAmount: hasStarted ? Number(record.amount) || 0 : Number(configured?.productExportFeeAmount) || 0, feeCurrency: hasStarted ? record.currency : configured?.productExportFeeCurrency || configured?.currency || 'NGN', paid: Boolean(record?.paidAt), exported: Boolean(record?.exportedAt), closed: Boolean(record?.closedAt), paymentStatus: record?.status || 'unpaid' })
+      }
+      if (url.pathname === '/v1/subscriptions/business-exit/checkout' && request.method === 'POST') {
+        const input = JSON.parse(await body(request)), business = await database.collection('business_settings').findOne({ businessId: claims.businessId })
+        const businessName = String(business?.settings?.appName || owner.businessName || '').trim()
+        if (!businessName || String(input.businessName || '').trim().toLocaleLowerCase() !== businessName.toLocaleLowerCase()) return reply(400, { error: 'Enter the exact business name shown in Business settings to continue.' })
+        const configured = await getPlan(), amount = Number(configured?.productExportFeeAmount) || 0, currency = String(configured?.productExportFeeCurrency || configured?.currency || 'NGN')
+        let record = await businessExits.findOne({ _id: claims.businessId })
+        if (record?.closedAt) return reply(409, { error: 'This business has already completed its Stockroom exit.' })
+        if (record?.paidAt || amount === 0) return reply(200, { paid: true, feeAmount: amount, feeCurrency: currency })
+        if (!process.env.PAYSTACK_SECRET_KEY) return reply(503, { error: 'Online payment is unavailable. Contact Stockroom support to arrange the export fee.' })
+        if (record?.status === 'pending' && record.authorizationUrl) return reply(200, { authorizationUrl: record.authorizationUrl, reference: record.reference, feeAmount: record.amount, feeCurrency: record.currency })
+        const reference = `export-${randomBytes(20).toString('hex')}`
+        const attempt = { _id: claims.businessId, businessId: claims.businessId, email: owner.email, amount, currency, reference, status: 'initiating', businessName, createdAt: new Date() }
+        if (!record) {
+          try { await businessExits.insertOne(attempt) }
+          catch (error) { if (error?.code === 11000) return reply(409, { error: 'An export payment is already starting. Refresh and try again shortly.' }); throw error }
+        } else {
+          const reserved = await businessExits.updateOne({ _id: claims.businessId, status: 'failed', paidAt: { $exists: false }, closedAt: { $exists: false } }, { $set: attempt, $unset: { authorizationUrl: '', exportedAt: '' } })
+          if (!reserved.modifiedCount) return reply(409, { error: 'An export payment is already starting. Refresh and try again shortly.' })
+        }
+        try {
+          const callback = new URL(appUrl('subscription')); callback.searchParams.set('exit', '1')
+          const result = await paystack('/transaction/initialize', { email: owner.email, amount, currency, reference, callback_url: callback.href })
+          await businessExits.updateOne({ _id: claims.businessId, reference }, { $set: { status: 'pending', authorizationUrl: result.authorization_url } })
+          return reply(200, { authorizationUrl: result.authorization_url, reference, feeAmount: amount, feeCurrency: currency })
+        } catch (error) { await businessExits.updateOne({ _id: claims.businessId, reference }, { $set: { status: 'failed', paymentError: error.message } }); throw error }
+      }
+      if (url.pathname === '/v1/subscriptions/business-exit/verify' && request.method === 'POST') {
+        const input = JSON.parse(await body(request)), result = await settleBusinessExit(String(input.reference || ''), claims.businessId)
+        return reply(200, { paid: Boolean(result.paidAt), paymentStatus: result.status })
+      }
+      if (url.pathname === '/v1/subscriptions/business-exit/exported' && request.method === 'POST') {
+        const configured = await getPlan(), record = await businessExits.findOne({ _id: claims.businessId })
+        if ((Number(configured?.productExportFeeAmount) || 0) > 0 && !record?.paidAt) return reply(402, { error: 'Pay the one-time export fee before downloading products.' })
+        await businessExits.updateOne({ _id: claims.businessId }, { $set: { businessId: claims.businessId, amount: Number(record?.amount ?? configured?.productExportFeeAmount) || 0, currency: record?.currency || configured?.productExportFeeCurrency || configured?.currency || 'NGN', exportedAt: new Date() } }, { upsert: true })
+        return reply(200, { exported: true })
+      }
+      if (url.pathname === '/v1/subscriptions/business-exit/close' && request.method === 'POST') {
+        const input = JSON.parse(await body(request)), configured = await getPlan(), record = await businessExits.findOne({ _id: claims.businessId })
+        const business = await database.collection('business_settings').findOne({ businessId: claims.businessId }), businessName = String(business?.settings?.appName || owner.businessName || '').trim()
+        if (String(input.businessName || '').trim().toLocaleLowerCase() !== businessName.toLocaleLowerCase()) return reply(400, { error: 'Enter the exact business name to confirm final exit.' })
+        if (!record?.exportedAt || ((Number(record?.amount ?? configured?.productExportFeeAmount) || 0) > 0 && !record.paidAt)) return reply(409, { error: 'Complete the paid product export before final exit.' })
+        await businessExits.updateOne({ _id: claims.businessId }, { $set: { closedAt: new Date(), status: 'closed' } })
+        await subscriptions.updateOne({ _id: claims.businessId }, { $set: { closedAt: new Date() } }, { upsert: true })
+        return reply(200, { closed: true, dataRetained: true })
+      }
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'GET') return reply(200, await referralInfo(claims.businessId))
       if (url.pathname === '/v1/subscriptions/referrals' && request.method === 'POST') {
         const input = JSON.parse(await body(request))
