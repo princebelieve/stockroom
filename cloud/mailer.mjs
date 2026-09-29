@@ -115,3 +115,10 @@ export async function sendStaffInvite({ to, name, businessId, password }) {
   await sendMail({ to, subject: 'Your Stockroom staff account', text: `Hello ${name},\n\nYou have been added to Stockroom business ${businessId}.\nEmail: ${to}\nTemporary password: ${password}\n\nSign in online once before using the app offline, then change your password.`, html: `<p>Hello ${name},</p><p>You have been added to Stockroom business <b>${businessId}</b>.</p><p>Email: ${to}<br>Temporary password: ${password}</p><p>Sign in online once before using the app offline, then change your password.</p>` })
   return true
 }
+
+export async function sendBusinessRegistrationKey({ to, businessName, key, expiresAt }) {
+  if (!configured()) throw new Error('Email is not configured.')
+  const expiry = new Date(expiresAt).toUTCString()
+  const safeName = String(businessName).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
+  await sendMail({ to, subject: 'Your Stockroom business registration key', text: `Your registration key for ${businessName} is:\n\n${key}\n\nUse it with this email address to create your Stockroom owner account. It expires ${expiry}. If you did not request this key, ignore this email.`, html: `<p>Your registration key for <b>${safeName}</b> is:</p><h2>${key}</h2><p>Use it with this email address to create your Stockroom owner account.</p><p>It expires ${expiry}. If you did not request this key, ignore this email.</p>` })
+}

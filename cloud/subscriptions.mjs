@@ -190,10 +190,12 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
         if (request.method === 'PUT') {
           const input = JSON.parse(await body(request))
+          const registrationKeyDurationDays = Number(input.registrationKeyDurationDays ?? 7)
+          if (!Number.isInteger(registrationKeyDurationDays) || registrationKeyDurationDays < 1 || registrationKeyDurationDays > 30) throw new Error('Registration key duration must be from 1 to 30 days.')
           const referral = { ...referralPercentages(input), visitorFirstReferralPercent: Number(input.visitorFirstReferralPercent ?? 0), visitorRecurringReferralPercent: Number(input.visitorRecurringReferralPercent ?? 0) }
           for (const value of [referral.visitorFirstReferralPercent, referral.visitorRecurringReferralPercent]) if (!Number.isFinite(value) || value < 0 || value > 100 || Math.round(value * 100) !== value * 100) throw new Error('Visitor referral rates must be from 0 to 100 with up to two decimal places.')
           const plan = input.monthlyAmount === undefined
-            ? { ...validatePlan(input), ...referral }
+            ? { ...validatePlan(input), registrationKeyDurationDays, ...referral }
             : (() => {
               const monthlyGraceDays = Number(input.monthlyGraceDays ?? Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1) * 30)
               const otherGraceMonths = Number(input.graceMonths ?? 1)
@@ -203,11 +205,12 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
                 { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365, graceMonths: otherGraceMonths }), id: 'yearly', name: 'Yearly' },
                 { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365), graceMonths: otherGraceMonths }), id: 'enterprise', name: 'Enterprise' },
               ]
-              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, ...referral, plans }
+              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, registrationKeyDurationDays, ...referral, plans }
             })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
-        return reply(200, { plan: await getPlan(), testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+        const plan = await getPlan()
+        return reply(200, { plan, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
       }
       if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })

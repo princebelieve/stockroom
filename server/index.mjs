@@ -56,6 +56,16 @@ const server = createServer(async (request, response) => {
     } catch { return sendJson(response, 503, { error: 'Registration could not be confirmed. Try signing in first; if no account exists, retry your key.' }) }
   })
 
+  if (request.method === 'POST' && request.url === '/api/auth/registration-key') return readJson(request, response, async input => {
+    const config = await getCloudConfiguration()
+    if (config.businessId || (await getSettings()).ownerConfigured) return sendJson(response, 409, { error: 'This installation already belongs to a business. Sign in to continue.' })
+    try {
+      if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
+      const result = await fetch(`${config.url}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(20000) })
+      return sendJson(response, result.status, await result.json())
+    } catch { return sendJson(response, 503, { error: 'Could not request a registration key. Check your internet connection and try again.' }) }
+  })
+
   if (request.method === 'GET' && request.url === '/api/subscriptions/access') {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, await getSubscriptionAccess(request.headers['x-subscription-refresh'] === 'true'))

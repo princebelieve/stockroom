@@ -249,6 +249,10 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
     return originalFetch(`${cloudUrl}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
   }
+  if (path === '/api/auth/registration-key' && method === 'POST') {
+    if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
+    return originalFetch(`${cloudUrl}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
+  }
   // Logout must also clear stale sessions whose user record no longer exists.
   // Device enrollment lives in separate settings and is preserved.
   if (path === '/api/auth/logout' && method === 'POST') {

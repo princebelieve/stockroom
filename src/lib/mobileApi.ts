@@ -252,6 +252,10 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
     return originalFetch(`${cloudUrl}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
   }
+  if (path === '/api/auth/registration-key' && method === 'POST') {
+    if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
+    return originalFetch(`${cloudUrl}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
+  }
   if (['/api/auth/password-reset/request', '/api/auth/password-reset/confirm'].includes(path) && method === 'POST') {
     return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: init?.body })
   }

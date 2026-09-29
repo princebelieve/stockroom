@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { mailConfigured, mailDiagnostics, sendPasswordReset } from './mailer.mjs'
+import { mailConfigured, mailDiagnostics, sendBusinessRegistrationKey, sendPasswordReset } from './mailer.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
@@ -112,7 +112,7 @@ async function ownerPasswordIsValid(claims, value) {
   return Boolean(owner && matchesPassword(String(value || ''), owner.passwordHash))
 }
 
-const registration = await createRegistration({ database, client, accounts, hashPassword })
+const registration = await createRegistration({ database, client, accounts, hashPassword, sendBusinessRegistrationKey })
 const visitorAccounts = createVisitorAccounts({ database, hashPassword, matchesPassword, signToken })
 const referralWallet = await createReferralWallet({ database, accounts, verifyToken })
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook })
@@ -139,6 +139,14 @@ const server = createServer(async (request, response) => {
     }
     if (await visitorAccounts(request, response, verifyToken, readJson)) return
     if (await referralWallet.handle(request, response)) return
+    if (request.method === 'POST' && request.url === '/v1/public/registration-keys') {
+      response.setHeader('Cache-Control', 'no-store')
+      try {
+        const input = await readJson(request, 8192)
+        const address = String(request.headers['x-forwarded-for'] || request.socket.remoteAddress || '').split(',')[0].trim()
+        return send(response, 201, await registration.issuePublic(input, address))
+      } catch (error) { return send(response, error.statusCode || 400, { error: error.message }) }
+    }
     if (request.method === 'POST' && request.url === '/v1/registration-keys') {
       const claims = verifyToken(request)
       if (!await canIssueRegistrationKey(claims, process.env.DEVELOPER_EMAIL, accounts)) return send(response, 403, { error: 'Developer account required.' })

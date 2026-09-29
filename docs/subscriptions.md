@@ -6,7 +6,7 @@
 - Visitor promoters use `/visitor` to register or sign in, share their personal referral link, see attributed businesses and manage their reward wallet.
 - The developer uses `/developer` to manage businesses, referrals, payouts, Enterprise requests, subscription plans, reward rates and global subscription enforcement.
 
-Configure `DEVELOPER_EMAIL` in Render to the email of the developer's Stockroom cloud owner account. The developer signs in to `/developer` with that account. Other owners are denied developer API access. `ADMIN_API_KEY` remains for device enrollment and is unrelated to subscriptions.
+Configure `DEVELOPER_EMAIL` in Render to the email of the developer's Stockroom cloud owner account. The developer signs in to `/developer` with that account. Other owners are denied developer API access. `ADMIN_API_KEY` remains for device enrollment and is unrelated to subscriptions. The developer sets the automatic registration-key lifetime (1–30 days) in Plan settings. New business signups generate a one-use key and email it to the address supplied; the email must match when creating the owner account. Public requests are rate-limited. Manual key issuance remains available in Businesses.
 
 ## Subscription configuration
 
@@ -34,6 +34,10 @@ Owner and visitor wallets show registered businesses, earned, paid, pending and 
 
 ## Paystack referral transfers
 
-Automatic referral payouts are disabled by default. Keep `PAYSTACK_REFERRAL_AUTO_PAYOUTS=false` and `PAYSTACK_REFERRAL_WEBHOOK_READY=false` until Paystack transfers from balance are available and the transfer webhook is configured at `/v1/subscriptions/webhook`. Set both to `true` only with `PAYSTACK_SECRET_KEY` configured. Promoters then need to save a supported bank destination before automatic transfer can start. Transfers require sufficient Paystack balance and can require OTP approval. A rejected transfer is queued for manual payment; if Paystack's response is ambiguous, Stockroom holds the funds for review to avoid duplicate payment. XOF payouts remain manual.
+Automatic referral payouts are enabled by default and can be switched on or off in Developer Control Centre → Plan settings. The switch is stored in Stockroom's database; there are no separate Render readiness flags. Automatic transfers use the existing `PAYSTACK_SECRET_KEY` and the current `/v1/subscriptions/webhook`, which handles subscription and transfer events. Promoters must save a supported bank destination and submit a withdrawal request before Stockroom starts a transfer. Transfers require sufficient Paystack balance. Paystack failures fall back to a manual request; ambiguous results stay held for review to avoid duplicate payment. XOF payouts remain manual.
 
-Paystack receives full account details to create a transfer recipient. Stockroom stores the Paystack recipient code and the account's last four digits. Configure the payout flags only after confirming the account's transfer setup and webhook behavior.
+Stockroom exposes a server-side transfer approval endpoint at `/v1/paystack/transfer-approval`. Copy its full HTTPS URL from Developer Control Centre → Plan settings into Paystack Dashboard → Settings → Preferences → Transfer Approval. The endpoint approves only a recent Stockroom payout in `initiating` state when the transfer reference and amount match; currency, source and recipient are checked when provided. It responds quickly and rejects unknown or mismatched requests. Paystack requires OTP and URL approval separately, so disable OTP confirmation in Paystack Preferences if transfers should proceed without a person entering each OTP. Keep URL approval enabled as the server-side check. Test with a small payout before relying on unattended live transfers.
+
+Paystack receives full account details to create a transfer recipient. Stockroom stores the Paystack recipient code and the account's last four digits. Do not put the Paystack secret key in the app or browser; store it only in Render as `PAYSTACK_SECRET_KEY`.
+
+You do not create payout codes manually. When a promoter saves their bank destination, Paystack creates and returns the recipient code (usually `RCP_...`), which Stockroom stores. When Stockroom starts a withdrawal transfer, Paystack returns its transfer code (`TRF_...`); Stockroom saves that for status tracking or OTP finalization.

@@ -13,6 +13,7 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
   const payouts = database.collection('referral_payouts')
   const wallets = database.collection('referral_wallets')
   const profiles = database.collection('referral_payout_profiles')
+  const payoutSettings = database.collection('referral_payout_settings')
 
   await Promise.all([
     payouts.createIndex({ referrerType: 1, referrerId: 1, createdAt: -1 }),
@@ -21,7 +22,21 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
   ])
 
   const sendJson = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); return true }
-  const autoReady = () => process.env.PAYSTACK_REFERRAL_AUTO_PAYOUTS === 'true' && process.env.PAYSTACK_REFERRAL_WEBHOOK_READY === 'true' && Boolean(process.env.PAYSTACK_SECRET_KEY)
+  const automaticPayoutsEnabled = async () => (await payoutSettings.findOne({ _id: 'control' }))?.enabled !== false
+  const autoReady = async () => Boolean(await automaticPayoutsEnabled()) && Boolean(process.env.PAYSTACK_SECRET_KEY)
+  async function approveTransfer(request, response) {
+    const input = await readBody(request)
+    const payload = input.data && typeof input.data === 'object' ? input.data : input
+    const reference = String(payload.reference || '')
+    const amount = Number(payload.amount)
+    const row = reference ? await payouts.findOne({ reference, status: 'initiating', method: 'paystack' }) : null
+    if (!row || !Number.isSafeInteger(amount) || amount !== row.amountMinor || Date.now() - new Date(row.createdAt).getTime() > 5 * 60_000) return sendJson(response, 400, {})
+    if (payload.currency && String(payload.currency).toUpperCase() !== row.currency) return sendJson(response, 400, {})
+    if (payload.source && payload.source !== 'balance') return sendJson(response, 400, {})
+    const recipient = typeof payload.recipient === 'string' ? payload.recipient : payload.recipient?.recipient_code || payload.recipient?.recipientCode || payload.recipient?.code || ''
+    if (recipient && recipient !== row.recipientCode) return sendJson(response, 400, {})
+    return sendJson(response, 200, {})
+  }
   const authorizedDeveloper = claims => Boolean(process.env.DEVELOPER_EMAIL && claims?.kind === 'access' && claims.role === 'owner' && String(claims.email || '').toLowerCase() === process.env.DEVELOPER_EMAIL.trim().toLowerCase())
   const paystack = async (path, input) => {
     if (!process.env.PAYSTACK_SECRET_KEY) throw new Error('Paystack transfers are not configured.')
@@ -67,9 +82,10 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
       await ensureWallet(referrer, currency)
       balances.push({ currency, earnedMinor, paidMinor, pendingMinor: reservedMinor, availableMinor: Math.max(0, earnedMinor - paidMinor - reservedMinor) })
     }
-    const profileMap = Object.fromEntries(profileRows.map(row => [row.currency, { currency: row.currency, name: row.name, bankName: row.bankName || '', accountLast4: row.accountLast4 || '', automaticReady: Boolean(autoReady() && row.recipientCode && recipientTypes[row.currency]) }]))
+    const payoutsReady = await autoReady()
+    const profileMap = Object.fromEntries(profileRows.map(row => [row.currency, { currency: row.currency, name: row.name, bankName: row.bankName || '', accountLast4: row.accountLast4 || '', automaticReady: Boolean(payoutsReady && row.recipientCode && recipientTypes[row.currency]) }]))
     const referral = await referrals.findOne({ _id: referrer.type === 'business' ? referrer.id : `visitor:${referrer.id}` })
-    return { referrer, link: referral ? (referrer.type === 'visitor' ? `${process.env.SUBSCRIPTION_PUBLIC_URL || 'https://stockroom.globalcreest.com'}/welcome?ref=${referral.code}#register` : `${process.env.SUBSCRIPTION_PUBLIC_URL || 'https://stockroom.globalcreest.com'}/?screen=register&ref=${referral.code}`) : '', referredBusinesses: referredRows.length, automaticTransfersEnabled: autoReady(), balances, profiles: Object.values(profileMap), commissions: earnedRows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amountMinor: amount, currency, percent, kind, createdAt })), payouts: payoutRows.map(({ _id, amountMinor, currency, status, method, reference, note, createdAt, paidAt, automaticError }) => ({ id: _id, amountMinor, currency, status, method: method || '', reference: reference || '', note: note || '', createdAt, paidAt: paidAt || null, automaticError: automaticError || '' })) }
+    return { referrer, link: referral ? (referrer.type === 'visitor' ? `${process.env.SUBSCRIPTION_PUBLIC_URL || 'https://stockroom.globalcreest.com'}/welcome?ref=${referral.code}#register` : `${process.env.SUBSCRIPTION_PUBLIC_URL || 'https://stockroom.globalcreest.com'}/?screen=register&ref=${referral.code}`) : '', referredBusinesses: referredRows.length, automaticTransfersEnabled: payoutsReady, balances, profiles: Object.values(profileMap), commissions: earnedRows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amountMinor: amount, currency, percent, kind, createdAt })), payouts: payoutRows.map(({ _id, amountMinor, currency, status, method, reference, note, createdAt, paidAt, automaticError }) => ({ id: _id, amountMinor, currency, status, method: method || '', reference: reference || '', note: note || '', createdAt, paidAt: paidAt || null, automaticError: automaticError || '' })) }
   }
   async function referralsReport() {
     const [businessRows, visitorRows, referredRows, commissionRows, payoutRows, registeredBusinessCount, visitorPromoterCount, referredBusinessCount] = await Promise.all([
@@ -119,16 +135,28 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
       const referrer = row.referrerType === 'visitor' ? visitorById.get(row.referrerId) : businessById.get(row.referrerId)
       return { id: row._id, referrerType: row.referrerType, referrerName: referrer?.ownerName || referrer?.name || '', referrerEmail: referrer?.email || '', currency: row.currency, amountMinor: row.amountMinor, status: row.status, method: row.method || '', note: row.note || '', paymentNote: row.paymentNote || '', createdAt: row.createdAt, automaticError: row.automaticError || '' }
     })
-    return { registeredBusinesses: registeredBusinessCount, referredBusinesses: referredBusinessCount, visitorPromoters: visitorPromoterCount, businesses, referrers: [...referrers.values()].map(entry => ({ ...entry, businesses: entry.businesses.slice(0, 100) })).sort((a, b) => b.registered - a.registered), payouts: payoutList.slice(0, 250), automaticTransfersEnabled: autoReady() }
+    return { registeredBusinesses: registeredBusinessCount, referredBusinesses: referredBusinessCount, visitorPromoters: visitorPromoterCount, businesses, referrers: [...referrers.values()].map(entry => ({ ...entry, businesses: entry.businesses.slice(0, 100) })).sort((a, b) => b.registered - a.registered), payouts: payoutList.slice(0, 250), automaticTransfersEnabled: await autoReady() }
   }
   async function handle(request, response) {
     const path = new URL(request.url, 'http://localhost').pathname
-    if (!path.startsWith('/v1/referral-wallet/') && !path.startsWith('/v1/developer/')) return false
+    if (!path.startsWith('/v1/referral-wallet/') && !path.startsWith('/v1/developer/') && path !== '/v1/paystack/transfer-approval') return false
     const claims = verifyToken(request)
     try {
+      if (path === '/v1/paystack/transfer-approval' && request.method === 'POST') return approveTransfer(request, response)
       if (path.startsWith('/v1/developer/')) {
         if (!authorizedDeveloper(claims)) return sendJson(response, 403, { error: 'Developer account required.' })
         if (path === '/v1/developer/overview' && request.method === 'GET') return sendJson(response, 200, await referralsReport())
+        if (path === '/v1/developer/referral-payout-settings' && request.method === 'GET') {
+          const baseUrl = String(process.env.RENDER_EXTERNAL_URL || `${request.headers['x-forwarded-proto'] || 'https'}://${request.headers.host || ''}`).replace(/\/$/, '')
+          return sendJson(response, 200, { enabled: await automaticPayoutsEnabled(), available: Boolean(process.env.PAYSTACK_SECRET_KEY), approvalUrl: `${baseUrl}/v1/paystack/transfer-approval` })
+        }
+        if (path === '/v1/developer/referral-payout-settings' && request.method === 'PUT') {
+          const input = await readBody(request)
+          if (typeof input.enabled !== 'boolean') return sendJson(response, 400, { error: 'Choose whether automatic referral payouts are enabled.' })
+          if (input.enabled && !process.env.PAYSTACK_SECRET_KEY) return sendJson(response, 409, { error: 'Automatic payouts need the existing Paystack secret key to be configured in Render.' })
+          await payoutSettings.updateOne({ _id: 'control' }, { $set: { enabled: input.enabled, updatedAt: new Date(), updatedBy: claims.email } }, { upsert: true })
+          return sendJson(response, 200, { enabled: input.enabled, available: Boolean(process.env.PAYSTACK_SECRET_KEY) })
+        }
         const businessMatch = path.match(/^\/v1\/developer\/businesses\/([a-zA-Z0-9_-]+)\/(suspend|restore)$/)
         if (businessMatch && request.method === 'POST') {
           const businessId = businessMatch[1]
@@ -168,12 +196,12 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
       if (path === '/v1/referral-wallet/me' && request.method === 'GET') return sendJson(response, 200, await walletSummary(referrer))
       if (path === '/v1/referral-wallet/banks' && request.method === 'GET') {
         const currency = new URL(request.url, 'http://localhost').searchParams.get('currency')?.toUpperCase() || ''
-        if (!autoReady() || !recipientTypes[currency]) return sendJson(response, 409, { error: 'Automatic Paystack bank lookup is not available; use manual payout.' })
+        if (!(await autoReady()) || !recipientTypes[currency]) return sendJson(response, 409, { error: 'Automatic Paystack bank lookup is not available; use manual payout.' })
         const result = await paystack(`/bank?currency=${encodeURIComponent(currency)}&perPage=100`)
         return sendJson(response, 200, { banks: (Array.isArray(result) ? result : []).filter(bank => bank.active !== false).map(bank => ({ name: bank.name, code: bank.code })) })
       }
       if (path === '/v1/referral-wallet/profile' && request.method === 'POST') {
-        if (!autoReady()) return sendJson(response, 409, { error: 'Automatic Paystack transfers are not enabled. You can still request a manual payout.' })
+        if (!(await autoReady())) return sendJson(response, 409, { error: 'Automatic Paystack transfers are not enabled. You can still request a manual payout.' })
         const input = await readBody(request), currency = String(input.currency || '').toUpperCase(), type = recipientTypes[currency]
         const name = String(input.name || '').trim(), accountNumber = String(input.accountNumber || '').replace(/\s/g, ''), bankCode = String(input.bankCode || '').trim()
         if (!type || !minorCurrencies.has(currency) || !name || name.length > 100 || !/^\d{6,20}$/.test(accountNumber) || !bankCode || bankCode.length > 30) return sendJson(response, 400, { error: 'Enter a supported payout currency, account holder, account number and bank code.' })
@@ -192,8 +220,8 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
         const reserved = await wallets.updateOne({ _id: walletKey, $expr: { $gte: [{ $subtract: [{ $subtract: ['$earnedMinor', '$paidMinor'] }, '$reservedMinor'] }, amountMinor] } }, { $inc: { reservedMinor: amountMinor } })
         if (!reserved.modifiedCount) return sendJson(response, 409, { error: 'The requested amount is higher than your available referral balance.' })
         const id = randomUUID(), profile = await profiles.findOne({ referrerId: referrer.id, referrerType: referrer.type, currency })
-        const automatic = autoReady() && Boolean(profile?.recipientCode && recipientTypes[currency])
-        const row = { _id: id, referrerId: referrer.id, referrerType: referrer.type, currency, amountMinor, status: automatic ? 'initiating' : 'manual_requested', method: automatic ? 'paystack' : 'manual', note: String(input.note || '').trim().slice(0, 300), createdAt: new Date(), ...(automatic ? { reference: `ref-${id}` } : {}) }
+        const automatic = await autoReady() && Boolean(profile?.recipientCode && recipientTypes[currency])
+        const row = { _id: id, referrerId: referrer.id, referrerType: referrer.type, currency, amountMinor, status: automatic ? 'initiating' : 'manual_requested', method: automatic ? 'paystack' : 'manual', note: String(input.note || '').trim().slice(0, 300), createdAt: new Date(), ...(automatic ? { reference: `ref-${id}`, recipientCode: profile.recipientCode } : {}) }
         try { await payouts.insertOne(row) }
         catch (error) {
           await wallets.updateOne({ _id: walletKey }, { $inc: { reservedMinor: -amountMinor } }).catch(() => {})

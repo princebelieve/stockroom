@@ -15,28 +15,51 @@ export function registrationInput(input) {
   return { businessId, email, businessName, expiresInDays }
 }
 
-export async function createRegistration({ database, client, accounts, hashPassword }) {
+export async function createRegistration({ database, client, accounts, hashPassword, sendBusinessRegistrationKey }) {
   const keys = database.collection('business_registration_keys')
+  const rateLimits = database.collection('public_registration_key_rate_limits')
   await keys.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
-  return {
-    async issue(input) {
-      const details = registrationInput(input)
-      if (await accounts.findOne({ email: details.email })) throw new Error('This owner email is already registered. Use existing-business sign-in.')
-      const prefix = details.businessId.slice(0, details.businessId.lastIndexOf('-'))
-      let uniqueId = false
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const candidate = `${prefix}-${randomBytes(5).toString('hex')}`
-        if (!(await accounts.findOne({ businessId: candidate })) && !(await keys.findOne({ businessId: candidate }))) {
-          details.businessId = candidate
-          uniqueId = true
-          break
-        }
+  await rateLimits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+  async function allowRequest(key, limit) {
+    const now = new Date(), expiresAt = new Date(now.getTime() + 60 * 60 * 1000)
+    await rateLimits.updateOne({ _id: key }, [{ $set: { count: { $cond: [{ $gt: ['$expiresAt', now] }, { $add: [{ $ifNull: ['$count', 0] }, 1] }, 1] }, expiresAt: { $cond: [{ $gt: ['$expiresAt', now] }, '$expiresAt', expiresAt] } } }], { upsert: true })
+    const row = await rateLimits.findOne({ _id: key })
+    return (row?.count || 0) <= limit
+  }
+  async function issue(input) {
+    const details = registrationInput(input)
+    if (await accounts.findOne({ email: details.email })) throw new Error('This owner email is already registered. Use existing-business sign-in.')
+    const prefix = details.businessId.slice(0, details.businessId.lastIndexOf('-'))
+    let uniqueId = false
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidate = `${prefix}-${randomBytes(5).toString('hex')}`
+      if (!(await accounts.findOne({ businessId: candidate })) && !(await keys.findOne({ businessId: candidate }))) {
+        details.businessId = candidate
+        uniqueId = true
+        break
       }
-      if (!uniqueId) throw new Error('Could not generate a unique business ID. Please try again.')
-      const key = `SBIT-${randomBytes(24).toString('hex')}`
-      const expiresAt = new Date(Date.now() + details.expiresInDays * 86400000)
-      await keys.insertOne({ _id: registrationKeyHash(key), ...details, expiresAt, createdAt: new Date(), usedAt: null })
-      return { key, ...details, expiresAt }
+    }
+    if (!uniqueId) throw new Error('Could not generate a unique business ID. Please try again.')
+    const key = `SBIT-${randomBytes(24).toString('hex')}`
+    const expiresAt = new Date(Date.now() + details.expiresInDays * 86400000)
+    await keys.insertOne({ _id: registrationKeyHash(key), ...details, expiresAt, createdAt: new Date(), usedAt: null })
+    return { key, ...details, expiresAt }
+  }
+  return {
+    issue,
+    async issuePublic(input, ipAddress = '') {
+      const email = String(input.email || '').trim().toLowerCase()
+      if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 254) throw new Error('Enter a valid owner email address.')
+      const ipHash = createHash('sha256').update(String(ipAddress || 'unknown')).digest('hex')
+      const emailHash = createHash('sha256').update(email).digest('hex')
+      const allowed = await Promise.all([allowRequest(`ip:${ipHash}`, 10), allowRequest(`email:${emailHash}`, 3)])
+      if (allowed.some(value => !value)) throw Object.assign(new Error('Too many key requests. Please wait an hour before trying again.'), { statusCode: 429 })
+      const setup = await database.collection('subscription_settings').findOne({ _id: 'plan' })
+      const expiresInDays = Number(setup?.registrationKeyDurationDays ?? 7)
+      const result = await issue({ ...input, email, expiresInDays })
+      try { await sendBusinessRegistrationKey({ to: email, businessName: result.businessName, key: result.key, expiresAt: result.expiresAt }) }
+      catch (error) { await keys.deleteOne({ _id: registrationKeyHash(result.key), usedAt: null }); throw new Error('We could not email your key. Please try again later or contact Stockroom support.') }
+      return { businessName: result.businessName, email: result.email, expiresAt: result.expiresAt }
     },
     async redeem(input) {
       const ownerName = String(input.ownerName || '').trim()
