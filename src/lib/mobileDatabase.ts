@@ -99,7 +99,7 @@ export async function openMobileDatabase() {
       unit TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS branches (id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS branches (id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS branch_inventory (branch_id TEXT NOT NULL, product_id TEXT NOT NULL REFERENCES products(id), stock INTEGER NOT NULL DEFAULT 0 CHECK(stock >= 0), reorder_point INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY(branch_id, product_id));
     CREATE TABLE IF NOT EXISTS inventory_movements (
       id TEXT PRIMARY KEY,
@@ -156,6 +156,8 @@ export async function openMobileDatabase() {
     );
   `)
   try { await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+  const branchColumns = await connection.query('PRAGMA table_info(branches)')
+  if (!branchColumns.values?.some(row => row.name === 'is_active')) await connection.execute('ALTER TABLE branches ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1')
   for (const table of ['inventory_movements', 'sales', 'expenses']) {
     try { await connection.execute(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`) } catch {}
   }

@@ -38,7 +38,7 @@ Offline availability depends on data already downloaded and locally cached. New 
 
 ## Business registration and sign-in
 
-New businesses request a registration key from S. B. Ibhadode technology and redeem it in the app with the matching owner email. Registration and first data setup require internet. Owners use their email to sign in; staff use the username assigned in Team management. For a new PWA/browser profile, staff should open the business sign-in link supplied by the owner.
+New businesses can request a registration key from the app; Stockroom generates and emails it automatically using the validity period set in Developer settings. They redeem it with the same owner email. Registration and first data setup require internet. Owners use their email to sign in; staff use the username assigned in Team management. For a new PWA/browser profile, staff should open the business sign-in link supplied by the owner.
 
 The public product and registration information is at [stockroom.globalcreest.com/welcome](https://stockroom.globalcreest.com/welcome). Subscription and account features are available inside the app after owner sign-in.
 

@@ -82,8 +82,22 @@ async function applyOperation(operation: Operation) {
   if (seen.values?.length) return
   const payload = operation.payload
   if (operation.entityType === 'branch' && operation.action === 'upsert') {
-    await db.run('INSERT INTO branches (id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, updated_at=excluded.updated_at', [payload.id, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.createdAt || operation.createdAt, payload.updatedAt || operation.createdAt])
+    await db.run('INSERT INTO branches (id, name, address, is_default, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, is_active=excluded.is_active, updated_at=excluded.updated_at', [payload.id, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.isActive === false ? 0 : 1, payload.createdAt || operation.createdAt, payload.updatedAt || operation.createdAt])
     await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [payload.id, operation.createdAt])
+  } else if (operation.entityType === 'branch_transfer' && operation.action === 'create') {
+    const exists = await db.query('SELECT id FROM inventory_movements WHERE id=?', [`${payload.id}:out`])
+    if (!exists.values?.length) {
+      const source = (await db.query('SELECT stock FROM branch_inventory WHERE branch_id=? AND product_id=?', [payload.fromBranchId, payload.productId])).values?.[0]
+      if (!source || Number(source.stock) < Number(payload.quantity)) throw new Error('Transfer cannot sync because the source branch lacks sufficient stock.')
+      await db.beginTransaction()
+      try {
+        await db.run('UPDATE branch_inventory SET stock=stock-?, updated_at=? WHERE branch_id=? AND product_id=?', [Number(payload.quantity), payload.createdAt || operation.createdAt, payload.fromBranchId, payload.productId])
+        await db.run('INSERT INTO branch_inventory (branch_id,product_id,stock,reorder_point,updated_at) VALUES (?,?,?,0,?) ON CONFLICT(branch_id,product_id) DO UPDATE SET stock=branch_inventory.stock+excluded.stock, updated_at=excluded.updated_at', [payload.toBranchId, payload.productId, Number(payload.quantity), payload.createdAt || operation.createdAt])
+        await db.run('INSERT OR IGNORE INTO inventory_movements (id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?)', [`${payload.id}:out`, payload.productId, -Number(payload.quantity), `Transfer to ${payload.toBranchId}: ${payload.reason}`, payload.createdAt || operation.createdAt, payload.fromBranchId])
+        await db.run('INSERT OR IGNORE INTO inventory_movements (id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?)', [`${payload.id}:in`, payload.productId, Number(payload.quantity), `Transfer from ${payload.fromBranchId}: ${payload.reason}`, payload.createdAt || operation.createdAt, payload.toBranchId])
+        await db.commitTransaction()
+      } catch (caught) { await db.rollbackTransaction(); throw caught }
+    }
   } else if (operation.entityType === 'product' && operation.action === 'upsert') {
     await db.run(`INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sku=excluded.sku, barcode=excluded.barcode, category=excluded.category, reorder_point=excluded.reorder_point, price=excluded.price, cost_price=excluded.cost_price, unit=excluded.unit, updated_at=excluded.updated_at`,
@@ -357,16 +371,49 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   if (!user) return error('Authentication required.', 401)
   await ensureBranches(db)
   const requestedBranchId = new Headers(init?.headers).get('X-Stockroom-Branch') || 'main'
-  const branchId = (await db.query('SELECT id FROM branches WHERE id = ?', [requestedBranchId])).values?.length ? requestedBranchId : 'main'
-  if (path === '/api/branches' && method === 'GET') return json({ branches: (await db.query('SELECT id, name, address, is_default AS isDefault, created_at AS createdAt, updated_at AS updatedAt FROM branches ORDER BY is_default DESC, name')).values || [] })
+  const branchId = (await db.query('SELECT id FROM branches WHERE id = ? AND is_active = 1', [requestedBranchId])).values?.length ? requestedBranchId : 'main'
+  if (path === '/api/branches' && method === 'GET') return json({ branches: (await db.query('SELECT id, name, address, is_default AS isDefault, is_active AS isActive, created_at AS createdAt, updated_at AS updatedAt FROM branches ORDER BY is_default DESC, name')).values || [] })
   if (path === '/api/branches' && method === 'POST') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
     const input = await body(init); const name = String(input.name || '').trim().slice(0, 100); const address = String(input.address || '').trim().slice(0, 250)
     if (name.length < 2) return error('Branch name must contain at least 2 characters.')
     if ((await db.query('SELECT id FROM branches WHERE lower(name)=lower(?)', [name])).values?.length) return error('A branch with that name already exists.')
-    const branch = { id: id(), name, address, isDefault: false, createdAt: now(), updatedAt: now() }
-    await db.run('INSERT INTO branches (id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)', [branch.id, name, address, branch.createdAt, branch.updatedAt]); await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [branch.id, branch.createdAt]); await queue('branch', branch.id, 'upsert', branch)
+    const branch = { id: id(), name, address, isDefault: false, isActive: true, createdAt: now(), updatedAt: now() }
+    await db.run('INSERT INTO branches (id, name, address, is_default, is_active, created_at, updated_at) VALUES (?, ?, ?, 0, 1, ?, ?)', [branch.id, name, address, branch.createdAt, branch.updatedAt]); await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [branch.id, branch.createdAt]); await queue('branch', branch.id, 'upsert', branch)
     return json(branch, 201)
+  }
+  const branchPath = path.match(/^\/api\/branches\/([^/]+)$/)
+  if (branchPath && method === 'PUT') {
+    if (user.role !== 'owner') return error('Owner access required.', 403)
+    const input = await body(init), branchId = decodeURIComponent(branchPath[1]), current = (await db.query('SELECT id, is_default AS isDefault, created_at AS createdAt FROM branches WHERE id = ?', [branchId])).values?.[0]
+    if (!current) return error('Branch not found.', 404)
+    const name = String(input.name || '').trim().slice(0, 100), address = String(input.address || '').trim().slice(0, 250), isActive = input.isActive !== false
+    if (name.length < 2) return error('Branch name must contain at least 2 characters.')
+    if (!isActive && Number(current.isDefault)) return error('The Main branch cannot be deactivated.')
+    if (!isActive && Number((await db.query('SELECT COUNT(*) AS count FROM branches WHERE is_active=1')).values?.[0]?.count) <= 1) return error('Keep at least one active branch.')
+    if ((await db.query('SELECT id FROM branches WHERE lower(name)=lower(?) AND id<>?', [name, branchId])).values?.length) return error('A branch with that name already exists.')
+    const branch = { id: branchId, name, address, isDefault: Boolean(current.isDefault), isActive, createdAt: String(current.createdAt), updatedAt: now() }
+    await db.run('UPDATE branches SET name=?, address=?, is_active=?, updated_at=? WHERE id=?', [name, address, isActive ? 1 : 0, branch.updatedAt, branchId]); await queue('branch', branch.id, 'upsert', branch)
+    return json(branch)
+  }
+  if (path === '/api/branch-transfers' && method === 'POST') {
+    if (!(user.role === 'owner' || user.role === 'admin' || user.operationalAccess)) return error('Inventory access required.', 403)
+    const input = await body(init), fromBranchId = String(input.fromBranchId || ''), toBranchId = String(input.toBranchId || ''), productId = String(input.productId || ''), quantity = Number(input.quantity), reason = String(input.reason || '').trim().slice(0, 250)
+    if (fromBranchId !== branchId) return error('Select the source branch before transferring stock.')
+    if (!fromBranchId || !toBranchId || fromBranchId === toBranchId || !Number.isSafeInteger(quantity) || quantity < 1 || reason.length < 3) return error('Choose two different branches, a whole quantity, and a reason.')
+    if (Number((await db.query('SELECT COUNT(*) AS count FROM branches WHERE id IN (?, ?) AND is_active=1', [fromBranchId, toBranchId])).values?.[0]?.count) !== 2) return error('Both branches must be active.')
+    const source = (await db.query('SELECT stock FROM branch_inventory WHERE branch_id=? AND product_id=?', [fromBranchId, productId])).values?.[0]
+    if (!source || Number(source.stock) < quantity) return error('The source branch does not have enough stock.')
+    const transfer = { id: id(), fromBranchId, toBranchId, productId, quantity, reason, createdAt: now() }
+    await db.beginTransaction()
+    try {
+      await db.run('UPDATE branch_inventory SET stock=stock-?, updated_at=? WHERE branch_id=? AND product_id=?', [quantity, transfer.createdAt, fromBranchId, productId])
+      await db.run('INSERT INTO branch_inventory (branch_id,product_id,stock,reorder_point,updated_at) VALUES (?,?,?,0,?) ON CONFLICT(branch_id,product_id) DO UPDATE SET stock=branch_inventory.stock+excluded.stock, updated_at=excluded.updated_at', [toBranchId, productId, quantity, transfer.createdAt])
+      await db.run('INSERT INTO inventory_movements (id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?)', [`${transfer.id}:out`, productId, -quantity, `Transfer to ${toBranchId}: ${reason}`, transfer.createdAt, fromBranchId])
+      await db.run('INSERT INTO inventory_movements (id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?)', [`${transfer.id}:in`, productId, quantity, `Transfer from ${fromBranchId}: ${reason}`, transfer.createdAt, toBranchId])
+      await queue('branch_transfer', transfer.id, 'create', transfer); await db.commitTransaction()
+    } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not transfer stock.') }
+    return json(transfer, 201)
   }
   if (path === '/api/auth/session' && method === 'GET') {
     const token = new Headers(init?.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') || id()

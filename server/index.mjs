@@ -4,7 +4,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
+import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
@@ -16,7 +16,7 @@ const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascr
 const generatedDeviceId = () => `desktop-${randomUUID()}`
 const requestBranch = (request) => {
   const requested = String(request.headers['x-stockroom-branch'] || 'main').slice(0, 80)
-  return listBranches().some(branch => branch.id === requested) ? requested : 'main'
+  return listBranches().some(branch => branch.id === requested && branch.isActive) ? requested : 'main'
 }
 
 function sendJson(response, status, payload) {
@@ -435,6 +435,23 @@ const server = createServer(async (request, response) => {
       const user = sessionUser(request)
       if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
       try { return sendJson(response, 201, await createBranch(input)) }
+      catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+  const branchMatch = request.url.match(/^\/api\/branches\/([^/]+)$/)
+  if (request.method === 'PUT' && branchMatch) {
+    return readJson(request, response, async (input) => {
+      if (sessionUser(request)?.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
+      try { return sendJson(response, 200, updateBranch(decodeURIComponent(branchMatch[1]), input)) }
+      catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+  if (request.method === 'POST' && request.url === '/api/branch-transfers') {
+    return readJson(request, response, async (input) => {
+      const user = sessionUser(request)
+      if (!user || !(user.role === 'owner' || user.role === 'admin' || user.operationalAccess)) return sendJson(response, 403, { error: 'Inventory access required.' })
+      if (String(input.fromBranchId || '') !== requestBranch(request)) return sendJson(response, 400, { error: 'Select the source branch before transferring stock.' })
+      try { return sendJson(response, 201, transferBranchStock(input)) }
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }

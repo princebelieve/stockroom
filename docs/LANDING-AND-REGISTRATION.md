@@ -44,19 +44,19 @@ Deploy the cloud API before the frontend. Keep existing MongoDB and secrets. Reg
 ## Everyday use
 
 - For advertising, share `https://stockroom.globalcreest.com/welcome`. The page identifies Stockroom as a product of S. B. Ibhadode technology.
-- For key generation, open `https://stockroom.globalcreest.com/?screen=subscription` and sign in with the owner account matching Render's existing `DEVELOPER_EMAIL`. The Business registration keys section is developer-only.
-- Generate the key and copy the customer instructions from that screen. Send those privately yourself.
+- For a new business, open `https://stockroom.globalcreest.com/?screen=register` or choose **Register a new business** in the app. The owner enters a business name and email; Stockroom generates a one-use key and emails it automatically. Its expiry uses the duration set by the developer in Plan settings.
+- The developer-only key form remains available in the Businesses dashboard for assisted signups.
 - A new customer's installed app starts with **New business with a key** and **Existing business**. Manual admin-key installation is under **Developer installation tools**, not in the ordinary customer path.
-- New visitors to the app root are sent to `/welcome`; **Start business registration** opens the request form in the app. The customer may also follow `https://stockroom.globalcreest.com/?screen=register` directly. The form provides WhatsApp, `info@sbi.globalcreest.com`, and `sbi.globalcreest.com` contact options to request a registration link.
+- New visitors to the app root are sent to `/welcome`; **Start business registration** opens the request form in the app. The customer may also follow `https://stockroom.globalcreest.com/?screen=register` directly. The request form emails the generated key directly. The listed support channels are available if the email does not arrive.
 - Returning customers use their saved workspace. Adding another device uses the existing owner credentials, not a new key. Subscription selection and payment stay in Stockroom.
 
 ## Generate and redeem a key
 
-1. Sign in as the configured developer owner. Open **Subscription → Business registration keys**.
-2. Enter a business name, owner email, and 1–30 days of validity (default 7). Stockroom generates a unique business ID automatically.
-3. Copy the displayed key and send it privately with `https://stockroom.globalcreest.com/?screen=register`. The server stores only a SHA-256 hash, never the usable key. It is not an admin/device token.
-4. The customer uses **Register a new business** in Stockroom. The existing **Set up your shop** screen accepts the key, matching owner email, password, currency and optional referral code. The public landing page only links to this app screen.
-5. Successful key registration reuses the app?s existing device enrollment and sign-in flows. Additional devices use **Existing business / Add another device**. Subscription selection, payments and referral management stay in the app?s existing Subscription screen. No installer admin key is shared.
+1. The owner opens `https://stockroom.globalcreest.com/?screen=register` or taps **Register a new business** in the app and enters a business name and email.
+2. Stockroom creates a unique business ID and one-use key, then emails it to that address. The developer controls key validity (1Ã¢â‚¬â€œ30 days, default 7) in Developer dashboard **Settings Ã¢â€ â€™ Plan and reward settings**. Public key requests are rate-limited.
+3. The owner enters the emailed key and the same email, then sets a password, currency, and optional referral code. The key can only be redeemed once and only with that email.
+4. If a customer needs help or cannot receive the automated email, the developer can issue a key from the dashboardÃ¢â‚¬â„¢s **Businesses** page. The server stores only a SHA-256 hash of the usable key.
+5. Additional devices use **Existing business / Add another device**. Subscription and referral management stay in the app.
 
 Key consumption, owner creation, initial business settings, sync-log entry, and referral binding commit atomically. Failed registration rolls back the key use. Concurrent/replayed claims cannot create a second business with the same key. Expired keys cannot be redeemed even before MongoDB's TTL cleanup runs.
 
@@ -66,4 +66,4 @@ The old owner-registration endpoint now requires a valid enrolled device token f
 
 The public page fetches the configured business-owner and visitor-promoter reward percentages from `/v1/public/landing`. Visitors can create promoter accounts on `/welcome`; the account provides an invitation link and a view of verified commissions. New businesses opened from either kind of invitation retain the referral code through registration. Each referred business can generate rewards on up to four successful subscription payments. Every payment counts once regardless of whether it grants monthly, yearly or Enterprise access. Rates are saved when checkout starts. Payouts are arranged manually.
 
-PWA installation belongs to the **app origin**. On the separate public domain the PWA button opens the app, where supported browsers expose installation. On iOS use Safari's Share → Add to Home Screen. Do not install a second copy on the marketing origin and expect it to share the app origin's local database.
+PWA installation belongs to the **app origin**. On the separate public domain the PWA button opens the app, where supported browsers expose installation. On iOS use Safari's Share ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Add to Home Screen. Do not install a second copy on the marketing origin and expect it to share the app origin's local database.

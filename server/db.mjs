@@ -44,6 +44,7 @@ database.exec(`
     name TEXT NOT NULL,
     address TEXT NOT NULL DEFAULT '',
     is_default INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(organization_id, name)
@@ -239,6 +240,7 @@ try { database.exec("ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DE
 try { database.exec("ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0") } catch {}
 try { database.exec("ALTER TABLE users ADD COLUMN operational_access INTEGER NOT NULL DEFAULT 0") } catch {}
 try { database.exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''") } catch {}
+try { database.exec('ALTER TABLE branches ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1') } catch {}
 // Existing inventory becomes the stock of Main branch during the upgrade.
 database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT \'main\', id, stock, reorder_point, updated_at FROM products WHERE organization_id = ?').run(organizationId)
 for (const table of ['inventory_movements', 'sales', 'sale_item_voids', 'expenses', 'stocktakes']) {
@@ -632,6 +634,21 @@ export function applyRemoteOperations(operations) {
       } else if (operation.entityType === 'branch' && operation.action === 'upsert') {
         database.prepare('INSERT INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, updated_at=excluded.updated_at').run(payload.id, organizationId, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.createdAt || now(), payload.updatedAt || now())
         database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE organization_id = ?').run(payload.id, now(), organizationId)
+        if (payload.isActive !== undefined) database.prepare('UPDATE branches SET is_active = ? WHERE id = ?').run(payload.isActive === false ? 0 : 1, payload.id)
+      } else if (operation.entityType === 'branch_transfer' && operation.action === 'create') {
+        if (!database.prepare('SELECT 1 FROM inventory_movements WHERE id = ?').get(`${payload.id}:out`)) {
+          const source = database.prepare('SELECT stock FROM branch_inventory WHERE branch_id = ? AND product_id = ?').get(payload.fromBranchId, payload.productId)
+          if (!source || source.stock < Number(payload.quantity)) throw new Error('Remote branch transfer exceeds available source stock.')
+          const createdAt = payload.createdAt || now()
+          database.exec('BEGIN')
+          try {
+            database.prepare('UPDATE branch_inventory SET stock = stock - ?, updated_at = ? WHERE branch_id = ? AND product_id = ?').run(Number(payload.quantity), createdAt, payload.fromBranchId, payload.productId)
+            database.prepare('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, 0, ?) ON CONFLICT(branch_id, product_id) DO UPDATE SET stock = branch_inventory.stock + excluded.stock, updated_at = excluded.updated_at').run(payload.toBranchId, payload.productId, Number(payload.quantity), createdAt)
+            database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(`${payload.id}:out`, organizationId, payload.productId, -Number(payload.quantity), `Transfer to ${payload.toBranchId}: ${payload.reason}`, createdAt, payload.fromBranchId)
+            database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(`${payload.id}:in`, organizationId, payload.productId, Number(payload.quantity), `Transfer from ${payload.fromBranchId}: ${payload.reason}`, createdAt, payload.toBranchId)
+            database.exec('COMMIT')
+          } catch (error) { database.exec('ROLLBACK'); throw error }
+        }
       } else if (operation.entityType === 'stock' && operation.action === 'adjust') {
         adjustStock(payload.productId, Number(payload.amount), payload.reason || 'remote-adjustment', false, payload.branchId || 'main')
       } else if (operation.entityType === 'sale' && operation.action === 'create') {
@@ -764,7 +781,22 @@ export async function queueInitialSettingsSnapshot() {
 }
 
 export function listBranches() {
-  return database.prepare('SELECT id, name, address, is_default AS isDefault, created_at AS createdAt, updated_at AS updatedAt FROM branches WHERE organization_id = ? ORDER BY is_default DESC, name').all(organizationId).map(branch => ({ ...branch, isDefault: Boolean(branch.isDefault) }))
+  return database.prepare('SELECT id, name, address, is_default AS isDefault, is_active AS isActive, created_at AS createdAt, updated_at AS updatedAt FROM branches WHERE organization_id = ? ORDER BY is_default DESC, name').all(organizationId).map(branch => ({ ...branch, isDefault: Boolean(branch.isDefault), isActive: Boolean(branch.isActive) }))
+}
+
+export function updateBranch(id, input) {
+  const existing = database.prepare('SELECT id, is_default AS isDefault FROM branches WHERE id = ? AND organization_id = ?').get(id, organizationId)
+  if (!existing) throw new Error('Branch not found.')
+  const name = String(input.name ?? '').trim().slice(0, 100), address = String(input.address ?? '').trim().slice(0, 250), isActive = input.isActive !== false
+  if (name.length < 2) throw new Error('Branch name must contain at least 2 characters.')
+  if (database.prepare('SELECT 1 FROM branches WHERE organization_id = ? AND lower(name) = lower(?) AND id <> ?').get(organizationId, name, id)) throw new Error('A branch with that name already exists.')
+  if (!isActive && existing.isDefault) throw new Error('The Main branch cannot be deactivated.')
+  if (!isActive && database.prepare('SELECT COUNT(*) AS count FROM branches WHERE organization_id = ? AND is_active = 1').get(organizationId).count <= 1) throw new Error('Keep at least one active branch.')
+  const updatedAt = now()
+  database.prepare('UPDATE branches SET name = ?, address = ?, is_active = ?, updated_at = ? WHERE id = ? AND organization_id = ?').run(name, address, isActive ? 1 : 0, updatedAt, id, organizationId)
+  const branch = { id, name, address, isDefault: Boolean(existing.isDefault), isActive, createdAt: database.prepare('SELECT created_at AS createdAt FROM branches WHERE id = ?').get(id).createdAt, updatedAt }
+  queueSync('branch', id, 'upsert', branch)
+  return branch
 }
 
 export function createBranch(input) {
@@ -776,9 +808,32 @@ export function createBranch(input) {
   const timestamp = now()
   database.prepare('INSERT INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)').run(id, organizationId, name, address, timestamp, timestamp)
   database.prepare('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE organization_id = ?').run(id, timestamp, organizationId)
-  const branch = { id, name, address, isDefault: false, createdAt: timestamp, updatedAt: timestamp }
+  const branch = { id, name, address, isDefault: false, isActive: true, createdAt: timestamp, updatedAt: timestamp }
   queueSync('branch', id, 'upsert', branch)
   return branch
+}
+
+export function transferBranchStock(input) {
+  const fromBranchId = String(input.fromBranchId || ''), toBranchId = String(input.toBranchId || ''), productId = String(input.productId || '')
+  const quantity = Number(input.quantity), reason = String(input.reason || '').trim().slice(0, 250)
+  if (!fromBranchId || !toBranchId || fromBranchId === toBranchId) throw new Error('Choose two different branches.')
+  if (!Number.isSafeInteger(quantity) || quantity <= 0) throw new Error('Transfer quantity must be a positive whole number.')
+  if (reason.length < 3) throw new Error('Enter a reason for the transfer.')
+  if (database.prepare('SELECT COUNT(*) AS count FROM branches WHERE organization_id = ? AND id IN (?, ?) AND is_active = 1').get(organizationId, fromBranchId, toBranchId).count !== 2) throw new Error('Both branches must be active.')
+  if (!database.prepare('SELECT 1 FROM products WHERE id = ? AND organization_id = ?').get(productId, organizationId)) throw new Error('Product not found.')
+  const source = database.prepare('SELECT stock FROM branch_inventory WHERE branch_id = ? AND product_id = ?').get(fromBranchId, productId)
+  if (!source || source.stock < quantity) throw new Error('The source branch does not have enough stock.')
+  const createdAt = now(), transferId = crypto.randomUUID(), payload = { id: transferId, fromBranchId, toBranchId, productId, quantity, reason, createdAt }
+  database.exec('BEGIN')
+  try {
+    database.prepare('UPDATE branch_inventory SET stock = stock - ?, updated_at = ? WHERE branch_id = ? AND product_id = ?').run(quantity, createdAt, fromBranchId, productId)
+    database.prepare('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, 0, ?) ON CONFLICT(branch_id, product_id) DO UPDATE SET stock = branch_inventory.stock + excluded.stock, updated_at = excluded.updated_at').run(toBranchId, productId, quantity, createdAt)
+    database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(`${transferId}:out`, organizationId, productId, -quantity, `Transfer to ${toBranchId}: ${reason}`, createdAt, fromBranchId)
+    database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(`${transferId}:in`, organizationId, productId, quantity, `Transfer from ${fromBranchId}: ${reason}`, createdAt, toBranchId)
+    queueSync('branch_transfer', transferId, 'create', payload)
+    database.exec('COMMIT')
+  } catch (error) { database.exec('ROLLBACK'); throw error }
+  return payload
 }
 
 export function listProducts(branchId = 'main') {
