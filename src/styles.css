@@ -96,7 +96,9 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .full-panel .settings-form .primary-button { font-size: 13px; }
   body { background: #eef4ef; }
   .main-content { padding-inline: 12px; padding-bottom: 92px; }
-  .topbar { position: sticky; top: 0; z-index: 12; margin: -76px -12px 18px; padding: 14px 12px 12px 70px; background: color-mix(in srgb, var(--paper) 92%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  /* Keep the page heading in normal flow on phones. A sticky header can cover
+     the first row of forms and make newly selected pages appear pinned under it. */
+  .topbar { position: static; margin: 0 -12px 18px; padding: 14px 12px 12px 70px; background: color-mix(in srgb, var(--paper) 92%, transparent); border-bottom: 1px solid var(--line); }
   .topbar h1 { font-size: 20px; }
   .panel { border-radius: 16px; padding: 18px 16px; box-shadow: 0 8px 22px rgba(23, 53, 45, .055); }
   .metric-card { border-radius: 16px; padding: 18px; }
