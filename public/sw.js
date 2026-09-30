@@ -17,6 +17,9 @@ self.addEventListener('fetch', event => {
   // Never cache API responses, tokens, errors, or unrelated origins.
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/v1/')) return
   if (event.request.mode === 'navigate') {
+    // These are real static documents. Do not turn their navigations into the
+    // app shell: doing so makes sitemap.xml render Stockroom instead of XML.
+    if (['/sitemap.xml', '/robots.txt', '/privacy', '/privacy.html', '/terms', '/terms.html'].includes(url.pathname)) return
     // Keep an HTML shell and its hashed assets together. An older worker can
     // see a newly deployed index.html before its replacement worker has
     // precached that deployment's assets. Saving that HTML in the older cache
