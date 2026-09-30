@@ -58,12 +58,21 @@ Use an up-to-date iOS version (iOS 17 or newer is recommended). Open the product
 HTTPS URL in Safari and choose Share → Add to Home Screen. Open the installed
 icon **before enrolling**, since browser and installed-app storage may differ.
 
-The owner joins an existing business with a unique device ID (for example
-`shop-iphone-01`) and label, then signs in. Do not reuse another device's ID.
-New-business provisioning still happens through the existing installation flow.
-Initial enrollment, sign-in after logout, staff administration and password reset
-need internet access. An existing signed-in session can reopen and work offline.
-Owner sign-in renews the same device's token without deleting its database/outbox.
+New businesses can be registered from the PWA: request a one-use registration
+key, redeem it with the same owner email, then sign in. This creates the business
+in the cloud and enrolls the current browser profile as its first device. Existing
+businesses can enroll another PWA/browser by opening the business-specific sign-in
+link and signing in with the owner's or staff member's credentials. Each browser
+profile or installed PWA keeps its own device identity and local database; do not
+reuse another device's ID. Initial registration, enrollment, first data download,
+sign-in after logout, staff administration and password reset need internet access.
+After setup, an existing signed-in session can reopen and work offline. Owner
+sign-in renews the same device's token without deleting its database or outbox.
+Account deletion requests and cancellation require an online cloud connection.
+The developer sets the waiting period in the Control Centre; it defaults to 90
+days. Closing a business owner account stops its cloud sync immediately and
+deletes its cloud records on the scheduled date. Offline device copies remain on
+those devices and must be cleared separately.
 
 ## Daily use and updates
 

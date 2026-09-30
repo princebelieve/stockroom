@@ -1,6 +1,6 @@
 # Stockroom Business
 
-Stockroom Business is an offline-first business operations app for organizations that manage products, stock, sales, customers, and staff. It is not limited to a particular business size or industry. It supports Windows desktop, Android, and browser/PWA use.
+Stockroom Business is an offline-first business operations app for organizations that manage products, stock, sales, customers, and staff. It is not limited to a particular business size or industry. The PWA is a complete installation option; the Windows installer and Android APK are optional clients for businesses that prefer installed apps.
 
 ## What the app does
 
@@ -10,7 +10,8 @@ Stockroom Business is an offline-first business operations app for organizations
 - **Sales operations:** review sales, receipts, payment evidence, cashier activity, and reports. Import provider CSV data for reconciliation without changing the original sales.
 - **Staff and access:** owners manage admin and cashier accounts. Cashiers can be limited to POS; owners can grant additional operational access.
 - **Business and device setup:** set the business name, logo, currency, payment policy, and device-specific printer or checkout settings. The device wizard records setup and test status; it does not provide direct payment-terminal integration.
-- **Subscriptions and referrals:** owners can manage subscription payments and share referral invitations. The tracked referral program currently credits existing business owners; independent referral-partner accounts are not available.
+- **Subscriptions and referrals:** owners can manage subscription payments and share business invitations. Visitor promoters can create an account, share a tracked link, and review verified rewards in their wallet.
+- **Account closure:** signed-in owners can deactivate a business and schedule cloud record deletion; visitor promoters can close their account from the promoter wallet. The developer sets the waiting period (90 days by default). Offline device copies are not remotely erased.
 
 See [hardware setup](docs/hardware-setup.md), [subscription behavior](docs/subscriptions.md), and [PWA deployment and platform limitations](PWA-DEPLOYMENT.md) for details.
 
@@ -22,7 +23,7 @@ Each client keeps its own local database:
 - **Browser/PWA:** SQLite stored in IndexedDB for that browser profile. Installing the PWA is optional; a browser tab uses the same profile workspace.
 - **Android:** native SQLite on the device.
 
-A new device or browser profile needs internet for its initial sign-in, business enrollment, and download of business data. After setup, the saved workspace can reopen offline. Local sales and other supported changes are saved on the device first and queued for synchronization. Use **Sync now** when online to upload queued work; **Refresh** downloads cloud changes without discarding local work. Sync regularly, especially before changing or clearing browser/device storage.
+A new business can register in the PWA while online. New devices and browser profiles need internet for enrollment, initial sign-in, and download of business data. After setup, the saved workspace can reopen offline. Local sales and other supported changes are saved on the device first and queued for synchronization. Use **Sync now** when online to upload queued work; **Refresh** downloads cloud changes without discarding local work. Sync regularly, especially before changing or clearing browser/device storage.
 
 Each browser profile or installed client is connected to one business at a time. For a new browser/PWA, staff can use the business-specific sign-in link shown to the owner in **Team management**, then sign in with their own username and password. The link identifies the business; it does not replace staff credentials. Each browser profile has separate storage and must download its own workspace.
 
@@ -42,6 +43,8 @@ New businesses can request a registration key from the app; Stockroom generates 
 
 The public product and registration information is at [stockroom.globalcreest.com/welcome](https://stockroom.globalcreest.com/welcome). Subscription and account features are available inside the app after owner sign-in.
 
+Account holders can request closure at [stockroom.globalcreest.com/account-deletion](https://stockroom.globalcreest.com/account-deletion). The same page is linked from the mobile landing-page menu and Privacy Policy.
+
 ## Development
 
 Requirements: Node.js and npm. Install dependencies and start the local Vite development server:
@@ -59,7 +62,7 @@ npm run build:pwa   # browser/PWA build
 npm test            # automated Node tests
 ```
 
-The browser integration flow is documented in [PWA deployment](PWA-DEPLOYMENT.md). Android and Windows packaging commands are in `package.json`; release Android builds require the configured private signing keystore and credentials. Do not distribute debug builds as production releases.
+The browser integration flow is documented in [PWA deployment](PWA-DEPLOYMENT.md). Android and Windows packaging commands are in `package.json`; release Android builds require the configured private signing keystore and credentials. `npm run android:release` creates both a sideloadable APK and a Play Store AAB in `release/android`, with versioned filenames, and refuses to overwrite an artifact with the same name. `npm run android:bundle` creates only the AAB. Increase Android `versionCode` before each Play Store upload and keep `versionName` aligned with `package.json`. Do not distribute debug builds as production releases.
 
 ## Cloud and secrets
 

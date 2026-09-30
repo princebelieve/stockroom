@@ -71,10 +71,12 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       : null
     const trialEndsAt = subscription?.trialEndsAt || legacyTrialEndsAt
     const isTrial = !subscription?.expiresAt && Boolean(trialEndsAt)
-    const effectiveExpiresAt = subscription?.expiresAt || trialEndsAt
-    const planId = subscription?.planId || (isTrial ? 'trial' : null)
-    const graceDays = isTrial ? 0 : planId === 'monthly' && subscription?.graceMonths === undefined ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? Number(plan?.monthlyGraceMonths ?? plan?.graceMonths ?? 1) * 30) : undefined
-    const graceMonths = isTrial ? undefined : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
+    const playActive = ['SUBSCRIPTION_STATE_ACTIVE', 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD', 'SUBSCRIPTION_STATE_CANCELED'].includes(subscription?.playSubscriptionState) && subscription?.playExpiresAt && new Date(subscription.playExpiresAt) > new Date()
+    const playIsLater = Boolean(playActive && (!subscription?.expiresAt || new Date(subscription.playExpiresAt) > new Date(subscription.expiresAt)))
+    const effectiveExpiresAt = playIsLater ? subscription.playExpiresAt : subscription?.expiresAt || trialEndsAt
+    const planId = playIsLater ? subscription.playPlanId : subscription?.planId || (isTrial ? 'trial' : null)
+    const graceDays = isTrial ? 0 : playIsLater ? (planId === 'monthly' ? Number(subscription.playGraceDays ?? plan?.monthlyGraceDays ?? 30) : undefined) : planId === 'monthly' && subscription?.graceMonths === undefined ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? Number(plan?.monthlyGraceMonths ?? plan?.graceMonths ?? 1) * 30) : undefined
+    const graceMonths = isTrial ? undefined : playIsLater ? (planId === 'monthly' ? undefined : Number(subscription.playGraceMonths ?? plan?.graceMonths ?? 1)) : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
     return subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, suspended: Boolean(subscription?.suspendedAt || subscription?.closedAt), suspensionReason: subscription?.closedAt ? 'This business has completed its Stockroom exit.' : subscription?.suspensionReason || '', portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
   }
   async function ensureSubscription(businessId) {
@@ -125,7 +127,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const basisPoints = { $cond: [underRewardLimit, { $cond: [first, Math.round((payment.firstReferralPercent || 0) * 100), Math.round((payment.recurringReferralPercent || 0) * 100)] }, 0] }
     const commission = { reference, referrerId: { $cond: [underRewardLimit, payment.referrerId || null, null] }, referrerType: { $cond: [underRewardLimit, payment.referrerType || 'business', null] }, currency: payment.currency, percent, kind: { $cond: [underRewardLimit, { $cond: [first, 'first', 'recurring'] }, 'exhausted'] }, amount: { $floor: { $divide: [{ $multiply: [payment.amount, basisPoints] }, 10000] } }, createdAt: '$$NOW' }
     const paymentAccess = { ...(payment.planId ? { planId: payment.planId } : {}), ...(Number.isInteger(payment.graceDays) ? { graceDays: payment.graceDays } : {}), ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}), trialEndsAt: null }
-    await subscriptions.updateOne({ _id: payment.businessId, references: { $ne: reference } }, [{ $set: { expiresAt: { $add: [{ $max: [{ $ifNull: ['$expiresAt', '$trialEndsAt'] }, '$$NOW'] }, payment.days * 86400000] }, references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] }, commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] }, ...paymentAccess } }])
+    await subscriptions.updateOne({ _id: payment.businessId, references: { $ne: reference } }, [{ $set: { expiresAt: { $add: [{ $max: [{ $ifNull: ['$expiresAt', '$trialEndsAt'] }, { $ifNull: ['$playExpiresAt', '$$NOW'] }, '$$NOW'] }, payment.days * 86400000] }, references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] }, commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] }, ...paymentAccess } }])
     // The same atomic update selects the first paid renewal, even with concurrent checkouts.
     const settled = await subscriptions.findOne({ _id: payment.businessId })
     const entry = settled.commissionEvents?.find(item => item.reference === reference)
@@ -212,13 +214,17 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           const input = JSON.parse(await body(request))
           const registrationKeyDurationDays = Number(input.registrationKeyDurationDays ?? 7)
           if (!Number.isInteger(registrationKeyDurationDays) || registrationKeyDurationDays < 1 || registrationKeyDurationDays > 30) throw new Error('Registration key duration must be from 1 to 30 days.')
+          const accountDeletionGraceDays = Number(input.accountDeletionGraceDays ?? 90)
+          if (!Number.isInteger(accountDeletionGraceDays) || accountDeletionGraceDays < 1 || accountDeletionGraceDays > 365) throw new Error('Account deletion delay must be from 1 to 365 days.')
           const productExportFeeAmount = Number(input.productExportFeeAmount ?? 0)
           const productExportFeeCurrency = String(input.productExportFeeCurrency || input.currency || 'NGN').toUpperCase()
           if (!Number.isSafeInteger(productExportFeeAmount) || productExportFeeAmount < 0 || productExportFeeAmount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(productExportFeeCurrency)) throw new Error('Product export fee must be a non-negative minor-unit amount and supported currency.')
+          const googlePlayProductIds = Object.fromEntries(['monthly', 'yearly', 'enterprise'].map(id => [id, String(input[`play${id[0].toUpperCase()}${id.slice(1)}ProductId`] || '').trim()]).filter(([, value]) => value))
+          if (Object.values(googlePlayProductIds).some(value => !/^[a-zA-Z0-9._-]{3,100}$/.test(value))) throw new Error('Google Play product IDs must be 3 to 100 letters, numbers, dots, underscores, or hyphens.')
           const referral = { ...referralPercentages(input), visitorFirstReferralPercent: Number(input.visitorFirstReferralPercent ?? 0), visitorRecurringReferralPercent: Number(input.visitorRecurringReferralPercent ?? 0) }
           for (const value of [referral.visitorFirstReferralPercent, referral.visitorRecurringReferralPercent]) if (!Number.isFinite(value) || value < 0 || value > 100 || Math.round(value * 100) !== value * 100) throw new Error('Visitor referral rates must be from 0 to 100 with up to two decimal places.')
           const plan = input.monthlyAmount === undefined
-            ? { ...validatePlan(input), registrationKeyDurationDays, productExportFeeAmount, productExportFeeCurrency, ...referral }
+            ? { ...validatePlan(input), registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, ...referral }
             : (() => {
               const monthlyGraceDays = Number(input.monthlyGraceDays ?? Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1) * 30)
               const otherGraceMonths = Number(input.graceMonths ?? 1)
@@ -228,12 +234,12 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
                 { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365, graceMonths: otherGraceMonths }), id: 'yearly', name: 'Yearly' },
                 { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365), graceMonths: otherGraceMonths }), id: 'enterprise', name: 'Enterprise' },
               ]
-              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, registrationKeyDurationDays, productExportFeeAmount, productExportFeeCurrency, ...referral, plans }
+              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, ...referral, plans }
             })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         const plan = await getPlan()
-        return reply(200, { plan, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+        return reply(200, { plan, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, accountDeletionGraceDays: plan?.accountDeletionGraceDays ?? 90, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', googlePlayProductIds: plan?.googlePlayProductIds || {}, testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
       }
       if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
