@@ -33,8 +33,9 @@ const server = createServer(async (request, response) => {
     const user = savedSessionUser(String(request.headers['x-local-session'] || ''))
     const path = request.url.slice('/api/cloud'.length)
     const accountDeletionRoute = path === '/v1/account-deletion/me'
-    if (!user || (!accountDeletionRoute && user.role !== 'owner')) return sendJson(response, 401, { error: accountDeletionRoute ? 'Sign in to manage account closure.' : 'Local owner authentication required.' })
-    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path)) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    const notificationRoute = path.startsWith('/v1/notifications/')
+    if (!user || (!accountDeletionRoute && !notificationRoute && user.role !== 'owner')) return sendJson(response, 401, { error: accountDeletionRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path) && !notificationRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })

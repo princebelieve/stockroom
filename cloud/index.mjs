@@ -11,6 +11,7 @@ import { createVisitorAccounts } from './visitor-accounts.mjs'
 import { createAccountDeletion } from './account-deletion.mjs'
 import { createReferralWallet } from './referral-wallet.mjs'
 import { createGooglePlayBilling } from './google-play-billing.mjs'
+import { createNotifications } from './notifications.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -118,9 +119,10 @@ async function ownerPasswordIsValid(claims, value) {
 const registration = await createRegistration({ database, client, accounts, hashPassword, sendBusinessRegistrationKey })
 const visitorAccounts = createVisitorAccounts({ database, hashPassword, matchesPassword, signToken })
 const accountDeletion = createAccountDeletion({ database, accounts, devices, refreshTokens, visitors: referralVisitors, verifyToken, graceDays: async () => (await database.collection('subscription_settings').findOne({ _id: 'plan' }))?.accountDeletionGraceDays ?? 90 })
-const referralWallet = await createReferralWallet({ database, accounts, verifyToken })
+const notifications = await createNotifications({ database, accounts, visitors: referralVisitors, verifyToken })
+const referralWallet = await createReferralWallet({ database, accounts, verifyToken, notifications })
 const googlePlayBilling = createGooglePlayBilling({ database, accounts, verifyToken })
-const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook })
+const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook, notifications })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   // Referral percentages are intentionally public. They are displayed on the
@@ -145,6 +147,7 @@ const server = createServer(async (request, response) => {
     if (await accountDeletion.handle(request, response)) return
     const deletionBlock = await accountDeletion.blocked(request)
     if (deletionBlock) return send(response, 403, { error: deletionBlock })
+    if (await notifications.handle(request, response)) return
     if (await visitorAccounts(request, response, verifyToken, readJson)) return
     if (await referralWallet.handle(request, response)) return
     if (await googlePlayBilling.handle(request, response)) return

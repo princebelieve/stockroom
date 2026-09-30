@@ -18,6 +18,7 @@
     "android:release": "npm run android:sync && cd android && gradlew.bat assembleRelease bundleRelease && cd .. && node scripts/publish-android-release.mjs",
     "android:bundle": "npm run android:sync && cd android && gradlew.bat bundleRelease && cd .. && node scripts/publish-android-release.mjs --aab-only",
     "sync-api": "node cloud/index.mjs",
+    "vapid:keys": "node scripts/generate-vapid-keys.mjs",
     "test": "node --test test/**/*.test.mjs"
   },
   "dependencies": {

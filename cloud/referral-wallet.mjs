@@ -5,7 +5,7 @@ const walletCurrencies = new Set(['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'])
 const recipientTypes = { NGN: 'nuban', GHS: 'ghipss', ZAR: 'basa', KES: 'kepss', USD: 'kepss' }
 const walletId = (type, id, currency) => `${type}:${id}:${currency}`
 
-export async function createReferralWallet({ database, accounts, verifyToken }) {
+export async function createReferralWallet({ database, accounts, verifyToken, notifications = null }) {
   const visitors = database.collection('referral_visitors')
   const referrals = database.collection('subscription_referrals')
   const subscriptions = database.collection('subscriptions')
@@ -227,6 +227,7 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
           await wallets.updateOne({ _id: walletKey }, { $inc: { reservedMinor: -amountMinor } }).catch(() => {})
           throw error
         }
+        if (notifications?.notifyReferrer) void notifications.notifyReferrer(referrer.type, referrer.id, { title: 'Payout request received', body: `Your ${currency} ${Number(amountMinor / 100).toFixed(2)} referral payout request has been saved.`, type: 'payout', url: referrer.type === 'visitor' ? '/visitor' : '/?screen=subscription' }).catch(error => console.error('Payout notification failed:', error.message))
         if (automatic) {
           try {
             const transfer = await paystack('/transfer', { source: 'balance', amount: amountMinor, recipient: profile.recipientCode, reference: `ref-${id}`, currency, reason: 'Stockroom referral reward' })
@@ -256,12 +257,15 @@ export async function createReferralWallet({ database, accounts, verifyToken }) 
     if (event.event === 'transfer.success') {
       const updated = await payouts.updateOne({ _id: row._id, status: { $in: ['processing', 'awaiting_otp', 'initiating'] } }, { $set: { status: 'paid', paidAt: new Date(), method: 'paystack', updatedAt: new Date() } })
       if (updated.modifiedCount) await wallets.updateOne({ _id: walletId(row.referrerType, row.referrerId, row.currency) }, { $inc: { paidMinor: row.amountMinor, reservedMinor: -row.amountMinor } })
+      if (updated.modifiedCount && notifications?.notifyReferrer) void notifications.notifyReferrer(row.referrerType, row.referrerId, { title: 'Referral payout sent', body: `Your ${row.currency} ${Number(row.amountMinor / 100).toFixed(2)} referral payout was confirmed.`, type: 'payout', url: row.referrerType === 'visitor' ? '/visitor' : '/?screen=subscription' }).catch(error => console.error('Payout notification failed:', error.message))
     } else if (event.event === 'transfer.reversed' && row.status === 'paid') {
       const updated = await payouts.updateOne({ _id: row._id, status: 'paid' }, { $set: { status: 'reversed', automaticError: String(event.data?.reason || event.event), updatedAt: new Date() } })
       if (updated.modifiedCount) await wallets.updateOne({ _id: walletId(row.referrerType, row.referrerId, row.currency) }, { $inc: { paidMinor: -row.amountMinor } })
+      if (updated.modifiedCount && notifications?.notifyReferrer) void notifications.notifyReferrer(row.referrerType, row.referrerId, { title: 'Referral payout reversed', body: `Paystack reported that your ${row.currency} ${Number(row.amountMinor / 100).toFixed(2)} payout was reversed. Open your wallet for details.`, type: 'payout', url: row.referrerType === 'visitor' ? '/visitor' : '/?screen=subscription' }).catch(error => console.error('Payout notification failed:', error.message))
     } else {
       const updated = await payouts.updateOne({ _id: row._id, status: { $in: ['processing', 'awaiting_otp', 'initiating'] } }, { $set: { status: event.event === 'transfer.reversed' ? 'reversed' : 'failed', automaticError: String(event.data?.reason || event.event), updatedAt: new Date() } })
       if (updated.modifiedCount) await wallets.updateOne({ _id: walletId(row.referrerType, row.referrerId, row.currency) }, { $inc: { reservedMinor: -row.amountMinor } })
+      if (updated.modifiedCount && notifications?.notifyReferrer) void notifications.notifyReferrer(row.referrerType, row.referrerId, { title: 'Referral payout needs attention', body: `Your ${row.currency} payout could not be completed automatically. Open your wallet for details.`, type: 'payout', url: row.referrerType === 'visitor' ? '/visitor' : '/?screen=subscription' }).catch(error => console.error('Payout notification failed:', error.message))
     }
     return true
   }

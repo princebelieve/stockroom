@@ -12,6 +12,23 @@ self.addEventListener('activate', event => {
 self.addEventListener('message', event => {
   if (event.data?.type === 'ACTIVATE_UPDATE') self.skipWaiting()
 })
+self.addEventListener('push', event => {
+  let data = {}
+  try { data = event.data?.json() || {} } catch { data = { body: event.data?.text() || '' } }
+  const title = String(data.title || 'Stockroom update').slice(0, 100)
+  const options = { body: String(data.body || '').slice(0, 300), icon: '/icon-192.png', badge: '/icon.svg', tag: String(data.id || 'stockroom-notification'), data: { url: String(data.url || '/') } }
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+self.addEventListener('notificationclick', event => {
+  event.notification.close()
+  const target = new URL(event.notification.data?.url || '/', self.location.origin)
+  if (target.origin !== self.location.origin) target.href = self.location.origin + '/'
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+    const client = clients.find(item => new URL(item.url).origin === self.location.origin)
+    if (client) { void client.navigate(target.href); return client.focus() }
+    return self.clients.openWindow(target.href)
+  }))
+})
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url)
   // Never cache API responses, tokens, errors, or unrelated origins.
