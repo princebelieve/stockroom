@@ -15,8 +15,7 @@ export function CartItem({ product, quantity, money, onChange, onVoid }: {
   function save() {
     if (!valid) return
     const nextQuantity = Number(draft)
-    if (nextQuantity < quantity) onVoid(quantity - nextQuantity)
-    else onChange(nextQuantity)
+    onChange(nextQuantity)
     setEditing(false)
   }
   return <div className="cart-row">
@@ -32,7 +31,7 @@ export function CartItem({ product, quantity, money, onChange, onVoid }: {
           <button type="button" className="quantity-save" disabled={!valid} aria-label={`Save quantity for ${product.name}`} title="Save quantity" onClick={save}><Check size={16} /></button>
           <button type="button" className="quantity-cancel" aria-label={`Cancel quantity edit for ${product.name}`} title="Cancel" onClick={() => setEditing(false)}><X size={16} /></button>
         </> : <>
-          <button type="button" className="quantity-decrease" aria-label={`Remove one ${product.unit} of ${product.name}`} title="Remove one unit (void reason required)" onClick={() => onVoid(1)}><Minus size={16} /></button>
+          <button type="button" className="quantity-decrease" aria-label={`Reduce ${product.name} quantity by one`} title="Reduce quantity" onClick={() => onChange(quantity - 1)}><Minus size={16} /></button>
           <output aria-label={`Quantity for ${product.name}`}>{quantity}</output>
           <button type="button" className="quantity-increase" disabled={!Number.isSafeInteger(quantity + 1)} aria-label={`Increase quantity of ${product.name}`} title="Increase quantity" onClick={() => onChange(quantity + 1)}><Plus size={16} /></button>
           <button type="button" className="quantity-edit" aria-label={`Edit quantity of ${product.name}`} title="Enter quantity" onClick={() => { setDraft(String(quantity)); setEditing(true) }}><Pencil size={16} /></button>
