@@ -19,10 +19,10 @@ export function printerSettings(): PrinterSettings {
   } catch { return { receipt: '', report: '', width: 80, automatic: false } }
 }
 let printing = false
-export async function printDocument(kind: 'receipt' | 'order' | 'report', settings = printerSettings(), test = false) {
+export async function printDocument(kind: 'receipt' | 'order' | 'report', settings = printerSettings(), test = false, productForm = false) {
   if (printing) throw new Error('A print job is already in progress.')
   printing = true
-  document.body.dataset.printKind = test ? 'test' : kind
+  document.body.dataset.printKind = test ? 'test' : productForm && kind === 'report' ? 'product-form' : kind
   document.documentElement.style.setProperty('--receipt-width', test && kind === 'report' ? '190mm' : `${settings.width}mm`)
   const sample = test ? document.createElement('section') : null
   if (sample) { sample.className = 'printer-test'; sample.textContent = `Stockroom ${kind === 'report' ? 'A4 report' : `${settings.width} mm ${kind === 'order' ? 'order' : 'receipt'}`} test print — ${new Date().toLocaleString()}`; document.body.append(sample) }

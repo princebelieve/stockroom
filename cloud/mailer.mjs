@@ -18,16 +18,27 @@ export function mailConfigured() {
 }
 const configured = mailConfigured
 
-export async function sendSubscriptionReminder({ to, expiresAt, url }) {
+export async function sendSubscriptionReminder({ to, expiresAt, url, autoRenew = false }) {
   if (!configured()) throw new Error('Email is not configured.')
-  await sendMail({ to, subject: 'Your Stockroom subscription expires soon', text: `Your Stockroom subscription expires on ${expiresAt.toISOString().slice(0, 10)} (UTC).\n\nRenew manually at ${url}\n\nYou will not be charged automatically. Sign in as the business owner and choose Renew with Paystack.` })
+  const paymentNote = autoRenew
+    ? 'Automatic renewal is enabled for this business. You can manage or cancel it from Stockroom’s Subscription screen.'
+    : 'No automatic renewal is active. Sign in as the business owner and choose a one-time Paystack payment to renew.'
+  await sendMail({ to, subject: 'Your Stockroom subscription expires soon', text: `Your Stockroom subscription access is due to end on ${expiresAt.toISOString().slice(0, 10)} (UTC).\n\n${paymentNote}\n\n${url}` })
 }
 
-export async function sendSubscriptionConfirmation({ to, amount, currency, expiresAt }) {
+export async function sendSubscriptionConfirmation({ to, amount, currency, expiresAt, autoRenew = false }) {
   if (!configured()) throw new Error('Email is not configured.')
   const value = `${currency} ${(amount / 100).toFixed(2)}`
   const renewal = expiresAt.toISOString().slice(0, 10)
-  await sendMail({ to, subject: 'Your Stockroom subscription payment is confirmed', text: `We confirmed your Stockroom subscription payment of ${value}.\n\nYour current access renews or expires on ${renewal} (UTC).\n\nYou will not be charged automatically.`, html: `<p>We confirmed your Stockroom subscription payment of <b>${value}</b>.</p><p>Your current access renews or expires on <b>${renewal}</b> (UTC).</p><p>You will not be charged automatically.</p>` })
+  const renewalNote = autoRenew
+    ? 'Automatic renewal is enabled. Manage or cancel future charges from the Subscription screen in Stockroom.'
+    : 'This was a one-time payment. No further automatic charges are scheduled.'
+  await sendMail({ to, subject: 'Your Stockroom subscription payment is confirmed', text: `We confirmed your Stockroom subscription payment of ${value}.\n\nYour current access renews or expires on ${renewal} (UTC).\n\n${renewalNote}`, html: `<p>We confirmed your Stockroom subscription payment of <b>${value}</b>.</p><p>Your current access renews or expires on <b>${renewal}</b> (UTC).</p><p>${renewalNote}</p>` })
+}
+
+export async function sendSubscriptionPaymentFailed({ to, url }) {
+  if (!configured()) throw new Error('Email is not configured.')
+  await sendMail({ to, subject: 'Action needed for your Stockroom subscription', text: `Paystack could not collect your automatic subscription renewal. Paystack does not guarantee another attempt, so please update your payment method or make a one-time renewal to avoid losing access.\n\nManage your subscription at ${url}`, html: `<p>Paystack could not collect your automatic subscription renewal.</p><p>Please update your payment method or make a one-time renewal to avoid losing access.</p><p><a href="${url}">Manage your Stockroom subscription</a></p>` })
 }
 
 export async function sendSubscriptionGraceNotice({ to, expiresAt, graceEndsAt, url }) {

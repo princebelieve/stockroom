@@ -15,6 +15,18 @@ Stockroom Business is an offline-first business operations app for organizations
 
 See [hardware setup](docs/hardware-setup.md), [subscription behavior](docs/subscriptions.md), and [PWA deployment and platform limitations](PWA-DEPLOYMENT.md) for details.
 
+### Product autofill and migration
+
+Use **Print blank product form** beside **Add product** on Overview or Inventory to print a reusable, one-product sheet for handwriting and photocopying. It includes the existing Add Product fields, business identity, currency and business-type unit guidance, with product values left blank. It uses the report printer/system print dialog; completed paper forms can be entered through Add product.
+
+Owners can also use **Upload completed product form** to enter details beside a photo and save after review. **Autofill on this device** uses the bundled English OCR reader without Google, an API key or a recognition-service bill. It works best for printed text; handwriting recognition is best-effort and must be checked. Optional Google Cloud Vision recognition is also retained. Both readers fill empty fields without replacing owner entries, and failures never prevent manual completion. Write in BLOCK / CAPITAL LETTERS for best results. Form recognition requires the current marked form (F01–F10). See [handwritten form setup, workflow and validation](docs/handwritten-product-forms.md).
+
+In Inventory, use **Product import and autofill** to load CSV files, scan barcodes, or read package, invoice and product-list screenshots. Image text is read locally with the bundled English OCR engine. You can also paste text. Select the document type, read the image, then choose **Suggest products from text**. Review and edit the resulting rows before importing. PDFs currently require a screenshot of the relevant table.
+
+Barcode lookup uses Open Food Facts for packaged food when online; it is not a universal product catalogue. Only the barcode is sent, not photos or business records. Suggestions are attributed to [Open Food Facts](https://world.openfoodfacts.org), whose database is licensed under [ODbL](https://opendatacommons.org/licenses/odbl/1-0/). Missing results and network failures leave an editable barcode row. Lookup results are cached for the current session and requests are spaced to respect provider limits.
+
+Package names and sizes are text-based suggestions, not guaranteed image recognition. Invoice lines require owner selection; only clear, explicitly labelled unit-cost columns are extracted as cost. Ambiguous lines retain their original text for correction. Invoice quantities never become current stock automatically. The owner must enter selling price and current stock, including explicit zero where appropriate; blank cost and reorder values save as zero. Review the selling unit carefully for cartons versus individual items. Duplicate barcodes are blocked in selected rows and the loaded catalogue. Confirmed imported rows are removed immediately, so a later row failure preserves only the unfinished work. After an uncertain network failure, refresh inventory before retrying.
+
 ## Offline work and synchronization
 
 Each client keeps its own local database:

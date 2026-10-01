@@ -7,7 +7,7 @@ export const NativePrinting = registerPlugin<{
 }>('StockroomPrinting')
 
 export function printHtml(kind: 'receipt' | 'order' | 'report', width: number, test: boolean) {
-  const source = document.querySelector(test ? '.printer-test' : kind === 'order' ? '.print-order' : kind === 'receipt' ? '.print-receipt' : '.reports-dashboard')
+  const source = document.querySelector(test ? '.printer-test' : kind === 'order' ? '.print-order' : kind === 'receipt' ? '.print-receipt' : document.body.dataset.printKind === 'product-form' ? '.blank-product-form' : '.reports-dashboard')
   if (!source) throw new Error('No document is available to print.')
   const copy = source.cloneNode(true) as HTMLElement
   copy.querySelectorAll('button, form, input, select, textarea, script, iframe, .report-actions').forEach(node => node.remove())

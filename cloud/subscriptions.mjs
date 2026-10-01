@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { mailConfigured, sendReferralBonusNotice, sendSubscriptionConfirmation, sendSubscriptionGraceNotice, sendSubscriptionReminder } from './mailer.mjs'
+import { mailConfigured, sendReferralBonusNotice, sendSubscriptionConfirmation, sendSubscriptionGraceNotice, sendSubscriptionPaymentFailed, sendSubscriptionReminder } from './mailer.mjs'
 import { graceDaysEndsAt, graceEndsAt, subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
 
 export function validatePlan(input) {
@@ -39,11 +39,13 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
   const settings = database.collection('subscription_settings')
   const subscriptions = database.collection('subscriptions')
   const payments = database.collection('subscription_payments')
+  const paystackRenewals = database.collection('paystack_auto_renewals')
   const notices = database.collection('subscription_notices')
   const enterpriseRequests = database.collection('enterprise_subscription_requests')
   const businessExits = database.collection('business_exit_payments')
   await businessExits.createIndex({ reference: 1 }, { unique: true, sparse: true })
   await subscriptions.createIndex({ expiresAt: 1 })
+  await paystackRenewals.createIndex({ businessId: 1, status: 1 })
   const getPlan = () => settings.findOne({ _id: 'plan' })
   const getPlans = async () => {
     const saved = await getPlan()
@@ -109,10 +111,108 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const result = await response.json()
     if (!response.ok || !result.status) {
       const reason = String(result.message || '').toLowerCase()
-      if (reason.includes('currency') && (reason.includes('support') || reason.includes('enabled'))) throw new Error('This subscription currency is not enabled for the payment account. Please contact Stockroom support.')
+      if (reason.includes('currency') && (reason.includes('support') || reason.includes('enabled'))) throw new Error('This currency is not enabled on your Paystack account yet. Use an enabled currency until Paystack approves international payments for your account.')
       throw new Error('Paystack request failed. Please try again.')
     }
     return result.data
+  }
+  async function paystackPlanCode(plan) {
+    if (!['monthly', 'yearly'].includes(plan.id)) throw new Error('Automatic Paystack renewal is available for Monthly and Yearly plans only. Enterprise proposals remain one-time payments.')
+    const key = `${plan.id}_${plan.currency}_${plan.amount}`
+    const saved = await getPlan()
+    const known = saved?.paystackRecurringPlans?.[key]
+    if (known) return known
+    const created = await paystack('/plan', {
+      name: `Stockroom ${plan.name || plan.id} ${plan.currency} ${plan.amount}`,
+      amount: plan.amount,
+      currency: plan.currency,
+      interval: plan.id === 'yearly' ? 'annually' : 'monthly',
+      send_invoices: true,
+      send_sms: false,
+    })
+    if (!created?.plan_code) throw new Error('Paystack did not return a recurring plan code.')
+    await settings.updateOne({ _id: 'plan' }, { $set: { [`paystackRecurringPlans.${key}`]: created.plan_code } })
+    return created.plan_code
+  }
+  async function linkPaystackRenewal(payload) {
+    const data = payload || {}
+    const nested = data.subscription || data
+    const subscriptionCode = nested.subscription_code || data.subscription_code
+    if (!subscriptionCode) return null
+    const reference = data.transaction?.reference || data.reference || nested.transaction?.reference
+    const email = String(data.customer?.email || data.email || '').trim().toLowerCase()
+    const planCode = data.plan?.plan_code || nested.plan?.plan_code || data.plan_code || nested.plan_code
+    let payment = reference ? await payments.findOne({ _id: reference, autoRenew: true }) : null
+    if (!payment && email && planCode) payment = await payments.find({ email, paystackPlanCode: planCode, autoRenew: true, createdAt: { $gte: new Date(Date.now() - 7 * 86400000) } }).sort({ createdAt: -1 }).limit(1).next()
+    if (!payment) return null
+    const nextPaymentDate = nested.next_payment_date || data.next_payment_date || null
+    const map = {
+      businessId: payment.businessId,
+      email: payment.email,
+      planId: payment.planId,
+      planCode: payment.paystackPlanCode,
+      amount: payment.amount,
+      currency: payment.currency,
+      days: payment.days,
+      ...(Number.isInteger(payment.graceDays) ? { graceDays: payment.graceDays } : {}),
+      ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}),
+      firstReferralPercent: payment.firstReferralPercent || 0,
+      recurringReferralPercent: payment.recurringReferralPercent || 0,
+      referrerId: payment.referrerId || null,
+      referrerType: payment.referrerType || 'business',
+      status: nested.status || data.status || 'active',
+      nextPaymentDate,
+      updatedAt: new Date(),
+    }
+    await paystackRenewals.updateOne({ _id: subscriptionCode }, { $set: map }, { upsert: true })
+    await subscriptions.updateOne({ _id: payment.businessId }, { $set: { paystackSubscriptionCode: subscriptionCode, paystackAutoRenewStatus: map.status, ...(nextPaymentDate ? { paystackNextPaymentDate: new Date(nextPaymentDate) } : {}) } })
+    return { subscriptionCode, ...map }
+  }
+  async function settlePaystackRenewal(reference, subscriptionCode, scheduledNextPaymentDate = null) {
+    const existing = await payments.findOne({ _id: reference })
+    if (existing) {
+      const settled = await settle(reference)
+      if (subscriptionCode && scheduledNextPaymentDate) {
+        const nextPaymentDate = new Date(scheduledNextPaymentDate)
+        await paystackRenewals.updateOne({ _id: subscriptionCode }, { $set: { nextPaymentDate, updatedAt: new Date() } })
+        await subscriptions.updateOne({ _id: existing.businessId, paystackSubscriptionCode: subscriptionCode }, { $set: { paystackNextPaymentDate: nextPaymentDate } })
+      }
+      return settled
+    }
+    const renewal = subscriptionCode ? await paystackRenewals.findOne({ _id: subscriptionCode }) : null
+    if (!renewal) return false
+    await payments.updateOne({ _id: reference }, { $setOnInsert: {
+      ...renewal,
+      _id: reference,
+      businessId: renewal.businessId,
+      email: renewal.email,
+      planId: renewal.planId,
+      autoRenew: true,
+      paystackPlanCode: renewal.planCode,
+      paystackSubscriptionCode: subscriptionCode,
+      createdAt: new Date(),
+    } }, { upsert: true })
+    await settle(reference, renewal.businessId)
+    const nextPaymentDate = scheduledNextPaymentDate ? new Date(scheduledNextPaymentDate) : new Date(Date.now() + renewal.days * 86400000)
+    await paystackRenewals.updateOne({ _id: subscriptionCode }, { $set: { status: 'active', nextPaymentDate, updatedAt: new Date() } })
+    await subscriptions.updateOne({ _id: renewal.businessId, paystackSubscriptionCode: subscriptionCode }, { $set: { paystackAutoRenewStatus: 'active', paystackNextPaymentDate: nextPaymentDate } })
+    return true
+  }
+  async function updatePaystackRenewalStatus(payload, status) {
+    const data = payload || {}
+    const nested = data.subscription || data
+    const code = nested.subscription_code || data.subscription_code
+    if (!code) return
+    const renewal = await paystackRenewals.findOne({ _id: code })
+    if (!renewal) return
+    const nextPaymentDate = nested.next_payment_date || data.next_payment_date || null
+    await paystackRenewals.updateOne({ _id: code }, { $set: { status, ...(nextPaymentDate ? { nextPaymentDate: new Date(nextPaymentDate) } : {}), updatedAt: new Date() } })
+    await subscriptions.updateOne({ _id: renewal.businessId, paystackSubscriptionCode: code }, { $set: { paystackAutoRenewStatus: status, ...(nextPaymentDate ? { paystackNextPaymentDate: new Date(nextPaymentDate) } : {}) } })
+    if (status === 'attention' && renewal.status !== 'attention') {
+      const owner = await accounts.findOne({ businessId: renewal.businessId, role: 'owner' })
+      if (owner?.email && mailConfigured()) void sendSubscriptionPaymentFailed({ to: owner.email, url: appUrl() }).catch(error => console.error('Subscription payment-failure email failed:', error.message))
+      if (notifications?.notifyBusinessOwners) void notifications.notifyBusinessOwners(renewal.businessId, { title: 'Automatic renewal payment failed', body: 'Paystack could not collect your subscription renewal. Update your payment method or renew manually to keep Stockroom access.', type: 'subscription', url: '/?screen=subscription' }).catch(error => console.error('Subscription payment-failure notification failed:', error.message))
+    }
   }
   async function settle(reference, businessId) {
     const payment = await payments.findOne({ _id: reference, ...(businessId ? { businessId } : {}) })
@@ -140,7 +240,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const paymentOwner = firstConfirmation && mailConfigured() ? await accounts.findOne({ businessId: payment.businessId, role: 'owner' }) : null
     await payments.updateOne({ _id: reference }, { $set: { paidAt: new Date() } })
     if (payment.enterpriseRequestId) await enterpriseRequests.updateOne({ _id: payment.enterpriseRequestId, status: 'approved' }, { $set: { status: 'paid', paidAt: new Date(), paymentReference: reference } })
-    if (paymentOwner?.email) void sendSubscriptionConfirmation({ to: paymentOwner.email, amount: payment.amount, currency: payment.currency, expiresAt: settled.expiresAt }).catch(error => console.error('Subscription confirmation email failed:', error.message))
+    if (paymentOwner?.email) void sendSubscriptionConfirmation({ to: paymentOwner.email, amount: payment.amount, currency: payment.currency, expiresAt: settled.expiresAt, autoRenew: payment.autoRenew === true }).catch(error => console.error('Subscription confirmation email failed:', error.message))
     if (firstConfirmation && notifications?.notifyBusinessOwners) void notifications.notifyBusinessOwners(payment.businessId, { title: 'Subscription payment confirmed', body: `Your ${payment.planId || 'Stockroom'} subscription payment was verified. Access is active through ${new Date(settled.expiresAt).toLocaleDateString()}.`, type: 'subscription', url: '/?screen=subscription' }).catch(error => console.error('Subscription notification failed:', error.message))
     if (newlyCredited && entry.amount > 0) {
       const referrer = entry.referrerType === 'visitor' ? await database.collection('referral_visitors').findOne({ _id: entry.referrerId }) : await accounts.findOne({ businessId: entry.referrerId, role: 'owner' })
@@ -171,7 +271,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         if (!claim.modifiedCount) continue
       }
       try {
-        if (owner.email && mailConfigured()) await sendSubscriptionReminder({ to: owner.email, expiresAt: subscription.expiresAt, url: appUrl() })
+        if (owner.email && mailConfigured()) await sendSubscriptionReminder({ to: owner.email, expiresAt: subscription.expiresAt, url: appUrl(), autoRenew: subscription.paystackAutoRenewStatus === 'active' })
         if (notifications?.notifyBusinessOwners) void notifications.notifyBusinessOwners(subscription._id, { title: 'Subscription renewal reminder', body: `Your Stockroom subscription expires on ${subscription.expiresAt.toLocaleDateString()}.`, type: 'subscription', url: '/?screen=subscription' }).catch(error => console.error('Subscription reminder notification failed:', error.message))
         await notices.updateOne({ _id: id }, { $set: { sent: true, sentAt: new Date() } })
       } catch (error) { await notices.updateOne({ _id: id }, { $set: { lockedUntil: new Date(0) } }); console.error('Subscription reminder failed:', error.message) }
@@ -201,7 +301,19 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const raw = await body(request)
         if (!validSignature(raw, request.headers['x-paystack-signature'], process.env.PAYSTACK_SECRET_KEY)) return reply(401, { error: 'Invalid signature.' })
         const event = JSON.parse(raw)
-        if (event.event === 'charge.success' && await payments.findOne({ _id: event.data.reference })) await settle(event.data.reference)
+        if (event.event === 'subscription.create') await linkPaystackRenewal(event.data)
+        if (event.event === 'charge.success') {
+          if (await payments.findOne({ _id: event.data.reference })) await settle(event.data.reference)
+          else await settlePaystackRenewal(event.data.reference, event.data.subscription?.subscription_code || event.data.subscription_code, event.data.subscription?.next_payment_date || event.data.next_payment_date)
+          if (event.data.subscription?.subscription_code) await linkPaystackRenewal(event.data)
+        }
+        if (event.event === 'invoice.update' && (event.data?.status === 'success' || event.data?.paid === true || event.data?.paid === 1)) {
+          const reference = event.data.transaction?.reference || event.data.reference
+          if (reference) await settlePaystackRenewal(reference, event.data.subscription?.subscription_code || event.data.subscription_code, event.data.subscription?.next_payment_date || event.data.next_payment_date)
+        }
+        if (event.event === 'invoice.payment_failed') await updatePaystackRenewalStatus(event.data, 'attention')
+        if (event.event === 'subscription.not_renew') await updatePaystackRenewalStatus(event.data, 'non_renewing')
+        if (event.event === 'subscription.disable') await updatePaystackRenewalStatus(event.data, 'disabled')
         if (event.event === 'charge.success') {
           const exit = await businessExits.findOne({ reference: event.data.reference, status: 'pending' })
           if (exit) await settleBusinessExit(event.data.reference, exit.businessId)
@@ -217,17 +329,19 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           const input = JSON.parse(await body(request))
           const registrationKeyDurationDays = Number(input.registrationKeyDurationDays ?? 7)
           if (!Number.isInteger(registrationKeyDurationDays) || registrationKeyDurationDays < 1 || registrationKeyDurationDays > 30) throw new Error('Registration key duration must be from 1 to 30 days.')
-          const accountDeletionGraceDays = Number(input.accountDeletionGraceDays ?? 90)
+          const accountDeletionGraceDays = Number(input.accountDeletionGraceDays ?? 14)
           if (!Number.isInteger(accountDeletionGraceDays) || accountDeletionGraceDays < 1 || accountDeletionGraceDays > 365) throw new Error('Account deletion delay must be from 1 to 365 days.')
           const productExportFeeAmount = Number(input.productExportFeeAmount ?? 0)
           const productExportFeeCurrency = String(input.productExportFeeCurrency || input.currency || 'NGN').toUpperCase()
           if (!Number.isSafeInteger(productExportFeeAmount) || productExportFeeAmount < 0 || productExportFeeAmount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(productExportFeeCurrency)) throw new Error('Product export fee must be a non-negative minor-unit amount and supported currency.')
           const googlePlayProductIds = Object.fromEntries(['monthly', 'yearly', 'enterprise'].map(id => [id, String(input[`play${id[0].toUpperCase()}${id.slice(1)}ProductId`] || '').trim()]).filter(([, value]) => value))
           if (Object.values(googlePlayProductIds).some(value => !/^[a-zA-Z0-9._-]{3,100}$/.test(value))) throw new Error('Google Play product IDs must be 3 to 100 letters, numbers, dots, underscores, or hyphens.')
+          const googlePlayExportProductId = String(input.playExportProductId || '').trim()
+          if (googlePlayExportProductId && !/^[a-zA-Z0-9._-]{3,100}$/.test(googlePlayExportProductId)) throw new Error('Google Play export product ID must be 3 to 100 letters, numbers, dots, underscores, or hyphens.')
           const referral = { ...referralPercentages(input), visitorFirstReferralPercent: Number(input.visitorFirstReferralPercent ?? 0), visitorRecurringReferralPercent: Number(input.visitorRecurringReferralPercent ?? 0) }
           for (const value of [referral.visitorFirstReferralPercent, referral.visitorRecurringReferralPercent]) if (!Number.isFinite(value) || value < 0 || value > 100 || Math.round(value * 100) !== value * 100) throw new Error('Visitor referral rates must be from 0 to 100 with up to two decimal places.')
           const plan = input.monthlyAmount === undefined
-            ? { ...validatePlan(input), registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, ...referral }
+            ? { ...validatePlan(input), registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, googlePlayExportProductId, ...referral }
             : (() => {
               const monthlyGraceDays = Number(input.monthlyGraceDays ?? Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1) * 30)
               const otherGraceMonths = Number(input.graceMonths ?? 1)
@@ -237,12 +351,12 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
                 { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365, graceMonths: otherGraceMonths }), id: 'yearly', name: 'Yearly' },
                 { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365), graceMonths: otherGraceMonths }), id: 'enterprise', name: 'Enterprise' },
               ]
-              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, ...referral, plans }
+              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, googlePlayExportProductId, ...referral, plans }
             })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         const plan = await getPlan()
-        return reply(200, { plan, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, accountDeletionGraceDays: plan?.accountDeletionGraceDays ?? 90, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', googlePlayProductIds: plan?.googlePlayProductIds || {}, testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+        return reply(200, { plan, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, accountDeletionGraceDays: plan?.accountDeletionGraceDays ?? 14, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', googlePlayProductIds: plan?.googlePlayProductIds || {}, googlePlayExportProductId: plan?.googlePlayExportProductId || '', testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
       }
       if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
@@ -286,7 +400,14 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       if (claims?.kind !== 'access' || claims.role !== 'owner') return reply(403, { error: 'Sign in with your cloud owner account.' })
       const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
       if (!owner) return reply(403, { error: 'Owner account not found.' })
-      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), plans: await getPlans(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1 } }), enterpriseRequest: await currentEnterpriseRequest(claims.businessId), isDeveloper: isDeveloper(claims) })
+      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') return reply(200, { plan: await getPlan(), plans: await getPlans(), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1, planId: 1, paystackAutoRenewStatus: 1, paystackNextPaymentDate: 1 } }), enterpriseRequest: await currentEnterpriseRequest(claims.businessId), isDeveloper: isDeveloper(claims) })
+      if (url.pathname === '/v1/subscriptions/auto-renewal/manage' && request.method === 'POST') {
+        const current = await subscriptions.findOne({ _id: claims.businessId }, { projection: { paystackSubscriptionCode: 1, paystackAutoRenewStatus: 1 } })
+        if (!current?.paystackSubscriptionCode || !['active', 'attention', 'non_renewing'].includes(current.paystackAutoRenewStatus)) return reply(409, { error: 'There is no active Paystack automatic renewal to manage.' })
+        const result = await paystack(`/subscription/${encodeURIComponent(current.paystackSubscriptionCode)}/manage/link`)
+        if (!result?.link) throw new Error('Paystack did not return a subscription management link.')
+        return reply(200, { url: result.link })
+      }
       if (url.pathname === '/v1/subscriptions/business-exit' && request.method === 'GET') {
         const configured = await getPlan(), record = await businessExits.findOne({ _id: claims.businessId })
         const business = await database.collection('business_settings').findOne({ businessId: claims.businessId })
@@ -353,14 +474,20 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const plan = (await getPlans()).find(item => item.id === String(input.planId || 'monthly'))
         if (!plan) return reply(409, { error: 'The selected subscription plan is unavailable.' })
         if (plan.id === 'enterprise') return reply(409, { error: 'Enterprise plans require an approved proposal.' })
+        const autoRenew = input.autoRenew === true
+        if (autoRenew && !['monthly', 'yearly'].includes(plan.id)) return reply(400, { error: 'Automatic Paystack renewal is currently available for Monthly and Yearly plans only.' })
+        const current = await subscriptions.findOne({ _id: claims.businessId }, { projection: { paystackAutoRenewStatus: 1 } })
+        if (['active', 'attention'].includes(current?.paystackAutoRenewStatus)) return reply(409, { error: 'A Paystack automatic renewal is already active. Manage or cancel it before starting another subscription checkout.' })
+        if (autoRenew && current?.paystackAutoRenewStatus === 'non_renewing') return reply(409, { error: 'Your previous automatic renewal is still being closed. Refresh after it is disabled before enabling automatic renewal again.' })
         const reference = `sub-${randomBytes(20).toString('hex')}`
         const callback = appUrl()
         await ensureSubscription(claims.businessId)
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         const configuredPlan = await getPlan()
         const rates = subscription.referrerType === 'visitor' ? { firstReferralPercent: configuredPlan?.visitorFirstReferralPercent || 0, recurringReferralPercent: configuredPlan?.visitorRecurringReferralPercent || 0 } : referralPercentages(configuredPlan || plan)
-        await payments.insertOne({ ...validatePlan(plan), ...rates, planId: plan.id || 'monthly', referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
-        const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: callback })
+        const recurringPlanCode = autoRenew ? await paystackPlanCode(plan) : null
+        await payments.insertOne({ ...validatePlan(plan), ...rates, planId: plan.id || 'monthly', referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', ...(autoRenew ? { autoRenew: true, autoRenewConsentAt: new Date(), autoRenewTermsVersion: '2026-09', paystackPlanCode: recurringPlanCode } : {}), _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: callback, ...(recurringPlanCode ? { plan: recurringPlanCode } : {}) })
         return reply(200, { authorizationUrl: result.authorization_url, reference })
       }
       if (url.pathname === '/v1/subscriptions/enterprise-request' && request.method === 'POST') {
@@ -374,6 +501,8 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       if (url.pathname === '/v1/subscriptions/enterprise-checkout' && request.method === 'POST') {
         const requestRow = await currentEnterpriseRequest(claims.businessId)
         if (!requestRow || requestRow.status !== 'approved') return reply(409, { error: 'There is no approved enterprise proposal ready for payment.' })
+        const current = await subscriptions.findOne({ _id: claims.businessId }, { projection: { paystackAutoRenewStatus: 1 } })
+        if (['active', 'attention'].includes(current?.paystackAutoRenewStatus)) return reply(409, { error: 'A Paystack automatic renewal is already active. Manage or cancel it before paying for another subscription.' })
         const configured = await getPlan()
         const plan = validatePlan({ amount: requestRow.offeredAmount, currency: requestRow.offeredCurrency, days: requestRow.offeredDays, reminderDays: configured?.reminderDays, freeTrialDays: configured?.freeTrialDays, graceMonths: configured?.graceMonths })
         const reference = `sub-${randomBytes(20).toString('hex')}`

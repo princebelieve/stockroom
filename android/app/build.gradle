@@ -4,15 +4,17 @@ def releaseStoreFile = System.getenv('ANDROID_RELEASE_KEYSTORE')
 def releaseStorePassword = System.getenv('ANDROID_RELEASE_STORE_PASSWORD')
 def releaseKeyAlias = System.getenv('ANDROID_RELEASE_KEY_ALIAS')
 def releaseKeyPassword = System.getenv('ANDROID_RELEASE_KEY_PASSWORD')
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 
 android {
     namespace = "com.stockroom.business"
     compileSdk = rootProject.ext.compileSdkVersion
+    buildFeatures { buildConfig true }
     defaultConfig {
         applicationId "com.stockroom.business"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 11
+        versionCode 12
         versionName "1.0.10"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -21,7 +23,12 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    if (releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+    flavorDimensions "distribution"
+    productFlavors {
+        direct { dimension "distribution"; buildConfigField "boolean", "PLAY_STORE_BUILD", "false" }
+        playStore { dimension "distribution"; buildConfigField "boolean", "PLAY_STORE_BUILD", "true" }
+    }
+    if (hasReleaseSigning) {
         signingConfigs {
             production {
                 storeFile file(releaseStoreFile)
@@ -33,14 +40,19 @@ android {
     }
     buildTypes {
         release {
-            if (releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+            if (hasReleaseSigning) {
                 signingConfig signingConfigs.production
-            } else {
-                throw new GradleException('Release APK requires ANDROID_RELEASE_KEYSTORE, ANDROID_RELEASE_STORE_PASSWORD, ANDROID_RELEASE_KEY_ALIAS, and ANDROID_RELEASE_KEY_PASSWORD. The development/debug key is not used for production releases.')
             }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def productionAndroidTasks = graph.allTasks.findAll { it.name ==~ /(?:assemble|bundle)(?:Direct|PlayStore)Release/ }
+    if (!productionAndroidTasks.isEmpty() && !hasReleaseSigning) {
+        throw new GradleException('Android release requires ANDROID_RELEASE_KEYSTORE, ANDROID_RELEASE_STORE_PASSWORD, ANDROID_RELEASE_KEY_ALIAS, and ANDROID_RELEASE_KEY_PASSWORD. The development/debug key is not used for production releases.')
     }
 }
 
@@ -58,6 +70,7 @@ dependencies {
     implementation project(':capacitor-android')
     implementation platform('com.google.firebase:firebase-bom:34.19.0')
     implementation 'com.google.firebase:firebase-messaging'
+    implementation 'com.android.billingclient:billing:9.1.0'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

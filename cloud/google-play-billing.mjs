@@ -26,17 +26,20 @@ function configuredProducts(saved = null) {
 export function createGooglePlayBilling({ database, accounts, verifyToken, fetcher = fetch }) {
   const subscriptions = database.collection('subscriptions')
   const purchases = database.collection('google_play_purchases')
+  const businessExits = database.collection('business_exit_payments')
   let cachedAccessToken = ''
   let tokenExpiresAt = 0
   let tokenPromise
 
   async function config() {
     const serviceAccount = parseServiceAccount()
-    const saved = await database.collection('subscription_settings').findOne({ _id: 'plan' }, { projection: { googlePlayProductIds: 1 } })
+    const saved = await database.collection('subscription_settings').findOne({ _id: 'plan' }, { projection: { googlePlayProductIds: 1, googlePlayExportProductId: 1 } })
     const products = configuredProducts(saved?.googlePlayProductIds)
     const packageName = String(process.env.GOOGLE_PLAY_PACKAGE_NAME || '').trim()
     const enabled = Boolean(serviceAccount?.client_email && serviceAccount?.private_key && products && packageName)
-    return { serviceAccount, products, packageName, enabled }
+    const exportProductId = String(saved?.googlePlayExportProductId || '').trim()
+    if (exportProductId && !/^[a-zA-Z0-9._-]{3,100}$/.test(exportProductId)) throw new Error('Configure a valid Google Play export product ID.')
+    return { serviceAccount, products, exportProductId, packageName, enabled }
   }
 
   async function googleAccessToken(serviceAccount) {
@@ -79,6 +82,22 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
     const url = `${API_ROOT}/applications/${encodeURIComponent(packageName)}/purchases/subscriptions/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}:acknowledge`
     const response = await fetcher(url, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(15000) })
     if (!response.ok) throw new Error('Google Play could not acknowledge this subscription purchase. Check the Play Console API permissions.')
+  }
+
+  async function getOneTimePurchase({ serviceAccount, packageName, productId, purchaseToken }) {
+    const accessToken = await googleAccessToken(serviceAccount)
+    const url = `${API_ROOT}/applications/${encodeURIComponent(packageName)}/purchases/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}`
+    const response = await fetcher(url, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15000) })
+    const data = await response.json()
+    if (!response.ok) throw new Error('Google Play could not verify this export purchase. Please retry.')
+    return data
+  }
+
+  async function consumeOneTimePurchase({ serviceAccount, packageName, productId, purchaseToken }) {
+    const accessToken = await googleAccessToken(serviceAccount)
+    const url = `${API_ROOT}/applications/${encodeURIComponent(packageName)}/purchases/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}:consume`
+    const response = await fetcher(url, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(15000) })
+    if (!response.ok) throw new Error('Google Play could not confirm this export purchase. Please retry before downloading.')
   }
 
   function accountBinding(businessId, packageName) {
@@ -168,6 +187,29 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
     return send(response, 200, { ok: true, subscription: result })
   }
 
+  async function verifyExportPurchase(request, response, current) {
+    const claims = verifyToken(request)
+    if (claims?.kind !== 'access' || claims.role !== 'owner' || !claims.businessId) return send(response, 401, { error: 'Sign in as the business owner to verify the export payment.' })
+    if (!current.exportProductId) return send(response, 503, { error: 'Google Play product export is not configured yet.' })
+    const purchaseToken = String((await readJson(request)).purchaseToken || '').trim()
+    if (purchaseToken.length < 20 || purchaseToken.length > 4096) return send(response, 400, { error: 'A valid Google Play purchase token is required.' })
+    const key = tokenKey(purchaseToken)
+    const previous = await purchases.findOne({ _id: key })
+    if (previous && (previous.businessId !== claims.businessId || previous.kind !== 'export')) return send(response, 409, { error: 'This Google Play purchase is already linked to another Stockroom purchase.' })
+    const data = await getOneTimePurchase({ serviceAccount: current.serviceAccount, packageName: current.packageName, productId: current.exportProductId, purchaseToken })
+    if (data.productId !== current.exportProductId || data.purchaseState !== 0 || data.obfuscatedExternalAccountId !== accountBinding(claims.businessId, current.packageName)) return send(response, 409, { error: 'Google Play could not confirm a completed export purchase for this business.' })
+    const existingExit = await businessExits.findOne({ _id: claims.businessId })
+    if (existingExit?.closedAt) return send(response, 409, { error: 'This business has already completed its Stockroom exit.' })
+    if (data.consumptionState !== 1) await consumeOneTimePurchase({ serviceAccount: current.serviceAccount, packageName: current.packageName, productId: current.exportProductId, purchaseToken })
+    const now = new Date()
+    const configured = await database.collection('subscription_settings').findOne({ _id: 'plan' })
+    const amount = Number(configured?.productExportFeeAmount) || 0
+    const currency = configured?.productExportFeeCurrency || configured?.currency || 'NGN'
+    await purchases.updateOne({ _id: key }, { $set: { businessId: claims.businessId, kind: 'export', productId: current.exportProductId, packageName: current.packageName, orderId: data.orderId || null, consumed: true, updatedAt: now }, $setOnInsert: { createdAt: now } }, { upsert: true })
+    await businessExits.updateOne({ _id: claims.businessId, closedAt: { $exists: false } }, { $set: { businessId: claims.businessId, status: 'paid', amount, currency, paidAt: now, paymentMethod: 'google_play', googlePlayOrderId: data.orderId || null, googlePlayPurchaseTokenHash: key } }, { upsert: true })
+    return send(response, 200, { ok: true, paid: true })
+  }
+
   async function verifyPubSubIdentity(request) {
     const authorization = String(request.headers.authorization || '')
     const idToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1]
@@ -235,7 +277,7 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
       if (!current.enabled) return send(response, 503, { enabled: false, error: 'Google Play subscriptions are not configured yet.' })
       const claims = verifyToken(request)
       if (claims?.kind !== 'access' || claims.role !== 'owner' || !claims.businessId) return send(response, 401, { error: 'Sign in as the business owner to load Play subscription options.' })
-      return send(response, 200, { enabled: true, packageName: current.packageName, products: current.products, obfuscatedAccountId: accountBinding(claims.businessId, current.packageName) })
+      return send(response, 200, { enabled: true, packageName: current.packageName, products: current.products, exportProductId: current.exportProductId, obfuscatedAccountId: accountBinding(claims.businessId, current.packageName) })
     }
     if (url.pathname === '/v1/play/subscriptions/verify' && request.method === 'POST') {
       let current
@@ -243,6 +285,13 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
       if (!current.enabled) return send(response, 503, { enabled: false, error: 'Google Play subscriptions are not configured yet.' })
       try { return await verifyPurchase(request, response, current) }
       catch (error) { return send(response, error.statusCode || 400, { error: error.statusCode === 502 ? 'Google Play could not verify this purchase right now. Please retry.' : error.message || 'Could not verify this Google Play purchase.' }) }
+    }
+    if (url.pathname === '/v1/play/products/verify' && request.method === 'POST') {
+      let current
+      try { current = await config() } catch { return send(response, 503, { enabled: false, error: 'Google Play subscription configuration is invalid.' }) }
+      if (!current.enabled) return send(response, 503, { enabled: false, error: 'Google Play subscriptions are not configured yet.' })
+      try { return await verifyExportPurchase(request, response, current) }
+      catch (error) { return send(response, error.statusCode || 400, { error: error.message || 'Could not verify the Google Play export purchase.' }) }
     }
     if (url.pathname === '/v1/play/rtdn' && request.method === 'POST') {
       let current

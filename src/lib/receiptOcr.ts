@@ -6,8 +6,8 @@ export function receiptSuggestions(text: string) {
   return { reference: unique.length === 1 ? unique[0] : '', ambiguous: unique.length > 1, amount: [...new Set(amounts)].length === 1 ? amounts[0] : '', status: /\b(declined|failed|reversed|unsuccessful|not approved)\b/i.test(text) ? 'Failure/reversal text detected' : /\b(approved|successful|success)\b/i.test(text) ? 'Approval text detected — check original receipt' : 'Status not identified' }
 }
 
-export async function readReceiptPhoto(file: File, signal: AbortSignal, progress: (message: string) => void) {
-  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 15 * 1024 * 1024) throw new Error('Choose a JPG, PNG or WebP receipt photo smaller than 15 MB.')
+export async function readPhotoData(file: File, signal: AbortSignal, progress: (message: string) => void, preserveColumns = false, includeBlocks = false) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 15 * 1024 * 1024) throw new Error('Choose a JPG, PNG or WebP photo smaller than 15 MB.')
   const { createWorker } = await import('tesseract.js')
   if (signal.aborted) throw new Error('Reading cancelled.')
   let worker: Awaited<ReturnType<typeof createWorker>> | undefined
@@ -17,13 +17,18 @@ export async function readReceiptPhoto(file: File, signal: AbortSignal, progress
   const work = (async () => {
     worker = await createWorker('eng', 1, { workerPath: new URL('/ocr/worker.min.js', location.origin).href, corePath: new URL('/ocr', location.origin).href, langPath: new URL('/ocr', location.origin).href, logger: event => { if (!signal.aborted) progress(`${event.status} ${Math.round(event.progress * 100)}%`) } })
     if (signal.aborted || stopped) { await worker.terminate(); throw new Error('Reading cancelled.') }
-    return (await worker.recognize(file)).data.text
+    if (preserveColumns) await worker.setParameters({ preserve_interword_spaces: '1' })
+    return (await worker.recognize(file, {}, { text: true, blocks: includeBlocks })).data
   })()
   try {
     return await Promise.race([work, new Promise<never>((_, reject) => {
       abort = () => { stopped = true; void worker?.terminate(); reject(new Error('Reading cancelled.')) }
       signal.addEventListener('abort', abort, { once: true })
-      timer = setTimeout(() => { stopped = true; void worker?.terminate(); reject(new Error('Receipt reading timed out. Try a clearer photo or enter the reference manually.')) }, 90000)
+      timer = setTimeout(() => { stopped = true; void worker?.terminate(); reject(new Error('Image reading timed out. Try a clearer photo or enter the details manually.')) }, 90000)
     })])
   } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); void worker?.terminate() }
+}
+
+export async function readReceiptPhoto(file: File, signal: AbortSignal, progress: (message: string) => void, preserveColumns = false) {
+  return (await readPhotoData(file, signal, progress, preserveColumns)).text
 }

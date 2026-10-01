@@ -5,7 +5,7 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
   const requests = database.collection('account_deletion_requests')
   const periodDays = async () => {
     const value = Number(await graceDays())
-    return Number.isInteger(value) && value >= 1 && value <= 365 ? value : 90
+    return Number.isInteger(value) && value >= 1 && value <= 365 ? value : 14
   }
 
   async function identity(claims) {

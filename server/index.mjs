@@ -34,14 +34,16 @@ const server = createServer(async (request, response) => {
     const path = request.url.slice('/api/cloud'.length)
     const accountDeletionRoute = path === '/v1/account-deletion/me'
     const notificationRoute = path.startsWith('/v1/notifications/')
+    const productFormRoute = ['/v1/product-forms/status', '/v1/product-forms/read'].includes(path)
     if (!user || (!accountDeletionRoute && !notificationRoute && user.role !== 'owner')) return sendJson(response, 401, { error: accountDeletionRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
-    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path) && !notificationRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path) && !notificationRoute && !productFormRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
       let body = ''
-      for await (const chunk of request) body += chunk
-      const upstream = await fetch(`${config.url}${path}`, { method: request.method, headers: { 'Content-Type': 'application/json', Authorization: String(request.headers.authorization || '') }, ...(body ? { body } : {}), signal: AbortSignal.timeout(8000) })
+      let bodySize = 0
+      for await (const chunk of request) { bodySize += chunk.length; if (productFormRoute && bodySize > 4_100_000) return sendJson(response, 413, { error: 'Form image is too large.' }); body += chunk }
+      const upstream = await fetch(`${config.url}${path}`, { method: request.method, headers: { 'Content-Type': 'application/json', Authorization: String(request.headers.authorization || '') }, ...(body ? { body } : {}), signal: AbortSignal.timeout(productFormRoute ? 55000 : 8000) })
       return sendJson(response, upstream.status, await upstream.json())
     } catch { return sendJson(response, 503, { error: 'Could not reach the cloud service. Check your connection and try again.' }) }
   }

@@ -11,8 +11,8 @@ if (!versionName || !versionCode) throw new Error('Could not read Android versio
 const outputDirectory = resolve(projectRoot, 'release/android')
 mkdirSync(outputDirectory, { recursive: true })
 const artifacts = [
-  ...(!process.argv.includes('--aab-only') ? [{ source: 'android/app/build/outputs/apk/release/app-release.apk', extension: 'apk' }] : []),
-  { source: 'android/app/build/outputs/bundle/release/app-release.aab', extension: 'aab' },
+  ...(!process.argv.includes('--aab-only') ? [{ source: 'android/app/build/outputs/apk/direct/release/app-direct-release.apk', extension: 'apk' }] : []),
+  { source: 'android/app/build/outputs/bundle/playStoreRelease/app-playStore-release.aab', extension: 'aab' },
 ]
 
 for (const artifact of artifacts) {

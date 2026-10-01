@@ -15,6 +15,7 @@ android/local.properties
 android/app/google-services.json
 .gradle/
 /.gradle-user/
+/android/.gradle-user/
 
 # Environment secrets
 .env
