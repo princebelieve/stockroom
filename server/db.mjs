@@ -761,6 +761,7 @@ export function approveStocktake(id, reason = '') {
   const stocktake = getStocktake(id)
   if (!stocktake || stocktake.status !== 'draft') return null
   const approvalReason = String(reason || 'Approved after physical count').trim() || 'Approved after physical count'
+  const beforeStocks = new Map()
   database.exec('BEGIN')
   try {
     for (const count of stocktake.counts) {
@@ -768,6 +769,7 @@ export function approveStocktake(id, reason = '') {
       const adjustmentReason = `${approvalReason} · ${count.name}`
       const product = database.prepare('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?').get(count.productId, stocktake.branchId || 'main')
       if (!product) continue
+      beforeStocks.set(count.productId, Number(product.stock))
       const nextStock = product.stock + count.variance
       if (nextStock < 0) throw new Error(`Stock cannot be negative for ${count.name}.`)
       database.prepare('UPDATE branch_inventory SET stock = ?, updated_at = ? WHERE product_id = ? AND branch_id = ?').run(nextStock, now(), count.productId, stocktake.branchId || 'main')
@@ -778,7 +780,7 @@ export function approveStocktake(id, reason = '') {
     database.prepare('UPDATE stocktakes SET status = ?, approval_reason = ?, approved_at = ? WHERE id = ? AND organization_id = ?').run('approved', approvalReason, now(), id, organizationId)
     database.exec('COMMIT')
     const approved = getStocktake(id)
-    queueSync('stocktake', id, 'approved', approved)
+    queueSync('stocktake', id, 'approved', { ...approved, counts: approved.counts.map(count => ({ ...count, beforeStock: beforeStocks.get(count.productId) })) })
     return approved
   } catch (error) { database.exec('ROLLBACK'); throw error }
 }
@@ -849,7 +851,8 @@ export function transferBranchStock(input) {
   if (!database.prepare('SELECT 1 FROM products WHERE id = ? AND organization_id = ?').get(productId, organizationId)) throw new Error('Product not found.')
   const source = database.prepare('SELECT stock FROM branch_inventory WHERE branch_id = ? AND product_id = ?').get(fromBranchId, productId)
   if (!source || source.stock < quantity) throw new Error('The source branch does not have enough stock.')
-  const createdAt = now(), transferId = crypto.randomUUID(), payload = { id: transferId, fromBranchId, toBranchId, productId, quantity, reason, createdAt }
+  const destination = database.prepare('SELECT stock FROM branch_inventory WHERE branch_id = ? AND product_id = ?').get(toBranchId, productId)
+  const createdAt = now(), transferId = crypto.randomUUID(), payload = { id: transferId, fromBranchId, toBranchId, productId, quantity, reason, sourceBeforeStock: Number(source.stock), destinationBeforeStock: Number(destination?.stock) || 0, createdAt }
   database.exec('BEGIN')
   try {
     database.prepare('UPDATE branch_inventory SET stock = stock - ?, updated_at = ? WHERE branch_id = ? AND product_id = ?').run(quantity, createdAt, fromBranchId, productId)
@@ -903,7 +906,7 @@ export function adjustStock(productId, amount, reason = 'manual-adjustment', sho
     throw error
   }
   const saved = database.prepare('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND i.branch_id = ?').get(productId, branchId)
-  if (shouldSync) { queueSync('stock', productId, 'adjust', { productId, branchId, amount, reason, updatedAt }); queueSync('inventory_movement', productId, 'create', { productId, branchId, amount, reason, createdAt: updatedAt }) }
+  if (shouldSync) { queueSync('stock', productId, 'adjust', { productId, branchId, amount, beforeStock: Number(product.stock), reason, updatedAt }); queueSync('inventory_movement', productId, 'create', { productId, branchId, amount, reason, createdAt: updatedAt }) }
   return saved
 }
 
@@ -925,6 +928,7 @@ export function createSale(sale, shouldSync = true, branchId = 'main') {
       const updatedAt = now()
       const product = database.prepare('SELECT i.stock, p.cost_price AS costPrice, p.name FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND p.organization_id = ? AND i.branch_id = ?').get(item.productId, organizationId, sale.branchId)
       if (!product || product.stock < item.quantity) throw new Error('Insufficient stock for sale.')
+      item.beforeStock = Number(product.stock)
       database.prepare('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), sale.id, item.productId, product.name, item.quantity, item.price, product.costPrice || 0)
       database.prepare('UPDATE branch_inventory SET stock = stock - ?, updated_at = ? WHERE product_id = ? AND branch_id = ?').run(item.quantity, updatedAt, item.productId, sale.branchId)
       database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, item.productId, -item.quantity, 'sale', updatedAt, sale.branchId)

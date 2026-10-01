@@ -8,6 +8,8 @@ declare global {
     listPrinters: () => Promise<InstalledPrinter[]>
     print: (options: { kind: 'receipt' | 'order' | 'report'; deviceName: string; width: number }) => Promise<void>
     control: (options: import('./nativePrinting').HardwareCommand) => Promise<void>
+    showNotification: (options: { id: string; title: string; body: string; url?: string }) => Promise<boolean>
+    notificationsSupported: () => Promise<boolean>
   } }
 }
 export function printerSettings(): PrinterSettings {

@@ -37,12 +37,54 @@ function encryption(subscription, publicKey) {
 export async function createNotifications({ database, accounts, visitors, verifyToken, fetcher = fetch }) {
   const notifications = database.collection('app_notifications')
   const subscriptions = database.collection('push_subscriptions')
+  const fcmSubscriptions = database.collection('fcm_push_subscriptions')
   await Promise.all([
     notifications.createIndex({ recipientKey: 1, createdAt: -1 }),
     notifications.createIndex({ recipientKey: 1, readAt: 1, createdAt: -1 }),
     subscriptions.createIndex({ endpointHash: 1 }, { unique: true }),
     subscriptions.createIndex({ recipientKey: 1, updatedAt: -1 }),
+    fcmSubscriptions.createIndex({ tokenHash: 1 }, { unique: true }),
+    fcmSubscriptions.createIndex({ recipientKey: 1, updatedAt: -1 }),
   ])
+
+  let cachedFcmAuth = null
+  function fcmConfig() {
+    const projectId = String(process.env.FCM_PROJECT_ID || '').trim()
+    const clientEmail = String(process.env.FCM_CLIENT_EMAIL || '').trim()
+    const privateKey = String(process.env.FCM_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim()
+    return projectId && clientEmail && privateKey ? { projectId, clientEmail, privateKey } : null
+  }
+
+  async function fcmAccessToken(config) {
+    if (cachedFcmAuth && cachedFcmAuth.expiresAt > Date.now() + 60_000) return cachedFcmAuth.token
+    const now = Math.floor(Date.now() / 1000)
+    const unsigned = `${base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))}.${base64url(JSON.stringify({ iss: config.clientEmail, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }))}`
+    const signer = createSign('RSA-SHA256'); signer.update(unsigned); signer.end()
+    const assertion = `${unsigned}.${signer.sign(createPrivateKey(config.privateKey)).toString('base64url')}`
+    const response = await fetcher('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }), signal: AbortSignal.timeout(10000) })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || !result.access_token) throw new Error(`FCM OAuth failed (${response.status}).`)
+    cachedFcmAuth = { token: result.access_token, expiresAt: Date.now() + Number(result.expires_in || 3600) * 1000 }
+    return cachedFcmAuth.token
+  }
+
+  async function deliverFcm(subscription, payload) {
+    const config = fcmConfig()
+    if (!config) return
+    try {
+      const accessToken = await fcmAccessToken(config)
+      const response = await fetcher(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(config.projectId)}/messages:send`, {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { token: subscription.token, data: { title: payload.title, body: payload.body, url: payload.url, id: payload.id, type: payload.type }, android: { priority: 'HIGH', ttl: '3600s' } } }),
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!response.ok) {
+        const details = await response.json().catch(() => ({}))
+        if (response.status === 404 || JSON.stringify(details).includes('UNREGISTERED')) await fcmSubscriptions.deleteOne({ _id: subscription._id })
+        console.error('FCM delivery failed.', response.status, JSON.stringify(details).slice(0, 500))
+      }
+    } catch (error) { console.error('FCM delivery failed.', error instanceof Error ? error.message : 'Unknown error.') }
+  }
 
   function vapid() {
     const publicKey = String(process.env.VAPID_PUBLIC_KEY || '').trim()
@@ -86,7 +128,9 @@ export async function createNotifications({ database, accounts, visitors, verify
     const saved = { _id: new ObjectId(), recipientKey, businessId: message.businessId || null, title: String(message.title || 'Stockroom update').slice(0, 100), body: String(message.body || '').slice(0, 300), url: String(message.url || '/').slice(0, 300), type: String(message.type || 'general').slice(0, 40), createdAt: new Date(), readAt: null }
     await notifications.insertOne(saved)
     const targets = await subscriptions.find({ recipientKey }).limit(20).toArray()
-    await Promise.all(targets.map(target => deliver(target, { title: saved.title, body: saved.body, url: saved.url, id: saved._id.toString() })))
+    const fcmTargets = await fcmSubscriptions.find({ recipientKey }).limit(20).toArray()
+    const payload = { title: saved.title, body: saved.body, url: saved.url, id: saved._id.toString(), type: saved.type }
+    await Promise.all([...targets.map(target => deliver(target, payload)), ...fcmTargets.map(target => deliverFcm(target, payload))])
     return saved
   }
 
@@ -135,7 +179,20 @@ export async function createNotifications({ database, accounts, visitors, verify
         const rows = await notifications.find({ recipientKey: who.key }).sort({ createdAt: -1 }).limit(50).toArray()
         const currentVapid = vapid()
         const pushEnabled = subscriptions.countDocuments({ recipientKey: who.key }).then(count => count > 0)
-        return reply(200, { notifications: rows.map(row => ({ id: row._id.toString(), title: row.title, body: row.body, url: row.url, type: row.type, createdAt: row.createdAt, read: Boolean(row.readAt) })), unread: rows.filter(row => !row.readAt).length, pushSupported: Boolean(currentVapid), pushEnabled: await pushEnabled, publicKey: currentVapid?.publicKey || '' })
+        return reply(200, { notifications: rows.map(row => ({ id: row._id.toString(), title: row.title, body: row.body, url: row.url, type: row.type, createdAt: row.createdAt, read: Boolean(row.readAt) })), unread: rows.filter(row => !row.readAt).length, pushSupported: Boolean(currentVapid), pushEnabled: await pushEnabled, fcmSupported: Boolean(fcmConfig()), fcmEnabled: await fcmSubscriptions.countDocuments({ recipientKey: who.key }) > 0, publicKey: currentVapid?.publicKey || '' })
+      }
+      if (url.pathname === '/v1/notifications/fcm-token' && (request.method === 'POST' || request.method === 'DELETE')) {
+        const input = await readJson(request)
+        const token = String(input.token || '')
+        if (token.length < 20 || token.length > 4096) return reply(400, { error: 'A valid Android push token is required.' })
+        const tokenHash = createHash('sha256').update(token).digest('hex')
+        if (request.method === 'DELETE') await fcmSubscriptions.deleteOne({ tokenHash, recipientKey: who.key })
+        else {
+          if (!fcmConfig()) return reply(503, { error: 'Android push notifications are not configured on this server.' })
+          const now = new Date()
+          await fcmSubscriptions.updateOne({ tokenHash }, { $set: { tokenHash, token, recipientKey: who.key, ...(who.businessId ? { businessId: who.businessId } : {}), ...(who.accountId ? { accountId: who.accountId } : {}), ...(who.visitorId ? { visitorId: who.visitorId } : {}), updatedAt: now }, $setOnInsert: { createdAt: now } }, { upsert: true })
+        }
+        return reply(200, { ok: true })
       }
       if (url.pathname === '/v1/notifications/push-subscription' && request.method === 'POST') {
         const input = await readJson(request)

@@ -1,10 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron'
+import { app, BrowserWindow, Notification, dialog, ipcMain, screen, session, shell } from 'electron'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sendHardwareCommand } from './hardware.mjs'
 
 const port = Number(process.env.PORT || 8787)
+app.setAppUserModelId('com.stockroom.business')
 let customerDisplayWindow = null
+let mainWindow = null
 
 function waitForLocalServer() {
   return new Promise((resolve, reject) => {
@@ -27,6 +29,8 @@ async function createWindow() {
     width: 1440, height: 900, minWidth: 1024, minHeight: 700, autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)) },
   })
+  mainWindow = window
+  window.on('closed', () => { if (mainWindow === window) mainWindow = null })
   window.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const external = new URL(url)
@@ -82,6 +86,22 @@ app.whenReady().then(async () => {
         deviceName: options.deviceName, silent: Boolean(options.deviceName), printBackground: true,
         ...(options.kind === 'report' ? { pageSize: 'A4' } : { usePrinterDefaultPageSize: true }),
       }, (success, reason) => success ? resolve() : reject(new Error(reason || 'Print job failed.'))))
+    })
+    ipcMain.handle('notifications:supported', (event) => {
+      trustedSender(event)
+      return Notification.isSupported()
+    })
+    ipcMain.handle('notifications:show', (event, options) => {
+      trustedSender(event)
+      if (!Notification.isSupported()) return false
+      const title = String(options?.title || 'Stockroom alert').slice(0, 100)
+      const body = String(options?.body || 'There is a new business update.').slice(0, 300)
+      let target = `http://127.0.0.1:${port}/`
+      try { const candidate = new URL(String(options?.url || '/'), target); if (candidate.origin === `http://127.0.0.1:${port}`) target = candidate.href } catch {}
+      const notification = new Notification({ title, body })
+      notification.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); void mainWindow.loadURL(target); mainWindow.focus() } })
+      notification.show()
+      return true
     })
     ipcMain.handle('customer-display:open', (_event, pairingUrl) => openCustomerDisplay(pairingUrl))
     await import('../server/index.mjs')

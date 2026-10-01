@@ -25,6 +25,7 @@ const database = client.db(process.env.MONGODB_DATABASE || 'stockroom_sync')
 const operations = database.collection('sync_operations')
 const entityHeads = database.collection('sync_entity_heads')
 const businessSettings = database.collection('business_settings')
+const inventoryAlertState = database.collection('inventory_alert_state')
 const accounts = database.collection('accounts')
 const devices = database.collection('devices')
 const passwordResets = database.collection('password_resets')
@@ -35,6 +36,7 @@ await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true }
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
 await businessSettings.createIndex({ businessId: 1 }, { unique: true })
+await inventoryAlertState.createIndex({ businessId: 1, branchId: 1, productId: 1 }, { unique: true })
 // Staff email is optional contact data. Convert the original mandatory unique
 // index once so several staff accounts can omit it.
 await accounts.dropIndex('email_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
@@ -120,6 +122,56 @@ const registration = await createRegistration({ database, client, accounts, hash
 const visitorAccounts = createVisitorAccounts({ database, hashPassword, matchesPassword, signToken })
 const accountDeletion = createAccountDeletion({ database, accounts, devices, refreshTokens, visitors: referralVisitors, verifyToken, graceDays: async () => (await database.collection('subscription_settings').findOne({ _id: 'plan' }))?.accountDeletionGraceDays ?? 90 })
 const notifications = await createNotifications({ database, accounts, visitors: referralVisitors, verifyToken })
+
+async function inventoryDelta(businessId, branchId, productId, delta, source, beforeStock) {
+  if (!productId || !Number.isFinite(delta) || delta === 0) return
+  const productHead = await entityHeads.findOne({ businessId, entityType: 'product', entityId: String(productId) })
+  const product = productHead?.payload || {}
+  const productName = String(product.name || 'A product').slice(0, 100)
+  const reorder = Math.max(0, Number(product.reorder) || 0)
+  const filter = { businessId, branchId: String(branchId || 'main'), productId: String(productId) }
+  const initialStock = Math.max(0, Number.isFinite(Number(beforeStock)) ? Number(beforeStock) : 0)
+  const previous = await inventoryAlertState.findOneAndUpdate(filter, [{ $set: { ...filter, stock: { $max: [0, { $add: [{ $ifNull: ['$stock', initialStock] }, delta] }] }, reorder: { $literal: reorder }, productName: { $literal: productName }, updatedAt: { $literal: new Date() } } }], { upsert: true, returnDocument: 'before' })
+  const previousStock = previous ? Number(previous.stock) || 0 : initialStock
+  const stock = Math.max(0, previousStock + delta)
+  const crossedLow = previousStock > reorder && stock <= reorder && stock > 0
+  const crossedOut = previousStock > 0 && stock === 0
+  const recovered = previousStock <= reorder && stock > reorder
+  const branch = filter.branchId === 'main' ? 'Main branch' : String((await entityHeads.findOne({ businessId, entityType: 'branch', entityId: filter.branchId }))?.payload?.name || filter.branchId)
+  const inventoryUrl = `/?screen=Inventory&search=${encodeURIComponent(String(product.sku || productId))}`
+  if (crossedOut) await notifyInventoryTeam(businessId, { title: 'Out of stock', body: `${productName} has run out at ${branch}.`, type: 'inventory-out', url: inventoryUrl })
+  else if (crossedLow) await notifyInventoryTeam(businessId, { title: 'Low stock', body: `${productName} is down to ${stock} (reorder at ${reorder}) at ${branch}.`, type: 'inventory-low', url: inventoryUrl })
+  else if (recovered) await notifyInventoryTeam(businessId, { title: 'Stock replenished', body: `${productName} is above its reorder level at ${branch} (${stock} in stock).`, type: 'inventory-restocked', url: inventoryUrl })
+  if (source === 'stock-adjustment' && delta < 0 && stock > reorder && Math.abs(delta) >= Math.max(10, reorder * 2)) {
+    await notifyInventoryTeam(businessId, { title: 'Large stock reduction', body: `${Math.abs(delta)} ${product.unit || 'units'} of ${productName} were removed at ${branch}. Review inventory activity.`, type: 'inventory-adjustment', url: inventoryUrl })
+  }
+  if (source === 'stocktake' && delta < 0 && Math.abs(delta) >= Math.max(5, reorder)) {
+    await notifyInventoryTeam(businessId, { title: 'Stocktake discrepancy', body: `The count found ${Math.abs(delta)} fewer ${product.unit || 'units'} of ${productName} than expected at ${branch}.`, type: 'inventory-discrepancy', url: inventoryUrl })
+  }
+}
+
+async function notifyInventoryTeam(businessId, message) {
+  const team = await accounts.find({ businessId, $or: [{ role: { $in: ['owner', 'admin'] } }, { role: 'cashier', operationalAccess: true }] }).project({ _id: 1 }).toArray()
+  await Promise.all(team.map(account => notifications.notifyAccount(account._id.toString(), message)))
+}
+
+async function processInventoryNotification(operation) {
+  const { businessId, entityType, action, payload = {} } = operation
+  if (entityType === 'product' && action === 'upsert') {
+    const branchId = 'main'
+    const filter = { businessId, branchId, productId: String(payload.id || operation.entityId) }
+    await inventoryAlertState.updateOne(filter, { $setOnInsert: { ...filter, stock: Math.max(0, Number(payload.stock) || 0), reorder: Math.max(0, Number(payload.reorder) || 0), productName: String(payload.name || 'Product'), updatedAt: new Date() } }, { upsert: true })
+  } else if (entityType === 'stock' && action === 'adjust') {
+    await inventoryDelta(businessId, payload.branchId, payload.productId || operation.entityId, Number(payload.amount) || 0, 'stock-adjustment', payload.beforeStock)
+  } else if (entityType === 'sale' && action === 'create') {
+    for (const item of Array.isArray(payload.items) ? payload.items : []) await inventoryDelta(businessId, payload.branchId, item.productId, -(Number(item.quantity) || 0), 'sale', item.beforeStock)
+  } else if (entityType === 'branch_transfer' && action === 'create') {
+    await inventoryDelta(businessId, payload.fromBranchId, payload.productId, -(Number(payload.quantity) || 0), 'transfer', payload.sourceBeforeStock)
+    await inventoryDelta(businessId, payload.toBranchId, payload.productId, Number(payload.quantity) || 0, 'transfer', payload.destinationBeforeStock)
+  } else if (entityType === 'stocktake' && action === 'approved') {
+    for (const item of Array.isArray(payload.counts) ? payload.counts : []) await inventoryDelta(businessId, payload.branchId, item.productId, Number(item.variance) || 0, 'stocktake', item.beforeStock)
+  }
+}
 const referralWallet = await createReferralWallet({ database, accounts, verifyToken, notifications })
 const googlePlayBilling = createGooglePlayBilling({ database, accounts, verifyToken })
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook, notifications })
@@ -396,7 +448,12 @@ const server = createServer(async (request, response) => {
           }
           await entityHeads.updateOne(filter, { $set: { updatedAt: operationUpdatedAt(document), payload: document.payload, operationId: document.operationId, deviceId, receivedAt: new Date() } }, { upsert: true })
         }
-        await operations.updateOne({ businessId, operationId: document.operationId }, { $setOnInsert: document }, { upsert: true })
+        try { await operations.insertOne(document) }
+        catch (error) {
+          if (error?.code === 11000) { acceptedOperationIds.push(document.operationId); continue }
+          throw error
+        }
+        try { await processInventoryNotification(document) } catch (error) { console.error('Inventory notification processing failed.', error instanceof Error ? error.message : 'Unknown error.') }
         if (document.entityType === 'settings' && document.action === 'upsert' && document.payload?.appName && document.payload?.currency) {
           await businessSettings.updateOne({ businessId }, { $set: { businessId, settings: document.payload, updatedAt: operationUpdatedAt(document), receivedAt: new Date() } }, { upsert: true })
         }

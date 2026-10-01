@@ -154,6 +154,8 @@ function initialScreen() {
   try {
     const user = JSON.parse(localStorage.getItem('stockroom-user') || 'null') as User | null
     if (user && new URLSearchParams(window.location.search).get('screen') === 'account-deletion') return 'Account'
+    const requested = new URLSearchParams(window.location.search).get('screen')
+    if (user && requested && screenAllowedForUser(requested, user)) return requested
     return user ? preferredScreen(user) : 'Overview'
   } catch { return 'Overview' }
 }
@@ -187,7 +189,7 @@ function PublicLandingLink() {
 function App() {
   const deriveSku = (name: string) => `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`
   const [products, setProducts] = useState<Product[]>([])
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('search') || '')
   const [active, setActive] = useState(initialScreen)
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<'Sales' | 'Team' | null>(null)
   useEffect(() => { if (user && screenAllowedForUser(active, user)) localStorage.setItem(navigationKey(user), active) }, [active])
