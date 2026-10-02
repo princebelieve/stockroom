@@ -1,4 +1,6 @@
+import { readCustomValues, validateCustomValues, validateCoreRequirements } from './shop-fields.mjs'
 import { paymentPolicy, recordPayment } from './payment.mjs'
+import { normalizeShopProfile, validateShopProfile } from './shop-profile.mjs'
 import { normalizeCashSale } from './cash.mjs'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -233,6 +235,8 @@ try { database.exec("ALTER TABLE sales ADD COLUMN payment_method TEXT NOT NULL D
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_reference TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN terminal_provider TEXT NOT NULL DEFAULT ''") } catch {}
 try { database.exec("ALTER TABLE app_settings ADD COLUMN payment_policy TEXT NOT NULL DEFAULT '{}'") } catch {}
+try { database.exec("ALTER TABLE products ADD COLUMN custom_values TEXT NOT NULL DEFAULT '{}'") } catch {}
+try { database.exec("ALTER TABLE app_settings ADD COLUMN shop_profile TEXT NOT NULL DEFAULT 'null'") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN payment_details TEXT") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN cash_received REAL") } catch {}
 try { database.exec("ALTER TABLE sales ADD COLUMN change_given REAL") } catch {}
@@ -317,11 +321,12 @@ export function getSyncStatus() {
   return { configured: Boolean(process.env.SYNC_API_URL && process.env.SYNC_DEVICE_TOKEN && process.env.BUSINESS_ID), pending, conflicts, lastError }
 }
 export async function getSettings() {
-  const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)
+  const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, shop_profile AS shopProfile, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)
   const ownerCount = database.prepare('SELECT COUNT(*) AS count FROM users WHERE organization_id = ?').get(organizationId).count
   return {
     ...(row || { appName: 'My Business', currency: 'USD', posProvider: '', posTerminalId: '', posConnection: 'manual', logoData: '', updatedAt: now() }),
     paymentPolicy: paymentPolicy(row?.paymentPolicy),
+    shopProfile: row?.shopProfile && row.shopProfile !== 'null' ? normalizeShopProfile(row.shopProfile) : null,
     ownerConfigured: ownerCount > 0,
   }
 }
@@ -656,6 +661,7 @@ export function applyRemoteOperations(operations) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sku = excluded.sku, barcode = excluded.barcode, category = excluded.category, reorder_point = excluded.reorder_point, price = excluded.price, unit = excluded.unit, updated_at = excluded.updated_at`)
           .run(payload.id, organizationId, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, payload.unit, payload.updated || now())
         database.prepare("INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES ('main', ?, ?, ?, ?)").run(payload.id, Number(payload.stock) || 0, Number(payload.reorder) || 0, payload.updated || now())
+        if (payload.customValues != null) database.prepare('UPDATE products SET custom_values = ? WHERE id = ?').run(JSON.stringify(readCustomValues(payload.customValues)), payload.id)
       } else if (operation.entityType === 'branch' && operation.action === 'upsert') {
         database.prepare('INSERT INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, updated_at=excluded.updated_at').run(payload.id, organizationId, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.createdAt || now(), payload.updatedAt || now())
         database.prepare('UPDATE branches SET is_active = ?, assigned_user_ids = ? WHERE id = ?').run(payload.isActive === false ? 0 : 1, JSON.stringify(Array.isArray(payload.assignedUserIds) ? payload.assignedUserIds : []), payload.id)
@@ -704,6 +710,7 @@ export function applyRemoteOperations(operations) {
         }
       } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
         if (payload.paymentPolicy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(payload.paymentPolicy)), organizationId)
+        if (payload.shopProfile != null) database.prepare('UPDATE app_settings SET shop_profile = ? WHERE organization_id = ?').run(JSON.stringify(normalizeShopProfile(payload.shopProfile)), organizationId)
         database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?')
           .run(payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.logoData || '', payload.updatedAt || now(), organizationId)
       }
@@ -807,6 +814,14 @@ export async function queueInitialSettingsSnapshot() {
   return true
 }
 
+export async function updateShopProfile(input) {
+  const profile = validateShopProfile(input)
+  database.prepare('UPDATE app_settings SET shop_profile = ?, updated_at = ? WHERE organization_id = ?').run(JSON.stringify(profile), now(), organizationId)
+  const settings = await getSettings()
+  queueSync('settings', organizationId, 'upsert', settings)
+  return profile
+}
+
 export function listBranches() {
   return database.prepare('SELECT id, name, address, is_default AS isDefault, is_active AS isActive, assigned_user_ids AS assignedUserIds, created_at AS createdAt, updated_at AS updatedAt FROM branches WHERE organization_id = ? ORDER BY is_default DESC, name').all(organizationId).map(branch => ({ ...branch, isDefault: Boolean(branch.isDefault), isActive: Boolean(branch.isActive), assignedUserIds: JSON.parse(branch.assignedUserIds || '[]') }))
 }
@@ -866,25 +881,42 @@ export function transferBranchStock(input) {
 }
 
 export function listProducts(branchId = 'main') {
-  return database.prepare(`SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated
+  return database.prepare(`SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated
     FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? WHERE p.organization_id = ? ORDER BY p.name`).all(branchId, organizationId)
 }
 
 export function exportProductCatalogCsv() {
-  const rows = database.prepare(`SELECT p.name, p.sku, p.barcode, p.category, p.cost_price AS cost, p.price, p.unit, b.name AS branch, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder
+  const rows = database.prepare(`SELECT p.name, p.sku, p.barcode, p.category, p.cost_price AS cost, p.price, p.unit, p.custom_values AS customValues, b.name AS branch, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder
     FROM products p CROSS JOIN branches b LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = b.id
     WHERE p.organization_id = ? ORDER BY p.name, b.is_default DESC, b.name`).all(organizationId)
   const cell = value => `"${String(value ?? '').replace(/^[=+@-]/, "'$&").replace(/"/g, '""')}"`
-  return [['Product', 'SKU', 'Barcode', 'Category', 'Cost price', 'Selling price', 'Unit', 'Branch', 'Stock', 'Reorder point'], ...rows.map(row => [row.name, row.sku, row.barcode, row.category, row.cost, row.price, row.unit, row.branch, row.stock, row.reorder])].map(row => row.map(cell).join(',')).join('\r\n')
+  const profile = normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile)
+  const customIds = [...new Set(rows.flatMap(row => Object.keys(readCustomValues(row.customValues))))]
+  return [['Product', 'SKU', 'Barcode', 'Category', 'Cost price', 'Selling price', 'Unit', 'Branch', 'Stock', 'Reorder point', ...customIds.map(id => `${profile.fields.find(field => field.id === id)?.label || id} [${id}]`)], ...rows.map(row => [row.name, row.sku, row.barcode, row.category, row.cost, row.price, row.unit, row.branch, row.stock, row.reorder, ...customIds.map(id => readCustomValues(row.customValues)[id] || '')])].map(row => row.map(cell).join(',')).join('\r\n')
 }
 
 export function createProduct(input, branchId = 'main') {
+  const profile = normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile)
+  validateCoreRequirements(input, profile)
+  const customValues = validateCustomValues(input.customValues, profile)
   const product = { id: crypto.randomUUID(), updated: now() }
   database.prepare('INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)').run(product.id, organizationId, input.name, input.sku, input.barcode || '', input.category, input.reorder, input.price, input.cost || 0, input.unit, product.updated)
   database.prepare('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, ?, ?)').run(branchId, product.id, input.stock, input.reorder, product.updated)
-  const saved = database.prepare('SELECT id, name, sku, barcode, category, ? AS stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(input.stock, product.id)
+  database.prepare('UPDATE products SET custom_values = ? WHERE id = ?').run(JSON.stringify(customValues), product.id)
+  const saved = database.prepare('SELECT custom_values AS customValues, id, name, sku, barcode, category, ? AS stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(input.stock, product.id)
   queueSync('product', saved.id, 'upsert', { ...saved, stock: 0 })
   if (Number(input.stock)) queueSync('stock', saved.id, 'adjust', { productId: saved.id, branchId, amount: Number(input.stock), reason: 'initial-stock', updatedAt: product.updated })
+  return saved
+}
+
+export async function updateProductCustomValues(productId, input, branchId = 'main') {
+  const current = (await listProducts(branchId)).find(product => product.id === productId)
+  if (!current) throw new Error('Product not found.')
+  const customValues = { ...readCustomValues(current.customValues), ...validateCustomValues(input, normalizeShopProfile((await getSettings()).shopProfile)) }
+  const updated = now()
+  database.prepare('UPDATE products SET custom_values = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(customValues), updated, productId)
+  const saved = { ...current, customValues, updated }
+  queueSync('product', productId, 'upsert', { ...saved, stock: 0 })
   return saved
 }
 
@@ -905,7 +937,7 @@ export function adjustStock(productId, amount, reason = 'manual-adjustment', sho
     database.exec('ROLLBACK')
     throw error
   }
-  const saved = database.prepare('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND i.branch_id = ?').get(productId, branchId)
+  const saved = database.prepare('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND i.branch_id = ?').get(productId, branchId)
   if (shouldSync) { queueSync('stock', productId, 'adjust', { productId, branchId, amount, beforeStock: Number(product.stock), reason, updatedAt }); queueSync('inventory_movement', productId, 'create', { productId, branchId, amount, reason, createdAt: updatedAt }) }
   return saved
 }

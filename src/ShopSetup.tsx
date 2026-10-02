@@ -1,0 +1,97 @@
+﻿import { useEffect, useRef, useState } from 'react'
+import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
+import { businessModes, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
+import { coreFields, validateFields, type ShopField } from '../server/shop-fields.mjs'
+import { ShopProductFields } from './ShopProductFields'
+import { readReceiptPhoto } from './lib/receiptOcr'
+import { suggestTemplateFields } from './lib/shopTemplate'
+import { BlankProductForm } from './BlankProductForm'
+
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD' }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string }) {
+  const [draft, setDraft] = useState(value)
+  const [step, setStep] = useState(0)
+  const [dirty, setDirty] = useState(false)
+  const [message, setMessage] = useState('')
+  const [problem, setProblem] = useState('')
+  const [industry, setIndustry] = useState<BusinessMode>(value.industry)
+  const [text, setText] = useState('')
+  const [candidates, setCandidates] = useState<ShopField[]>([])
+  const [selected, setSelected] = useState<number[]>([])
+  const [file, setFile] = useState<File | null>(null)
+  const [progress, setProgress] = useState('')
+  const reading = useRef<AbortController | null>(null)
+  useEffect(() => () => reading.current?.abort(), [])
+  useEffect(() => { if (!dirty) { setDraft(value); setIndustry(value.industry) } }, [value, dirty])
+  function change(next: ShopProfile) { setDraft(next); setDirty(true); setMessage(''); setProblem('') }
+  function updateField(id: string, changes: Partial<ShopField>) { change({ ...draft, mode: 'custom', fields: draft.fields.map(field => field.id === id ? { ...field, ...changes } : field) }) }
+  function move(id: string, direction: number) {
+    const fields = [...draft.fields]; const index = fields.findIndex(field => field.id === id); const next = index + direction
+    if (next < 0 || next >= fields.length) return
+    ;[fields[index], fields[next]] = [fields[next], fields[index]]; change({ ...draft, fields })
+  }
+  function useTemplate() {
+    const next = normalizeShopProfile({ mode: industry === 'general' ? 'general' : 'suggested', industry })
+    const ids = new Set(next.fields.map(field => field.id))
+    next.fields.push(...draft.fields.filter(field => !ids.has(field.id)).map(field => ({ ...field, visible: false })))
+    if (next.fields.length > 49) { setProblem('This template would exceed 40 custom fields. Customize your current fields instead.'); return }
+    change(next); setMessage('Template loaded into your draft. Review fields before saving.')
+  }
+  function suggest() { const fields = suggestTemplateFields(text, draft.fields); setCandidates(fields); setSelected(fields.map((_, index) => index)); setProgress(fields.length ? 'Review the detected labels below. Uncheck text that is not a field.' : 'No labels found. Type or add your fields manually.') }
+  function addSuggestions() {
+    const fields = [...draft.fields]
+    for (const index of selected) {
+      const candidate = candidates[index]
+      const position = fields.findIndex(field => field.id === candidate.id)
+      if (position >= 0) fields[position] = { ...fields[position], label: candidate.label, visible: true }
+      else fields.push(candidate)
+    }
+    if (fields.length > 49) { setProblem('Use up to 40 custom fields. Uncheck some suggestions.'); return }
+    change({ ...draft, mode: 'custom', fields }); setCandidates([]); setMessage('Selected labels added to your draft. Check their types and placeholders below.')
+  }
+  function go(next: number) {
+    try { if (next > step) { const fields = draft.fields.map(field => ({ ...field, options: field.options.map(item => item.trim()).filter(Boolean) })); validateFields(fields); setDraft({ ...draft, fields }) }; setStep(next); setProblem('') }
+    catch (error) { setProblem(error instanceof Error ? error.message : 'Check your fields.') }
+  }
+  return <section id="shop-setup" className="panel full-panel shop-wizard">
+    <h2>Shop setup wizard</h2><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p>
+    <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
+    {step === 0 && <div className="shop-step">
+      <h3>Start with a familiar template</h3><label>Business template<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
+      <p>{businessModes[industry].note}</p><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
+      <p>Loading a template replaces this draft's visible fields. Previous custom fields stay in Removed fields so their saved values can be restored.</p>
+      <details><summary>Start from a printed form or screenshot</summary><p>Upload a JPG, PNG or WebP image, or paste headings from your old app. Text is read on this device without a paid recognition service. Clear printed text works best; write in BLOCK / CAPITAL LETTERS for handwritten labels.</p>
+        <label>Template image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { reading.current?.abort(); setFile(event.target.files?.[0] || null); setCandidates([]); setProgress('') }} /></label>
+        <AsyncButton className="filter-button" disabled={!file} busyLabel="Reading image..." onClick={async () => {
+          if (!file) return
+          const controller = new AbortController(); reading.current = controller
+          try { const result = await readReceiptPhoto(file, controller.signal, setProgress, true); if (!controller.signal.aborted) { setText(result); setProgress('Text read. Check it, then suggest fields.') } } finally { if (reading.current === controller) reading.current = null }
+        }}>Read template image</AsyncButton><button type="button" className="filter-button" onClick={() => { reading.current?.abort(); setProgress('Reading cancelled. You can enter labels manually.') }}>Cancel reading</button>
+        <label>Template text<textarea rows={6} value={text} onChange={event => setText(event.target.value)} placeholder="Product name&#10;Paper size&#10;Finish&#10;Selling price" /></label>
+        <button type="button" className="filter-button" disabled={!text.trim()} onClick={suggest}>Suggest fields from text</button>
+        {progress && <p role="status">{progress}</p>}
+        {candidates.length > 0 && <fieldset><legend>Review suggested fields</legend>{candidates.map((field, index) => <div key={index} className="shop-candidate"><label><input type="checkbox" checked={selected.includes(index)} onChange={event => setSelected(event.target.checked ? [...selected, index] : selected.filter(item => item !== index))} />Use label {index + 1}</label><input aria-label={`Suggested label ${index + 1}`} maxLength={80} value={field.label} onChange={event => setCandidates(candidates.map((item, i) => i === index ? { ...item, label: event.target.value } : item))} /><label>Connect to<select value={coreFields.some(core => core.id === field.id) ? field.id : 'custom'} onChange={event => {
+          const core = coreFields.find(item => item.id === event.target.value)
+          setCandidates(candidates.map((item, i) => i === index ? { ...(core || { ...item, id: `custom_${crypto.randomUUID().replaceAll('-', '_')}`, locked: false, required: false }), label: item.label } : item))
+        }}><option value="custom">New custom field</option>{coreFields.map(core => <option key={core.id} value={core.id}>{core.label}</option>)}</select></label></div>)}<button type="button" className="filter-button" disabled={!selected.length} onClick={addSuggestions}>Add selected fields to draft</button></fieldset>}
+      </details>
+    </div>}
+    {step === 1 && <div className="shop-step">
+      <div className="form-grid"><label>Item name<input maxLength={40} value={draft.itemLabel} onChange={event => change({ ...draft, mode: 'custom', itemLabel: event.target.value })} /></label><label>Catalogue name<input maxLength={40} value={draft.inventoryLabel} onChange={event => change({ ...draft, mode: 'custom', inventoryLabel: event.target.value })} /></label><label>Usual unit<input maxLength={30} value={draft.unit} onChange={event => change({ ...draft, mode: 'custom', unit: event.target.value })} /></label><label>Suggested categories<textarea rows={4} value={draft.categories.join('\n')} onChange={event => change({ ...draft, mode: 'custom', categories: event.target.value.split('\n') })} /></label></div>
+      <h3>Your form fields</h3><p>Open a field to edit it. Required stock and sales fields stay available. Removing an optional field hides it without deleting saved values.</p>
+      {draft.fields.filter(field => field.visible).map(field => <details key={field.id} className="shop-field"><summary>{field.label || 'Untitled field'} {field.locked ? '(stock and sales)' : field.required ? '(required)' : ''}</summary><div className="form-grid">
+        <label>Label<input value={field.label} maxLength={80} onChange={event => updateField(field.id, { label: event.target.value })} /></label><label>Placeholder<input value={field.placeholder} maxLength={120} onChange={event => updateField(field.id, { placeholder: event.target.value })} /></label>
+        <label>Input type<select disabled={!field.id.startsWith('custom_')} value={field.type} onChange={event => updateField(field.id, { type: event.target.value as ShopField['type'] })}><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="select">Dropdown</option></select></label>
+        <label className="shop-check"><input type="checkbox" disabled={field.locked} checked={field.required} onChange={event => updateField(field.id, { required: event.target.checked })} />Required</label>
+        {field.type === 'select' && <label>Dropdown choices (one per line)<textarea rows={4} value={field.options.join('\n')} onChange={event => updateField(field.id, { options: event.target.value.split('\n') })} /></label>}
+      </div><div className="report-actions"><button type="button" className="filter-button" disabled={draft.fields[0].id === field.id} onClick={() => move(field.id, -1)}>Move up</button><button type="button" className="filter-button" disabled={draft.fields.at(-1)?.id === field.id} onClick={() => move(field.id, 1)}>Move down</button>{!field.locked && <button type="button" className="filter-button" onClick={() => updateField(field.id, { visible: false })}>Remove field</button>}</div></details>)}
+      <button type="button" className="filter-button" disabled={draft.fields.length >= 49} onClick={() => change({ ...draft, mode: 'custom', fields: [...draft.fields, { id: `custom_${crypto.randomUUID().replaceAll('-', '_')}`, label: 'New field', placeholder: '', type: 'text', required: false, visible: true, locked: false, options: [] }] })}>Add input</button>
+      {draft.fields.some(field => !field.visible) && <details><summary>Removed fields</summary>{draft.fields.filter(field => !field.visible).map(field => <p key={field.id}>{field.label} <button type="button" className="filter-button" onClick={() => updateField(field.id, { visible: true })}>Restore {field.label}</button></p>)}</details>}
+    </div>}
+    {step === 2 && <div className="shop-step"><h3>Preview: {draft.inventoryLabel}</h3><p>This is the form your team will use. Preview entries are not saved.</p><fieldset className="shop-preview" aria-label="Product form preview"><ShopProductFields key={JSON.stringify(draft)} profile={draft} /></fieldset><BlankProductForm businessName={businessName} businessMode={draft.industry} currency={currency} shopProfile={draft} />
+      <p>Print customized form follows this layout for manual entry. Print blank product form keeps the standard F01-F10 layout for automatic completed-form reading. Stock and checkout calculations keep their existing rules.</p>
+      <AsyncForm onSubmit={async () => { const next = validateShopProfile({ ...draft, categories: draft.categories.map(item => item.trim()).filter(Boolean), fields: draft.fields.map(field => ({ ...field, options: field.options.map(item => item.trim()).filter(Boolean) })) }); await save(next); setDirty(false); setMessage('Shop setup saved on this device. Use Sync now to share it with your other devices.') }}><SubmitButton className="primary-button">Save shop setup</SubmitButton></AsyncForm>
+    </div>}
+    <div className="shop-steps">{step > 0 && <button type="button" className="filter-button" onClick={() => go(step - 1)}>Back</button>}{step < 2 && <button type="button" className="primary-button" onClick={() => go(step + 1)}>Continue</button>}</div>
+    {problem && <p role="alert">{problem}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted">Unsaved draft - complete the preview step to apply it.</p>}
+  </section>
+}

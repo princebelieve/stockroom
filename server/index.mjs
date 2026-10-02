@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { updateShopProfile, updateProductCustomValues } from './db.mjs'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
@@ -16,7 +17,7 @@ const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascr
 const generatedDeviceId = () => `desktop-${randomUUID()}`
 const requestBranch = (request) => {
   const requested = String(request.headers['x-stockroom-branch'] || 'main').slice(0, 80)
-  const user = savedSessionUser(request)
+  const user = sessionUser(request)
   const allowed = listBranches().filter(branch => branch.isActive && (user?.role === 'owner' || !branch.assignedUserIds?.length || branch.assignedUserIds.includes(user?.id)))
   return allowed.find(branch => branch.id === requested)?.id || allowed[0]?.id || 'main'
 }
@@ -476,6 +477,14 @@ const server = createServer(async (request, response) => {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, { products: await listProducts(requestBranch(request)) })
   }
+  if (request.method === 'PUT' && request.url === '/api/settings/shop-profile') {
+    const user = sessionUser(request)
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner can customize the shop.' })
+    return readJson(request, response, async input => {
+      try { return sendJson(response, 200, await updateShopProfile(input)) }
+      catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
   if (request.method === 'GET' && request.url === '/api/products/export') {
     if (savedSessionUser(String(request.headers['x-local-session'] || ''))?.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
     try {
@@ -514,6 +523,11 @@ const server = createServer(async (request, response) => {
     })
   }
 
+  const fieldsMatch = request.url?.match(/^\/api\/products\/([^/]+)\/custom-values$/)
+  if (request.method === 'PUT' && fieldsMatch) return readJson(request, response, async input => {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return sendJson(response, 200, await updateProductCustomValues(fieldsMatch[1], input.customValues, requestBranch(request)))
+  })
   const stockMatch = request.url?.match(/^\/api\/products\/([^/]+)\/stock$/)
   if (request.method === 'POST' && stockMatch) {
     return readJson(request, response, async (input) => {
@@ -557,7 +571,7 @@ function readJson(request, response, callback) {
 
 function validateProduct(input) {
   const product = {
-    name: String(input.name || '').trim(), sku: String(input.sku || '').trim() || `${String(input.name || '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(),
+    customValues: input.customValues, name: String(input.name || '').trim(), sku: String(input.sku || '').trim() || `${String(input.name || '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(),
     stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(),
   }
   if (!product.name || !product.sku || !product.category || !product.unit || [product.stock, product.reorder, product.price, product.cost].some((value) => !Number.isFinite(value) || value < 0)) throw new Error('Product fields are invalid.')

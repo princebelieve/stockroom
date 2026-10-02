@@ -1,4 +1,4 @@
-export type ProductDraft = { name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number }
+export type ProductDraft = { customValues?: Record<string, string>; name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number }
 
 export function validGtin(value: string) {
   if (!/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(value)) return false

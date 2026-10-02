@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { isNewerMutableOperation, mutableEntities } from '../cloud/conflict-policy.mjs'
+import { normalizeShopProfile } from '../server/shop-profile.mjs'
 
 const tempDirectories = []
 const processes = []
@@ -203,6 +204,9 @@ test('restart preserves installed business data, modeling an application upgrade
   const ownerEmail = `owner-restart-${Date.now()}@test.local`
   const token = await createOwner(first.baseUrl, ownerEmail)
   const item = await product(first.baseUrl, token, 7)
+  const setup = await json(`${first.baseUrl}/api/settings/shop-profile`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ mode: 'suggested', industry: 'printing' }) })
+  assert.equal(setup.response.status, 200)
+  assert.equal(setup.body.unit, 'copy')
   const running = processes.at(-1); await stop(running)
   const secondPort = ++port
   const restarted = spawn(globalThis.process.execPath, ['server/index.mjs'], { cwd: globalThis.process.cwd(), env: { ...globalThis.process.env, PORT: String(secondPort), CUSTOMER_DISPLAY_PORT: String(secondPort + 100), STOCKROOM_DATA_DIR: first.dataDirectory }, stdio: 'ignore' })
@@ -212,8 +216,58 @@ test('restart preserves installed business data, modeling an application upgrade
   const login = await json(`${baseUrl}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: ownerEmail, password: 'long-test-password' }) })
   const products = await json(`${baseUrl}/api/products`, { headers: { Authorization: `Bearer ${login.body.token}` } })
   assert.equal(products.body.products.find((value) => value.id === item.id).stock, 7)
+  assert.equal(products.body.products.find((value) => value.id === item.id).unit, 'piece')
+  assert.equal((await json(`${baseUrl}/api/settings`)).body.shopProfile.industry, 'printing')
 })
 
+test('shop setup validates input, requires owner access, and queues business-wide settings', async () => {
+  const { baseUrl, dataDirectory } = await startBusiness()
+  const token = await createOwner(baseUrl)
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const profile = { mode: 'custom', industry: 'printing', itemLabel: 'Printed item', inventoryLabel: 'Print catalogue', unit: 'sheet', categories: ['Cards', 'Flyers'] }
+  assert.equal((await json(`${baseUrl}/api/settings/shop-profile`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile) })).response.status, 403)
+  assert.equal((await json(`${baseUrl}/api/settings/shop-profile`, { method: 'PUT', headers, body: JSON.stringify({ ...profile, unit: '' }) })).response.status, 400)
+  assert.equal((await json(`${baseUrl}/api/settings/shop-profile`, { method: 'PUT', headers, body: JSON.stringify(profile) })).response.status, 200)
+  const settings = (await json(`${baseUrl}/api/settings`)).body
+  assert.equal(settings.shopProfile.unit, 'sheet')
+  const { shopProfile, ...oldClientSettings } = settings
+  assert.equal((await json(`${baseUrl}/api/settings`, { method: 'PUT', headers, body: JSON.stringify(oldClientSettings) })).response.status, 200)
+  assert.equal((await json(`${baseUrl}/api/settings`)).body.shopProfile.itemLabel, 'Printed item')
+  const db = new DatabaseSync(join(dataDirectory, 'stockroom.sqlite'))
+  try {
+    const snapshots = db.prepare("SELECT payload FROM sync_outbox WHERE entity_type = 'settings'").all().map(row => JSON.parse(row.payload))
+    assert.ok(snapshots.some(snapshot => snapshot.shopProfile?.unit === 'sheet'))
+  } finally { db.close() }
+})
+
+
+test('custom product values validate, persist, synchronize and survive field removal', async () => {
+  const { baseUrl, dataDirectory } = await startBusiness()
+  const token = await createOwner(baseUrl)
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const request = (path, value, method = 'PUT') => json(`${baseUrl}${path}`, { method, headers, body: JSON.stringify(value) })
+  const profile = normalizeShopProfile({ mode: 'suggested', industry: 'printing' })
+  const field = profile.fields.find(field => field.id === 'custom_printing_finish')
+  Object.assign(field, { type: 'select', options: ['Gloss', 'Matte'], required: true })
+  assert.equal((await request('/api/settings/shop-profile', profile)).response.status, 200)
+  const input = { name: 'Flyer', sku: 'FLYER', category: 'Print', unit: 'copy', stock: 8, reorder: 0, cost: 2, price: 5 }
+  assert.equal((await request('/api/products', input, 'POST')).response.status, 400)
+  const created = await request('/api/products', { ...input, customValues: { [field.id]: 'Gloss' } }, 'POST')
+  assert.equal(created.response.status, 201)
+  const id = created.body.id
+  let rows = (await json(`${baseUrl}/api/products`, { headers })).body.products
+  assert.equal(JSON.parse(rows.find(row => row.id === id).customValues)[field.id], 'Gloss')
+  assert.equal((await request(`/api/products/${id}/custom-values`, { customValues: { [field.id]: 'Bad' } })).response.status, 400)
+  assert.equal((await request(`/api/products/${id}/custom-values`, { customValues: { [field.id]: 'Matte' } })).response.status, 200)
+  field.visible = false
+  assert.equal((await request('/api/settings/shop-profile', profile)).response.status, 200)
+  assert.equal((await request(`/api/products/${id}/custom-values`, { customValues: {} })).response.status, 200)
+  rows = (await json(`${baseUrl}/api/products`, { headers })).body.products
+  assert.equal(JSON.parse(rows.find(row => row.id === id).customValues)[field.id], 'Matte')
+  assert.equal(rows.find(row => row.id === id).stock, 8)
+  const db = new DatabaseSync(join(dataDirectory, 'stockroom.sqlite'))
+  try { const snapshots = db.prepare("SELECT payload FROM sync_outbox WHERE entity_type = 'product'").all().map(row => JSON.parse(row.payload)); assert.ok(snapshots.some(row => (typeof row.customValues === 'string' ? JSON.parse(row.customValues) : row.customValues)?.[field.id] === 'Matte')) } finally { db.close() }
+})
 
 test('desktop subscription bridge uses enrolled cloud and preserves cloud authentication failures', async () => {
   const cloud = createServer((request, response) => {

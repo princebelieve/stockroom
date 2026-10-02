@@ -1,3 +1,5 @@
+import type { ShopProfile } from '../server/shop-profile.mjs'
+import { CustomFieldEditor, customFieldProblem } from './ShopProductFields'
 import { useEffect, useRef, useState } from 'react'
 import { cloudRequest } from './lib/cloudRequest'
 import { readLocalProductForm } from './lib/localProductForm'
@@ -25,12 +27,13 @@ export async function prepareFormPhoto(file: File) {
   } finally { bitmap.close() }
 }
 
-export function HandwrittenProductForm({ apiUrl, token, onToken, products, create }: { apiUrl: string; token: string; onToken: (token: string, refresh: string) => void; products: Product[]; create: (draft: ProductDraft) => Promise<void> }) {
+export function HandwrittenProductForm({ shopProfile, apiUrl, token, onToken, products, create }: { shopProfile?: ShopProfile; apiUrl: string; token: string; onToken: (token: string, refresh: string) => void; products: Product[]; create: (draft: ProductDraft) => Promise<void> }) {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState('')
   const [result, setResult] = useState<Reading | null>(null)
   const [draft, setDraft] = useState<ProductDraft>({ name: '' })
   const [reviewed, setReviewed] = useState(false)
+  const [onlineReadingAvailable, setOnlineReadingAvailable] = useState(false)
   const [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState(false)
@@ -39,7 +42,13 @@ export function HandwrittenProductForm({ apiUrl, token, onToken, products, creat
   const controller = useRef<AbortController | null>(null)
   useEffect(() => { if (!file) { setPreview(''); return }; const url = URL.createObjectURL(file); setPreview(url); return () => URL.revokeObjectURL(url) }, [file])
   useEffect(() => () => controller.current?.abort(), [])
-  const validation = draftProblem(draft, products.flatMap(product => [product.barcode || '', product.sku]), [])
+  useEffect(() => {
+    const abort = new AbortController()
+    setOnlineReadingAvailable(false); setConsent(false)
+    if (apiUrl && token) void cloudRequest(apiUrl, '/v1/product-forms/status', { signal: abort.signal }, onToken, token).then(status => { if (!abort.signal.aborted) setOnlineReadingAvailable(status.configured === true) }).catch(() => {})
+    return () => abort.abort()
+  }, [apiUrl, token, file])
+  const validation = customFieldProblem(draft.customValues, shopProfile) || draftProblem(draft, products.flatMap(product => [product.barcode || '', product.sku]), [])
     || (!draft.unit?.trim() ? 'Enter the unit used on this form.' : '')
     || (draft.sku?.trim() && products.some(product => product.sku === draft.sku?.trim()) ? 'This SKU already exists. Check inventory before saving.' : '')
   async function run(action: () => Promise<void>) {
@@ -56,16 +65,16 @@ export function HandwrittenProductForm({ apiUrl, token, onToken, products, creat
     try {
       let data: Reading
       if (local) {
-        setMessage('Reading on this device. No photo is being uploaded...')
-        data = await readLocalProductForm(file, controller.current.signal, progress => setMessage(`On-device reading: ${progress}`))
+        setMessage('Reading your form...')
+        data = await readLocalProductForm(file, controller.current.signal, () => setMessage('Reading your form...'))
       } else {
         const status = await cloudRequest(apiUrl, '/v1/product-forms/status', { signal: controller.current.signal }, onToken, token)
-        if (!status.configured) throw new Error('Google reading is not configured.')
-        setMessage('Reading with Google. This may take up to a minute...')
+        if (!status.configured) throw new Error('Online reading is unavailable.')
+        setMessage('Reading your form online...')
         const image = await prepareFormPhoto(file)
         data = await cloudRequest(apiUrl, '/v1/product-forms/read', { method: 'POST', signal: controller.current.signal, body: JSON.stringify({ image }) }, onToken, token) as Reading
       }
-      if (!data.fields || fields.some(field => !data.fields[field])) throw new Error('The handwriting service returned an incomplete result. Try again.')
+      if (!data.fields || fields.some(field => !data.fields[field])) throw new Error('Some details could not be read. Try a clearer photo.')
       const next: ProductDraft = { ...draft }
       for (const field of fields) {
         const value = data.fields[field].value
@@ -73,29 +82,28 @@ export function HandwrittenProductForm({ apiUrl, token, onToken, products, creat
       }
       setDraft(next); setResult(data); setMessage('Suggestions filled empty fields; your existing entries were kept. Compare every value with the photo before saving.')
     } catch (error) {
-      setMessage(`${controller.current?.signal.aborted ? 'Automatic reading stopped.' : error instanceof Error ? error.message : 'Automatic reading is unavailable.'} ${local ? 'Enter any unread details beside the photo.' : 'Try Autofill on this device, or enter the details beside the photo.'} You can save without Google recognition. Your entries have been kept.`)
+      setMessage(controller.current?.signal.aborted ? 'Reading stopped. Your entries are safe; you can complete the form yourself.' : 'Could not read this photo. Try a clearer photo or fill in the missing details. Your entries are safe.')
     } finally { clearTimeout(timer); setReading(false) }
   }
-  return <section className="panel full-panel">
-    <h2>Upload completed product form</h2>
+  return <details className="panel full-panel product-intake">
+    <summary>Upload completed product form</summary>
     <p><strong>For best results, write clearly in BLOCK / CAPITAL LETTERS, one answer per box.</strong> Always check the details before saving.</p>
-    <p>Photograph one handwritten form with all four corners and markers F01–F10 visible. Use the latest blank form, keep the page upright, and write beneath each heading.</p>
+    <p>Use the standard blank form for autofill. Photograph the whole page, including the numbered boxes.</p>
     <fieldset disabled={busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
       <label>Completed paper form photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => {
         const selected = event.target.files?.[0]; event.target.value = ''
         if (!selected) return
         if (!['image/jpeg', 'image/png', 'image/webp'].includes(selected.type) || selected.size > 15 * 1024 * 1024) { setMessage('Choose a JPG, PNG or WebP photo smaller than 15 MB.'); return }
-        setFile(selected); setResult(emptyReading()); setDraft({ name: '' }); setReviewed(false); setConsent(false); setMessage('Enter the details beside your photo, or optionally try automatic reading. No recognition service is needed to save.')
+        setFile(selected); setResult(emptyReading()); setDraft({ name: '' }); setReviewed(false); setConsent(false); setMessage('Photo ready. Choose Autofill on this device, or enter the details below.')
       }} /></label>
-      <p>Autofill on this device uses the bundled English text reader: no Google account, API key or recognition-service bill, and no photo upload. It works best with printed text; handwriting, even block capitals, may need correction. Offline reading needs the app's reader files available on this device. You can always enter the details yourself.</p>
+
       <button type="button" className="primary-button" disabled={!file} onClick={() => void run(() => read(true))}>Autofill on this device</button>
-      <p>Google recognition is optional and needs internet and an available service. Only if you choose it is the photo sent through Stockroom to Google. JPG, PNG or WebP, up to 15 MB; PDF forms need a photo or screenshot.</p>
-      <label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />Send this photo to Google Cloud Vision to read the handwriting.</label>
-      <button type="button" className="filter-button" disabled={!file || !consent} onClick={() => void run(() => read())}>Read completed form</button>
+      {onlineReadingAvailable && <details><summary>Try online handwriting reading</summary><p>With your permission, this photo will be sent to Google to read the handwriting.</p><label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />Send this photo to Google for handwriting reading.</label><button type="button" className="filter-button" disabled={!file || !consent} onClick={() => void run(() => read())}>Read completed form</button></details>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
         {preview && <a href={preview} target="_blank" rel="noreferrer" style={{ flex: '1 1 260px' }}><img src={preview} alt="Uploaded handwritten product form for comparison" style={{ width: '100%', maxWidth: 480, height: 'auto' }} /><span>Open photo full size</span></a>}
         {result && <div style={{ flex: '1 1 280px' }}><div className="form-grid">{fields.map((field, index) => <label key={field}>{labels[field]}<input aria-label={`Form ${labels[field]}`} type={index >= 5 ? 'number' : 'text'} min={index >= 5 ? 0 : undefined} step={index >= 5 ? 'any' : undefined} value={draft[field] ?? ''} onChange={event => { const value = event.target.value; setDraft(current => ({ ...current, [field]: index >= 5 ? value === '' ? undefined : Number(value) : value })); setReviewed(false) }} /><small>{result.fields[field].state === 'suggested' ? 'Suggested — verify against photo' : result.fields[field].state === 'uncertain' ? 'Uncertain — please enter this answer' : 'No answer read — complete if needed'}</small></label>)}</div>
-          <p>Blank SKU is generated automatically. Blank cost and reorder point save as 0. Enter selling price and stock explicitly, including 0 where appropriate.</p>
+          {shopProfile && <CustomFieldEditor profile={shopProfile} values={draft.customValues} labelPrefix="Form " onChange={customValues => { setDraft(current => ({ ...current, customValues })); setReviewed(false) }} />}
+          <p>Complete the missing details, including your selling price and current stock. Blank cost and reorder point save as 0.</p>
           {validation && <p role="status">{validation}</p>}
           <label><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} />I checked every field against the handwritten form.</label>
           <button type="button" className="primary-button" disabled={!reviewed || Boolean(validation)} onClick={() => void run(async () => {
@@ -109,5 +117,5 @@ export function HandwrittenProductForm({ apiUrl, token, onToken, products, creat
     </fieldset>
     {reading && <button type="button" className="filter-button" onClick={() => controller.current?.abort()}>Stop reading and enter manually</button>}
     {message && <p role="status">{message}</p>}
-  </section>
+  </details>
 }

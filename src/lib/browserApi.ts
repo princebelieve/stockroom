@@ -1,3 +1,5 @@
+import { readCustomValues, validateCustomValues, validateCoreRequirements } from '../../server/shop-fields.mjs'
+import { normalizeShopProfile, validateShopProfile } from '../../server/shop-profile.mjs'
 import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
 import { normalizeCashSale } from '../../server/cash.mjs'
 import { loadSubscriptionAccess } from '../../server/subscription-client.mjs'
@@ -104,6 +106,7 @@ async function applyOperation(operation: Operation) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sku=excluded.sku, barcode=excluded.barcode, category=excluded.category, reorder_point=excluded.reorder_point, price=excluded.price, cost_price=excluded.cost_price, unit=excluded.unit, updated_at=excluded.updated_at`,
     [payload.id, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, Number(payload.cost) || 0, payload.unit, payload.updated || operation.createdAt])
     await db.run("INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES ('main', ?, ?, ?, ?)", [payload.id, Number(payload.stock) || 0, Number(payload.reorder) || 0, payload.updated || operation.createdAt])
+    if (payload.customValues != null) await db.run('UPDATE products SET custom_values = ? WHERE id = ?', [JSON.stringify(readCustomValues(payload.customValues)), payload.id])
   } else if (operation.entityType === 'stock' && operation.action === 'adjust') {
     if (!(await db.query('SELECT id FROM products WHERE id = ?', [payload.productId])).values?.length) throw new Error('A stock change references a missing product. Refresh again after the product is synchronized.')
     const branchId = String(payload.branchId || 'main')
@@ -149,6 +152,7 @@ async function applyOperation(operation: Operation) {
   } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
     if (payload.paymentPolicy !== undefined) await db.run('UPDATE app_settings SET payment_policy = ? WHERE id = 1', [JSON.stringify(paymentPolicy(payload.paymentPolicy))])
     await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [payload.appName || 'My Business', payload.currency || 'USD', payload.posProvider || '', payload.posTerminalId || '', payload.posConnection || 'manual', payload.logoData || '', payload.updatedAt || operation.createdAt])
+    if (payload.shopProfile != null) await db.run('UPDATE app_settings SET shop_profile = ? WHERE id = 1', [JSON.stringify(normalizeShopProfile(payload.shopProfile))])
   }
   await db.run('INSERT INTO sync_inbox (operation_id, received_at) VALUES (?, ?)', [operation.operationId, now()])
 }
@@ -228,13 +232,13 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
 
 async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) {
   const db = await openMobileDatabase()
-  const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
+  const current = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, shop_profile AS shopProfile, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
   // Startup is always local-first. A valid local settings row, including the
   // initial default values, must never make reopening the PWA wait for cloud.
   if (current?.appName && current?.currency) return current
   if (config) {
     await pullLatest(config)
-    const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
+    const synced = (await db.query('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, shop_profile AS shopProfile, updated_at AS updatedAt FROM app_settings WHERE id = 1')).values?.[0]
     if (synced?.appName && synced?.currency && !(synced.appName === 'My Business' && synced.currency === 'USD')) return synced
     // A repaired/cleared local database can retain a sync cursor but lose the
     // old settings operation. Recover the latest business settings directly.
@@ -243,6 +247,7 @@ async function hydrateBusinessSettings(config?: MobileSyncConfiguration | null) 
     if (response.ok && remote.settings?.appName && remote.settings?.currency) {
       const settings = remote.settings
       await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, payment_policy, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, payment_policy=excluded.payment_policy, updated_at=excluded.updated_at', [settings.appName, settings.currency, settings.posProvider || '', settings.posTerminalId || '', settings.posConnection || 'manual', settings.logoData || '', JSON.stringify(paymentPolicy(settings.paymentPolicy)), settings.updatedAt || now()])
+      if (settings.shopProfile != null) await db.run('UPDATE app_settings SET shop_profile = ? WHERE id = 1', [JSON.stringify(normalizeShopProfile(settings.shopProfile))])
       return { ...settings, paymentPolicy: JSON.stringify(paymentPolicy(settings.paymentPolicy)) }
     }
     if (synced?.appName && synced?.currency) return synced
@@ -449,7 +454,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     await setSetting('lastSyncError', status.lastError)
     return json(status)
   }
-  if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? ORDER BY p.updated_at DESC', [branchId])).values || [] })
+  if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? ORDER BY p.updated_at DESC', [branchId])).values || [] })
   if (path === '/api/products/export' && method === 'GET') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
     try {
@@ -457,20 +462,39 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
       const status = await response.json() as { feeAmount?: number; paid?: boolean; closed?: boolean }
       if (!response.ok || status.closed || (Number(status.feeAmount) > 0 && !status.paid)) return error('Complete the one-time product export payment before downloading.', 402)
     } catch { return error('Could not verify product export eligibility with Stockroom cloud.', 503) }
-    const rows = (await db.query('SELECT p.name, p.sku, p.barcode, p.category, p.cost_price AS cost, p.price, p.unit, b.name AS branch, COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder FROM products p CROSS JOIN branches b LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=b.id ORDER BY p.name,b.is_default DESC,b.name')).values || []
+    const rows = (await db.query('SELECT p.name, p.sku, p.barcode, p.category, p.cost_price AS cost, p.price, p.unit, p.custom_values AS customValues, b.name AS branch, COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder FROM products p CROSS JOIN branches b LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=b.id ORDER BY p.name,b.is_default DESC,b.name')).values || []
     const cell = (value: unknown) => `"${String(value ?? '').replace(/^[=+@-]/, "'$&").replace(/"/g, '""')}"`
-    const csv = [['Product','SKU','Barcode','Category','Cost price','Selling price','Unit','Branch','Stock','Reorder point'], ...rows.map(row => [row.name,row.sku,row.barcode,row.category,row.cost,row.price,row.unit,row.branch,row.stock,row.reorder])].map(row => row.map(cell).join(',')).join('\r\n')
+    const profile = normalizeShopProfile((await hydrateBusinessSettings()).shopProfile)
+    const customIds = [...new Set(rows.flatMap(row => Object.keys(readCustomValues(row.customValues))))]
+    const csv = [['Product','SKU','Barcode','Category','Cost price','Selling price','Unit','Branch','Stock','Reorder point', ...customIds.map(id => `${profile.fields.find(field => field.id === id)?.label || id} [${id}]`)], ...rows.map(row => [row.name,row.sku,row.barcode,row.category,row.cost,row.price,row.unit,row.branch,row.stock,row.reorder, ...customIds.map(id => readCustomValues(row.customValues)[id] || '')])].map(row => row.map(cell).join(',')).join('\r\n')
     return new Response(csv, { headers: { 'Content-Type': 'text/csv;charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-products.csv"' } })
   }
   if (path === '/api/products' && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
     const input = await body(init); const name = String(input.name || '').trim(); const product = { id: id(), name, sku: String(input.sku || '').trim() || `${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(), stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(), updated: now() }
     if (!product.name || !product.sku || !product.category || !product.unit || [product.stock, product.reorder, product.price, product.cost].some((value) => !Number.isFinite(value) || value < 0)) return error('Product fields are invalid.')
+    let customValues: Record<string, string>
+    try { const profile = normalizeShopProfile((await hydrateBusinessSettings()).shopProfile); validateCoreRequirements(product, profile); customValues = validateCustomValues(input.customValues, profile) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid custom fields.') }
+    Object.assign(product, { customValues })
     await db.run('INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)', [product.id, product.name, product.sku, product.barcode, product.category, product.reorder, product.price, product.cost, product.unit, product.updated])
+    await db.run('UPDATE products SET custom_values = ? WHERE id = ?', [JSON.stringify(customValues), product.id])
     await db.run('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, ?, ?)', [branchId, product.id, product.stock, product.reorder, product.updated])
     await queue('product', product.id, 'upsert', { ...product, stock: 0 })
     if (product.stock) await queue('stock', product.id, 'adjust', { productId: product.id, branchId, amount: product.stock, reason: 'initial-stock', updatedAt: product.updated })
     return json(product, 201)
+  }
+  const fieldsMatch = path.match(/^\/api\/products\/([^/]+)\/custom-values$/)
+  if (fieldsMatch && method === 'PUT') {
+    if (!canOperate(user)) return error('Operational access is required.', 403)
+    const current = (await db.query('SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock,0) AS stock, p.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=? WHERE p.id=?', [branchId, fieldsMatch[1]])).values?.[0]
+    if (!current) return error('Product not found.', 404)
+    let customValues: Record<string, string>
+    try { customValues = { ...readCustomValues(current.customValues), ...validateCustomValues((await body(init)).customValues, normalizeShopProfile((await hydrateBusinessSettings()).shopProfile)) } } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid custom fields.') }
+    const updated = now()
+    await db.run('UPDATE products SET custom_values = ?, updated_at = ? WHERE id = ?', [JSON.stringify(customValues), updated, fieldsMatch[1]])
+    const saved = { ...current, customValues, updated }
+    await queue('product', String(current.id), 'upsert', { ...saved, stock: 0 })
+    return json(saved)
   }
   const stock = path.match(/^\/api\/products\/([^/]+)\/stock$/)
   if (stock && method === 'POST') {
@@ -478,7 +502,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const input = await body(init); const amount = Number(input.amount); if (!Number.isInteger(amount) || amount === 0) return error('Stock amount must be a non-zero integer.')
     const product = (await db.query('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?', [stock[1], branchId])).values?.[0]; if (!product || Number(product.stock) + amount < 0) return error('Stock cannot be negative.')
     const updated = now(); await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [amount, updated, stock[1], branchId]); await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [id(), stock[1], amount, 'manual-adjustment', updated, branchId]); await queue('stock', stock[1], 'adjust', { productId: stock[1], branchId, amount, beforeStock: Number(product.stock), reason: 'manual-adjustment', updatedAt: updated })
-    return json((await db.query('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [stock[1], branchId])).values?.[0])
+    return json((await db.query('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [stock[1], branchId])).values?.[0])
   }
   if (path === '/api/sales' && method === 'POST') {
     const subscription = await subscriptionStatus()
@@ -599,11 +623,21 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (user.role !== 'owner') return error('Only the owner can reset staff passwords.', 403)
     try { const input = await body(init); const result = await cloudRequest(`/v1/staff/${encodeURIComponent(staffPassword[1])}/password`, { method: 'PUT', body: JSON.stringify({ password: input.password }) }); return json(result.account) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not reset staff password.', 400) }
   }
+  if (path === '/api/settings/shop-profile' && method === 'PUT') {
+    if (user.role !== 'owner') return error('Only the owner can customize the shop.', 403)
+    let profile
+    try { profile = validateShopProfile(await body(init)) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid shop setup.') }
+    await db.run('INSERT OR IGNORE INTO app_settings (id, updated_at) VALUES (1, ?)', [now()])
+    await db.run('UPDATE app_settings SET shop_profile = ?, updated_at = ? WHERE id = 1', [JSON.stringify(profile), now()])
+    const snapshot = await hydrateBusinessSettings()
+    await queue('settings', 'business', 'upsert', { ...snapshot, shopProfile: profile, paymentPolicy: paymentPolicy(snapshot.paymentPolicy) })
+    return json(profile)
+  }
   if (path === '/api/settings' && method === 'PUT') {
     if (user.role !== 'owner') return error('Only the owner can change business settings.', 403)
     const input = await body(init); const appName = String(input.appName || '').trim(); const currency = String(input.currency || '').toUpperCase(); const posConnection = String(input.posConnection || 'manual'); const logoData = String(input.logoData || '')
     if (!appName || appName.length > 60 || !/^[A-Z]{3}$/.test(currency) || !['manual', 'usb', 'bluetooth', 'network', 'sdk'].includes(posConnection) || (logoData && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(logoData) || logoData.length > 1_400_000))) return error('Business settings are invalid.')
-    const updatedAt = now(); const settings = { appName, currency, posProvider: String(input.posProvider || ''), posTerminalId: String(input.posTerminalId || ''), posConnection, logoData, updatedAt }; await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [appName, currency, settings.posProvider, settings.posTerminalId, posConnection, logoData, updatedAt]); const policy = paymentPolicy(input.paymentPolicy ?? (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy); await db.run('UPDATE app_settings SET payment_policy = ? WHERE id = 1', [JSON.stringify(policy)]); await queue('settings', 'business', 'upsert', { ...settings, paymentPolicy: policy }); return json({ ...settings, paymentPolicy: policy })
+    const updatedAt = now(); const settings = { appName, currency, posProvider: String(input.posProvider || ''), posTerminalId: String(input.posTerminalId || ''), posConnection, logoData, updatedAt }; await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [appName, currency, settings.posProvider, settings.posTerminalId, posConnection, logoData, updatedAt]); const policy = paymentPolicy(input.paymentPolicy ?? (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy); await db.run('UPDATE app_settings SET payment_policy = ? WHERE id = 1', [JSON.stringify(policy)]); const rawProfile = (await db.query('SELECT shop_profile FROM app_settings WHERE id = 1')).values?.[0]?.shop_profile; const shopProfile = rawProfile && rawProfile !== 'null' ? normalizeShopProfile(rawProfile) : null; await queue('settings', 'business', 'upsert', { ...settings, paymentPolicy: policy, shopProfile }); return json({ ...settings, paymentPolicy: policy, shopProfile })
   }
   return error('This action is available in the installed desktop app.', 501)
 }

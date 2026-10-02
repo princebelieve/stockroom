@@ -19,8 +19,7 @@ try {
   await page.route(`${base}/v1/product-forms/read`, route => { requests++; assert.match(route.request().postDataJSON().image, /^data:image\/jpeg;base64,/); return route.fulfill({ json: { fields } }) })
   await page.goto(`${base}/form-test`)
   const image = await page.evaluate(async () => {
-    const React = (await import('/node_modules/.vite/deps/react.js')).default
-    const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
+    const { React, createRoot } = await import('/test/shop-setup-harness.ts')
     const { HandwrittenProductForm } = await import('/src/HandwrittenProductForm.tsx')
     const { BlankProductForm } = await import('/src/BlankProductForm.tsx')
     await import('/src/styles.css')
@@ -35,9 +34,9 @@ try {
     for (let i = 0; i < 10; i++) { context.fillText(`F${String(i + 1).padStart(2, '0')}`, 60, 100 + i * 170); if (i < 9) context.fillText(answers[i], 80, 185 + i * 170) }
     return canvas.toDataURL('image/png').split(',')[1]
   })
-  await page.getByRole('heading', { name: 'Upload completed product form' }).waitFor()
+  await page.getByText('Upload completed product form', { exact: true }).click()
   await page.getByLabel('Completed paper form photo').setInputFiles({ name: 'form.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') })
-  assert.equal(await page.getByRole('button', { name: 'Read completed form' }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'Read completed form' }).count(), 0)
   await page.getByLabel('Form Product name', { exact: true }).fill('MANUAL PRODUCT')
   await page.getByLabel('Form Unit', { exact: true }).fill('carton')
   await page.getByLabel('Form Starting stock', { exact: true }).fill('0')
@@ -72,12 +71,14 @@ try {
   // Start a fresh review for the separate Google success/failure checks.
   await page.getByLabel('Completed paper form photo').setInputFiles({ name: 'form.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') })
   await page.getByLabel('Form Product name', { exact: true }).fill('OWNER ENTERED NAME')
-  await page.getByLabel('Send this photo to Google Cloud Vision to read the handwriting.').check()
-  await page.getByRole('button', { name: 'Read completed form' }).click()
-  await page.getByRole('status').filter({ hasText: 'not configured' }).waitFor()
+  assert.equal(await page.getByText('Try online handwriting reading', { exact: true }).count(), 0)
   assert.equal(requests, 0)
-  assert.equal(await page.getByLabel('Form Product name', { exact: true }).inputValue(), 'OWNER ENTERED NAME')
   configured = true
+  await page.getByLabel('Completed paper form photo').setInputFiles({ name: 'form-online.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') })
+  await page.getByText('Try online handwriting reading', { exact: true }).click()
+  await page.getByLabel('Form Product name', { exact: true }).fill('OWNER ENTERED NAME')
+  await page.getByLabel('Form Starting stock', { exact: true }).fill('0')
+  await page.getByLabel('Send this photo to Google for handwriting reading.').check()
   await page.getByRole('button', { name: 'Read completed form' }).click()
   await page.getByRole('status').filter({ hasText: 'Suggestions filled empty fields' }).waitFor()
   assert.equal(await page.getByLabel('Form Product name', { exact: true }).inputValue(), 'OWNER ENTERED NAME')

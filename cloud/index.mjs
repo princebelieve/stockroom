@@ -13,6 +13,8 @@ import { createReferralWallet } from './referral-wallet.mjs'
 import { createGooglePlayBilling } from './google-play-billing.mjs'
 import { createNotifications } from './notifications.mjs'
 import { createProductFormReader } from './product-form.mjs'
+import { normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
+import { readCustomValues } from '../server/shop-fields.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -443,8 +445,21 @@ const server = createServer(async (request, response) => {
           continue
         }
         if (mutableEntities.has(document.entityType)) {
+          if (document.entityType === 'settings') {
+            if (document.payload?.shopProfile != null && document.payload.shopProfile !== 'null') {
+              try { document.payload.shopProfile = validateShopProfile(typeof document.payload.shopProfile === 'string' ? JSON.parse(document.payload.shopProfile) : document.payload.shopProfile) }
+              catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid shop setup. Save a valid setup and sync again.' }); continue }
+            } else {
+              const previous = await businessSettings.findOne({ businessId })
+              if (previous?.settings?.shopProfile) document.payload.shopProfile = normalizeShopProfile(previous.settings.shopProfile)
+            }
+          }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
+          if (document.entityType === 'product') {
+            try { document.payload.customValues = { ...readCustomValues(current?.payload?.customValues), ...readCustomValues(document.payload.customValues) } }
+            catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid custom product details.' }); continue }
+          }
           if (!isNewerMutableOperation(document, current)) {
             conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'A newer version of this record was saved on another device.', localPayload: document.payload, remotePayload: current.payload })
             continue

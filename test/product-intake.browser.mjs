@@ -12,8 +12,7 @@ try {
   await page.route('https://world.openfoodfacts.org/**', route => route.abort())
   await page.goto(`${base}/intake-test`)
   await page.evaluate(async () => {
-    const React = (await import('/node_modules/.vite/deps/react.js')).default
-    const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
+    const { React, createRoot } = await import('/test/shop-setup-harness.ts')
     const { ProductIntake } = await import('/src/ProductIntake.tsx')
     window.saved = []; window.fail = true
     createRoot(document.getElementById('root')).render(React.createElement(ProductIntake, {
@@ -21,7 +20,8 @@ try {
       create: async draft => { if (draft.name === 'Soap' && window.fail) throw new Error('Simulated save failure'); window.saved.push(draft) },
     }))
   })
-  // Real local OCR, then editable package suggestion.
+  await page.getByText('Add products from a photo, barcode or file', { exact: true }).click()
+  // Real local OCR automatically fills review fields after upload.
   const image = await page.evaluate(async () => {
     const canvas = document.createElement('canvas'); canvas.width = 900; canvas.height = 320
     const context = canvas.getContext('2d'); context.fillStyle = 'white'; context.fillRect(0, 0, 900, 320); context.fillStyle = 'black'; context.font = '40px monospace'
@@ -29,8 +29,7 @@ try {
     return canvas.toDataURL('image/png').split(',')[1]
   })
   await page.getByLabel('Photo or screenshot', { exact: true }).setInputFiles({ name: 'package.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') })
-  await page.getByRole('status').filter({ hasText: 'Image text is ready' }).waitFor({ timeout: 90000 })
-  await page.getByRole('button', { name: 'Suggest products from text' }).click()
+  await page.getByRole('status').filter({ hasText: 'Product details filled below' }).waitFor({ timeout: 90000 })
   assert.match(await page.getByLabel('Name row 1', { exact: true }).inputValue(), /Orange Juice/)
   assert.equal(await page.getByLabel('Selling price row 1').inputValue(), '')
   await page.getByLabel('Remove row 1').click()
@@ -52,6 +51,7 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Import 1 reviewed product', exact: true }).isDisabled(), true)
   await page.getByLabel('Remove row 1').click()
   await page.getByLabel('What are you reading?').selectOption('document')
+  await page.getByText('Paste text or correct the photo text', { exact: true }).click()
   await page.getByLabel('Read or pasted text').fill('Description | Quantity | Unit cost\nSoap | 12 | 20\nTotal 240')
   await page.getByRole('button', { name: 'Suggest products from text' }).click()
   assert.equal(await page.getByLabel('Import row 1', { exact: true }).isChecked(), false)

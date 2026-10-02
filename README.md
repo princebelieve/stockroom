@@ -15,13 +15,25 @@ Stockroom Business is an offline-first business operations app for organizations
 
 See [hardware setup](docs/hardware-setup.md), [subscription behavior](docs/subscriptions.md), and [PWA deployment and platform limitations](PWA-DEPLOYMENT.md) for details.
 
+### Easy shop setup
+
+Owners can open **Business settings → Shop setup** for a three-step wizard: choose a business template, customize fields, then preview and save. General purpose, printing, restaurant and other presets supply a starting point. Owners can rename labels, edit placeholders, reorder fields, remove/restore optional fields, and add up to 40 custom text, number, date or dropdown inputs. Custom fields can be required. Item names, catalogue names, usual units and suggested categories remain editable. Name, unit, stock and selling price remain available for stock and sales calculations.
+
+Upload a clear JPG, PNG or WebP screenshot/photo of an old app or printed form to read headings locally using the bundled English OCR engine. Pasted text also works. Review suggested labels and connect them to existing fields or new custom fields before applying them to the draft. This creates a starting form; it does not copy an old app's design, calculations or inventory data. No Google recognition service is required for template reading.
+
+The saved layout drives Add Product. Custom fields are also available during product import and completed-paper-form review. Use **Product details** on an inventory row to edit custom values or view previously saved values from removed fields. Removing a field hides it; it does not erase product values. Settings and custom values save offline and synchronize across updated clients. Industry suggestions use the existing stock and sales rules; they do not add kitchen or print-production workflows.
+
+**Print customized form** prints visible fields in the chosen order for manual entry. **Print blank product form** retains the standard F01–F10 sheet for completed-form autofill. Automatic extraction of answers from arbitrary customized layouts is not included; custom answers can be entered beside the uploaded image. Write in BLOCK / CAPITAL LETTERS for best results.
+
 ### Product autofill and migration
 
 Use **Print blank product form** beside **Add product** on Overview or Inventory to print a reusable, one-product sheet for handwriting and photocopying. It includes the existing Add Product fields, business identity, currency and business-type unit guidance, with product values left blank. It uses the report printer/system print dialog; completed paper forms can be entered through Add product.
 
 Owners can also use **Upload completed product form** to enter details beside a photo and save after review. **Autofill on this device** uses the bundled English OCR reader without Google, an API key or a recognition-service bill. It works best for printed text; handwriting recognition is best-effort and must be checked. Optional Google Cloud Vision recognition is also retained. Both readers fill empty fields without replacing owner entries, and failures never prevent manual completion. Write in BLOCK / CAPITAL LETTERS for best results. Form recognition requires the current marked form (F01–F10). See [handwritten form setup, workflow and validation](docs/handwritten-product-forms.md).
 
-In Inventory, use **Product import and autofill** to load CSV files, scan barcodes, or read package, invoice and product-list screenshots. Image text is read locally with the bundled English OCR engine. You can also paste text. Select the document type, read the image, then choose **Suggest products from text**. Review and edit the resulting rows before importing. PDFs currently require a screenshot of the relevant table.
+In Inventory, open **Add products from a photo, barcode or file** to load CSV files, scan barcodes, or read package, invoice and product-list screenshots. Uploading a package photo reads it locally and opens the actual Add Product form with the detected name and barcode filled in. Add Product also has a photo input that fills empty fields without replacing owner entries. Selling price and stock must be entered explicitly. Invoice and product-list images continue to use a multi-product review table. You can also expand **Paste text or correct the photo text** and request new suggestions from edited text. Review and complete the results before saving. PDFs currently require a screenshot of the relevant table.
+
+Completed-paper-form uploads are in their own expandable section. Online handwriting reading appears only when Stockroom's service reports it is available; it asks for permission before sending a photo to Google. Google configuration and any associated billing are managed by the Stockroom operator, not by shop owners. Local reading and manual entry remain available without it.
 
 Barcode lookup uses Open Food Facts for packaged food when online; it is not a universal product catalogue. Only the barcode is sent, not photos or business records. Suggestions are attributed to [Open Food Facts](https://world.openfoodfacts.org), whose database is licensed under [ODbL](https://opendatacommons.org/licenses/odbl/1-0/). Missing results and network failures leave an editable barcode row. Lookup results are cached for the current session and requests are spaced to respect provider limits.
 

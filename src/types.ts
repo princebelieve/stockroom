@@ -1,4 +1,5 @@
 export type Product = {
+  customValues?: Record<string, string> | string
   id: string
   name: string
   sku: string
