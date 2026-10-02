@@ -247,6 +247,16 @@ function App() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const mobileMenuRef = useRef<HTMLElement>(null)
+  const mobileMenuToggleRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !mobileMenuRef.current?.contains(event.target) && !mobileMenuToggleRef.current?.contains(event.target)) setMobileMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside, true)
+    return () => document.removeEventListener('pointerdown', closeOutside, true)
+  }, [mobileMenuOpen])
   const [deviceSetupKind, setDeviceSetupKind] = useState<DeviceKind | undefined>()
   const [settingsTab, setSettingsTab] = useState<'business' | 'shop'>('business')
   const [detailsProduct, setDetailsProduct] = useState<Product | null>(null)
@@ -1657,9 +1667,9 @@ function App() {
 
   return <div className="app-shell">
     {(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
-    <button className="mobile-nav-toggle" type="button" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}><Menu size={22} /></button>
+    <button ref={mobileMenuToggleRef} className="mobile-nav-toggle" type="button" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}><Menu size={22} /></button>
     {mobileMenuOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />}
-    <aside className={`sidebar${mobileMenuOpen ? ' mobile-menu-open' : ''}`}>
+    <aside ref={mobileMenuRef} className={`sidebar${mobileMenuOpen ? ' mobile-menu-open' : ''}`}>
       <div className="brand"><div className="brand-mark">{logoData ? <img src={logoData} alt="" className="brand-logo" /> : <Boxes size={21} />}</div><div><strong>{appName}</strong><span>Business operations</span></div></div>
       <nav onClick={(event) => { if (!(event.target as HTMLElement).closest('.sidebar-nav-group')) setMobileMenuOpen(false) }}>
         {canManageOperations && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
