@@ -13,7 +13,9 @@ if (menuButton && mainNav) {
   mainNav.querySelectorAll<HTMLDetailsElement>('details').forEach(group => {
     group.addEventListener('toggle', () => { if (group.open) mainNav.querySelectorAll<HTMLDetailsElement>('details').forEach(other => { if (other !== group) other.open = false }) })
   })
-  document.addEventListener('click', event => { if (!(event.target instanceof Node) || !mainNav.contains(event.target)) closeGroups() })
+  document.addEventListener('pointerdown', event => {
+    if (event.target instanceof Node && !mainNav.contains(event.target) && !menuButton.contains(event.target)) closeMenu()
+  }, true)
   mainNav.addEventListener('click', event => { if ((event.target as HTMLElement).closest('a')) closeMenu() })
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu() })
 }

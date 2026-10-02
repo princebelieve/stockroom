@@ -20,6 +20,26 @@ export function NotificationCenter({ apiUrl, token, onToken, allowPush = false, 
   const [deviceAlerts, setDeviceAlerts] = useState(() => localStorage.getItem('stockroom-device-alerts') === 'on')
   const [nativeFcmReady, setNativeFcmReady] = useState(false)
   const [message, setMessage] = useState('')
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        menuRef.current?.querySelector<HTMLButtonElement>('.notification-bell')?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', closeOutside, true)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
 
   const onTokenRef = useRef(onToken)
   onTokenRef.current = onToken
@@ -108,7 +128,7 @@ export function NotificationCenter({ apiUrl, token, onToken, allowPush = false, 
     catch (error) { setMessage(error instanceof Error ? error.message : 'Could not update notifications.') }
   }
 
-  return <div className="notification-center">
+  return <div className="notification-center" ref={menuRef}>
     <button type="button" className="notification-bell" aria-label={`Notifications${data?.unread ? `, ${data.unread} unread` : ''}`} aria-expanded={open} onClick={() => setOpen(value => !value)} title="Notifications">
       {data?.unread ? <BellRing size={19} /> : <Bell size={19} />}{Boolean(data?.unread) && <span className="notification-count">{data!.unread > 99 ? '99+' : data!.unread}</span>}
     </button>
