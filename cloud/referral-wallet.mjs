@@ -39,11 +39,25 @@ export async function createReferralWallet({ database, accounts, verifyToken, no
   }
   const authorizedDeveloper = claims => Boolean(process.env.DEVELOPER_EMAIL && claims?.kind === 'access' && claims.role === 'owner' && String(claims.email || '').toLowerCase() === process.env.DEVELOPER_EMAIL.trim().toLowerCase())
   const paystack = async (path, input) => {
-    if (!process.env.PAYSTACK_SECRET_KEY) throw new Error('Paystack transfers are not configured.')
+    if (!process.env.PAYSTACK_SECRET_KEY) throw new Error('Bank verification and withdrawals are temporarily unavailable. Please contact Stockroom support.')
     const result = await fetch(`https://api.paystack.co${path}`, { method: input ? 'POST' : 'GET', headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' }, ...(input ? { body: JSON.stringify(input) } : {}), signal: AbortSignal.timeout(20_000) })
     const data = await result.json().catch(() => ({}))
-    if (!result.ok || !data.status) throw Object.assign(new Error(data.message || 'Paystack transfer request failed.'), { providerRejected: true })
+    if (!result.ok || !data.status) throw Object.assign(new Error('The bank service could not complete this request. Check your details or try again later.'), { providerRejected: true })
     return data.data
+  }
+  async function resolveAccount(input) {
+    const currency = String(input.currency || '').toUpperCase()
+    const accountNumber = String(input.accountNumber || '').replace(/\s/g, '')
+    const bankCode = String(input.bankCode || '').trim()
+    if (!['NGN', 'GHS'].includes(currency)) throw new Error('Account-name lookup is not available for this currency. Contact Stockroom support for help.')
+    if (!/^\d{6,20}$/.test(accountNumber) || !bankCode || bankCode.length > 30) throw new Error('Select your bank and enter a valid account number.')
+    const banks = await paystack('/bank?currency=' + currency + '&perPage=100')
+    const bank = banks?.find(row => row.code === bankCode && row.active !== false)
+    if (!bank) throw new Error('Select a supported bank for this currency.')
+    const result = await paystack('/bank/resolve?account_number=' + encodeURIComponent(accountNumber) + '&bank_code=' + encodeURIComponent(bankCode))
+    const name = String(result?.account_name || '').trim()
+    if (!name || String(result.account_number) !== accountNumber) throw new Error('We could not confirm this account. Check the bank and account number and try again.')
+    return { currency, accountNumber, bankCode, name, bankName: bank.name }
   }
   async function identity(claims) {
     if (claims?.kind === 'visitor' && claims.visitorId) {
@@ -196,18 +210,20 @@ export async function createReferralWallet({ database, accounts, verifyToken, no
       if (path === '/v1/referral-wallet/me' && request.method === 'GET') return sendJson(response, 200, await walletSummary(referrer))
       if (path === '/v1/referral-wallet/banks' && request.method === 'GET') {
         const currency = new URL(request.url, 'http://localhost').searchParams.get('currency')?.toUpperCase() || ''
-        if (!(await autoReady()) || !recipientTypes[currency]) return sendJson(response, 409, { error: 'Automatic Paystack bank lookup is not available; use manual payout.' })
+        if (!(await autoReady()) || !recipientTypes[currency]) return sendJson(response, 409, { error: 'Bank lookup is unavailable. Please contact Stockroom support.' })
         const result = await paystack(`/bank?currency=${encodeURIComponent(currency)}&perPage=100`)
         return sendJson(response, 200, { banks: (Array.isArray(result) ? result : []).filter(bank => bank.active !== false).map(bank => ({ name: bank.name, code: bank.code })) })
       }
-      if (path === '/v1/referral-wallet/profile' && request.method === 'POST') {
-        if (!(await autoReady())) return sendJson(response, 409, { error: 'Automatic Paystack transfers are not enabled. You can still request a manual payout.' })
-        const input = await readBody(request), currency = String(input.currency || '').toUpperCase(), type = recipientTypes[currency]
-        const name = String(input.name || '').trim(), accountNumber = String(input.accountNumber || '').replace(/\s/g, ''), bankCode = String(input.bankCode || '').trim()
-        if (!type || !minorCurrencies.has(currency) || !name || name.length > 100 || !/^\d{6,20}$/.test(accountNumber) || !bankCode || bankCode.length > 30) return sendJson(response, 400, { error: 'Enter a supported payout currency, account holder, account number and bank code.' })
-        const recipient = await paystack('/transferrecipient', { type, name, account_number: accountNumber, bank_code: bankCode, currency })
-        await profiles.updateOne({ referrerId: referrer.id, referrerType: referrer.type, currency }, { $set: { referrerId: referrer.id, referrerType: referrer.type, currency, name, bankName: recipient.details?.bank_name || '', accountLast4: accountNumber.slice(-4), recipientCode: recipient.recipient_code, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true })
-        return sendJson(response, 200, { ok: true, profile: { currency, name, bankName: recipient.details?.bank_name || '', accountLast4: accountNumber.slice(-4), automaticReady: true } })
+      if (['/v1/referral-wallet/profile', '/v1/referral-wallet/resolve'].includes(path) && request.method === 'POST') {
+        if (!(await autoReady())) return sendJson(response, 409, { error: 'Bank verification is temporarily unavailable. Please try again later or contact Stockroom support.' })
+        const input = await readBody(request)
+        const { currency, accountNumber, bankCode, name, bankName } = await resolveAccount(input)
+        if (path.endsWith('/resolve')) return sendJson(response, 200, { name })
+        if (input.confirmedName !== name) return sendJson(response, 409, { error: 'Check the account name again before saving this bank account.' })
+        const recipient = await paystack('/transferrecipient', { type: recipientTypes[currency], name, account_number: accountNumber, bank_code: bankCode, currency })
+        if (!recipient?.recipient_code) throw new Error('Could not save this bank account. Please try again.')
+        await profiles.updateOne({ referrerId: referrer.id, referrerType: referrer.type, currency }, { $set: { referrerId: referrer.id, referrerType: referrer.type, currency, name, bankName, accountLast4: accountNumber.slice(-4), recipientCode: recipient.recipient_code, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true })
+        return sendJson(response, 200, { ok: true, profile: { currency, name, bankName, accountLast4: accountNumber.slice(-4), automaticReady: true } })
       }
       if (path === '/v1/referral-wallet/payouts' && request.method === 'POST') {
         const input = await readBody(request), currency = String(input.currency || '').toUpperCase(), amountMinor = Number(input.amountMinor)
@@ -232,15 +248,15 @@ export async function createReferralWallet({ database, accounts, verifyToken, no
           try {
             const transfer = await paystack('/transfer', { source: 'balance', amount: amountMinor, recipient: profile.recipientCode, reference: `ref-${id}`, currency, reason: 'Stockroom referral reward' })
             await payouts.updateOne({ _id: id, status: 'initiating' }, { $set: { transferCode: transfer.transfer_code || '', status: transfer.status === 'otp' ? 'awaiting_otp' : 'processing', updatedAt: new Date() } })
-            return sendJson(response, 202, { ok: true, mode: 'paystack', status: transfer.status === 'otp' ? 'awaiting_otp' : 'processing', message: transfer.status === 'otp' ? 'Paystack requires transfer OTP approval. The developer will need to confirm it.' : 'Paystack transfer started. The wallet will update when Paystack confirms it.' })
+            return sendJson(response, 202, { ok: true, mode: 'paystack', status: transfer.status === 'otp' ? 'awaiting_otp' : 'processing', message: transfer.status === 'otp' ? 'Your withdrawal is awaiting approval by the Stockroom team.' : 'Your bank transfer has started. Your wallet will update once payment is confirmed.' })
           } catch (error) {
             const providerRejected = Boolean(error?.providerRejected)
             const updated = await payouts.updateOne({ _id: id, status: 'initiating' }, { $set: { status: providerRejected ? 'manual_requested' : 'manual_review', method: providerRejected ? 'manual' : 'paystack', automaticError: String(error.message || 'Paystack transfer could not start.').slice(0, 300), updatedAt: new Date() }, $unset: { transferCode: '' } })
             if (!updated.modifiedCount) return sendJson(response, 202, { ok: true, mode: 'paystack', status: 'processing', message: 'Paystack has already notified Stockroom that the transfer is processing.' })
-            if (!providerRejected) return sendJson(response, 202, { ok: true, mode: 'review', status: 'manual_review', message: 'Paystack did not confirm whether it received the transfer request. The amount is held while this is checked to prevent a duplicate payment.' })
+            if (!providerRejected) return sendJson(response, 202, { ok: true, mode: 'review', status: 'manual_review', message: 'Your transfer is awaiting confirmation. The amount remains pending while the Stockroom team checks its status.' })
           }
         }
-        return sendJson(response, 202, { ok: true, mode: 'manual', status: 'manual_requested', message: automatic ? 'Paystack rejected the transfer request. Your payout is saved for manual payment.' : 'Your manual payout request is saved for review.' })
+        return sendJson(response, 202, { ok: true, mode: 'manual', status: 'manual_requested', message: automatic ? 'Your transfer could not start. The Stockroom team will review your saved withdrawal request.' : 'Your manual payout request is saved for review.' })
       }
       return sendJson(response, 404, { error: 'Wallet route not found.' })
     } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Wallet request failed.' }) }
@@ -261,7 +277,7 @@ export async function createReferralWallet({ database, accounts, verifyToken, no
     } else if (event.event === 'transfer.reversed' && row.status === 'paid') {
       const updated = await payouts.updateOne({ _id: row._id, status: 'paid' }, { $set: { status: 'reversed', automaticError: String(event.data?.reason || event.event), updatedAt: new Date() } })
       if (updated.modifiedCount) await wallets.updateOne({ _id: walletId(row.referrerType, row.referrerId, row.currency) }, { $inc: { paidMinor: -row.amountMinor } })
-      if (updated.modifiedCount && notifications?.notifyReferrer) void notifications.notifyReferrer(row.referrerType, row.referrerId, { title: 'Referral payout reversed', body: `Paystack reported that your ${row.currency} ${Number(row.amountMinor / 100).toFixed(2)} payout was reversed. Open your wallet for details.`, type: 'payout', url: row.referrerType === 'visitor' ? '/visitor' : '/?screen=subscription' }).catch(error => console.error('Payout notification failed:', error.message))
+      if (updated.modifiedCount && notifications?.notifyReferrer) void notifications.notifyReferrer(row.referrerType, row.referrerId, { title: 'Referral payout reversed', body: `Your bank reported that your ${row.currency} ${Number(row.amountMinor / 100).toFixed(2)} payout was reversed. Open your wallet for details.`, type: 'payout', url: row.referrerType === 'visitor' ? '/visitor' : '/?screen=subscription' }).catch(error => console.error('Payout notification failed:', error.message))
     } else {
       const updated = await payouts.updateOne({ _id: row._id, status: { $in: ['processing', 'awaiting_otp', 'initiating'] } }, { $set: { status: event.event === 'transfer.reversed' ? 'reversed' : 'failed', automaticError: String(event.data?.reason || event.event), updatedAt: new Date() } })
       if (updated.modifiedCount) await wallets.updateOne({ _id: walletId(row.referrerType, row.referrerId, row.currency) }, { $inc: { reservedMinor: -row.amountMinor } })
