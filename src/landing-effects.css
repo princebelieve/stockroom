@@ -85,3 +85,24 @@ footer { align-items: center; border-color: rgba(21, 60, 52, .14); }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .motion-ready .reveal { opacity: 1; transform: none; }
 }
+
+/* Public visitor navigation uses the business app's workspace colors. */
+header{max-width:none;background:#17352d;color:#dce9df;padding:20px max(24px,calc((100vw - 1200px)/2));box-shadow:0 6px 20px #102b2518;position:relative;z-index:30}
+header .brand{color:#fff;flex-shrink:0}
+header .brand>span>span{color:#9eb5a9}
+header #main-nav{gap:6px;flex-wrap:wrap;justify-content:flex-end;font-size:13px}
+header #main-nav>a,header .landing-nav-group summary{padding:11px 12px;border-radius:8px;color:#dce9df;cursor:pointer;text-decoration:none;font-weight:600}
+header #main-nav a:hover,header .landing-nav-group summary:hover,header .landing-nav-group[open]>summary{background:#286052;color:#fff;transform:none}
+.landing-nav-group{position:relative}
+.landing-nav-group summary{list-style:none;display:flex;align-items:center;gap:9px}
+.landing-nav-group summary::-webkit-details-marker{display:none}
+.landing-nav-group summary::after{content:'';width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin-top:-4px}
+.landing-nav-group[open] summary::after{transform:rotate(225deg);margin-top:3px}
+.landing-subnav{position:absolute;top:calc(100% + 8px);right:0;min-width:240px;padding:8px;background:#214b40;border:1px solid #467766;border-radius:10px;box-shadow:0 14px 30px #102b2530;display:grid;gap:3px}
+header #main-nav .landing-subnav a{display:block;padding:11px 12px;border-radius:6px;color:#bdd5ca;text-decoration:none;font-size:13px}
+header #main-nav>a.landing-register{background:#d5e95c;color:#17352d}
+header #main-nav>a.landing-register:hover{background:#e2f182}
+header .menu-toggle{background:#214b40;border-color:#467766;color:#fff}
+header summary:focus-visible{outline:3px solid #d5e95c;outline-offset:3px}
+@media(max-width:1050px) and (min-width:761px){header{flex-wrap:wrap;gap:14px}header #main-nav{justify-content:flex-start}}
+@media(max-width:760px){header{padding:18px 22px;gap:14px}header .brand{flex-shrink:1}header #main-nav{background:#17352d;border-color:#467766;gap:5px;align-items:stretch}header #main-nav>a,header #main-nav>a:not(.small-button){color:#dce9df;padding:12px}header #main-nav .landing-nav-group{width:100%}header #main-nav .landing-nav-group summary{justify-content:space-between;padding:12px}header #main-nav .landing-subnav{position:static;min-width:0;margin:4px 10px 8px;padding:0 0 0 10px;border:0;border-left:1px solid #467766;border-radius:0;background:transparent;box-shadow:none}header #main-nav .landing-subnav a{padding:10px;font-size:12px}header #main-nav a:hover,header #main-nav a:focus-visible{background:#286052;color:#fff}}

@@ -4,11 +4,16 @@ import './landing-effects.css'
 const menuButton = document.getElementById('landing-menu-toggle') as HTMLButtonElement | null
 const mainNav = document.getElementById('main-nav')
 if (menuButton && mainNav) {
-  const closeMenu = () => { menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-label', 'Open navigation menu'); mainNav.classList.remove('open') }
+  const closeGroups = () => mainNav.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(group => { group.open = false })
+  const closeMenu = () => { closeGroups(); menuButton.setAttribute('aria-expanded', 'false'); menuButton.setAttribute('aria-label', 'Open navigation menu'); mainNav.classList.remove('open') }
   menuButton.addEventListener('click', () => {
     const open = menuButton.getAttribute('aria-expanded') !== 'true'
     menuButton.setAttribute('aria-expanded', String(open)); menuButton.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu'); mainNav.classList.toggle('open', open)
   })
+  mainNav.querySelectorAll<HTMLDetailsElement>('details').forEach(group => {
+    group.addEventListener('toggle', () => { if (group.open) mainNav.querySelectorAll<HTMLDetailsElement>('details').forEach(other => { if (other !== group) other.open = false }) })
+  })
+  document.addEventListener('click', event => { if (!(event.target instanceof Node) || !mainNav.contains(event.target)) closeGroups() })
   mainNav.addEventListener('click', event => { if ((event.target as HTMLElement).closest('a')) closeMenu() })
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu() })
 }

@@ -549,7 +549,8 @@ const server = createServer(async (request, response) => {
 function serveFrontend(request, response) {
   if (!existsSync(distDirectory)) return sendJson(response, 503, { error: 'Frontend build not found. Run npm run build first.' })
   const requestedPath = decodeURIComponent((request.url || '/').split('?')[0])
-  const relativePath = requestedPath === '/' ? 'index.html' : requestedPath.replace(/^\/+/, '')
+  const pageRoutes = { '/welcome': 'welcome.html', '/visitor': 'visitor.html', '/developer': 'developer.html', '/account-deletion': 'account-deletion.html' }
+  const relativePath = pageRoutes[requestedPath] || (requestedPath === '/' ? 'index.html' : requestedPath.replace(/^\/+/, ''))
   const candidate = join(distDirectory, relativePath)
   const filePath = existsSync(candidate) && statSync(candidate).isFile() ? candidate : join(distDirectory, 'index.html')
   const extension = extname(filePath)

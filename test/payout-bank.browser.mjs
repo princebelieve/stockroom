@@ -23,7 +23,11 @@ try {
         if (path.includes('/banks')) return { banks: [{ name: 'Example Bank', code: '001' }] }
         const input = JSON.parse(init.body)
         if (input.accountNumber === '9999999999') throw Error('Account could not be verified.')
-        if (path.endsWith('/resolve')) return { name: 'VERIFIED ACCOUNT NAME' }
+        if (path.endsWith('/resolve')) {
+          window.lookups = (window.lookups || 0) + 1
+          if (input.accountNumber === '1111111111') { window.delayedLookupStarted = true; await new Promise(resolve => setTimeout(resolve, 1200)); return { name: 'OLD ACCOUNT NAME' } }
+          return { name: 'VERIFIED ACCOUNT NAME' }
+        }
         window.submitted = input
         return { profile: { name: 'VERIFIED ACCOUNT NAME', accountLast4: '6789' } }
       }
@@ -31,25 +35,28 @@ try {
   })
   await page.getByLabel('Bank', { exact: true }).selectOption('001')
   await page.getByLabel('Account number', { exact: true }).fill('0123456789')
-  await page.getByRole('button', { name: 'Check account name' }).click()
-  await page.getByRole('button', { name: 'Confirm and save bank account' }).waitFor()
+  await page.waitForFunction(() => document.querySelector('input[readonly]')?.value === 'VERIFIED ACCOUNT NAME')
   assert.equal(await page.getByLabel('Account name', { exact: true }).inputValue(), 'VERIFIED ACCOUNT NAME')
   assert.equal(await page.getByLabel('Account name', { exact: true }).getAttribute('readonly'), '')
   assert.equal(await page.evaluate(() => window.saved), 0)
   await page.getByLabel('Account number', { exact: true }).fill('9999999999')
   assert.equal(await page.getByLabel('Account name', { exact: true }).inputValue(), '')
-  await page.getByRole('button', { name: 'Check account name' }).click()
   await page.getByText('Account could not be verified.').waitFor()
-  assert.equal(await page.getByRole('button', { name: 'Confirm and save bank account' }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: 'Confirm and save bank account' }).isDisabled(), true)
   await page.getByLabel('Account number', { exact: true }).fill('0123456789')
-  await page.getByRole('button', { name: 'Check account name' }).click()
   await page.getByRole('button', { name: 'Confirm and save bank account' }).click()
   await page.getByText(/Bank account saved:/).waitFor()
   assert.equal(await page.evaluate(() => window.saved), 1)
   assert.equal(await page.evaluate(() => window.submitted.confirmedName), 'VERIFIED ACCOUNT NAME')
+  await page.getByLabel('Account number', { exact: true }).fill('1111111111')
+  await page.waitForFunction(() => window.delayedLookupStarted)
+  await page.getByLabel('Account number', { exact: true }).fill('0123456789')
+  await page.waitForFunction(() => document.querySelector('input[readonly]')?.value === 'VERIFIED ACCOUNT NAME')
+  await page.waitForTimeout(1400)
+  assert.equal(await page.getByLabel('Account name', { exact: true }).inputValue(), 'VERIFIED ACCOUNT NAME')
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 850 })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   }
-  console.log('PASS bank verification, confirmation, changed details, lookup failure, phone and desktop widths')
+  console.log('PASS automatic bank verification, confirmation, changed details, lookup failure, stale responses, phone and desktop widths')
 } finally { await browser.close(); await server.close() }
