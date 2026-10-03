@@ -17,3 +17,5 @@ References: [Square item grid](https://squareup.com/help/us/en/article/8334-set-
 | Item voids (submenu) | Voided items | Review recorded item cancellations |
 
 Reviewed and retained: Overview, Inventory (or the owner's catalogue name), Customer display, Stock movements, Reports, Staff activity, Sync issues, Subscription, Business settings and Close your account. Their labels describe distinct existing destinations. No routes, stored screen identifiers, permissions or subscription rules were renamed.
+
+Inventory also contains Purchasing and receiving, Stock costs and expiry, and the existing product intake options. Supplier order/conversion/history tools are expandable; batch/expiry inputs are optional inside delivery receiving. Reports contain expenses, the current-month profit estimate and supermarket purchasing/expiry summaries. Suggested navigation names above are review notes, not proof of renamed routes.

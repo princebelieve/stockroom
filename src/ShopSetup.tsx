@@ -53,11 +53,11 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     catch (error) { setProblem(error instanceof Error ? error.message : 'Check your fields.') }
   }
   return <section id="shop-setup" className="panel full-panel shop-wizard">
-    <h2>Shop setup wizard</h2><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p>
+    <h2>Business type and product form</h2><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p>
     <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
     {step === 0 && <div className="shop-step">
-      <h3>Start with a familiar template</h3><label>Business template<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
-      <p>{businessModes[industry].note}</p><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
+      <h3>Start with a familiar template</h3><label>Business type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
+      <p>{businessModes[industry].note}</p><label><input type="checkbox" checked={draft.features?.services ?? draft.industry !== 'supermarket'} onChange={event => change({ ...draft, features: { services: event.target.checked } })} />Show service charges at checkout</label><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
       <p>Loading a template replaces this draft's visible fields. Previous custom fields stay in Removed fields so their saved values can be restored.</p>
       <details><summary>Start from a printed form or screenshot</summary><p>Upload a JPG, PNG or WebP image, or paste headings from your old app. Text is read on this device without a paid recognition service. Clear printed text works best; write in BLOCK / CAPITAL LETTERS for handwritten labels.</p>
         <label>Template image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { reading.current?.abort(); setFile(event.target.files?.[0] || null); setCandidates([]); setProgress('') }} /></label>

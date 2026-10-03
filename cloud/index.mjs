@@ -1,3 +1,5 @@
+import { createSupermarketCoordinator } from './supermarket-coordination.mjs'
+import { validateRetailRecord } from '../server/retail.mjs'
 import { createPosPaystack } from './pos-paystack.mjs'
 import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
@@ -27,6 +29,7 @@ const client = new MongoClient(uri)
 await client.connect()
 const database = client.db(process.env.MONGODB_DATABASE || 'stockroom_sync')
 const operations = database.collection('sync_operations')
+const coordinateSupermarket=createSupermarketCoordinator(database,client)
 const entityHeads = database.collection('sync_entity_heads')
 const businessSettings = database.collection('business_settings')
 const inventoryAlertState = database.collection('inventory_alert_state')
@@ -37,6 +40,8 @@ const refreshTokens = database.collection('auth_refresh_tokens')
 const referralVisitors = database.collection('referral_visitors')
 const businessExitPayments = database.collection('business_exit_payments')
 await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
+await operations.createIndex({ businessId: 1, entityId: 1 }, { unique: true, partialFilterExpression: { entityType: 'retail_record' } })
+await operations.createIndex({businessId:1,'payload.branchId':1,'payload.supplierId':1},{unique:true,partialFilterExpression:{entityType:'retail_record','payload.kind':'supplier-opening'}})
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
 await businessSettings.createIndex({ businessId: 1 }, { unique: true })
@@ -165,10 +170,12 @@ async function processInventoryNotification(operation) {
     const branchId = 'main'
     const filter = { businessId, branchId, productId: String(payload.id || operation.entityId) }
     await inventoryAlertState.updateOne(filter, { $setOnInsert: { ...filter, stock: Math.max(0, Number(payload.stock) || 0), reorder: Math.max(0, Number(payload.reorder) || 0), productName: String(payload.name || 'Product'), updatedAt: new Date() } }, { upsert: true })
+  } else if (entityType === 'retail_record' && action === 'create' && ['receipt', 'waste', 'supplier-return'].includes(payload.kind)) {
+    for (const line of payload.lines || []) await inventoryDelta(businessId, payload.branchId, line.productId, Number(line.units) * (payload.kind === 'receipt' ? 1 : -1), payload.kind, line.beforeStock)
   } else if (entityType === 'stock' && action === 'adjust') {
     await inventoryDelta(businessId, payload.branchId, payload.productId || operation.entityId, Number(payload.amount) || 0, 'stock-adjustment', payload.beforeStock)
   } else if (entityType === 'sale' && action === 'create') {
-    for (const item of Array.isArray(payload.items) ? payload.items : []) await inventoryDelta(businessId, payload.branchId, item.productId, -(Number(item.quantity) || 0), 'sale', item.beforeStock)
+    for (const item of Array.isArray(payload.items) ? payload.items : []) if (!String(item.productId).startsWith('service:')) await inventoryDelta(businessId, payload.branchId, item.productId, -(Number(item.quantity) || 0), 'sale', item.beforeStock)
   } else if (entityType === 'branch_transfer' && action === 'create') {
     await inventoryDelta(businessId, payload.fromBranchId, payload.productId, -(Number(payload.quantity) || 0), 'transfer', payload.sourceBeforeStock)
     await inventoryDelta(businessId, payload.toBranchId, payload.productId, Number(payload.quantity) || 0, 'transfer', payload.destinationBeforeStock)
@@ -360,7 +367,7 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request)
       if (!await ownerPasswordIsValid(claims, input.ownerPassword)) return send(response, 401, { error: 'Owner password confirmation is required to create a staff account.' })
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
-      if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 10 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3–32 character username, and a 10-character password.' })
+      if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 10 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“32 character username, and a 10-character password.' })
       const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, passwordHash: hashPassword(password), createdAt: new Date() }
       try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) {
         if (error?.code === 11000) {
@@ -456,9 +463,29 @@ const server = createServer(async (request, response) => {
       for (const document of documents) {
         // Retries are normal after an interrupted response. They are successful
         // no-ops, never conflicts and never duplicate financial events.
-        if (await operations.findOne({ businessId, operationId: document.operationId }, { projection: { _id: 1 } })) {
+        const previouslyStored=await operations.findOne({businessId,operationId:document.operationId})
+        if (previouslyStored) {
+          for(const reason of previouslyStored.coordinationWarnings||[])conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason})
           acceptedOperationIds.push(document.operationId)
           continue
+        }
+        if (document.entityType === 'retail_record') {
+          try {
+            if (document.action !== 'create' || document.entityId !== document.payload.id) throw new Error('Invalid purchasing operation.')
+            validateRetailRecord(document.payload)
+          } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message }); continue }
+          const previous = await operations.findOne({ businessId, entityType: 'retail_record', entityId: document.entityId })
+          if (previous) {
+            if (JSON.stringify(previous.payload) !== JSON.stringify(document.payload)) conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Purchasing record ID already exists with different details.' })
+            else acceptedOperationIds.push(document.operationId)
+            continue
+          }
+        }
+        if(document.entityType==='retail_record' && document.payload.kind==='pricing'){
+          const filter={businessId,entityType:'product',entityId:document.payload.productId}
+          const product=await entityHeads.findOne(filter)
+          if(product && product.operationId!==document.operationId && product.payload.updated!==document.payload.before.updatedAt){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'The product changed on another till. Refresh and review the price change.'});continue}
+          if(product && product.operationId!==document.operationId){const changed=await entityHeads.updateOne({...filter,operationId:product.operationId},{$set:{payload:{...product.payload,price:document.payload.price,cost:document.payload.cost,barcode:document.payload.barcode,updated:document.payload.createdAt},operationId:document.operationId,updatedAt:document.payload.createdAt}});if(!changed.matchedCount){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent price change won. Refresh pricing.'});continue}}
         }
         if (mutableEntities.has(document.entityType)) {
           if (document.entityType === 'settings') {
@@ -476,15 +503,33 @@ const server = createServer(async (request, response) => {
             try { document.payload.customValues = { ...readCustomValues(current?.payload?.customValues), ...readCustomValues(document.payload.customValues) } }
             catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid custom product details.' }); continue }
           }
+          if(document.entityType==='pos_record' && document.payload.expectedUpdatedAt!==undefined && document.payload.expectedUpdatedAt!==(current?.payload?.updatedAt||'')){
+            conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This basket or register was changed on another till. Refresh and review the other version.',localPayload:document.payload,remotePayload:current?.payload||{}});continue
+          }
           if (!isNewerMutableOperation(document, current)) {
             conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'A newer version of this record was saved on another device.', localPayload: document.payload, remotePayload: current.payload })
             continue
           }
-          await entityHeads.updateOne(filter, { $set: { updatedAt: operationUpdatedAt(document), payload: document.payload, operationId: document.operationId, deviceId, receivedAt: new Date() } }, { upsert: true })
+          try {
+            const guarded=document.entityType==='pos_record' && document.payload.expectedUpdatedAt!==undefined
+            const result=await entityHeads.updateOne(guarded && current?{...filter,operationId:current.operationId}:filter,{ $set: { updatedAt: operationUpdatedAt(document), payload: document.payload, operationId: document.operationId, deviceId, receivedAt: new Date() } },{upsert:guarded?!current:true})
+            if(guarded && current && !result.matchedCount){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent till edit won. Refresh this basket or register.'});continue}
+          }catch(error){if(error.code!==11000)throw error;conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent till created this record. Refresh before editing.'});continue}
+
         }
+        const coordinationWarnings=await coordinateSupermarket(document)
+        document.coordinationWarnings=coordinationWarnings
+        for(const reason of coordinationWarnings)conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason,localPayload:document.payload})
         try { await operations.insertOne(document) }
         catch (error) {
-          if (error?.code === 11000) { acceptedOperationIds.push(document.operationId); continue }
+          if (error?.code === 11000) {
+            if (document.entityType === 'retail_record') {
+              const previous = await operations.findOne({ businessId, entityType: 'retail_record', entityId: document.entityId })
+              if(!previous && document.payload.kind==='supplier-opening'){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This supplier already has an opening balance from another till. Review the existing entry.'});continue}
+              if (previous && JSON.stringify(previous.payload) !== JSON.stringify(document.payload)) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Purchasing record ID already exists with different details.' }); continue }
+            }
+            acceptedOperationIds.push(document.operationId); continue
+          }
           throw error
         }
         try { await processInventoryNotification(document) } catch (error) { console.error('Inventory notification processing failed.', error instanceof Error ? error.message : 'Unknown error.') }
@@ -508,6 +553,7 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
+      if (query.get('protocol') !== 'retail-v3' && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
       return send(response, 200, { operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })
     }
     return send(response, 404, { error: 'Not found.' })

@@ -1,3 +1,4 @@
+import { stockChange } from './stock-ledger.mjs'
 import { posSettings, refundFor } from './pos-pricing.mjs'
 export const posSchema = 'CREATE TABLE IF NOT EXISTS pos_records (scope TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,id));'
 export async function ensurePos(db) { await db.run(posSchema) }
@@ -12,9 +13,11 @@ export async function savePosRecord(db, scope, record) {
 export async function applyPosRecord(db, scope, record, organizationId) {
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
   if (record.kind === 'return' && !found) {
-    for (const item of record.items) if (item.restock) {
+    for (const item of record.items) if (item.restock && !String(item.productId).startsWith('service:')) {
       const result = await db.query('SELECT stock FROM branch_inventory WHERE product_id=? AND branch_id=?', [item.productId, record.branchId])
       if (!result.values.length) throw new Error('Returned product is not available on this device yet.')
+      const parts=item.batchAllocations?.length?item.batchAllocations:[{quantity:item.quantity,unitCost:item.unitCost||0}]
+      for(const [index,part] of parts.entries())await stockChange(db,{id:`${record.id}:restock:${item.lineIndex}:${index}`,lotId:part.id,branchId:record.branchId,productId:item.productId,delta:part.quantity,reconcile:index===0,unitCost:part.unitCost,expiry:part.expiry||'',batchNumber:part.batchNumber||'',createdAt:record.updatedAt})
       await db.run('UPDATE branch_inventory SET stock=stock+? WHERE product_id=? AND branch_id=?', [item.quantity, item.productId, record.branchId])
       const columns = organizationId ? 'id,organization_id,product_id,quantity,reason,created_at,branch_id' : 'id,product_id,quantity,reason,created_at,branch_id'
       const values = [`${record.id}:return:${item.lineIndex}`, ...(organizationId ? [organizationId] : []), item.productId, item.quantity, `Return ${record.saleId}: ${record.reason}`, record.updatedAt, record.branchId]
@@ -36,7 +39,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   await ensurePos(db)
   const manager = ['owner', 'admin'].includes(user.role)
   const records = kind => posRecords(db, scope, kind, kind === 'settings' || kind === 'product' ? 'main' : branchId)
-  const write = async record => { await savePosRecord(db, scope, record); await publish(record); return record }
+  const write = async record => { if(['basket','register'].includes(record.kind)){const previous=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.id])).values[0];record.expectedUpdatedAt=previous?JSON.parse(previous.payload).updatedAt:''} await db.beginTransaction(); try { await savePosRecord(db, scope, record); await publish(record); await db.commitTransaction() } catch(error) { await db.rollbackTransaction(); throw error } return record }
   const stamp = { branchId, updatedAt: new Date().toISOString(), staffId: user.id, staffName: user.name }
   if (method === 'GET') {
     const [settings, baskets, registers, returns, products] = await Promise.all(['settings', 'basket', 'register', 'return', 'product'].map(records))
@@ -76,10 +79,12 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     const loaded = (await sales()).filter(sale => sale.paymentDetails?.pos?.registerId === existing.id)
     const cashSales = loaded.reduce((sum, sale) => sum + (sale.paymentMethod === 'cash' ? sale.total : (sale.paymentDetails?.allocations || []).filter(part => part.method === 'cash').reduce((total, part) => total + part.amount, 0)), 0)
     const cashReturns = (await records('return')).filter(record => record.registerId === existing.id && record.method === 'cash').reduce((sum, record) => sum + record.total, 0)
-    const expectedCash = Math.round((existing.openingCash + cashSales - cashReturns + existing.movements.reduce((sum, movement) => sum + movement.amount * (movement.direction === 'in' ? 1 : -1), 0)) * 100) / 100
+    const hasRetail=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='retail_records'")).values.length
+    const supplierCash=hasRetail?(await db.query('SELECT payload FROM retail_records WHERE scope=? AND branch_id=?',[scope,branchId])).values.map(row=>JSON.parse(row.payload)).filter(row=>row.registerId===existing.id).reduce((sum,row)=>sum+Number(row.cashAmount||0),0):0
+    const expectedCash = Math.round((existing.openingCash + cashSales - cashReturns + supplierCash + existing.movements.reduce((sum, movement) => sum + movement.amount * (movement.direction === 'in' ? 1 : -1), 0)) * 100) / 100
     const countedCash = amount(input.amount), difference = Math.round((countedCash - expectedCash) * 100) / 100
     if (difference && String(input.reason || '').trim().length < 3) throw new Error('Explain the cash difference before closing.')
-    return write({ ...existing, updatedAt: stamp.updatedAt, closedAt: stamp.updatedAt, cashSales, cashReturns, expectedCash, countedCash, difference, closingReason: String(input.reason || '') })
+    return write({ ...existing, updatedAt: stamp.updatedAt, closedAt: stamp.updatedAt, cashSales, cashReturns, supplierCash, expectedCash, countedCash, difference, closingReason: String(input.reason || '') })
   }
   if (path === '/api/pos/returns') {
     if (!manager) throw new Error('Owner or admin access required for returns.')

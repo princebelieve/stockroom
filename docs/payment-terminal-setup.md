@@ -5,7 +5,7 @@ save a terminal profile for the current business on each checkout device:
 provider override, model, terminal ID/serial number, planned transport, and optional
 network host/port. These local assignments do not sync to other computers.
 
-No payment adapters are implemented yet. Saving a profile never connects a device.
+Connected Paystack Terminal checkout is implemented through a separate server adapter; see [Paystack setup](paystack-terminal.md). OPay and other providers still use manual confirmation. Saving an ordinary device profile never connects a device.
 The connection-test button remains disabled. Checkout requires manual confirmation;
 if a planned integration is selected and manual fallback is disabled, external-POS
 checkout is blocked. Cash and other existing payment methods are unaffected.
@@ -37,7 +37,7 @@ https://documentation.opaycheckout.com/payment-authentication
 
 ## Credential storage design
 
-Credential provisioning is not implemented in this update. Do not paste secrets
+OPay credential provisioning is not implemented. Paystack credentials use the separate business-scoped server configuration. Do not paste secrets
 into terminal profile fields; they are ordinary device settings, not a vault.
 
 For a future OPay adapter, store the merchant private key and clientAuthKey in a

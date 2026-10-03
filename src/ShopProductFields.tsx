@@ -10,7 +10,7 @@ export function ShopProductFields({ profile, customOnly = false, values, initial
     const name = custom ? `custom:${field.id}` : field.id
     return <label key={field.id}>{field.label}{field.required ? ' *' : ''}
       {field.type === 'select' ? <select name={name} required={field.required} defaultValue={saved[field.id] || ''}><option value="">{field.placeholder || 'Choose an option'}</option>{field.options.map(option => <option key={option}>{option}</option>)}</select>
-        : <input name={name} type={field.type} required={field.required} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '1' : 'any') : undefined} list={field.id === 'category' ? 'shop-category-options' : undefined} />}
+        : <input name={name} type={field.type} required={field.required} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} list={field.id === 'category' ? 'shop-category-options' : undefined} />}
     </label>
   })}<datalist id="shop-category-options">{profile.categories.map(category => <option key={category} value={category} />)}</datalist></div>
 }

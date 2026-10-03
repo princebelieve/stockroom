@@ -1,3 +1,5 @@
+import { validQuantity } from './quantities.mjs'
+import { retailAction } from './db.mjs'
 import { posAction } from './db.mjs'
 import { createServer } from 'node:http'
 import { updateShopProfile, updateProductCustomValues } from './db.mjs'
@@ -503,6 +505,13 @@ const server = createServer(async (request, response) => {
     })
   }
 
+  if (request.url === '/api/retail') {
+    const user = sessionUser(request)
+    if (!isManager(user)) return sendJson(response, 403, { error: 'Owner or admin access required for purchasing.' })
+    if (request.method === 'GET') return sendJson(response, 200, await retailAction('GET', {}, user, requestBranch(request)))
+    if (request.method === 'POST') return readJson(request, response, async input => sendJson(response, 201, await retailAction('POST', input, user, requestBranch(request))))
+    return sendJson(response, 405, { error: 'Unsupported purchasing method.' })
+  }
   if (request.method === 'GET' && request.url === '/api/products') {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, { products: await listProducts(requestBranch(request)) })
@@ -572,7 +581,7 @@ const server = createServer(async (request, response) => {
     return readJson(request, response, async (input) => {
       if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
       const amount = Number(input.amount)
-      if (!Number.isInteger(amount) || amount === 0) return sendJson(response, 400, { error: 'Stock amount must be a non-zero integer.' })
+      if (!validQuantity(amount, -Number.MAX_SAFE_INTEGER) || amount === 0) return sendJson(response, 400, { error: 'Stock amount must be non-zero with at most three decimals.' })
       try {
         const product = await adjustStock(stockMatch[1], amount, String(input.reason || 'manual-adjustment'), true, requestBranch(request))
         return product ? sendJson(response, 200, product) : sendJson(response, 404, { error: 'Product not found.' })
@@ -615,7 +624,7 @@ function validateProduct(input) {
     stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(),
   }
   if (!product.name || !product.sku || !product.category || !product.unit || [product.stock, product.reorder, product.price, product.cost].some((value) => !Number.isFinite(value) || value < 0)) throw new Error('Product fields are invalid.')
-  if (!Number.isInteger(product.stock) || !Number.isInteger(product.reorder)) throw new Error('Stock values must be whole numbers.')
+  if (!validQuantity(product.stock) || !validQuantity(product.reorder)) throw new Error('Stock values must have at most three decimals.')
   return product
 }
 

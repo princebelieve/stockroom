@@ -47,7 +47,13 @@ export function refundFor(sale, existing, selections) {
     const returned = existing.flatMap(record => record.items).filter(item => item.lineIndex === index).reduce((sum, item) => sum + Number(item.quantity), 0)
     if (!original || !Number.isFinite(quantity) || quantity <= 0 || Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 0.000001 || quantity + returned > original.quantity + 0.000001) throw new Error('Return quantity exceeds the quantity remaining on the receipt.')
     const amount = (Math.round(money(line.total) * (returned + quantity) / original.quantity) - Math.round(money(line.total) * returned / original.quantity)) / 100
-    return { lineIndex: index, productId: original.productId, productName: original.productName, quantity, amount, restock: selection.restock === true }
+    let offset=returned,remaining=quantity
+    const allocations=[]
+    const batches=typeof original.batchAllocations==='string'?JSON.parse(original.batchAllocations):original.batchAllocations||[]
+    for(const part of batches){const skipped=Math.min(offset,part.quantity);offset-=skipped;const units=Math.min(remaining,part.quantity-skipped);if(units>0){allocations.push({...part,quantity:units});remaining-=units}}
+    const tax = (Math.round(money(line.tax || 0) * (returned + quantity) / original.quantity) - Math.round(money(line.tax || 0) * returned / original.quantity)) / 100
+    const unitCost = allocations.length ? allocations.reduce((sum, part) => sum + part.quantity * part.unitCost, 0) / quantity : Number(original.unitCost || 0)
+    return { tax, unitCost, batchAllocations: allocations, lineIndex: index, productId: original.productId, productName: original.productName, quantity, amount, restock: selection.restock === true && !String(original.productId).startsWith('service:') }
   })
   if (!items.length || new Set(items.map(item => item.lineIndex)).size !== items.length) throw new Error('Select each returned line once.')
   return { items, total: items.reduce((sum, item) => sum + money(item.amount), 0) / 100 }

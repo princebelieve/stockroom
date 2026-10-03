@@ -54,3 +54,11 @@ Copy the returned `deviceToken` into the installed app's `%APPDATA%\Stockroom Bu
 For the Vercel/iPhone PWA, set PWA_ALLOWED_ORIGINS to the exact HTTPS origin(s), separated by commas. Android's https://localhost remains allowed. See [PWA-DEPLOYMENT.md](../PWA-DEPLOYMENT.md).
 
 Manual Paystack subscriptions, the developer-only enforcement switch, and one-month POS grace are integrated into the Vercel Business App. See [subscription setup](../docs/subscriptions.md). Enforcement starts off; deploy this cloud service before the updated client, then turn it on from the in-app Subscription screen when ready.
+
+## Supermarket sync and deployment
+
+The updated clients request `retail-v3` when pulling purchasing and stock-batch operations. Deploy this cloud version first, then update tills together. Keep existing MongoDB business IDs, data and credentials.
+
+Immutable `retail_record` operations capture orders, receipts, supplier returns, wastage and price/batch corrections. Operation IDs make retries idempotent. Revision checks protect shared baskets/registers and price changes. The coordinator uses MongoDB transactions and separate `supermarket_resources` / `supermarket_admissions` collections; it requires a transaction-capable deployment such as the existing Atlas replica set. Existing business collections are retained.
+
+Coordination detects stock overselling and excessive receiving/returns across tills. Completed offline financial records are retained and warnings are surfaced as sync conflicts for review. This is not a central stock reservation service and cannot prevent independently offline tills acting on the same available quantity. Supplier payments and opening balances synchronize as immutable retail records. New stock losses carry immutable batch-cost snapshots so reports on receiving tills use the original valuation. See [current supermarket scope](../docs/supermarket-workspace.md).

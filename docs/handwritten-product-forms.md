@@ -10,7 +10,7 @@
 4. Editable fields appear immediately beside the photo. Enter and save details manually without Google recognition; manual entry needs no cloud connection on an already set-up device. For best recognition results, write in BLOCK / CAPITAL LETTERS. Optionally agree to send the photo to Google Cloud Vision and select **Read completed form**. Suggestions fill empty fields without replacing your entries. If recognition is unavailable or cancelled using **Stop reading and enter manually**, your photo and entries remain available for manual completion.
 5. Compare every answer with the photo. Low-confidence, invalid, blank or ambiguous answers remain empty. Fill missing information, select the review confirmation, then save. Editing any field clears the confirmation. Recognition does not create products automatically.
 
-The owner needs a cloud session and internet access for recognition. Products save through the existing local product workflow. Blank SKU is generated; blank cost and reorder values save as zero, as stated on the review screen. Price, stock and unit require explicit entries. Existing barcodes/SKUs in the loaded catalogue are checked before saving.
+Google recognition needs a cloud session and internet access; on-device recognition needs the bundled reader assets installed or cached. Products save through the existing local product workflow. Blank SKU is generated; blank cost and reorder values save as zero, as stated on the review screen. Price, stock and unit require explicit entries. Existing barcodes/SKUs in the loaded catalogue are checked before saving.
 
 ## New Google Cloud Vision setup
 
@@ -38,3 +38,7 @@ The browser test also exercises the real on-device reader on a generated printed
 Automated parser and endpoint tests use synthetic Vision responses. Browser checks can mock the provider to verify upload, review and saving; those do not establish handwriting accuracy. The integration must also be checked with real, owner-written forms after the server key is configured. Test legible handwriting, zero values, empty boxes, decimal costs, leading-zero barcodes, crossed-out answers, faint photocopies and tilted photos. Compare all nine fields with the original, and keep manual review mandatory.
 
 Commands: `node --test test/product-form.test.mjs`, `node test/handwritten-product-form.browser.mjs`, and `npm.cmd run build`.
+
+## Existing-shop migration
+
+For a catalogue already stored electronically, start with [CSV product migration](product-migration.md). Paper forms and OCR are review aids, not a requirement to enter every product again. No supplier, batch label or expiry date is required on a product form. Enter a purchase cost where known: blank cost saves as zero and can overstate estimated profit.

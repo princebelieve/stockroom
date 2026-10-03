@@ -1,3 +1,4 @@
+import { stockSchema } from '../server/stock-ledger.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
@@ -11,6 +12,8 @@ function setup() {
     INSERT INTO customers VALUES ('customer',0);
     CREATE TABLE wallet_transactions (id TEXT PRIMARY KEY,customer_id TEXT,amount REAL,reason TEXT,created_at TEXT);
     CREATE TABLE inventory_movements (id TEXT PRIMARY KEY,product_id TEXT,quantity REAL,reason TEXT,created_at TEXT,branch_id TEXT);`)
+  sqlite.exec(stockSchema)
+  sqlite.exec("CREATE TABLE products(id TEXT PRIMARY KEY,cost_price REAL); INSERT INTO products VALUES('item',0)")
   const db = { query: async (sql, args = []) => ({ values: sqlite.prepare(sql).all(...args) }), run: async (sql, args = []) => sqlite.prepare(sql).run(...args), beginTransaction: async () => sqlite.exec('BEGIN'), commitTransaction: async () => sqlite.exec('COMMIT'), rollbackTransaction: async () => sqlite.exec('ROLLBACK') }
   const user = { id: 'owner', name: 'Owner', role: 'owner' }
   const sales = [{ id: 'sale', total: 10, paymentMethod: 'cash', items: [{ productId: 'item', quantity: 2, price: 5 }], paymentDetails: { pos: { customerId: 'customer' } } }]
@@ -18,6 +21,17 @@ function setup() {
   const call = (path, input, actor = user) => handlePos({ db, scope: 'shop', branchId: 'main', user: actor, path: `/api/pos/${path}`, method: 'POST', input, sales: async () => sales, publish: async record => { published.push(record) } })
   return { sqlite, db, call, sales, published }
 }
+
+test('restocked returns spanning several batches restore every batch exactly once',async()=>{
+  const {sqlite,db}=setup();try{
+    await ensurePos(db)
+    const record={id:'mixed',kind:'return',branchId:'main',updatedAt:new Date().toISOString(),saleId:'sale',reason:'Returned',items:[{lineIndex:0,productId:'item',quantity:3,restock:true,batchAllocations:[{id:'a',quantity:1,unitCost:2,expiry:'2099-01-01'},{id:'b',quantity:2,unitCost:5,expiry:'2099-02-01'}]}]}
+    await applyPosRecord(db,'shop',record);await applyPosRecord(db,'shop',record)
+    const batches=sqlite.prepare("SELECT id,quantity,unit_cost FROM stock_batches WHERE id IN ('a','b') ORDER BY id").all()
+    assert.deepEqual(batches.map(row=>[row.id,row.quantity,row.unit_cost]),[['a',1,2],['b',2,5]])
+    assert.equal(sqlite.prepare('SELECT stock FROM branch_inventory').get().stock,8)
+  }finally{sqlite.close()}
+})
 
 test('partial return restocks and credits the wallet with ledgers exactly once', async () => {
   const { sqlite, db, call } = setup()

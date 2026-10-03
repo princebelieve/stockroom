@@ -1,15 +1,16 @@
 # Stockroom Business
 
-Stockroom Business is an offline-first business operations app for organizations that manage products, stock, sales, customers, and staff. It is not limited to a particular business size or industry. The PWA is a complete installation option; the Windows installer and Android APK are optional clients for businesses that prefer installed apps.
+Stockroom Business is an offline-first business operations app for organizations that manage products, stock, sales, customers, and staff. Its implemented stock and checkout workflows suit retail shops and supermarkets. Business templates customize product forms and wording; they do not implement every sector's operating rules. The PWA is a complete installation option; the Windows installer and Android APK are optional clients for businesses that prefer installed apps.
 
 ## What the app does
 
 - **Inventory:** maintain products, SKUs and barcodes, categories, costs, prices, quantities, and reorder points; record stock movements and stocktakes.
 - **Point of sale:** record cash, bank transfer, manually confirmed external-terminal, split, and supported wallet payments. Sales reduce stock and produce receipts.
-- **Customers and wallets:** keep customer records, record deposits, repayments, and withdrawals, and track balances owed or prepaid. Wallet checkout availability depends on the client; it is not currently offered in the PWA.
+- **Customers and wallets:** keep customer records, record deposits, repayments, and withdrawals, and track balances owed or prepaid. Wallet checkout is available when enabled in the payment policy; only the owner can approve a credit purchase.
+- **Supermarket operations:** supplier orders, partial delivery receiving, pack conversions, supplier returns, wastage, optional expiry tracking, delivery-based costing and audited price/barcode changes. See [supermarket workflow](docs/supermarket-workspace.md).
 - **Sales operations:** review sales, receipts, payment evidence, cashier activity, and reports. Import provider CSV data for reconciliation without changing the original sales.
 - **Staff and access:** owners manage admin and cashier accounts. Cashiers can be limited to POS; owners can grant additional operational access.
-- **Business and device setup:** set the business name, logo, currency, payment policy, and device-specific printer or checkout settings. The device wizard records setup and test status; it does not provide direct payment-terminal integration.
+- **Business and device setup:** set the business name, logo, currency, payment policy, and device-specific printer or checkout settings. The device wizard records setup and test status; connected Paystack checkout uses a separate server configuration.
 - **Subscriptions and referrals:** owners can manage subscription payments and share business invitations. Visitor promoters can create an account, share a tracked link, and review verified rewards in their wallet.
 - **Account closure:** signed-in owners can deactivate a business and schedule cloud record deletion; visitor promoters can close their account from the promoter wallet. The developer sets the waiting period (90 days by default). Offline device copies are not remotely erased.
 
@@ -17,7 +18,7 @@ See [hardware setup](docs/hardware-setup.md), [subscription behavior](docs/subsc
 
 ### Easy shop setup
 
-Owners can open **Business settings → Shop setup** for a three-step wizard: choose a business template, customize fields, then preview and save. General purpose, printing, restaurant and other presets supply a starting point. Owners can rename labels, edit placeholders, reorder fields, remove/restore optional fields, and add up to 40 custom text, number, date or dropdown inputs. Custom fields can be required. Item names, catalogue names, usual units and suggested categories remain editable. Name, unit, stock and selling price remain available for stock and sales calculations.
+Owners can open **Business settings → Shop setup** for a three-step wizard: choose a business template, customize fields, then preview and save. General purpose, supermarket, printing, restaurant and other presets supply a starting point. Owners can rename labels, edit placeholders, reorder fields, remove/restore optional fields, and add up to 40 custom text, number, date or dropdown inputs. Custom fields can be required. Item names, catalogue names, usual units and suggested categories remain editable. Name, unit, stock and selling price remain available for stock and sales calculations.
 
 Upload a clear JPG, PNG or WebP screenshot/photo of an old app or printed form to read headings locally using the bundled English OCR engine. Pasted text also works. Review suggested labels and connect them to existing fields or new custom fields before applying them to the draft. This creates a starting form; it does not copy an old app's design, calculations or inventory data. No Google recognition service is required for template reading.
 
@@ -39,6 +40,16 @@ Barcode lookup uses Open Food Facts for packaged food when online; it is not a u
 
 Package names and sizes are text-based suggestions, not guaranteed image recognition. Invoice lines require owner selection; only clear, explicitly labelled unit-cost columns are extracted as cost. Ambiguous lines retain their original text for correction. Invoice quantities never become current stock automatically. The owner must enter selling price and current stock, including explicit zero where appropriate; blank cost and reorder values save as zero. Review the selling unit carefully for cartons versus individual items. Duplicate barcodes are blocked in selected rows and the loaded catalogue. Confirmed imported rows are removed immediately, so a later row failure preserves only the unfinished work. After an uncertain network failure, refresh inventory before retrying.
 
+### Simple supermarket use and switching from another app
+
+Product creation does not require a supplier, batch number or expiry date. Start with a name, selling unit, selling price and current stock. Supply the purchase cost for meaningful profit figures; category, barcode and reorder settings can be completed as needed. Batch identifiers are created automatically. Optional expiry fields live in an expandable section when receiving a delivery.
+
+For an existing catalogue, use CSV import and review the rows rather than re-enter every product from photos. The importer suggests familiar columns and lets owners map any other CSV headings. Existing barcode/SKU matches are skipped by default to preserve current records. Historical sales are not fabricated from a product list; existing supplier debt or credit can be entered as a supplier opening balance. See [product migration](docs/product-migration.md) for the supported columns and a cutover checklist.
+
+### Expenses and estimated profit
+
+The current-month estimate is net receipt revenue excluding checkout tax, minus net captured sold-stock costs, dated running expenses, recorded wastage, costed stock shortages and closed-register cash shortages, plus cash surplus. A negative result is a loss. Purchases remaining in stock are valued separately. Approved stock-count shortages and manual reductions capture the removed stock cost and deduct it from profit. Closed-register cash shortages are deducted and surplus is added. Zero or missing goods costs trigger a report warning; entering a new cost does not rewrite historical sale costs. See [report calculations and limits](docs/report-calculations.md).
+
 ## Offline work and synchronization
 
 Each client keeps its own local database:
@@ -55,10 +66,10 @@ Offline availability depends on data already downloaded and locally cached. New 
 
 ## Platform differences and limitations
 
-- **PWA:** supports browser-based inventory, POS, customers, expenses, reports, stocktakes, team functions, and sync, with some platform-specific limitations. Receipts use browser printing; physical terminal payments are recorded with manual references and confirmation. See the PWA guide for the current feature list and known limitations.
+- **PWA:** supports browser-based inventory, POS, customers, expenses, reports, stocktakes, team functions, and sync, with some platform-specific limitations. Receipts use browser printing; external terminal payments use manual confirmation or configured Paystack checkout. See the PWA guide for the current feature list and known limitations.
 - **Windows:** runs a local app service and SQLite database. Printer access uses installed Windows printer queues. The customer display and filesystem backup features are desktop-only.
 - **Android:** uses Capacitor and native SQLite. Printing opens Android's system print dialog and depends on a compatible print service.
-- **Payment terminals:** the app does not connect directly to payment providers. Staff confirm external payments from the provider's receipt or reference. OCR can suggest a reference from a receipt photo, but staff must verify payment status, amount, and currency.
+- **Payment terminals:** [connected Paystack Terminal](docs/paystack-terminal.md) is implemented for configured businesses. Other external terminals use staff confirmation from the provider's receipt or reference. OCR can suggest a reference from a receipt photo, but staff must verify payment status, amount, and currency.
 - **Device setup:** the wizard guides setup and records test status; unsupported hardware integrations remain unavailable. See [hardware setup](docs/hardware-setup.md).
 
 ## Business registration and sign-in

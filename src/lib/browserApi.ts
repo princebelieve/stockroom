@@ -1,3 +1,7 @@
+import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../server/stock-ledger.mjs'
+import { validQuantity } from '../../server/quantities.mjs'
+import { handleRetail, applyRetailRecord } from '../../server/retail.mjs'
+import { buildReports } from '../../server/reports.mjs'
 import { handlePos, ensurePos, applyPosRecord } from '../../server/pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from '../../server/shop-fields.mjs'
 import { normalizeShopProfile, validateShopProfile } from '../../server/shop-profile.mjs'
@@ -85,7 +89,10 @@ async function applyOperation(operation: Operation) {
   const seen = await db.query('SELECT operation_id FROM sync_inbox WHERE operation_id = ?', [operation.operationId])
   if (seen.values?.length) return
   const payload = operation.payload
-  if (operation.entityType === 'pos_record') {
+  if (operation.entityType === 'retail_record') {
+    await db.beginTransaction()
+    try { await applyRetailRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
+  } else if (operation.entityType === 'pos_record') {
     await ensurePos(db)
     await db.beginTransaction()
     try { await applyPosRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
@@ -99,6 +106,7 @@ async function applyOperation(operation: Operation) {
       if (!source || Number(source.stock) < Number(payload.quantity)) throw new Error('Transfer cannot sync because the source branch lacks sufficient stock.')
       await db.beginTransaction()
       try {
+        await stockTransfer(db,payload)
         await db.run('UPDATE branch_inventory SET stock=stock-?, updated_at=? WHERE branch_id=? AND product_id=?', [Number(payload.quantity), payload.createdAt || operation.createdAt, payload.fromBranchId, payload.productId])
         await db.run('INSERT INTO branch_inventory (branch_id,product_id,stock,reorder_point,updated_at) VALUES (?,?,?,0,?) ON CONFLICT(branch_id,product_id) DO UPDATE SET stock=branch_inventory.stock+excluded.stock, updated_at=excluded.updated_at', [payload.toBranchId, payload.productId, Number(payload.quantity), payload.createdAt || operation.createdAt])
         await db.run('INSERT OR IGNORE INTO inventory_movements (id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?)', [`${payload.id}:out`, payload.productId, -Number(payload.quantity), `Transfer to ${payload.toBranchId}: ${payload.reason}`, payload.createdAt || operation.createdAt, payload.fromBranchId])
@@ -117,21 +125,11 @@ async function applyOperation(operation: Operation) {
     const branchId = String(payload.branchId || 'main')
     await db.run('INSERT OR IGNORE INTO branches (id, name, address, is_default, created_at, updated_at) VALUES (?, ?, \'\', 0, ?, ?)', [branchId, branchId === 'main' ? 'Main branch' : 'Branch', operation.createdAt, operation.createdAt])
     await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE id = ?', [branchId, operation.createdAt, payload.productId])
-    await db.run('UPDATE branch_inventory SET stock = MAX(0, stock + ?), updated_at = ? WHERE product_id = ? AND branch_id = ?', [Number(payload.amount) || 0, operation.createdAt, payload.productId, branchId])
+    if(payload.stockEvent || Number(payload.amount)<0)await stockChange(db,payload.stockEvent || {id:operation.operationId,branchId,productId:payload.productId,delta:Number(payload.amount),createdAt:operation.createdAt,allowExpired:true})
+    await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [Number(payload.amount) || 0, operation.createdAt, payload.productId, branchId])
     await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [operation.operationId, payload.productId, Number(payload.amount) || 0, payload.reason || 'remote-adjustment', operation.createdAt, String(payload.branchId || 'main')])
   } else if (operation.entityType === 'sale' && operation.action === 'create') {
-    const existing = await db.query('SELECT id FROM sales WHERE id = ?', [payload.id])
-    if (!existing.values?.length) {
-      if (payload.paymentMethod === 'wallet') await debitSaleWallet(db, payload)
-      const branchId = String(payload.branchId || 'main')
-      await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, Number(payload.total), payload.paymentMethod || 'cash', payload.paymentReference || '', payload.terminalProvider || '', payload.staffId || '', payload.staffName || '', payload.createdAt || operation.createdAt, normalizeCashSale(payload).cashReceived, (payload.paymentDetails as { changeGiven?: unknown } | undefined)?.changeGiven ?? normalizeCashSale(payload).changeGiven, payload.paymentDetails ? JSON.stringify(payload.paymentDetails) : null, branchId])
-      for (const item of Array.isArray(payload.items) ? payload.items as Array<Record<string, unknown>> : []) {
-        const product = await db.query('SELECT name, cost_price AS cost FROM products WHERE id = ?', [item.productId])
-        await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), payload.id, item.productId, product.values?.[0]?.name || 'Product', Number(item.quantity), Number(item.price), Number(product.values?.[0]?.cost) || 0])
-        await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE id = ?', [branchId, operation.createdAt, item.productId])
-        await db.run('UPDATE branch_inventory SET stock = MAX(0, stock - ?) WHERE branch_id = ? AND product_id = ?', [Number(item.quantity), branchId, item.productId])
-      }
-    }
+    await applySyncedSale(db,payload,operation,debitSaleWallet)
   } else if (operation.entityType === 'sale_void' && operation.action === 'create') {
     await db.run('INSERT OR IGNORE INTO sale_item_voids (id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [payload.id, payload.orderId, payload.productId, payload.productName, Number(payload.quantity), Number(payload.unitPrice), payload.reason, payload.staffId || '', payload.staffName || '', payload.createdAt || operation.createdAt])
   } else if (operation.entityType === 'customer' && operation.action === 'upsert') {
@@ -151,7 +149,8 @@ async function applyOperation(operation: Operation) {
       if (!amount) continue
       if (!(await db.query('SELECT id FROM products WHERE id = ?', [count.productId])).values?.length) throw new Error('A stocktake references a missing product.')
       await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products WHERE id = ?', [branchId, operation.createdAt, count.productId])
-      await db.run('UPDATE branch_inventory SET stock = MAX(0, stock + ?), updated_at = ? WHERE branch_id = ? AND product_id = ?', [amount, operation.createdAt, branchId, count.productId])
+      if(count.stockEvent || amount<0)await stockChange(db,count.stockEvent || {id:`${payload.id}:count:${count.productId}`,branchId,productId:count.productId,delta:amount,createdAt:payload.approvedAt||operation.createdAt,allowExpired:true})
+      await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE branch_id = ? AND product_id = ?', [amount, operation.createdAt, branchId, count.productId])
       await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [id(), count.productId, amount, `Stocktake: ${payload.approvalReason || 'approved'}`, operation.createdAt, branchId])
     }
   } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
@@ -215,7 +214,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {
@@ -281,10 +280,6 @@ async function cachedStaff(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
   return rows.map(account => ({ ...account, operationalAccess: Boolean(account.operationalAccess) }))
 }
 
-function reportWindow(sales: Array<Record<string, unknown>>, since: number) {
-  const selected = sales.filter((sale) => new Date(String(sale.createdAt)).getTime() >= since)
-  return { total: selected.reduce((sum, sale) => sum + Number(sale.total || 0), 0), count: selected.length }
-}
 
 export async function handleBrowserApi(path: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase()
@@ -416,14 +411,15 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const input = await body(init), fromBranchId = String(input.fromBranchId || ''), toBranchId = String(input.toBranchId || ''), productId = String(input.productId || ''), quantity = Number(input.quantity), reason = String(input.reason || '').trim().slice(0, 250)
     if (fromBranchId !== branchId) return error('Select the source branch before transferring stock.')
     if (!permittedBranches.some(branch => branch.id === toBranchId && Number(branch.isActive))) return error('You do not have access to the destination branch.', 403)
-    if (!fromBranchId || !toBranchId || fromBranchId === toBranchId || !Number.isFinite(quantity) || quantity <= 0 || reason.length < 3) return error('Choose two different branches, a whole quantity, and a reason.')
+    if (!fromBranchId || !toBranchId || fromBranchId === toBranchId || !validQuantity(quantity, 0.001) || reason.length < 3) return error('Choose two different branches, a positive quantity, and a reason.')
     if (Number((await db.query('SELECT COUNT(*) AS count FROM branches WHERE id IN (?, ?) AND is_active=1', [fromBranchId, toBranchId])).values?.[0]?.count) !== 2) return error('Both branches must be active.')
     const source = (await db.query('SELECT stock FROM branch_inventory WHERE branch_id=? AND product_id=?', [fromBranchId, productId])).values?.[0]
     if (!source || Number(source.stock) < quantity) return error('The source branch does not have enough stock.')
     const destinationStock = (await db.query('SELECT stock FROM branch_inventory WHERE branch_id=? AND product_id=?', [toBranchId, productId])).values?.[0]
-    const transfer = { id: id(), fromBranchId, toBranchId, productId, quantity, reason, sourceBeforeStock: Number(source.stock), destinationBeforeStock: Number(destinationStock?.stock) || 0, createdAt: now() }
+    const transfer: any = { id: id(), fromBranchId, toBranchId, productId, quantity, reason, sourceBeforeStock: Number(source.stock), destinationBeforeStock: Number(destinationStock?.stock) || 0, createdAt: now() }
     await db.beginTransaction()
     try {
+      transfer.batchAllocations=await stockTransfer(db,transfer)
       await db.run('UPDATE branch_inventory SET stock=stock-?, updated_at=? WHERE branch_id=? AND product_id=?', [quantity, transfer.createdAt, fromBranchId, productId])
       await db.run('INSERT INTO branch_inventory (branch_id,product_id,stock,reorder_point,updated_at) VALUES (?,?,?,0,?) ON CONFLICT(branch_id,product_id) DO UPDATE SET stock=branch_inventory.stock+excluded.stock, updated_at=excluded.updated_at', [toBranchId, productId, quantity, transfer.createdAt])
       await db.run('INSERT INTO inventory_movements (id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?)', [`${transfer.id}:out`, productId, -quantity, `Transfer to ${toBranchId}: ${reason}`, transfer.createdAt, fromBranchId])
@@ -478,6 +474,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (!canOperate(user)) return error('Operational access is required.', 403)
     const input = await body(init); const name = String(input.name || '').trim(); const product = { id: id(), name, sku: String(input.sku || '').trim() || `${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24).toUpperCase() || 'PRODUCT'}-${crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase()}`, barcode: String(input.barcode || '').trim(), category: String(input.category || '').trim(), stock: Number(input.stock), reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0), unit: String(input.unit || '').trim(), updated: now() }
     if (!product.name || !product.sku || !product.category || !product.unit || [product.stock, product.reorder, product.price, product.cost].some((value) => !Number.isFinite(value) || value < 0)) return error('Product fields are invalid.')
+    if (!validQuantity(product.stock) || !validQuantity(product.reorder)) return error('Stock values must have at most three decimals.')
     let customValues: Record<string, string>
     try { const profile = normalizeShopProfile((await hydrateBusinessSettings()).shopProfile); validateCoreRequirements(product, profile); customValues = validateCustomValues(input.customValues, profile) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid custom fields.') }
     Object.assign(product, { customValues })
@@ -504,9 +501,18 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   const stock = path.match(/^\/api\/products\/([^/]+)\/stock$/)
   if (stock && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const input = await body(init); const amount = Number(input.amount); if (!Number.isInteger(amount) || amount === 0) return error('Stock amount must be a non-zero integer.')
+    const input = await body(init); const amount = Number(input.amount); if (!validQuantity(amount, -Number.MAX_SAFE_INTEGER) || amount === 0) return error('Stock amount must be non-zero with at most three decimals.')
     const product = (await db.query('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?', [stock[1], branchId])).values?.[0]; if (!product || Number(product.stock) + amount < 0) return error('Stock cannot be negative.')
-    const updated = now(); await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [amount, updated, stock[1], branchId]); await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [id(), stock[1], amount, 'manual-adjustment', updated, branchId]); await queue('stock', stock[1], 'adjust', { productId: stock[1], branchId, amount, beforeStock: Number(product.stock), reason: 'manual-adjustment', updatedAt: updated })
+    const updated = now(), eventId = id()
+    await db.beginTransaction()
+    try {
+      const stockEvent = await stockChange(db,{id:eventId,branchId,productId:stock[1],delta:amount,createdAt:updated,category:amount<0?'stock-loss':'stock-adjustment',reason:'manual-adjustment',allowExpired:true})
+      await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [amount, updated, stock[1], branchId])
+      await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [eventId, stock[1], amount, 'manual-adjustment', updated, branchId])
+      await queue('stock', stock[1], 'adjust', { productId: stock[1], branchId, amount, beforeStock: Number(product.stock), reason: 'manual-adjustment', updatedAt: updated, stockEvent })
+      await db.commitTransaction()
+    } catch(caught) { await db.rollbackTransaction(); return error(caught instanceof Error?caught.message:'Could not adjust stock.') }
+
     return json((await db.query('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [stock[1], branchId])).values?.[0])
   }
   if (path.startsWith('/api/integrations/')) {
@@ -518,6 +524,11 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
       return await originalFetch(`${config.syncApiUrl}${routes[path]}`, { method, headers: { Authorization: `Bearer ${config.deviceToken}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ ...await body(init), branchId }) }), signal: AbortSignal.timeout(45000) })
     } catch { return error('Could not reach the payment service. Check payment status before retrying.', 503) }
   }
+  if (path === '/api/retail') {
+    if (!isManager(user)) return error('Owner or admin access required for purchasing.', 403)
+    try { return json(await handleRetail({ currency: (await hydrateBusinessSettings()).currency, db, scope: 'business', branchId, user, method, input: method === 'GET' ? {} : await body(init), publish: (record: Record<string, unknown>) => queue('retail_record', String(record.id), 'create', record) }), method === 'GET' ? 200 : 201) }
+    catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not save purchasing changes.') }
+  }
   if (path.startsWith('/api/pos')) {
     try {
       return json(await handlePos({ db, scope: 'business', branchId, user, path, method, input: method === 'GET' ? {} : await body(init),
@@ -525,7 +536,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
           const loaded = (await db.query('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id=?', [branchId])).values || []
           for (const sale of loaded) {
             sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
-            sale.items = (await db.query('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid', [sale.id])).values || []
+            sale.items = (await db.query('SELECT product_id AS productId,product_name AS productName,quantity,unit_cost AS unitCost,batch_allocations AS batchAllocations,unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid', [sale.id])).values || []
           }
           return loaded
         }, publish: (record: Record<string, unknown>) => queue('pos_record', String(record.id), 'upsert', record) }))
@@ -551,14 +562,14 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
       if (!response.ok || !verified.paid || verified.amount !== sale.total || verified.currency !== sale.currency) return error('Paystack has not verified this sale amount and currency.')
       sale.terminalProvider = 'Paystack'; sale.paymentReference = verified.reference
     }
-    await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null, branchId]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT p.name, i.stock, p.cost_price AS cost FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [item.productId, branchId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); item.beforeStock = Number(product.stock); await db.run('UPDATE branch_inventory SET stock = stock - ? WHERE product_id = ? AND branch_id = ?', [Number(item.quantity), item.productId, branchId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, item.productName || product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
-    const payload = { ...sale, staffId: user.id, staffName: user.name }; await queue('sale', String(sale.id), 'create', payload); return json({ ...payload, syncStatus: 'pending' }, 201)
+    await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null, branchId]); for (const item of sale.items as Array<Record<string, unknown>>) { if (String(item.productId).startsWith('service:')) { const quantity = Number(item.quantity), price = Number(item.price); if (!String(item.productName || '').trim() || String(item.productName).length > 200 || !validQuantity(quantity, 0.001) || Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 0.000001 || !Number.isFinite(price) || price < 0) throw new Error('Enter a service description, positive quantity and valid price.'); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, item.productName, quantity, price, 0]); continue } const product = (await db.query('SELECT p.name, i.stock, p.cost_price AS cost FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [item.productId, branchId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); item.beforeStock = Number(product.stock); const allocation=await stockChange(db,{id:`${sale.id}:sale:${sale.items.indexOf(item)}`,branchId,productId:item.productId,delta:-Number(item.quantity),createdAt:sale.createdAt||now()});item.beforeStock=Number(product.stock);item.unitCost=allocation.unitCost;item.batchAllocations=allocation.allocations; await db.run('UPDATE branch_inventory SET stock = stock - ? WHERE product_id = ? AND branch_id = ?', [Number(item.quantity), item.productId, branchId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, item.productName || product.name, Number(item.quantity), Number(item.price), Number(item.unitCost) || 0]); await db.run('UPDATE sale_items SET batch_allocations=? WHERE sale_id=? AND id=(SELECT id FROM sale_items WHERE sale_id=? ORDER BY rowid DESC LIMIT 1)',[JSON.stringify(item.batchAllocations),sale.id,sale.id]) } await queue('sale', String(sale.id), 'create', { ...sale, staffId: user.id, staffName: user.name }); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
+    const payload = { ...sale, staffId: user.id, staffName: user.name }; return json({ ...payload, syncStatus: 'pending' }, 201)
   }
   if (path === '/api/sales' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
     const sales = (await db.query('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_name AS staffName, created_at AS createdAt FROM sales WHERE branch_id = ? ORDER BY created_at DESC', [branchId])).values || []
     for (const sale of sales) sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
-    for (const sale of sales) sale.items = (await db.query('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?', [sale.id])).values || []
+    for (const sale of sales) sale.items = (await db.query('SELECT product_id AS productId, product_name AS productName, quantity, unit_cost AS unitCost, batch_allocations AS batchAllocations, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?', [sale.id])).values || []
     return json({ sales })
   }
   if (path === '/api/sales/voids' && method === 'POST') {
@@ -566,7 +577,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const reason = String(input.reason || '').trim()
     const quantity = Number(input.quantity)
     const unitPrice = Number(input.unitPrice)
-    if (!String(input.id || '').trim() || !String(input.orderId || '').trim() || !String(input.productId || '').trim() || !String(input.productName || '').trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3 || reason.length > 500) return error('Select a valid item and enter a void reason of 3 to 500 characters.')
+    if (!String(input.id || '').trim() || !String(input.orderId || '').trim() || !String(input.productId || '').trim() || !String(input.productName || '').trim() || !validQuantity(quantity, 0.001) || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3 || reason.length > 500) return error('Select a valid item and enter a void reason of 3 to 500 characters.')
     const event = { id: String(input.id), orderId: String(input.orderId), productId: String(input.productId), productName: String(input.productName).trim().slice(0, 200), quantity, unitPrice, reason, branchId, staffId: user.id, staffName: user.name, createdAt: now() }
     await db.run('INSERT OR IGNORE INTO sale_item_voids (id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [event.id, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt, branchId])
     if ((await db.query('SELECT changes() AS changed')).values?.[0]?.changed) await queue('sale_void', event.id, 'create', event)
@@ -615,6 +626,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (!isManager(user)) return error('Owner or admin access required.', 403)
     const input = await body(init); const expense = { id: id(), category: String(input.category || '').trim(), description: String(input.description || '').trim(), amount: Number(input.amount), incurredAt: String(input.incurredAt || now()), createdAt: now(), branchId, staffId: user.id, staffName: user.name }
     if (!expense.category || !expense.description || !Number.isFinite(expense.amount) || expense.amount <= 0) return error('Expense category, description, and a positive amount are required.')
+    if (!Number.isFinite(Date.parse(expense.incurredAt))) return error('Enter a valid expense date.')
     await db.run('INSERT INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId, expense.staffId, expense.staffName]); await queue('expense', expense.id, 'create', expense); return json(expense, 201)
   }
   if (path === '/api/staff/activity' && method === 'GET') {
@@ -625,10 +637,17 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   }
   if (path === '/api/reports' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    const sales = (await db.query('SELECT total, created_at AS createdAt FROM sales WHERE branch_id = ?', [branchId])).values || []; const items = (await db.query('SELECT si.quantity, si.unit_price AS unitPrice, si.unit_cost AS unitCost FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.branch_id = ?', [branchId])).values || []; const products = (await db.query('SELECT COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder, p.price FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=?', [branchId])).values || []; const expenses = (await db.query('SELECT amount FROM expenses WHERE branch_id = ?', [branchId])).values || []
-    const today = new Date(); today.setHours(0, 0, 0, 0); const week = new Date(today); week.setDate(today.getDate() - 6); const month = new Date(today.getFullYear(), today.getMonth(), 1)
-    const revenue = sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0); const cost = items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitCost || 0), 0); const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
-    return json({ daily: reportWindow(sales, today.getTime()), weekly: reportWindow(sales, week.getTime()), monthly: reportWindow(sales, month.getTime()), inventory: { value: products.reduce((sum, product) => sum + Number(product.stock || 0) * Number(product.price || 0), 0), products: products.length, lowStock: products.filter((product) => Number(product.stock) <= Number(product.reorder)).length }, profit: { revenue, cost, expenses: expenseTotal, amount: revenue - cost - expenseTotal } })
+    await ensurePos(db)
+    const sales = (await db.query('SELECT id,total,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id = ?', [branchId])).values || []
+    const items = (await db.query('SELECT si.sale_id AS saleId,si.product_id AS productId,si.product_name AS productName,si.quantity, si.unit_cost AS unitCost FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.branch_id = ? ORDER BY si.rowid', [branchId])).values || []
+    const products = (await db.query('SELECT p.id,p.cost_price AS cost,COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder, p.price FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=?', [branchId])).values || []
+    const expenses = (await db.query('SELECT amount, incurred_at AS incurredAt FROM expenses WHERE branch_id = ?', [branchId])).values || []
+    const returns = ((await db.query("SELECT payload FROM pos_records WHERE scope = 'business' AND branch_id = ? AND kind = 'return'", [branchId])).values || []).map(row => JSON.parse(String(row.payload)))
+    const retail=((await db.query("SELECT payload FROM retail_records WHERE scope=? AND (branch_id=? OR kind='supplier')",['business',branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
+    const batchData=await batchReport(db,branchId)
+    const adjustments=(await db.query('SELECT payload FROM stock_events')).values.map(row=>JSON.parse(String(row.payload))).filter(row=>row.branchId===branchId && row.category==='stock-loss')
+    const registers=(await db.query("SELECT payload FROM pos_records WHERE scope='business' AND branch_id=? AND kind='register'",[branchId])).values.map(row=>JSON.parse(String(row.payload)))
+    return json(buildReports({ sales, items, products, expenses, returns,retail,batches:batchData.lots,adjustments,registers }))
   }
   if (path === '/api/reports/sales.csv' && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)

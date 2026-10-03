@@ -1,3 +1,4 @@
+import { migrateRetail } from '../../server/retail.mjs'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite'
 
@@ -157,13 +158,13 @@ export async function openMobileDatabase() {
       staff_name TEXT NOT NULL DEFAULT ''
     );
   `)
-  try { await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+  if (!(await connection.query('PRAGMA table_info(app_settings)')).values?.some(row => row.name === 'logo_data')) await connection.execute("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''")
   const branchColumns = await connection.query('PRAGMA table_info(branches)')
   if (!branchColumns.values?.some(row => row.name === 'is_active')) await connection.execute('ALTER TABLE branches ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1')
   const branchAccessColumns = await connection.query('PRAGMA table_info(branches)')
   if (!branchAccessColumns.values?.some(row => row.name === 'assigned_user_ids')) await connection.execute("ALTER TABLE branches ADD COLUMN assigned_user_ids TEXT NOT NULL DEFAULT '[]'")
   for (const table of ['inventory_movements', 'sales', 'expenses']) {
-    try { await connection.execute(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`) } catch {}
+    if (!(await connection.query(`PRAGMA table_info(${table})`)).values?.some(row => row.name === 'branch_id')) await connection.execute(`ALTER TABLE ${table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'`)
   }
   const expenseColumns = await connection.query('PRAGMA table_info(expenses)')
   if (!expenseColumns.values?.some(row => row.name === 'staff_id')) await connection.execute("ALTER TABLE expenses ADD COLUMN staff_id TEXT NOT NULL DEFAULT ''")
@@ -182,6 +183,9 @@ export async function openMobileDatabase() {
     const columns = await connection.query('PRAGMA table_info(sales)')
     if (!columns.values?.some(row => row.name === column)) await connection.execute(`ALTER TABLE sales ADD COLUMN ${column} REAL`)
   }
+  try { await migrateRetail(connection) } catch (error) { connection = null; throw error }
+  const nativeRun=connection.run.bind(connection)
+  connection.run=(statement,values,transaction=false,returnMode='no',isSQL92=true)=>nativeRun(statement,values,transaction,returnMode,isSQL92)
   return connection
 }
 

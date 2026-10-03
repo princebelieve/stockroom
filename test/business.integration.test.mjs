@@ -104,6 +104,57 @@ test('offline sale is committed locally and duplicate sale IDs do not reduce sto
   assert.equal(sales.body.sales.find(value => value.id === sale.id).changeGiven, 30)
 })
 
+test('supermarket reports handle multi-item receipts and returns, and stock transfers accept fractions', async () => {
+  const { baseUrl } = await startBusiness()
+  const token = await createOwner(baseUrl)
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const request = (path, body, method = 'POST') => json(`${baseUrl}${path}`, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const first = await product(baseUrl, token, 10)
+  const second = await product(baseUrl, token, 10)
+  const sale = { id: 'report-basket', items: [{ productId: first.id, quantity: 2, price: 10 }, { productId: second.id, quantity: 1, price: 10 }], total: 30, createdAt: new Date().toISOString(), paymentMethod: 'cash', cashReceived: 30 }
+  assert.equal((await request('/api/sales', sale)).response.status, 201)
+  assert.deepEqual((await request('/api/reports', undefined, 'GET')).body.profit, { revenue: 30, cost: 12, expenses: 0, amount: 18 })
+  const refund = { id: 'report-refund', saleId: sale.id, reason: 'Customer return', method: 'cash', items: [{ lineIndex: 0, quantity: 0.5, restock: true }] }
+  assert.equal((await request('/api/pos/returns', refund)).response.status, 200)
+  assert.equal((await request('/api/pos/returns', refund)).response.status, 200)
+  assert.deepEqual((await request('/api/reports', undefined, 'GET')).body.profit, { revenue: 25, cost: 10, expenses: 0, amount: 15 })
+  const destination = await request('/api/branches', { name: 'Second branch' })
+  assert.equal(destination.response.status, 201)
+  const transfer = await request('/api/branch-transfers', { fromBranchId: 'main', toBranchId: destination.body.id, productId: first.id, quantity: 0.25, reason: 'Measured stock transfer' })
+  assert.equal(transfer.response.status, 201, JSON.stringify(transfer.body))
+  const stock = (await request('/api/products', undefined, 'GET')).body.products.find(row => row.id === first.id).stock
+  assert.equal(stock, 8.25)
+})
+
+test('supermarket supplier cash settlement, stock shortages and till shortages reconcile end to end', async()=>{
+  const {baseUrl}=await startBusiness()
+  const token=await createOwner(baseUrl)
+  const headers={'Content-Type':'application/json',Authorization:`Bearer ${token}`}
+  const request=async(path,body,method='POST')=>{
+    const result=await json(`${baseUrl}${path}`,{method,headers,...(body?{body:JSON.stringify(body)}:{})})
+    assert.ok(result.response.ok,JSON.stringify(result.body));return result.body
+  }
+  const item=await product(baseUrl,token,10)
+  const register=await request('/api/pos/registers',{action:'open',amount:100})
+  await request('/api/retail',{id:'cash-supplier',kind:'supplier',name:'Wholesale'})
+  await request('/api/retail',{id:'cash-delivery',kind:'receipt',supplierId:'cash-supplier',reference:'INV',amountPaid:12,paymentMethod:'cash',lines:[{productId:item.id,quantity:4,unitCost:6}]})
+  await request('/api/retail',{id:'cash-payment',kind:'supplier-payment',supplierId:'cash-supplier',reference:'PAY',amount:10,method:'cash'})
+  await request('/api/retail',{id:'cash-return',kind:'supplier-return',supplierId:'cash-supplier',receiptId:'cash-delivery',reference:'RETURN',lines:[{productId:item.id,quantity:1}]})
+  await request('/api/retail',{id:'cash-refund',kind:'supplier-refund',supplierId:'cash-supplier',reference:'REFUND',amount:4,method:'cash'})
+  const closed=await request('/api/pos/registers',{id:register.id,action:'close',amount:80,reason:'Two naira short'})
+  assert.equal(closed.expectedCash,82);assert.equal(closed.difference,-2)
+  await request(`/api/products/${item.id}/stock`,{amount:-2,reason:'Damaged stock'})
+  const count=await request('/api/stocktakes',{})
+  const line=count.counts.find(row=>row.productId===item.id)
+  await request(`/api/stocktakes/${count.id}/counts/${line.id}`,{counted:line.expected-1},'PUT')
+  await request(`/api/stocktakes/${count.id}/approve`,{reason:'Shelf shortage'})
+  const report=await request('/api/reports',undefined,'GET')
+  assert.equal(report.supermarket.stockLoss,12)
+  assert.equal(report.supermarket.cashShortage,2)
+  assert.equal(report.supermarket.suppliers.find(row=>row.id==='cash-supplier').balance,0)
+  assert.equal(report.profit.amount,-14)
+})
+
 test('wallet payments require owner settings, debit once, allow approved debt and record repayments', async () => {
   const { baseUrl, dataDirectory } = await startBusiness()
   const token = await createOwner(baseUrl)
@@ -345,4 +396,44 @@ test('existing installer registration sends its enrolled device credential to cl
   assert.equal(result.response.status, 201)
   assert.equal(received.authorization, 'Bearer test-device-token')
   assert.equal(received.body.businessId, 'test-business')
+})
+
+
+test('purchasing API preserves existing data, receives cartons once, and writes durable migration and sync records', async () => {
+  const {baseUrl,dataDirectory,serverPort}=await startBusiness()
+  const token=await createOwner(baseUrl)
+  const item=await product(baseUrl,token,5)
+  const headers={ 'Content-Type':'application/json',Authorization:`Bearer ${token}` }
+  const send=input=>json(`${baseUrl}/api/retail`,{method:'POST',headers,body:JSON.stringify(input)})
+  const invalidSale={id:'invalid-purchasing-sale',items:[{productId:item.id,quantity:-1,price:10}],total:10,paymentMethod:'cash',cashReceived:10,createdAt:new Date().toISOString()}
+  assert.equal((await json(`${baseUrl}/api/sales`,{method:'POST',headers,body:JSON.stringify(invalidSale)})).response.status,400)
+  assert.equal((await json(`${baseUrl}/api/products`,{headers})).body.products[0].stock,5)
+
+  assert.equal((await json(`${baseUrl}/api/retail`)).response.status,403)
+  assert.equal((await send({id:'supplier-1',kind:'supplier',name:'Wholesale'})).response.status,201)
+  assert.equal((await send({id:'pack-1',kind:'conversion',productId:item.id,label:'Carton',factor:24})).response.status,201)
+  const delivery={id:'delivery-1',kind:'receipt',supplierId:'supplier-1',reference:'Invoice-1',lines:[{productId:item.id,quantity:2,conversionId:'pack-1',unitCost:96}]}
+  assert.equal((await send(delivery)).response.status,201)
+  assert.equal((await send(delivery)).response.status,201)
+  assert.equal((await json(`${baseUrl}/api/products`,{headers})).body.products[0].stock,53)
+  const db=new DatabaseSync(join(dataDirectory,'stockroom.sqlite'))
+  try {
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM retail_records WHERE kind='receipt'").get().n,1)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE entity_type='retail_record'").get().n,3)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n,2)
+  } finally {db.close()}
+  await stop(processes.at(-1))
+  const legacy=new DatabaseSync(join(dataDirectory,'stockroom.sqlite'))
+  legacy.exec("DELETE FROM schema_migrations WHERE module='retail'")
+  legacy.close()
+  const child=spawn(process.execPath,['server/index.mjs'],{env:{...process.env,PORT:String(serverPort),CUSTOMER_DISPLAY_PORT:String(serverPort+100),STOCKROOM_DATA_DIR:dataDirectory,SYNC_CONFIG_PATH:join(dataDirectory,'sync-config.json')},stdio:'ignore'})
+  processes.push(child)
+  for(let attempt=0;attempt<80;attempt++){try{if((await fetch(`${baseUrl}/api/health`)).ok)break}catch{};await new Promise(resolve=>setTimeout(resolve,50))}
+  assert.equal((await json(`${baseUrl}/api/products`,{headers})).body.products[0].stock,53)
+  const {readdir}=await import('node:fs/promises')
+  const backup=(await readdir(dataDirectory)).find(name=>name.startsWith('pre-retail-upgrade-'))
+  assert.ok(backup,'An established database is backed up before migrating')
+  const snapshot=new DatabaseSync(join(dataDirectory,backup),{readOnly:true})
+  try { assert.equal(snapshot.prepare('SELECT stock FROM branch_inventory WHERE product_id=?').get(item.id).stock,53) }
+  finally {snapshot.close()}
 })

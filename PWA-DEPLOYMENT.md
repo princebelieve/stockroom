@@ -96,8 +96,8 @@ those devices and must be cleared separately.
   began, and refuses any adjustment that would make local stock negative.
   Update the Android APK before relying on it to receive stocktake approvals;
   this change adds the missing Android reader for those sync operations.
-- Customer balance adjustments are supported; wallet-funded checkout is not yet
-  offered in the PWA. Physical terminal and printer support depends on the browser;
+- Customer balance adjustments and policy-enabled wallet checkout are supported;
+  credit approval is owner-only. Physical terminal and printer support depends on the browser;
   external-terminal payments use manual references and receipts use browser print.
 
 Before live use, verify on the actual iPhone: enrollment, login/logout, an offline
@@ -115,3 +115,9 @@ npm.cmd run desktop:package
 ```
 
 These continue to produce the Android APK and Windows installer in `release`.
+
+## Supermarket update compatibility
+
+Deploy the updated cloud service before updating Windows, Android and PWA clients. The purchasing/batch sync protocol is `retail-v3`; older clients are asked to update rather than consume records they cannot apply. No production deployment is implied by a successful local build.
+
+The PWA implements supplier orders, partial receiving, pack conversions, supplier returns, wastage, optional expiry tracking and shared report calculations. Batch/expiry entry is optional and hidden in receiving until expanded. See [supermarket workflow](docs/supermarket-workspace.md) and [report limits](docs/report-calculations.md). Existing browser data is migrated, not replaced; do not clear local storage during an upgrade.

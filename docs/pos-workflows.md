@@ -1,5 +1,7 @@
 # POS workflows
 
+For service businesses, open **POS → Charge for a service**. Enter a description (for example, A4 DI printing from a customer-supplied design), quantity and price per unit, then **Add service to basket**. Use **Take payment** and **Complete sale** to save the receipt, then print or share it using the existing receipt actions. A service needs no inventory product and does not deduct stock. Goods and services can share a basket. Service descriptions survive held baskets, saved drafts, receipts and synchronization. Service refunds never restock inventory. These are immediate charges; booking, job tracking and deposits are not included.
+
 Unpaid baskets are saved on the current device per staff member and branch. **Hold sale** saves a named basket for later; hold or clear the current basket before resuming another. The existing explicit void action keeps its reason requirement. Ordinary quantity changes do not ask for a reason.
 
 Owners and admins can add a fixed or percentage basket discount and override a selling price. Weighted quantities support three decimal places. Product variants use separate existing SKUs; **Product variants and extras** groups those products and adds optional priced extras. Extras do not deduct separate ingredient inventory.
@@ -16,4 +18,10 @@ Receipts can be printed, downloaded, copied, shared, or sent by the existing ser
 
 Integrated terminal checkout uses [Paystack Terminal](paystack-terminal.md). Manually confirmed terminals, bank transfers, and split payments retain their existing reference requirements. Connected Paystack currently handles the full sale amount; split terminal payments remain manually confirmed.
 
-Held baskets, register sessions, and returns synchronize as POS records. Offline work on different devices is not a globally locked checkout: synchronize before resuming shared baskets or processing returns, and keep a register session on one device. Cross-device simultaneous returns and register edits still need central coordination.
+Held baskets, register sessions, and returns synchronize as POS records. Offline work on different devices is not a globally locked checkout: synchronize before resuming shared baskets or processing returns, and keep a register session on one device. Cloud coordination detects exceeded return quantities and stock balances, while revision checks reject stale shared basket/register edits. Independently offline tills cannot reserve stock or prevent simultaneous returns; retained receipts and reported conflicts need owner review.
+
+## Supermarket checkout and reports
+
+Ordinary product entry requires no expiry date or batch label. Checkout automatically allocates the earliest unexpired recorded stock, then stock with no recorded expiry. Recorded expired stock cannot be sold. Transfers and restocked refunds preserve batch information. A physical cashier must still pick the appropriate dated stock: the app cannot observe which packet was taken from a shelf.
+
+Returns preserve the selected batches' costs and cumulative tax rounding. Goods not restocked retain their sold cost. Reports subtract refunds when recorded and include running expenses and recorded wastage; see [report calculations](report-calculations.md).

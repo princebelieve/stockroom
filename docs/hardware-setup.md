@@ -6,7 +6,7 @@ Cash checkout requires the amount received, blocks underpayment, and calculates
 change in cents. Tender and change are saved in receipt snapshots, the sales
 database and sync payloads. Older sales without tender details keep them unknown.
 
-Terminal payments use cashier confirmation, not a direct provider connection.
+Manually recorded terminal payments use cashier confirmation. Configured businesses can also use the separate [Paystack Terminal integration](paystack-terminal.md).
 Cashiers can scan a reference barcode/QR, type a reference, or choose a JPG/PNG/
 WebP receipt photo (up to 15 MB). English OCR runs locally using bundled Tesseract
 assets. The image/full OCR text is not stored or uploaded; only the reviewed
@@ -27,13 +27,12 @@ displays. Each flow identifies the device, saves its operational settings, then
 offers a supported test and an explicit confirmation of the observed result.
 Users can finish without testing; the status then remains "Configured — test
 needed". Unsupported connections are labelled "Integration unavailable" and
-cannot be marked tested. Terminal setup always identifies automatic payment
-integration as unavailable, including when manual fallback is allowed.
+cannot be marked tested. Ordinary terminal profiles do not activate an adapter; connected Paystack checkout requires the separate server configuration.
 
 Model names come from the device label/manual; there is no claimed catalog of
 certified models. Printer drivers/services determine supported printer models,
 ESC/POS settings determine drawer/cutter compatibility, and payment profiles
-remain manual until a provider adapter exists. The wizard does not download
+use manual confirmation except for the configured Paystack adapter. The wizard does not download
 drivers or send a payment. Device model/test records are scoped to the business
 and browser/device; underlying printer, drawer, scanner and display preferences
 are shared on that device. Changes to operational settings invalidate old test
@@ -81,7 +80,9 @@ Commands time out after five seconds and are not retried automatically. A
 successful send only confirms transport completion, not drawer/cutter movement.
 Check the device after an error before sending another command.
 
-## Remaining acceptance work
+## Device-specific checks when changing equipment
+
+These checks apply when installing a new client or changing equipment. They do not imply that the two shops already using Stockroom must restart hardware acceptance before using the supermarket workflow.
 
 - Build/install the updated Android APK and test printing, cancellation, repeat
   jobs, app close/reopen, Save as PDF, both roll widths, long receipts, and A4.
@@ -93,8 +94,8 @@ Check the device after an error before sending another command.
   permission denial, and all supported device/browser combinations.
 - Verify customer-display pairing, expiry, reconnection, secondary monitors,
   and app restart. Dedicated scanner/display automated coverage remains limited.
-- Direct payment-terminal integration is outside the selected receipt-confirmation
-  workflow. It is not a release requirement for manual receipt recording. Test
+- Paystack is the implemented connected-terminal option; other providers remain
+  manually confirmed. Test
   actual terminal receipt photos/barcodes and cashier confirmation instead.
 
 ## Implementation references

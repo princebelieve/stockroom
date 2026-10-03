@@ -35,6 +35,7 @@ try {
   await page.getByLabel('Remove row 1').click()
   // CSV quoting, explicit zero, and partial failure retry.
   await page.getByLabel('CSV product file').setInputFiles({ name: 'products.csv', mimeType: 'text/csv', buffer: Buffer.from('Name,Price,Stock\n"Juice, orange",10,0\nSoap,20,2') })
+  await page.getByRole('button',{name:'Load mapped products for review'}).click()
   await page.getByLabel('Name row 2', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Import 2 reviewed products' }).click()
   await page.getByRole('status').filter({ hasText: 'Simulated save failure' }).waitFor()

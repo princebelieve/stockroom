@@ -1,3 +1,4 @@
+import { migrateRetail } from '../../server/retail.mjs'
 import initSqlJs, { type Database, type SqlValue } from 'sql.js'
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 import { browserSchema } from './browserSchema'
@@ -53,10 +54,10 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
       if (!expenseColumns.some(row => row[1] === 'staff_id')) current.run("ALTER TABLE expenses ADD COLUMN staff_id TEXT NOT NULL DEFAULT ''")
       const expenseColumnsAfter = current.exec('PRAGMA table_info(expenses)')[0]?.values || []
       if (!expenseColumnsAfter.some(row => row[1] === 'staff_name')) current.run("ALTER TABLE expenses ADD COLUMN staff_name TEXT NOT NULL DEFAULT ''")
-      try { current.run("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''") } catch {}
+      if (!current.exec('PRAGMA table_info(app_settings)')[0]?.values.some(row => row[1] === 'logo_data')) current.run("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''")
       if (!current.exec('PRAGMA table_info(users)')[0].values.some(row => row[1] === 'username')) current.run("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
-      try { current.run("ALTER TABLE products ADD COLUMN custom_values TEXT NOT NULL DEFAULT '{}'") } catch {}
-      try { current.run("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''") } catch {}
+      if (!current.exec('PRAGMA table_info(products)')[0]?.values.some(row => row[1] === 'custom_values')) current.run("ALTER TABLE products ADD COLUMN custom_values TEXT NOT NULL DEFAULT '{}'")
+      if (!current.exec('PRAGMA table_info(products)')[0]?.values.some(row => row[1] === 'barcode')) current.run("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''")
       if (!current.exec('PRAGMA table_info(app_settings)')[0].values.some(row => row[1] === 'payment_policy')) current.run("ALTER TABLE app_settings ADD COLUMN payment_policy TEXT NOT NULL DEFAULT '{}'")
       if (!current.exec('PRAGMA table_info(app_settings)')[0].values.some(row => row[1] === 'shop_profile')) current.run("ALTER TABLE app_settings ADD COLUMN shop_profile TEXT NOT NULL DEFAULT 'null'")
       if (!current.exec('PRAGMA table_info(sales)')[0].values.some(row => row[1] === 'payment_details')) current.run('ALTER TABLE sales ADD COLUMN payment_details TEXT')
@@ -64,7 +65,13 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
         const info = current.exec('PRAGMA table_info(sales)')[0]
         if (!info.values.some(row => row[1] === column)) current.run(`ALTER TABLE sales ADD COLUMN ${column} REAL`)
       }
-      dirty = false
+      await migrateRetail({
+        execute: (sql: string) => current!.run(sql),
+        run: (sql: string, params: any[] = []) => current!.run(sql, params),
+        query: (sql: string, params: any[] = []) => { const statement = current!.prepare(sql); try { statement.bind(params); const values = []; while (statement.step()) values.push(statement.getAsObject()); return { values } } finally { statement.free() } },
+        beginTransaction: () => current!.run('BEGIN'), commitTransaction: () => current!.run('COMMIT'), rollbackTransaction: () => current!.run('ROLLBACK')
+      })
+      dirty = true
       current.run('BEGIN')
       try {
         const response = await action()

@@ -23,7 +23,7 @@ export const businessModes = {
   books: { label: 'Books, media, and learning materials', unit: 'piece', note: 'For books, publications, and media.' },
   hardware: { label: 'Hardware, tools, and equipment', unit: 'piece', note: 'For tools, fittings, and equipment.' },
   hospitality: { label: 'Hospitality, events, and entertainment', unit: 'piece', note: 'For event stock, venue supplies, and hospitality goods.' },
-  bulk: { label: 'Bulk or measured goods', unit: 'kg', note: 'New products default to kg. This is a unit label only; stock and sales remain whole quantities in this release.' },
+  bulk: { label: 'Bulk or measured goods', unit: 'kg', note: 'New products default to kg. Stock and sales support quantities with up to three decimal places.' },
   services: { label: 'Services and non-stock items', unit: 'service', note: 'For services or fees tracked as saleable items.' },
 }
 
@@ -59,8 +59,20 @@ export function normalizeShopProfile(input) {
     if (Array.isArray(input.categories)) value.categories = [...new Set(input.categories.filter(item => typeof item === 'string').map(item => item.trim().slice(0, 80)).filter(Boolean))].slice(0, 30)
   }
   value.fields = normalizeFields(input.fields, industry, value.itemLabel)
+  value.features = { services: typeof input.features?.services === 'boolean' ? input.features.services : industry !== 'supermarket' }
   value.version = 2
   return value
+}
+
+export function businessWorkspace(profile) {
+  const value = normalizeShopProfile(profile)
+  const supermarket = value.industry === 'supermarket'
+  return {
+    checkoutLabel: supermarket ? 'Checkout' : 'Sell (POS)',
+    overviewTitle: supermarket ? 'Supermarket at a glance' : 'Business at a glance',
+    overviewDescription: supermarket ? 'Review checkout sales, stock levels, and daily operations.' : 'Review business health, stock, and team activity.',
+    services: value.features.services,
+  }
 }
 
 export function validateShopProfile(input) {

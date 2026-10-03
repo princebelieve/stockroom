@@ -32,3 +32,14 @@ test('successive partial returns refund the original discounted tax-inclusive am
   assert.throws(() => refundFor(sale, previous, [{ lineIndex: 0, quantity: 1 }]), /remaining/)
   assert.throws(() => refundFor(sale, [], [{ lineIndex: 0, quantity: 1 }, { lineIndex: 0, quantity: 1 }]), /once/)
 })
+
+test('partial returns preserve the actual returned batch cost and cumulative tax rounding', () => {
+  const items = [{ productId: 'milk', quantity: 3, price: 0.99, unitCost: 4,
+    batchAllocations: [{ id: 'first', quantity: 1, unitCost: 2 }, { id: 'second', quantity: 2, unitCost: 5 }] }]
+  const pricing = priceOrder(items, { tax: { taxEnabled: true, taxRate: 7.5 } })
+  const sale = { items, paymentDetails: { pos: { pricing } } }
+  const returns = []
+  for (let i = 0; i < 3; i++) returns.push(refundFor(sale, returns, [{ lineIndex: 0, quantity: 1, restock: true }]))
+  assert.deepEqual(returns.map(record => record.items[0].unitCost), [2, 5, 5])
+  assert.equal(Math.round(returns.reduce((sum, record) => sum + record.items[0].tax, 0) * 100), Math.round(pricing.tax * 100))
+})

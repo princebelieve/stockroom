@@ -1,3 +1,5 @@
+import { stockChange } from '../../server/stock-ledger.mjs'
+import { validQuantity } from '../../server/quantities.mjs'
 import { openBrowserDatabase } from './browserDatabase'
 import type { Stocktake } from '../types'
 
@@ -36,7 +38,7 @@ export async function browserStocktake(path: string, init: RequestInit | undefin
   const input = JSON.parse(String(init?.body || '{}'))
   if (match[3] && method === 'PUT') {
     if (session.status !== 'draft') return fail('Approved stocktakes cannot be edited.', 409)
-    if (!Number.isInteger(input.counted) || input.counted < 0) return fail('Count must be a whole number zero or greater.')
+    if (!validQuantity(input.counted) || input.counted < 0) return fail('Count must have at most three decimals and be zero or greater.')
     const count = session.counts.find(item => item.id === match[3])
     if (!count) return fail('Stocktake item not found.', 404)
     count.counted = input.counted
@@ -54,12 +56,13 @@ export async function browserStocktake(path: string, init: RequestInit | undefin
       const product = (await db.query('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?', [count.productId, branchId])).values[0]
       if (!product || Number(product.stock) + count.variance < 0) return fail(`Cannot approve: insufficient current stock for ${count.name}. Review the count.`)
     }
-    // Publish only completed sessions. Drafts stay on their originating browser,
-    // avoiding concurrent approval of the same unfinished count on other devices.
-    await queue('stocktake', session.id, 'create', { ...session, status: 'approved', approvalReason: reason, approvedAt })
+    await db.beginTransaction()
+    try {
     session.history = []
     for (const count of session.counts) {
       if (!count.variance) continue
+      const before=(await db.query('SELECT stock FROM branch_inventory WHERE product_id=? AND branch_id=?',[count.productId,branchId])).values[0]
+      Object.assign(count,{beforeStock:Number(before.stock),stockEvent:await stockChange(db,{id:`${session.id}:count:${count.productId}`,branchId,productId:count.productId,delta:count.variance,createdAt:approvedAt,category:count.variance<0?'stock-loss':'stock-adjustment',reason,allowExpired:true})})
       await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [count.variance, approvedAt, count.productId, branchId])
       const movementId = crypto.randomUUID()
       await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [movementId, count.productId, count.variance, reason, approvedAt, branchId])
@@ -69,7 +72,10 @@ export async function browserStocktake(path: string, init: RequestInit | undefin
     session.approvalReason = reason
     session.approvedAt = approvedAt
     await save(session)
+    await queue('stocktake', session.id, 'create', { ...session })
     await queue('stocktake', session.id, 'approved', { ...session })
+    await db.commitTransaction()
+    } catch(caught) { await db.rollbackTransaction(); return fail(caught instanceof Error?caught.message:'Could not approve stocktake.') }
     return Response.json(session)
   }
   return fail('Method not allowed.', 405)

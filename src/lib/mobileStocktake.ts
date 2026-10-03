@@ -1,3 +1,5 @@
+import { stockChange } from '../../server/stock-ledger.mjs'
+import { validQuantity } from '../../server/quantities.mjs'
 import type { Stocktake } from '../types'
 import { openMobileDatabase } from './mobileDatabase'
 
@@ -36,7 +38,7 @@ export async function mobileStocktake(path: string, init: RequestInit | undefine
   const input = JSON.parse(String(init?.body || '{}')) as { counted?: unknown; reason?: unknown }
   if (match[3] && method === 'PUT') {
     if (session.status !== 'draft') return fail('Approved stocktakes cannot be edited.', 409)
-    if (!Number.isInteger(input.counted) || Number(input.counted) < 0) return fail('Count must be a whole number zero or greater.')
+    if (!validQuantity(input.counted) || Number(input.counted) < 0) return fail('Count must have at most three decimals and be zero or greater.')
     const count = session.counts.find(item => item.id === match[3])
     if (!count) return fail('Stocktake item not found.', 404)
     count.counted = Number(input.counted); count.variance = count.counted - count.expected
@@ -53,8 +55,12 @@ export async function mobileStocktake(path: string, init: RequestInit | undefine
       const product = (await db.query('SELECT stock FROM branch_inventory WHERE product_id = ? AND branch_id = ?', [count.productId, branchId])).values?.[0]
       if (!product || Number(product.stock) + count.variance < 0) return fail(`Cannot approve: insufficient current stock for ${count.name}. Review the count.`)
     }
+    await db.beginTransaction()
+    try {
     for (const count of session.counts) {
       if (!count.variance) continue
+      const before=(await db.query('SELECT stock FROM branch_inventory WHERE product_id=? AND branch_id=?',[count.productId,branchId])).values![0]
+      Object.assign(count,{beforeStock:Number(before.stock),stockEvent:await stockChange(db,{id:`${session.id}:count:${count.productId}`,branchId,productId:count.productId,delta:count.variance,createdAt:approvedAt,category:count.variance<0?'stock-loss':'stock-adjustment',reason,allowExpired:true})})
       await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [count.variance, approvedAt, count.productId, branchId])
       const movementId = crypto.randomUUID()
       await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [movementId, count.productId, count.variance, reason, approvedAt, branchId]);
@@ -62,7 +68,10 @@ export async function mobileStocktake(path: string, init: RequestInit | undefine
     }
     session.status = 'approved'; session.approvalReason = reason; session.approvedAt = approvedAt
     await save(session)
+    await queue('stocktake', session.id, 'create', { ...session })
     await queue('stocktake', session.id, 'approved', { ...session })
+    await db.commitTransaction()
+    } catch(caught) { await db.rollbackTransaction(); return fail(caught instanceof Error?caught.message:'Could not approve stocktake.') }
     return new Response(JSON.stringify(session), { headers: { 'Content-Type': 'application/json' } })
   }
   return fail('Method not allowed.', 405)

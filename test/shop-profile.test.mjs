@@ -1,7 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { businessModes, normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
+import { businessModes, businessWorkspace, normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
 import { validateCustomValues, readCustomValues } from '../server/shop-fields.mjs'
+
+test('supermarket workspace defaults and owner feature overrides survive normalization', () => {
+  const profile = normalizeShopProfile({ mode: 'suggested', industry: 'supermarket' })
+  assert.equal(businessWorkspace(profile).checkoutLabel, 'Checkout')
+  assert.equal(businessWorkspace(profile).services, false)
+  const enabled = validateShopProfile({ ...profile, features: { services: true } })
+  assert.equal(businessWorkspace(JSON.stringify(enabled)).services, true)
+  assert.equal(businessWorkspace({ mode: 'suggested', industry: 'services' }).services, true)
+})
 
 test('general setup and every suggestion have valid defaults', () => {
   assert.equal(normalizeShopProfile().inventoryLabel, 'Inventory')
