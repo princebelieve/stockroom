@@ -1,3 +1,4 @@
+import { validatePosSale } from './pos-pricing.mjs'
 export const extraReasons = { tip: 'Voluntary tip', rounding: 'Agreed rounding', donation: 'Voluntary donation', other: 'Other — explanation required' }
 export function paymentPolicy(value) {
   if (typeof value === 'string') { try { value = JSON.parse(value) } catch { value = {} } }
@@ -10,7 +11,7 @@ function cents(value, label) {
   if (!Number.isSafeInteger(n)) throw new Error(`${label} is too large.`)
   return n
 }
-export function recordPayment(sale, policyInput, legacy = false) {
+function paymentResult(sale, policyInput, legacy = false) {
   const policy = paymentPolicy(policyInput)
   if (!['cash', 'external-pos', 'bank-transfer', 'multiple', 'wallet'].includes(sale.paymentMethod)) throw new Error('Select a supported payment method.')
   if (legacy && !sale.paymentDetails) return sale
@@ -57,4 +58,11 @@ export function recordPayment(sale, policyInput, legacy = false) {
   if (['external-pos', 'bank-transfer'].includes(sale.paymentMethod) && (!String(sale.paymentReference || '').trim() || !String(sale.terminalProvider || '').trim())) throw new Error(`Record the ${sale.paymentMethod === 'bank-transfer' ? 'bank or transfer provider' : 'terminal provider'} and payment reference.`)
   const change = (paid - total - extra) / 100
   return { ...sale, cashReceived: isCashPayment ? paid / 100 : null, changeGiven: isCashPayment ? change : null, paymentDetails: { version: 1, amountReceived: paid / 100, changeGiven: change, extraKept: extra / 100, reason: extra ? reason : sale.paymentMethod === 'bank-transfer' && paid > total ? 'change-returned' : '', note: extra ? note : '', printExtraDetails: policy.printExtraDetails, policy } }
+}
+
+export function recordPayment(sale, policyInput, legacy = false) {
+  const validated = validatePosSale(sale)
+  const result = paymentResult(validated, policyInput, legacy)
+  if (validated.paymentDetails?.pos) result.paymentDetails = { ...result.paymentDetails, pos: validated.paymentDetails.pos }
+  return result
 }

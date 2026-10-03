@@ -1,3 +1,4 @@
+import { handlePos, ensurePos, applyPosRecord } from '../../server/pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from '../../server/shop-fields.mjs'
 import { normalizeShopProfile, validateShopProfile } from '../../server/shop-profile.mjs'
 import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
@@ -84,7 +85,11 @@ async function applyOperation(operation: Operation) {
   const seen = await db.query('SELECT operation_id FROM sync_inbox WHERE operation_id = ?', [operation.operationId])
   if (seen.values?.length) return
   const payload = operation.payload
-  if (operation.entityType === 'branch' && operation.action === 'upsert') {
+  if (operation.entityType === 'pos_record') {
+    await ensurePos(db)
+    await db.beginTransaction()
+    try { await applyPosRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
+  } else if (operation.entityType === 'branch' && operation.action === 'upsert') {
     await db.run('INSERT INTO branches (id, name, address, is_default, is_active, assigned_user_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, is_active=excluded.is_active, assigned_user_ids=excluded.assigned_user_ids, updated_at=excluded.updated_at', [payload.id, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.isActive === false ? 0 : 1, JSON.stringify(Array.isArray(payload.assignedUserIds) ? payload.assignedUserIds : []), payload.createdAt || operation.createdAt, payload.updatedAt || operation.createdAt])
     await db.run('INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) SELECT ?, id, 0, reorder_point, ? FROM products', [payload.id, operation.createdAt])
   } else if (operation.entityType === 'branch_transfer' && operation.action === 'create') {
@@ -411,7 +416,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const input = await body(init), fromBranchId = String(input.fromBranchId || ''), toBranchId = String(input.toBranchId || ''), productId = String(input.productId || ''), quantity = Number(input.quantity), reason = String(input.reason || '').trim().slice(0, 250)
     if (fromBranchId !== branchId) return error('Select the source branch before transferring stock.')
     if (!permittedBranches.some(branch => branch.id === toBranchId && Number(branch.isActive))) return error('You do not have access to the destination branch.', 403)
-    if (!fromBranchId || !toBranchId || fromBranchId === toBranchId || !Number.isSafeInteger(quantity) || quantity < 1 || reason.length < 3) return error('Choose two different branches, a whole quantity, and a reason.')
+    if (!fromBranchId || !toBranchId || fromBranchId === toBranchId || !Number.isFinite(quantity) || quantity <= 0 || reason.length < 3) return error('Choose two different branches, a whole quantity, and a reason.')
     if (Number((await db.query('SELECT COUNT(*) AS count FROM branches WHERE id IN (?, ?) AND is_active=1', [fromBranchId, toBranchId])).values?.[0]?.count) !== 2) return error('Both branches must be active.')
     const source = (await db.query('SELECT stock FROM branch_inventory WHERE branch_id=? AND product_id=?', [fromBranchId, productId])).values?.[0]
     if (!source || Number(source.stock) < quantity) return error('The source branch does not have enough stock.')
@@ -504,17 +509,49 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const updated = now(); await db.run('UPDATE branch_inventory SET stock = stock + ?, updated_at = ? WHERE product_id = ? AND branch_id = ?', [amount, updated, stock[1], branchId]); await db.run('INSERT INTO inventory_movements (id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?)', [id(), stock[1], amount, 'manual-adjustment', updated, branchId]); await queue('stock', stock[1], 'adjust', { productId: stock[1], branchId, amount, beforeStock: Number(product.stock), reason: 'manual-adjustment', updatedAt: updated })
     return json((await db.query('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [stock[1], branchId])).values?.[0])
   }
+  if (path.startsWith('/api/integrations/')) {
+    const routes: Record<string, string> = { '/api/integrations/paystack/config': '/v1/pos-paystack/config', '/api/integrations/paystack/presence': '/v1/pos-paystack/presence', '/api/integrations/paystack/start': '/v1/pos-paystack/start', '/api/integrations/paystack/verify': '/v1/pos-paystack/verify', '/api/integrations/receipts/send': '/v1/receipts/send' }
+    if (!routes[path]) return error('Integration route not found.', 404)
+    const config = await getMobileSyncConfiguration()
+    if (!config) return error('Connect this device to the cloud first.', 503)
+    try {
+      return await originalFetch(`${config.syncApiUrl}${routes[path]}`, { method, headers: { Authorization: `Bearer ${config.deviceToken}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ ...await body(init), branchId }) }), signal: AbortSignal.timeout(45000) })
+    } catch { return error('Could not reach the payment service. Check payment status before retrying.', 503) }
+  }
+  if (path.startsWith('/api/pos')) {
+    try {
+      return json(await handlePos({ db, scope: 'business', branchId, user, path, method, input: method === 'GET' ? {} : await body(init),
+        sales: async () => {
+          const loaded = (await db.query('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id=?', [branchId])).values || []
+          for (const sale of loaded) {
+            sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
+            sale.items = (await db.query('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid', [sale.id])).values || []
+          }
+          return loaded
+        }, publish: (record: Record<string, unknown>) => queue('pos_record', String(record.id), 'upsert', record) }))
+    } catch (caught) { return error(caught instanceof Error ? caught.message : 'POS action failed.') }
+  }
   if (path === '/api/sales' && method === 'POST') {
     const subscription = await subscriptionStatus()
     if (subscription.blocked) return error(subscription.reason, 402)
     let sale = await body(init); sale.branchId = branchId; if (sale.paymentMethod === 'wallet' && (sale.paymentDetails as { creditApproved?: boolean } | undefined)?.creditApproved && user.role !== 'owner') return error('Only the owner may approve credit purchases.', 403); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
     if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'pending' })
-    if (!sale.items.length || sale.items.some((item: Record<string, unknown>) => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) <= 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) return error('Sale quantities and prices are invalid.')
+    if (!sale.items.length || sale.items.some((item: Record<string, unknown>) => !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) return error('Sale quantities and prices are invalid.')
     const total = sale.items.reduce((sum: number, item: Record<string, unknown>) => sum + Number(item.quantity) * Number(item.price), 0)
-    if (Math.abs(total - Number(sale.total)) > 0.01) return error('Sale total does not match its items.')
+    if (!((sale.paymentDetails as { pos?: unknown } | undefined)?.pos) && Math.abs(total - Number(sale.total)) > 0.01) return error('Sale total does not match its items.')
     if (sale.paymentMethod === 'wallet' && !(sale.paymentDetails as { customerId?: unknown } | undefined)?.customerId) return error('Select the customer wallet.')
     if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'synced' })
-    await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null, branchId]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT p.name, i.stock, p.cost_price AS cost FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [item.productId, branchId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); item.beforeStock = Number(product.stock); await db.run('UPDATE branch_inventory SET stock = stock - ? WHERE product_id = ? AND branch_id = ?', [Number(item.quantity), item.productId, branchId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
+    const terminalOrder = (sale.paymentDetails as { pos?: { terminalRequestId?: string } } | undefined)?.pos?.terminalRequestId
+    if (terminalOrder) {
+      if (terminalOrder !== sale.id || sale.paymentMethod !== 'external-pos') return error('Paystack payment belongs to a different order.')
+      const config = await getMobileSyncConfiguration()
+      if (!config) return error('Connect to the payment service before completing this sale.')
+      const response = await originalFetch(`${config.syncApiUrl}/v1/pos-paystack/verify`, { method: 'POST', headers: { Authorization: `Bearer ${config.deviceToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: terminalOrder }), signal: AbortSignal.timeout(25000) })
+      const verified = await response.json()
+      if (!response.ok || !verified.paid || verified.amount !== sale.total || verified.currency !== sale.currency) return error('Paystack has not verified this sale amount and currency.')
+      sale.terminalProvider = 'Paystack'; sale.paymentReference = verified.reference
+    }
+    await db.beginTransaction(); try { if (sale.paymentMethod === 'wallet') await debitSaleWallet(db, sale); await db.run('INSERT INTO sales (id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [sale.id, Number(sale.total), sale.paymentMethod || 'cash', sale.paymentReference || '', sale.terminalProvider || '', user.id, user.name, sale.createdAt || now(), sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null, branchId]); for (const item of sale.items as Array<Record<string, unknown>>) { const product = (await db.query('SELECT p.name, i.stock, p.cost_price AS cost FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [item.productId, branchId])).values?.[0]; if (!product || Number(product.stock) < Number(item.quantity)) throw new Error('Insufficient stock for sale.'); item.beforeStock = Number(product.stock); await db.run('UPDATE branch_inventory SET stock = stock - ? WHERE product_id = ? AND branch_id = ?', [Number(item.quantity), item.productId, branchId]); await db.run('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [id(), sale.id, item.productId, item.productName || product.name, Number(item.quantity), Number(item.price), Number(product.cost) || 0]) } await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); return error(caught instanceof Error ? caught.message : 'Could not save sale.') }
     const payload = { ...sale, staffId: user.id, staffName: user.name }; await queue('sale', String(sale.id), 'create', payload); return json({ ...payload, syncStatus: 'pending' }, 201)
   }
   if (path === '/api/sales' && method === 'GET') {
@@ -529,7 +566,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const reason = String(input.reason || '').trim()
     const quantity = Number(input.quantity)
     const unitPrice = Number(input.unitPrice)
-    if (!String(input.id || '').trim() || !String(input.orderId || '').trim() || !String(input.productId || '').trim() || !String(input.productName || '').trim() || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3 || reason.length > 500) return error('Select a valid item and enter a void reason of 3 to 500 characters.')
+    if (!String(input.id || '').trim() || !String(input.orderId || '').trim() || !String(input.productId || '').trim() || !String(input.productName || '').trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3 || reason.length > 500) return error('Select a valid item and enter a void reason of 3 to 500 characters.')
     const event = { id: String(input.id), orderId: String(input.orderId), productId: String(input.productId), productName: String(input.productName).trim().slice(0, 200), quantity, unitPrice, reason, branchId, staffId: user.id, staffName: user.name, createdAt: now() }
     await db.run('INSERT OR IGNORE INTO sale_item_voids (id, order_id, product_id, product_name, quantity, unit_price, reason, staff_id, staff_name, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [event.id, event.orderId, event.productId, event.productName, event.quantity, event.unitPrice, event.reason, event.staffId, event.staffName, event.createdAt, branchId])
     if ((await db.query('SELECT changes() AS changed')).values?.[0]?.changed) await queue('sale_void', event.id, 'create', event)

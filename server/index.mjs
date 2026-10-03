@@ -1,3 +1,4 @@
+import { posAction } from './db.mjs'
 import { createServer } from 'node:http'
 import { updateShopProfile, updateProductCustomValues } from './db.mjs'
 import { randomUUID } from 'node:crypto'
@@ -6,7 +7,7 @@ import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, exportProductCatalogCsv, updateSettings, storageName } from './repository.mjs'
 import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
-import { getCloudConfiguration, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
+import { getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
@@ -53,6 +54,34 @@ const server = createServer(async (request, response) => {
     return response.end()
   }
 
+  if (request.url?.startsWith('/api/integrations/')) {
+    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
+    const paths = { '/api/integrations/paystack/config': '/v1/pos-paystack/config', '/api/integrations/paystack/presence': '/v1/pos-paystack/presence', '/api/integrations/paystack/start': '/v1/pos-paystack/start', '/api/integrations/paystack/verify': '/v1/pos-paystack/verify', '/api/integrations/receipts/send': '/v1/receipts/send' }
+    const upstreamPath = paths[request.url]
+    if (!upstreamPath) return sendJson(response, 404, { error: 'Integration route not found.' })
+    const forward = async input => {
+      try {
+        const config = await getCloudConfiguration(), token = await getCloudRegistrationToken()
+        if (!config.url || !token) return sendJson(response, 503, { error: 'Connect this device to the cloud first.' })
+        const upstream = await fetch(`${config.url}${upstreamPath}`, { method: request.method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(request.method === 'GET' ? {} : { body: JSON.stringify({ ...input, branchId: requestBranch(request) }) }), signal: AbortSignal.timeout(45000) })
+        return sendJson(response, upstream.status, await upstream.json())
+      } catch { return sendJson(response, 503, { error: 'Could not reach the payment service. Check the payment status before retrying.' }) }
+    }
+    if (request.method === 'GET') return forward({})
+    return readJson(request, response, forward)
+  }
+  if (request.url?.startsWith('/api/pos')) {
+    const user = sessionUser(request)
+    if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
+    if (request.method === 'GET') {
+      try { return sendJson(response, 200, await posAction(request.url, 'GET', {}, user, requestBranch(request))) }
+      catch (error) { return sendJson(response, 400, { error: error.message }) }
+    }
+    return readJson(request, response, async input => {
+      try { return sendJson(response, 200, await posAction(request.url, request.method, input, user, requestBranch(request))) }
+      catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
   if (request.method === 'GET' && request.url === '/api/health') {
     return sendJson(response, 200, { ok: true, storage: storageName })
   }
@@ -508,6 +537,15 @@ const server = createServer(async (request, response) => {
       if (input.paymentMethod === 'wallet' && input.paymentDetails?.creditApproved && user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner may approve credit purchases.' })
       if (!input?.id || !Array.isArray(input.items) || !Number.isFinite(Number(input.total))) return sendJson(response, 400, { error: 'Sale is invalid.' })
       try {
+        if (input.paymentDetails?.pos?.terminalRequestId) {
+          if (input.id !== input.paymentDetails.pos.terminalRequestId || input.paymentMethod !== 'external-pos') throw new Error('Paystack payment belongs to a different order.')
+          const config = await getCloudConfiguration(), token = await getCloudRegistrationToken()
+          if (!config.url || !token) throw new Error('Connect to the payment service before completing this sale.')
+          const result = await fetch(`${config.url}/v1/pos-paystack/verify`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: input.id }), signal: AbortSignal.timeout(25000) })
+          const verified = await result.json()
+          if (!result.ok || !verified.paid || verified.amount !== input.total || verified.currency !== input.currency) throw new Error('Paystack has not verified this sale amount and currency.')
+          input.terminalProvider = 'Paystack'; input.paymentReference = verified.reference
+        }
         return sendJson(response, 201, await createSale({ ...input, branchId: requestBranch(request), staffId: user.id, staffName: user.name }, true, requestBranch(request)))
       } catch (error) {
         return sendJson(response, 400, { error: error.message })

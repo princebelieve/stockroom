@@ -9,7 +9,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname
   try {
     // Mirror Vercel's cleanUrls behavior for the app's canonical /welcome URL.
-    const file = resolve('dist', path === '/' ? 'index.html' : path === '/welcome' ? 'welcome.html' : `.${path}`)
+    const file = resolve('dist', path === '/' ? 'index.html' : ['/welcome', '/developer', '/visitor', '/privacy', '/terms', '/account-deletion'].includes(path) ? `.${path}.html` : `.${path}`)
     if (!file.startsWith(resolve('dist'))) throw new Error('Invalid path')
     res.setHeader('Content-Type', types[extname(file)] || 'application/octet-stream')
     res.end(await readFile(file))
@@ -54,7 +54,7 @@ try {
   const registrationPage = await registrationContext.newPage()
   await registrationPage.goto(`http://127.0.0.1:${server.address().port}/?screen=register&ref=${'a'.repeat(32)}`)
   await registrationPage.waitForFunction(() => navigator.serviceWorker.controller)
-  await registrationPage.getByRole('button', { name: 'I have a registration key' }).click()
+  await registrationPage.getByRole('button', { name: 'I already have a key' }).click()
   await registrationPage.getByRole('heading', { name: 'Set up your shop' }).waitFor()
   await registrationPage.getByLabel('Business registration key').fill(`SBIT-${'b'.repeat(48)}`)
   await registrationPage.getByLabel('Owner name', { exact: true }).fill('Owner')
@@ -107,19 +107,20 @@ try {
   console.log('Offline shell ready')
   await context.setOffline(true)
   cloudOffline = true
+  const beforeSale = (await api('/api/sync/status')).data.pending
   const sale = { id: 'sale-test', total: 10, items: [{ productId: created.data.id, quantity: 2, price: 5 }], paymentMethod: 'cash', cashReceived: 20, changeGiven: 999 }
   assert.equal((await api('/api/sales', sale)).status, 201)
   assert.equal((await api('/api/sales', sale)).status, 200)
   assert.equal((await api('/api/products')).data.products[0].stock, 8)
-  assert.equal((await api('/api/sync/status')).data.pending, 2)
+  assert.equal((await api('/api/sync/status')).data.pending, beforeSale + 1)
   const failedSync = await api('/api/sync/now', {})
   assert.ok(failedSync.data.lastError)
-  assert.equal((await api('/api/sync/status')).data.pending, 2)
+  assert.equal((await api('/api/sync/status')).data.pending, beforeSale + 1)
   const rejected = await api('/api/sales', { ...sale, id: 'too-many', total: 500, items: [{ ...sale.items[0], quantity: 100 }] })
   assert.equal(rejected.status, 400)
   assert.equal((await api('/api/products')).data.products[0].stock, 8)
   const startupCloudRequests = []
-  const recordStartupCloud = request => { if (new URL(request.url()).pathname.startsWith('/v1/')) startupCloudRequests.push(request.url()) }
+  const recordStartupCloud = request => { if (/^\/v1\/(auth|devices|sync|subscriptions|pos-paystack)(\/|$)/.test(new URL(request.url()).pathname)) startupCloudRequests.push(request.url()) }
   page.on('request', recordStartupCloud)
   await page.reload()
   await page.getByRole('button', { name: 'Log out' }).waitFor()
@@ -131,7 +132,7 @@ try {
   assert.equal(savedCash.cashReceived, 20)
   assert.equal(savedCash.changeGiven, 10)
   assert.equal((await api('/api/products')).data.products[0].stock, 8)
-  assert.equal((await api('/api/sync/status')).data.pending, 2)
+  assert.equal((await api('/api/sync/status')).data.pending, beforeSale + 1)
   // A storage failure must not acknowledge a write or retain an in-memory edit.
   await page.evaluate(() => {
     window.restorePut = IDBObjectStore.prototype.put
@@ -173,7 +174,7 @@ try {
   await newPage.getByLabel('Password', { exact: true }).fill('test-password')
   await newPage.getByRole('button', { name: 'Sign in', exact: true }).click()
   await newPage.getByRole('button', { name: 'Log out' }).waitFor()
-  await newPage.getByRole('button', { name: 'POS', exact: true }).click()
+  await newPage.getByRole('button', { name: 'Sell (POS)', exact: true }).click()
   await newPage.locator('.pos-product').filter({ hasText: 'Tea' }).waitFor()
   assert.equal(await newPage.evaluate(async () => (await (await fetch('/api/products')).json()).products.find(p => p.id === 'remote').stock), 5)
   // Upload one real product on device A, then download it via Refresh on B.
@@ -222,7 +223,7 @@ try {
   assert.equal(await count(teaCount.id, 0), 200)
   assert.equal((await api('/api/sync/status')).data.pending, beforeDraft)
   await page.reload()
-  await navigateMobile('Stock take')
+  await navigateMobile('Stock count')
   await page.getByRole('button', { name: 'Approve adjustments' }).waitFor()
   assert.equal((await api('/api/stocktakes')).data.stocktake.counts.find(item => item.id === coffeeCount.id).counted, 8)
   await api('/api/products/remote/stock', { amount: -5 })
@@ -242,8 +243,9 @@ try {
   assert.deepEqual(stocktakeOps.map(item => item.action), ['create', 'approved'])
   assert.equal(stocktakeOps[0].payload.status, 'approved')
   assert.equal(stocktakeOps[1].payload.counts.find(item => item.id === coffeeCount.id).variance, -2)
-  await navigateMobile('POS')
+  await navigateMobile('Sell (POS)')
   await page.locator('.pos-product').filter({ hasText: 'Coffee' }).click()
+  await page.getByRole('button', { name: /Take payment/ }).click()
   await page.getByLabel('Payment method').selectOption('cash')
   assert.equal(await page.getByRole('button', { name: 'Complete sale', exact: true }).isDisabled(), true)
   await page.getByLabel('Cash received').fill('0.01')
@@ -274,8 +276,9 @@ try {
   const walletCustomer = (await api('/api/customers', { name: 'Wallet browser customer' })).data
   assert.equal((await api('/api/customers/' + walletCustomer.id + '/wallet', { amount: 20, reason: 'Deposit' })).status, 200)
   await page.reload()
-  await navigateMobile('POS')
-  await page.locator('.pos-product').first().click()
+  await navigateMobile('Sell (POS)')
+  await page.locator('.pos-product').filter({ hasText: 'Coffee' }).click()
+  await page.getByRole('button', { name: /Take payment/ }).click()
   await page.getByRole('combobox', { name: /^Payment method/ }).selectOption('wallet')
   await page.getByRole('combobox', { name: /^Customer wallet/ }).selectOption(walletCustomer.id)
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click()
@@ -287,15 +290,15 @@ try {
   const forceAccess = () => page.evaluate(async () => (await fetch('/api/subscriptions/access', { headers: { 'X-Subscription-Refresh': 'true' } })).json())
   assert.equal((await forceAccess()).blocked, true)
   await page.reload()
-  await navigateMobile('POS')
+  await navigateMobile('Sell (POS)')
   await page.getByRole('heading', { name: 'POS access paused' }).waitFor()
   cloudOffline = true
   assert.equal((await api('/api/sales', { id: 'blocked-sale' })).status, 402)
   cloudOffline = false
   subscription.testMode = true
   await page.getByRole('button', { name: 'Check access again' }).click()
-  await page.getByRole('heading', { name: 'Sell products' }).waitFor()
-  await navigateMobile('Wallet')
+  await page.getByRole('heading', { name: 'Choose products' }).waitFor()
+  await navigateMobile('Customer accounts')
   await page.getByRole('heading', { name: 'Wallet browser customer' }).waitFor()
   await page.getByRole('button', { name: 'Log out' }).click()
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()

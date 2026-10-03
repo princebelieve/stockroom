@@ -1,4 +1,5 @@
 export type Product = {
+  baseProductId?: string
   customValues?: Record<string, string> | string
   id: string
   name: string
@@ -14,6 +15,7 @@ export type Product = {
 }
 
 export type Sale = {
+  branchId?: string
   organizationId?: string
   businessName?: string
   currency?: string

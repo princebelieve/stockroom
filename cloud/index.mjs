@@ -1,8 +1,9 @@
+import { createPosPaystack } from './pos-paystack.mjs'
 import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { mailConfigured, mailDiagnostics, sendBusinessRegistrationKey, sendPasswordReset } from './mailer.mjs'
+import { mailConfigured, mailDiagnostics, sendPosReceipt, sendBusinessRegistrationKey, sendPasswordReset } from './mailer.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
@@ -179,6 +180,7 @@ const referralWallet = await createReferralWallet({ database, accounts, verifyTo
 const googlePlayBilling = createGooglePlayBilling({ database, accounts, verifyToken })
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook, notifications })
 const productFormReader = await createProductFormReader({ database, accounts, verifyToken, readJson, send })
+const posPaystack = await createPosPaystack({ database })
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   // Referral percentages are intentionally public. They are displayed on the
@@ -422,6 +424,17 @@ const server = createServer(async (request, response) => {
     if (!isDevice(claims)) return send(response, 403, { error: 'Device token required.' })
     const device = await devices.findOne({ businessId: claims.businessId, deviceId: claims.deviceId })
     if (!device || device.revokedAt) return send(response, 401, { error: 'This device has been revoked.' })
+    if (request.url?.startsWith('/v1/pos-paystack/')) {
+      try { return send(response, 200, await posPaystack({ businessId: claims.businessId, path: request.url, method: request.method, input: request.method === 'POST' ? await readJson(request) : {} })) }
+      catch (error) { return send(response, 400, { error: error.message }) }
+    }
+    if (request.method === 'POST' && request.url === '/v1/receipts/send') {
+      const input = await readJson(request)
+      const sale = await operations.findOne({ businessId: claims.businessId, entityType: 'sale', entityId: String(input.saleId || '') })
+      if (!sale) return send(response, 409, { error: 'Synchronize this receipt before sending it.' })
+      try { await sendPosReceipt({ to: input.to, sale: sale.payload }); return send(response, 200, { sent: true }) }
+      catch { return send(response, 400, { error: 'Receipt email could not be sent. Check the address and Gmail configuration.' }) }
+    }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
       const businessId = String(input.businessId || '')

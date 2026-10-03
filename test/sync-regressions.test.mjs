@@ -15,7 +15,7 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
       CREATE TABLE sync_inbox (operation_id TEXT PRIMARY KEY, received_at TEXT);`)
     const db = { query: async (sql, args = []) => ({ values: sqlite.prepare(sql).all(...args) }), run: async (sql, args = []) => sqlite.prepare(sql).run(...args) }
     const code = source.slice(source.indexOf('async function applyOperation('), source.indexOf('\n// Serialize network sync jobs'))
-    const apply = vm.runInNewContext(stripTypeScriptTypes(`(${code})`), { openMobileDatabase: async () => db, id: () => 'id', now: () => '2026-01-01' })
+    const apply = vm.runInNewContext(stripTypeScriptTypes(`(${code})`), { openMobileDatabase: async () => db, ensureBranches: async () => {}, id: () => 'id', now: () => '2026-01-01' })
     try {
       const operation = { operationId: 'repayment', createdAt: '2026-01-01', entityType: 'wallet', action: 'adjust', payload: { customerId: 'customer', amount: 100 } }
       await apply(operation); await apply(operation)

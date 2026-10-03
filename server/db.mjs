@@ -1,3 +1,4 @@
+import { handlePos, posSchema } from './pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from './shop-fields.mjs'
 import { paymentPolicy, recordPayment } from './payment.mjs'
 import { normalizeShopProfile, validateShopProfile } from './shop-profile.mjs'
@@ -211,6 +212,7 @@ database.exec(`
   );
 `)
 
+database.exec(posSchema)
 const organizationId = 'local-shop-organization'
 const now = () => new Date().toISOString()
 const initialShop = await readShopConfig()
@@ -591,7 +593,7 @@ export function createCustomer(input) {
 
 export function listSales(limit = 100, branchId = 'main') {
   const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? AND branch_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, branchId, Math.min(Math.max(Number(limit) || 100, 1), 500))
-  const itemQuery = database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?')
+  const itemQuery = database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice FROM sale_items WHERE sale_id = ? ORDER BY rowid')
   return sales.map((sale) => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: itemQuery.all(sale.id) }))
 }
 
@@ -603,7 +605,7 @@ export function recordSaleItemVoid(input, staff, shouldSync = true) {
   const quantity = Number(input.quantity)
   const unitPrice = Number(input.unitPrice)
   const reason = String(input.reason || '').trim().slice(0, 500)
-  if (!id || !orderId || !productId || !productName || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3) {
+  if (!id || !orderId || !productId || !productName || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || reason.length < 3) {
     throw new Error('A void needs an item, quantity, price, order, and reason of at least 3 characters.')
   }
   const event = { id, orderId, productId, productName, quantity, unitPrice, reason, branchId: String(input.branchId || 'main'), staffId: String(staff.id || ''), staffName: String(staff.name || ''), createdAt: shouldSync ? now() : String(input.createdAt || now()) }
@@ -656,7 +658,26 @@ export function applyRemoteOperations(operations) {
     if (!operation?.operationId || database.prepare('SELECT 1 FROM sync_inbox WHERE operation_id = ?').get(operation.operationId)) continue
     const payload = operation.payload || {}
     try {
-      if (operation.entityType === 'product' && operation.action === 'upsert') {
+      if (operation.entityType === 'pos_record') {
+        const existing = database.prepare('SELECT payload FROM pos_records WHERE scope=? AND id=?').get(organizationId, payload.id)
+        database.exec('BEGIN')
+        try {
+          if (payload.kind === 'return' && !existing) {
+            for (const item of payload.items) if (item.restock) {
+              if (!database.prepare('SELECT 1 FROM branch_inventory WHERE product_id=? AND branch_id=?').get(item.productId,payload.branchId)) throw new Error('Returned product has not synchronized yet.')
+              database.prepare('UPDATE branch_inventory SET stock=stock+? WHERE product_id=? AND branch_id=?').run(item.quantity,item.productId,payload.branchId)
+              database.prepare('INSERT INTO inventory_movements (id,organization_id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?,?)').run(`${payload.id}:return:${item.lineIndex}`,organizationId,item.productId,item.quantity,`Return ${payload.saleId}: ${payload.reason}`,payload.updatedAt,payload.branchId)
+            }
+            if (payload.walletCustomerId) {
+              const changed = database.prepare('UPDATE customers SET balance=ROUND(balance+?,2) WHERE id=? AND organization_id=?').run(payload.total,payload.walletCustomerId,organizationId)
+              if (!changed.changes) throw new Error('Returned customer has not synchronized yet.')
+              database.prepare('INSERT INTO wallet_transactions (id,organization_id,customer_id,amount,reason,created_at) VALUES (?,?,?,?,?,?)').run(payload.id,organizationId,payload.walletCustomerId,payload.total,`Return ${payload.saleId}: ${payload.reason}`,payload.updatedAt)
+            }
+          }
+          database.prepare('INSERT INTO pos_records (scope,id,kind,branch_id,payload,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(scope,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at WHERE excluded.updated_at >= pos_records.updated_at').run(organizationId,payload.id,payload.kind,payload.branchId,JSON.stringify(payload),payload.updatedAt)
+          database.exec('COMMIT')
+        } catch (error) { database.exec('ROLLBACK'); throw error }
+      } else if (operation.entityType === 'product' && operation.action === 'upsert') {
         database.prepare(`INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, unit, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sku = excluded.sku, barcode = excluded.barcode, category = excluded.category, reorder_point = excluded.reorder_point, price = excluded.price, unit = excluded.unit, updated_at = excluded.updated_at`)
           .run(payload.id, organizationId, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, payload.unit, payload.updated || now())
@@ -961,7 +982,7 @@ export function createSale(sale, shouldSync = true, branchId = 'main') {
       const product = database.prepare('SELECT i.stock, p.cost_price AS costPrice, p.name FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND p.organization_id = ? AND i.branch_id = ?').get(item.productId, organizationId, sale.branchId)
       if (!product || product.stock < item.quantity) throw new Error('Insufficient stock for sale.')
       item.beforeStock = Number(product.stock)
-      database.prepare('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), sale.id, item.productId, product.name, item.quantity, item.price, product.costPrice || 0)
+      database.prepare('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), sale.id, item.productId, item.productName || product.name, item.quantity, item.price, product.costPrice || 0)
       database.prepare('UPDATE branch_inventory SET stock = stock - ?, updated_at = ? WHERE product_id = ? AND branch_id = ?').run(item.quantity, updatedAt, item.productId, sale.branchId)
       database.prepare('INSERT INTO inventory_movements (id, organization_id, product_id, quantity, reason, created_at, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, item.productId, -item.quantity, 'sale', updatedAt, sale.branchId)
     }
@@ -972,4 +993,22 @@ export function createSale(sale, shouldSync = true, branchId = 'main') {
     database.exec('ROLLBACK')
     throw error
   }
+}
+
+let pendingPosAction = Promise.resolve()
+export function posAction(path, method, input, user, branchId) {
+  const action = pendingPosAction.then(() => performPosAction(path, method, input, user, branchId))
+  pendingPosAction = action.catch(() => undefined)
+  return action
+}
+async function performPosAction(path, method, input, user, branchId) {
+  const db = {
+    execute: sql => database.exec(sql),
+    query: (sql, params = []) => ({ values: database.prepare(sql).all(...params) }),
+    run: (sql, params = []) => database.prepare(sql).run(...params),
+    beginTransaction: () => database.exec('BEGIN'), commitTransaction: () => database.exec('COMMIT'), rollbackTransaction: () => database.exec('ROLLBACK')
+  }
+  return handlePos({ db, scope: organizationId, organizationId, branchId, user, path, method, input,
+    sales: () => database.prepare('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE organization_id=? AND branch_id=? ORDER BY created_at DESC').all(organizationId, branchId).map(sale => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid').all(sale.id) })),
+    publish: record => queueSync('pos_record', record.id, 'upsert', record) })
 }

@@ -133,3 +133,11 @@ export async function sendBusinessRegistrationKey({ to, businessName, key, expir
   const safeName = String(businessName).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
   await sendMail({ to, subject: 'Your Stockroom business registration key', text: `Your registration key for ${businessName} is:\n\n${key}\n\nUse it with this email address to create your Stockroom owner account. It expires ${expiry}. If you did not request this key, ignore this email.`, html: `<p>Your registration key for <b>${safeName}</b> is:</p><h2>${key}</h2><p>Use it with this email address to create your Stockroom owner account.</p><p>It expires ${expiry}. If you did not request this key, ignore this email.</p>` })
 }
+
+export async function sendPosReceipt({ to, sale }) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || '')) || String(to).length > 254) throw new Error('Enter a valid customer email.')
+  const format = value => new Intl.NumberFormat('en', { style: 'currency', currency: sale.currency || 'NGN' }).format(value)
+  const pricing = sale.paymentDetails?.pos?.pricing
+  const text = `${sale.businessName || 'Shop'}\nReceipt: ${sale.id}\n${sale.createdAt}\n\n${sale.items.map(item => `${item.quantity} x ${item.productName || item.productId}: ${format(item.price)}`).join('\n')}\n${pricing ? `Subtotal: ${format(pricing.subtotal)}\nDiscount: ${format(pricing.discount)}\n${pricing.taxSettings.taxEnabled ? `${pricing.taxSettings.taxLabel}: ${format(pricing.tax)}\n` : ''}` : ''}Total: ${format(sale.total)}\nPayment: ${sale.paymentMethod}`
+  await sendMail({ to, subject: `Receipt from ${sale.businessName || 'Shop'} - ${sale.id}`, text })
+}

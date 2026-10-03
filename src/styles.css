@@ -504,3 +504,12 @@ body { background: #dfece5; }
   .pos-workspace .pos-cart-items { max-height: none; }
   .pos-payment-panel { scroll-margin-top: 80px; }
 }
+/* Checkout tools share the app's existing forms and panel styles. */
+.pos-tools details { border-top: 1px solid var(--border, #dbe3ec); padding: 14px 0; }
+.pos-tools summary { cursor: pointer; font-weight: 600; }
+.pos-tools form, .pos-adjustments { display: grid; gap: 12px; margin-top: 12px; }
+.pos-tools label, .pos-adjustments label, .pos-paystack { display: grid; gap: 6px; }
+.pos-tools label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+.pos-tools input[type="checkbox"] { width: auto; }
+.pos-return-line { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border, #dbe3ec); }
+.pos-paystack { padding: 12px; border: 1px solid var(--border, #dbe3ec); border-radius: 8px; }

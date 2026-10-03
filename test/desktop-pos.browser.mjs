@@ -55,6 +55,32 @@ try {
  await pay.getByLabel('Cash portion',{exact:true}).waitFor()
  assert.equal(await page.locator('.sidebar').getByRole('button',{name:'Customer accounts',exact:true}).count(),1)
  assert.equal(await page.locator('.sidebar').getByRole('button',{name:'Printers & devices',exact:true}).count(),1)
+ // Simulate Paystack responses only; no real terminal receives this test order.
+ let terminalOrder, terminalPaid = false
+ await page.route('**/api/integrations/paystack/config', route => route.fulfill({ json: { configured: true, terminalId: 'TEST-TERMINAL', testMode: true } }))
+ await page.route('**/api/integrations/paystack/start', route => {
+   const input = route.request().postDataJSON()
+   terminalOrder = { ...input, reference: 'PRQ_browser_test', paid: false, status: 'pending' }
+   return route.fulfill({ json: terminalOrder })
+ })
+ await page.route('**/api/integrations/paystack/verify', route => {
+   const input = route.request().postDataJSON()
+   return route.fulfill({ json: terminalOrder ? { ...terminalOrder, paid: terminalPaid, status: terminalPaid ? 'paid' : 'pending' } : { orderId: input.orderId, paid: false, status: 'not-started' } })
+ })
+ await pay.getByLabel('Payment method',{exact:true}).selectOption('external-pos')
+ await pay.getByLabel('Use connected Paystack terminal').check()
+ await pay.getByRole('button', { name: 'Send amount to Paystack terminal' }).click()
+ assert.equal(terminalOrder.amount, 15)
+ assert.equal(await pay.getByRole('button', { name: 'Complete sale', exact: true }).isEnabled(), false)
+ assert.equal(await pay.getByLabel('Payment method',{exact:true}).isEnabled(), false)
+ terminalPaid = true
+ await pay.getByRole('button', { name: 'Check payment status' }).click()
+ assert.equal(await pay.getByRole('button', { name: 'Complete sale', exact: true }).isEnabled(), true)
+ await page.reload()
+ await page.getByRole('button',{name:/Take payment/}).click()
+ await pay.getByText('Payment verified. You can complete the sale.').waitFor()
+ assert.equal(await pay.getByRole('button', { name: 'Complete sale', exact: true }).isEnabled(), true)
+ assert.equal(await pay.getByRole('button', { name: 'Send amount to Paystack terminal' }).isEnabled(), false)
  assert.deepEqual(errors,[])
  const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
  await mobile.route('**/*', route => route.request().url().startsWith(base) ? route.continue() : route.abort())
