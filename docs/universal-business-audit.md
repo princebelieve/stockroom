@@ -19,7 +19,7 @@ Owners can also choose **Fast food only**, or enable Fast food alongside their e
 | Stock & checkout | Select stocked products, take payment, save a receipt and deduct stock. |
 | Payments & receipts | Enter what the customer is paying for, optional customer name/phone, amount and payment method; save and print/share a receipt without changing stock. |
 | Both | Staff switch between two separate screens. The payment form and product basket keep their own drafts. |
-| Fast food | Save menu orders, track Queued → Preparing → Ready → Collected, and record full payment against the same order. Prepared meals need no stock; linked packaged goods deduct stock on payment. |
+| Fast food | Save menu orders, track Queued → Preparing → Ready → Collected, and record full payment against the same order, with saved tax/discounts/rewards, unpaid corrections, cancellation, refunds and preparation tickets. Prepared meals need no stock; linked packaged goods deduct stock on payment. |
 
 Business templates still customize product fields and wording. The saved payment-screen choice now controls the availability of the two workflows and relevant stock navigation independently of the template.
 

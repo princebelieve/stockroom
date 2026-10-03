@@ -23,7 +23,7 @@ Choose **Prepared food** for meals made to order. They require no inventory prod
 
 Payment can be recorded before or during preparation. Its state is separate from preparation progress. The order number appears on its receipt; payment retries use one receipt ID for that order. A retry with different payment details is rejected.
 
-Submitted orders retain their item names, options, quantities, prices, business identity and currency. Later menu edits do not change them. Drafts are saved per business, staff member and branch and restore after a reload.
+Submitted orders retain their item names, options, quantities, prices, tax, discounts, rewards, business identity and currency. Later menu or settings edits do not change them. **Correct order** can replace an unpaid Queued order on its original till; the correction must include a reason and retains the previous items and amount in its history. Once preparation or payment has started, refund/cancel as appropriate and create a new order instead. Drafts are saved per business, staff member and branch and restore after a reload.
 
 Creating or preparing an order does not deduct stock. Saving payment deducts only linked packaged goods, once. Unpaid orders do not reserve stock; insufficient packaged stock blocks payment. Prepared food does not consume ingredients automatically.
 
@@ -37,8 +37,31 @@ Here, "cloud server" means the project's existing Stockroom synchronization back
 
 The existing synchronization server and participating apps must be updated for this workflow. Capability checks hold Fast food uploads on the device until the cloud supports them, and prevent older apps from consuming Fast food records and settings. Ordinary supermarket synchronization retains its existing protocol. The cloud changes in this repository must be deployed before using Fast food across devices.
 
-## Current scope
+## Corrections, cancellation and refunds
 
-This implementation covers menu ordering, a preparation queue, full payment, receipts and handover. The omissions below are possible future additions, not technical barriers or a required roadmap. It uses existing owner/admin/cashier accounts. It does not add table service, open tabs, recipes, ingredient consumption, kitchen-printer routing, deposits, order editing or cancellation. Existing receipt returns remain separate from preparation tracking.
+- **Correct order:** available only before payment and preparation, on the original till. Review the current menu and totals, enter a correction reason, then save. The saved order number stays the same.
+- **Cancel order:** stops an unpaid open order, requires a reason and retains its history. Cancelling does not deduct stock. A paid order must be refunded in full first.
+- **Refund order:** owners/admins can refund paid open or collected orders inside this workspace. Choose quantities and a reason. The amount uses the original receipt's tax, discounts and rewards. For bank/terminal refunds, first return the money outside the app, then confirm and record its reference. Cash refunds likewise record money staff return to the customer.
+- **Packaged stock:** a refund restores a packaged item's stock only when **Return this packaged item to stock** is selected. Prepared food is never restocked. Retries do not duplicate the refund. Fully refunded open orders cannot continue preparation or be handed over; cancel them to close the queue.
+- **Print preparation ticket:** prints the order number, customer, items, options and preparation note using the existing printer/browser print setup. It is clearly marked as a preparation ticket, not proof of payment. It does not automatically send jobs to a separate kitchen printer.
 
-Menu prices plus selected extras determine the final amount. Stock-checkout tax, discount and loyalty settings are not applied to counter orders. Existing financial reporting includes their saved receipts and recorded packaged-stock costs; it does not estimate prepared-food ingredient costs.
+## Prices, tax and rewards
+
+Menu prices plus selected extras form the subtotal. Owners can use **Menu -> Tax and rewards settings** to enable tax, choose whether prices include tax and set the default rate. These are the existing business-wide checkout settings, so a mixed business shares them with stock checkout. Existing product-specific rates remain in effect for linked packaged goods; prepared food uses the default rate.
+
+Owners/admins can apply a fixed or percentage discount before submitting an order. Selecting an existing customer account enables earning/spending rewards when the owner has enabled them. Available rewards are checked again when saving payment; offline tills do not reserve a shared reward balance. If payment is blocked because the customer's balance changed, correct the unpaid queued order to reduce the rewards, or cancel and replace it if preparation has started.
+
+Receipts, digital receipts, refunds and financial reporting use the order's saved adjustments. Refunding items restores their spent rewards and reverses earned rewards. Old orders saved before these changes keep their original totals and do not acquire tax or rewards retroactively.
+
+## Optional business operations
+
+The counter-service workflow supports ordering, preparation, full payment, receipts, corrections, cancellation, refunds and handover. The following are separate extensions for businesses that actually need them; they are not prerequisites for operating a Fast food counter:
+
+- **Tables and open tabs:** for customers who remain seated or add purchases before paying, typically table-service restaurants and bars.
+- **Deposits:** for advance payments on future orders. Counter orders currently settle in full.
+- **Recipes and ingredient consumption:** for tracking how much flour, meat, oil and other ingredients each prepared item uses, including wastage. Prepared food currently does not deduct ingredient stock.
+- **Kitchen-printer routing:** for automatically sending specific items to separate kitchen/bar printers. Manual preparation tickets are available now.
+
+Financial reports include saved receipts, refunds, receipt tax, packaged-stock costs and recorded expenses. They do not calculate recipe costs. To avoid overstating prepared-food profit, record ingredient costs as expenses when you are not already accounting for them through stock. Reliable item-by-item prepared-food margins require a future recipe/costing workflow. Do not charge the same costs through both stock and expenses.
+
+No new external service or paid subscription is introduced by these operations. Cross-device use requires all participating apps and the existing sync backend to support `counter-v2`; older deployments keep these uploads queued rather than accepting records they cannot handle.

@@ -208,7 +208,7 @@ async function syncNowImpl() {
     if (!operations.length) break
     if (operations.some(requiresCounterSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
-      if (!support.ok || !(await support.json()).capabilities?.includes('counter-v1')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
+      if (!support.ok || !(await support.json()).capabilities?.includes('counter-v2')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
     }
     {
       const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
@@ -243,7 +243,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
   try {
     let cursor = await setting('syncCursor')
     while (true) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v2&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) await applyOperation(operation)

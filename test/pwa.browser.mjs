@@ -33,7 +33,7 @@ try {
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
     let result = {}
-    if (path === '/v1/sync/capabilities') result = { capabilities: counterSupported ? ['counter-v1'] : [] }
+    if (path === '/v1/sync/capabilities') result = { capabilities: counterSupported ? ['counter-v2'] : [] }
     if (path === '/v1/subscriptions/access') result = subscription
     if (path === '/v1/auth/login') { loginBodies.push(body); result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' } }
     if (path === '/v1/devices/enroll') { enrollmentBodies.push(body); result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' } }
@@ -348,7 +348,7 @@ try {
     assert.equal(result.status, 200, JSON.stringify(result.data)); counter = result.data
     if (status === 'preparing') counterConflict = counter
   }
-  const counterSale = { id: 'counter-payment:pwa-counter', currency: counter.currency, total: 7, paymentMethod: 'cash', createdAt: new Date().toISOString(), items: [{ productId: 'service:counter:pwa-food', productName: 'Sandwich', quantity: 1, price: 5 }, { productId: created.data.id, productName: 'Packaged coffee', quantity: 1, price: 2 }], paymentDetails: { amountReceived: 10, counterOrder: { id: counter.id, tillId: 'counter-pwa-till' } } }
+  const counterSale = { id: 'counter-payment:pwa-counter', currency: counter.currency, total: 7, paymentMethod: 'cash', createdAt: new Date().toISOString(), items: [{ productId: 'service:counter:pwa-food', productName: 'Sandwich', quantity: 1, price: 5 }, { productId: created.data.id, productName: 'Packaged coffee', quantity: 1, price: 2 }], paymentDetails: { amountReceived: 10, pos: counter.pos, counterOrder: { id: counter.id, tillId: 'counter-pwa-till' } } }
   const paymentResult = await counterApi('/api/sales', counterSale)
   assert.equal(paymentResult.status, 201, JSON.stringify(paymentResult.data))
   assert.equal((await counterApi('/api/sales', counterSale)).status, 200)

@@ -46,7 +46,7 @@ test('Android sale route validates the saved order and commits stock, receipt an
       db, user, Headers, json, error: (message, status = 400) => json({ error: message }, status), body: async init => JSON.parse(init.body), subscriptionStatus: async () => ({ blocked: false }),
       recordPayment, normalizeCashSale, validateCounterPayment, validateCounterRetry, validateCheckoutSettings, validateLoyaltyBalance, validQuantity, stockChange, queue, id: randomUUID, now: () => new Date().toISOString()
     })
-    const sale = { id: counterSaleId(order.id), currency: 'USD', total: order.total, createdAt: new Date().toISOString(), paymentMethod: 'cash', items: counterItems(order), paymentDetails: { amountReceived: 10, counterOrder: { id: order.id, tillId: 'native-till' } } }
+    const sale = { id: counterSaleId(order.id), currency: 'USD', total: order.total, createdAt: new Date().toISOString(), paymentMethod: 'cash', items: counterItems(order), paymentDetails: { amountReceived: 10, pos: order.pos, counterOrder: { id: order.id, tillId: 'native-till' } } }
     const send = (value, till = 'native-till') => handler({ headers: { 'X-Stockroom-Till': till }, body: JSON.stringify(value) })
     assert.equal((await send(sale, 'wrong-till')).status, 400)
     assert.equal((await send({ ...sale, currency: 'EUR' })).status, 400)
