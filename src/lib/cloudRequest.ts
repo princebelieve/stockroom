@@ -2,7 +2,7 @@ const renewals = new Map<string, Promise<{ accessToken: string; refreshToken: st
 
 export class CloudAuthenticationError extends Error {}
 
-export async function cloudRequest(apiUrl: string, path: string, init: RequestInit = {}, onToken: (token: string, refresh: string) => void, fallbackToken = ''): Promise<any> {
+async function cloudRequestInternal(apiUrl: string, path: string, init: RequestInit = {}, onToken: (token: string, refresh: string) => void, fallbackToken = ''): Promise<any> {
   const send = (token: string) => fetch(`${apiUrl}${path}`, {
     ...init, signal: init.signal || AbortSignal.timeout(10_000),
     headers: { ...Object.fromEntries(new Headers(init.headers)), 'Content-Type': 'application/json', Authorization: `Bearer ${token}`,
@@ -46,4 +46,14 @@ export async function cloudRequest(apiUrl: string, path: string, init: RequestIn
     throw new Error(data.error || 'Cloud request failed.')
   }
   return data
+}
+
+export async function cloudRequest(apiUrl: string, path: string, init: RequestInit = {}, onToken: (token: string, refresh: string) => void, fallbackToken = ''): Promise<any> {
+  try { return await cloudRequestInternal(apiUrl, path, init, onToken, fallbackToken) }
+  catch (caught) {
+    if (caught instanceof Error && caught.name === 'TimeoutError') {
+      throw new Error('The cloud service took too long to respond. Tap Refresh to try again.')
+    }
+    throw caught
+  }
 }

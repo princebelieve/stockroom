@@ -37,8 +37,9 @@ const server = createServer(async (request, response) => {
     const accountDeletionRoute = path === '/v1/account-deletion/me'
     const notificationRoute = path.startsWith('/v1/notifications/')
     const productFormRoute = ['/v1/product-forms/status', '/v1/product-forms/read'].includes(path)
+    const referralWalletRoute = ['/v1/referral-wallet/me', '/v1/referral-wallet/payouts', '/v1/referral-wallet/banks', '/v1/referral-wallet/resolve', '/v1/referral-wallet/profile'].includes(path.split('?')[0])
     if (!user || (!accountDeletionRoute && !notificationRoute && user.role !== 'owner')) return sendJson(response, 401, { error: accountDeletionRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
-    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path) && !notificationRoute && !productFormRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })

@@ -262,12 +262,15 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/v1/auth/refresh') {
       const input = await readJson(request)
       const tokenHash = refreshTokenHash(String(input.refreshToken || ''))
-      const saved = await refreshTokens.findOneAndDelete({ tokenHash, expiresAt: { $gt: new Date() } })
+      // Keep this session credential valid until its original expiry or explicit
+      // revocation. A lost response must not consume the client's only way to
+      // recover; concurrent tabs must also be able to renew the same session.
+      const saved = await refreshTokens.findOne({ tokenHash, expiresAt: { $gt: new Date() } })
       if (!saved) return send(response, 401, { error: 'Cloud session renewal expired. Sign in again.' })
       const account = await accounts.findOne({ _id: saved.accountId })
       if (!account) return send(response, 401, { error: 'Cloud account is no longer available.' })
       if (await businessExitPayments.findOne({ _id: account.businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
-      return send(response, 200, await cloudSession(account))
+      return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account), refreshToken: String(input.refreshToken) })
     }
     if (request.method === 'GET' && request.url === '/v1/auth/me') {
       const claims = verifyToken(request)
