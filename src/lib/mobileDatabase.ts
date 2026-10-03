@@ -127,7 +127,7 @@ export async function openMobileDatabase() {
     CREATE TABLE IF NOT EXISTS sale_items (
       id TEXT PRIMARY KEY,
       sale_id TEXT NOT NULL REFERENCES sales(id),
-      product_id TEXT NOT NULL REFERENCES products(id),
+      product_id TEXT NOT NULL,
       product_name TEXT NOT NULL,
       quantity INTEGER NOT NULL CHECK(quantity > 0),
       unit_price REAL NOT NULL,

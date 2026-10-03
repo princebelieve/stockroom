@@ -31,6 +31,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   }
   function useTemplate() {
     const next = normalizeShopProfile({ mode: industry === 'general' ? 'general' : 'suggested', industry })
+    next.workflows = draft.workflows
     const ids = new Set(next.fields.map(field => field.id))
     next.fields.push(...draft.fields.filter(field => !ids.has(field.id)).map(field => ({ ...field, visible: false })))
     if (next.fields.length > 49) { setProblem('This template would exceed 40 custom fields. Customize your current fields instead.'); return }
@@ -53,11 +54,13 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     catch (error) { setProblem(error instanceof Error ? error.message : 'Check your fields.') }
   }
   return <section id="shop-setup" className="panel full-panel shop-wizard">
+    <label htmlFor="payment-screens">Payment screens</label><select id="payment-screens" value={draft.workflows || 'both'} onChange={event => change({ ...draft, workflows: event.target.value as ShopProfile['workflows'] })}><option value="payments">Payments &amp; receipts</option><option value="stock">Stock &amp; checkout</option><option value="both">Both</option></select><p>Payments &amp; receipts records a payment without changing stock. Both gives staff two separate screens.</p>
+    <AsyncButton className="primary-button" busyLabel="Saving screens..." onClick={async () => { const otherChanges = JSON.stringify({ ...draft, workflows: value.workflows }) !== JSON.stringify(value); await save(validateShopProfile({ ...value, workflows: draft.workflows })); setDirty(otherChanges); setMessage('Payment screens saved. Use Sync now to share this choice with your other devices.') }}>Save payment screens</AsyncButton>
     <h2>Business type and product form</h2><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p>
     <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
     {step === 0 && <div className="shop-step">
       <h3>Start with a familiar template</h3><label>Business type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
-      <p>{businessModes[industry].note}</p><label><input type="checkbox" checked={draft.features?.services ?? draft.industry !== 'supermarket'} onChange={event => change({ ...draft, features: { services: event.target.checked } })} />Show service charges at checkout</label><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
+      <p>{businessModes[industry].note}</p><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
       <p>Loading a template replaces this draft's visible fields. Previous custom fields stay in Removed fields so their saved values can be restored.</p>
       <details><summary>Start from a printed form or screenshot</summary><p>Upload a JPG, PNG or WebP image, or paste headings from your old app. Text is read on this device without a paid recognition service. Clear printed text works best; write in BLOCK / CAPITAL LETTERS for handwritten labels.</p>
         <label>Template image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { reading.current?.abort(); setFile(event.target.files?.[0] || null); setCandidates([]); setProgress('') }} /></label>

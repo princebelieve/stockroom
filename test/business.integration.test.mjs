@@ -421,7 +421,7 @@ test('purchasing API preserves existing data, receives cartons once, and writes 
   try {
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM retail_records WHERE kind='receipt'").get().n,1)
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE entity_type='retail_record'").get().n,3)
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n,2)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE module='retail'").get().n,2)
   } finally {db.close()}
   await stop(processes.at(-1))
   const legacy=new DatabaseSync(join(dataDirectory,'stockroom.sqlite'))

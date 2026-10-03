@@ -64,5 +64,12 @@ export function recordPayment(sale, policyInput, legacy = false) {
   const validated = validatePosSale(sale)
   const result = paymentResult(validated, policyInput, legacy)
   if (validated.paymentDetails?.pos) result.paymentDetails = { ...result.paymentDetails, pos: validated.paymentDetails.pos }
+  if (validated.paymentDetails?.servicePayment) {
+    const details = validated.paymentDetails.servicePayment
+    if (!sale.items?.length || sale.items.some(item => !String(item.productId).startsWith('service:'))) throw new Error('Service payments cannot include stock products.')
+    if (typeof details.customerName !== 'string' || details.customerName.length > 200 || typeof details.customerPhone !== 'string' || details.customerPhone.length > 80) throw new Error('Enter valid customer details.')
+    if (!Number.isFinite(Number(sale.total)) || Number(sale.total) <= 0 || Math.round(sale.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0) * 100) !== Math.round(Number(sale.total) * 100)) throw new Error('Service payment amount does not match its description line.')
+    result.paymentDetails.servicePayment = { customerName: details.customerName.trim(), customerPhone: details.customerPhone.trim() }
+  }
   return result
 }

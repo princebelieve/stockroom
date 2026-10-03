@@ -31,6 +31,27 @@ export async function migrateRetail(db) {
       await db.commitTransaction()
     } catch (error) { await db.rollbackTransaction(); throw error }
   }
+  // Receipt lines can describe payments without an inventory product. Older
+  // browser/native databases enforced a product foreign key; retain their
+  // receipt IDs, line order, columns and indexes while removing only that key.
+  if ((await db.query('PRAGMA table_info(sale_items)')).values.length && !(await db.query("SELECT version FROM schema_migrations WHERE module='service-payments' AND version=1")).values.length) {
+    await db.beginTransaction()
+    try {
+      const keys = (await db.query('PRAGMA foreign_key_list(sale_items)')).values
+      if (keys.some(key => key.from === 'product_id' && key.table === 'products')) {
+        const schema = (await db.query("SELECT sql FROM sqlite_master WHERE type='table' AND name='sale_items'")).values[0].sql
+        const indexes = (await db.query("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='sale_items' AND sql IS NOT NULL")).values
+        const replacement = schema.replace(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?["`\[]?sale_items["`\]]?/i, 'CREATE TABLE sale_items_payment_upgrade').replace(/(product_id\s+TEXT\s+NOT NULL)\s+REFERENCES\s+products\s*\(id\)/i, '$1')
+        if (replacement === schema || /product_id\s+TEXT\s+NOT NULL\s+REFERENCES/i.test(replacement)) throw new Error('Could not upgrade payment receipt storage safely.')
+        await db.execute(replacement)
+        await db.run('INSERT INTO sale_items_payment_upgrade SELECT * FROM sale_items ORDER BY rowid')
+        await db.execute('DROP TABLE sale_items; ALTER TABLE sale_items_payment_upgrade RENAME TO sale_items;')
+        for (const index of indexes) await db.execute(index.sql)
+      }
+      await db.run("INSERT INTO schema_migrations VALUES ('service-payments',1,?)", [new Date().toISOString()])
+      await db.commitTransaction()
+    } catch (error) { await db.rollbackTransaction(); throw error }
+  }
 }
 const text = (value, label) => {
   const result = String(value || '').trim()
