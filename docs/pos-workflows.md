@@ -1,5 +1,7 @@
 # POS workflows
 
+Counter-service menu ordering and preparation use the separate optional [Fast food workspace](fast-food-workspace.md). These controls do not appear in stock checkout.
+
 For payments without inventory, use the separate **Payments & receipts** screen. Enter what the customer is paying for, optional customer details, the amount and payment method, then save and print or share the receipt. This screen never deducts stock. Owners can enable **Stock & checkout**, **Payments & receipts**, or both in **Business settings → Business type → Payment screens**. See [Payments and receipts](payments-and-receipts.md) for details.
 
 Unpaid baskets are saved on the current device per staff member and branch. **Hold sale** saves a named basket for later; hold or clear the current basket before resuming another. The existing explicit void action keeps its reason requirement. Ordinary quantity changes do not ask for a reason.

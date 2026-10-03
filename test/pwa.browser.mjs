@@ -25,12 +25,15 @@ try {
   let loginBodies = []
   let enrollmentBodies = []
   let cloudOffline = false
+  let counterConflict = null
+  let counterSupported = true
   let subscription = { businessId: 'shop', testMode: true, expiresAt: null }
   const cloudRoute = async route => {
     if (cloudOffline) return route.abort('internetdisconnected')
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
     let result = {}
+    if (path === '/v1/sync/capabilities') result = { capabilities: counterSupported ? ['counter-v1'] : [] }
     if (path === '/v1/subscriptions/access') result = subscription
     if (path === '/v1/auth/login') { loginBodies.push(body); result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' } }
     if (path === '/v1/devices/enroll') { enrollmentBodies.push(body); result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' } }
@@ -39,7 +42,11 @@ try {
       const operations = remoteOperations.slice(cursor, cursor + 500)
       result = { operations, cursor: String(cursor + operations.length) }
     }
-    if (path === '/v1/sync/push') { pushed.push(...body.operations); result = { acceptedOperationIds: body.operations.map(item => item.operationId), conflicts: [] } }
+    if (path === '/v1/sync/push') {
+      pushed.push(...body.operations)
+      const rejected = counterConflict ? body.operations.filter(item => item.entityType === 'pos_record' && item.entityId === 'pwa-counter' && ['ready', 'collected'].includes(item.payload.status)) : []
+      result = { acceptedOperationIds: body.operations.filter(item => !rejected.includes(item)).map(item => item.operationId), conflicts: rejected.map(item => ({ operationId: item.operationId, entityType: item.entityType, entityId: item.entityId, localPayload: item.payload, remotePayload: counterConflict, reason: 'Concurrent preparation update' })) }
+    }
     if (path === '/v1/staff') result = { users: [] }
     await route.fulfill({ json: result })
   }
@@ -317,6 +324,55 @@ try {
   await page.getByRole('heading', { name: 'Choose products' }).waitFor()
   await navigateMobile('Customer accounts')
   await page.getByRole('heading', { name: 'Wallet browser customer' }).waitFor()
+  // Counter orders use the same durable offline storage without a retail basket.
+  const profileResult = await page.evaluate(async () => {
+    const response = await fetch('/api/settings/shop-profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'general', industry: 'general', workflows: 'both', fastFood: true }) })
+    return { status: response.status, data: await response.json() }
+  })
+  assert.equal(profileResult.status, 200, JSON.stringify(profileResult.data))
+  const counterApi = (path, body) => page.evaluate(async ({ path, body }) => {
+    const response = await fetch(path, { ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}), headers: { 'Content-Type': 'application/json', 'X-Stockroom-Till': 'counter-pwa-till' } })
+    return { status: response.status, data: await response.json() }
+  }, { path, body })
+  await context.setOffline(true); cloudOffline = true
+  const counterMenu = await counterApi('/api/pos/counter/menu', { id: 'counter-menu', commandId: 'pwa-menu', expectedUpdatedAt: '', items: [{ id: 'sandwich', name: 'Sandwich', price: 5, type: 'prepared', available: true, productId: '', options: [] }, { id: 'coffee', name: 'Packaged coffee', price: 2, type: 'stock', available: true, productId: created.data.id, options: [] }] })
+  assert.equal(counterMenu.status, 200, JSON.stringify(counterMenu.data))
+  const counterRequest = { id: 'pwa-counter', commandId: 'pwa-create', expectedUpdatedAt: '', menuUpdatedAt: counterMenu.data.updatedAt, lines: [{ id: 'pwa-food', menuItemId: 'sandwich', quantity: 1, optionIds: [] }, { id: 'pwa-coffee', menuItemId: 'coffee', quantity: 1, optionIds: [] }] }
+  const counterOrder = await counterApi('/api/pos/counter/orders', counterRequest)
+  assert.equal(counterOrder.status, 200, JSON.stringify(counterOrder.data))
+  assert.equal((await counterApi('/api/pos/counter/orders', counterRequest)).status, 200)
+  const beforeCounterStock = (await api('/api/products')).data.products.find(row => row.id === created.data.id).stock
+  let counter = counterOrder.data
+  for (const status of ['preparing', 'ready']) {
+    const result = await counterApi('/api/pos/counter/status', { id: counter.id, commandId: status, expectedUpdatedAt: counter.updatedAt, status })
+    assert.equal(result.status, 200, JSON.stringify(result.data)); counter = result.data
+    if (status === 'preparing') counterConflict = counter
+  }
+  const counterSale = { id: 'counter-payment:pwa-counter', currency: counter.currency, total: 7, paymentMethod: 'cash', createdAt: new Date().toISOString(), items: [{ productId: 'service:counter:pwa-food', productName: 'Sandwich', quantity: 1, price: 5 }, { productId: created.data.id, productName: 'Packaged coffee', quantity: 1, price: 2 }], paymentDetails: { amountReceived: 10, counterOrder: { id: counter.id, tillId: 'counter-pwa-till' } } }
+  const paymentResult = await counterApi('/api/sales', counterSale)
+  assert.equal(paymentResult.status, 201, JSON.stringify(paymentResult.data))
+  assert.equal((await counterApi('/api/sales', counterSale)).status, 200)
+  assert.equal((await counterApi('/api/sales', { ...counterSale, paymentDetails: { ...counterSale.paymentDetails, amountReceived: 20 } })).status, 400)
+  assert.equal((await api('/api/products')).data.products.find(row => row.id === created.data.id).stock, beforeCounterStock - 1)
+  assert.equal((await counterApi('/api/pos/counter/status', { id: counter.id, commandId: 'collect', expectedUpdatedAt: counter.updatedAt, status: 'collected' })).status, 200)
+  await page.reload()
+  await page.getByRole('button', { name: 'Log out' }).waitFor()
+  const restoredCounter = (await counterApi('/api/pos/counter')).data.orders.find(row => row.id === counter.id)
+  assert.equal(restoredCounter.status, 'collected'); assert.equal(restoredCounter.receiptId, counterSale.id)
+  await context.setOffline(false); cloudOffline = false
+  counterSupported = false
+  const unsupportedSync = await api('/api/sync/now', {})
+  assert.match(unsupportedSync.data.lastError, /Update the cloud server/)
+  assert.equal(pushed.filter(row => row.entityId === counterSale.id).length, 0)
+  assert.ok(unsupportedSync.data.pending > 0)
+  counterSupported = true
+  await api('/api/sync/now', {})
+  assert.equal(pushed.filter(row => row.entityType === 'sale' && row.entityId === counterSale.id).length, 1)
+  assert.equal((await counterApi('/api/pos/counter')).data.orders.find(row => row.id === counter.id).status, 'preparing')
+  const conflicts = (await api('/api/sync/conflicts')).data.conflicts
+  assert.equal(conflicts.length, 2)
+  for (const conflict of conflicts) assert.equal((await api('/api/sync/conflicts/' + conflict.id + '/resolve', {})).status, 200)
+  counterConflict = null
   await page.getByRole('button', { name: 'Log out' }).click()
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   assert.equal((await api('/api/settings')).data.existingBusiness, true)

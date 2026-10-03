@@ -3,6 +3,7 @@ import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../
 import { validQuantity } from '../../server/quantities.mjs'
 import { handleRetail, applyRetailRecord } from '../../server/retail.mjs'
 import { buildReports } from '../../server/reports.mjs'
+import { validateCounterPayment, validateCounterRetry, counterConflictRecord, requiresCounterSync } from '../../server/counter-service.mjs'
 import { handlePos, ensurePos, applyPosRecord } from '../../server/pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from '../../server/shop-fields.mjs'
 import { normalizeShopProfile, validateShopProfile } from '../../server/shop-profile.mjs'
@@ -181,13 +182,21 @@ async function syncNowImpl() {
     const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
     if (!operations.length) break
+    if (operations.some(requiresCounterSync)) {
+      const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
+      if (!support.ok || !(await support.json()).capabilities?.includes('counter-v1')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
+    }
     {
       const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Cloud push failed.')
       for (const conflict of result.conflicts || []) {
         const operation = operations.find(item => item.operationId === conflict.operationId)
-        if (operation) await db.run('INSERT OR IGNORE INTO sync_conflicts (id, operation_id, entity_type, entity_id, reason, local_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [conflict.operationId, conflict.operationId, operation.entityType, operation.entityId, conflict.reason || 'Concurrent edit', JSON.stringify(operation.payload), now()])
+        if (!operation) continue
+        const details = { ...conflict, entityType: operation.entityType, entityId: operation.entityId, localPayload: operation.payload }
+        await db.run('INSERT OR IGNORE INTO sync_conflicts (id,operation_id,entity_type,entity_id,reason,local_payload,remote_payload,created_at) VALUES(?,?,?,?,?,?,?,?)', [conflict.operationId,conflict.operationId,operation.entityType,operation.entityId,conflict.reason || 'Concurrent order edit',JSON.stringify(operation.payload),JSON.stringify(conflict.remotePayload || {}),now()])
+        const remote = counterConflictRecord(details)
+        if (remote) await db.run("UPDATE pos_records SET payload=?,updated_at=? WHERE scope='business' AND id=?", [JSON.stringify(remote), remote.updatedAt, remote.id])
       }
       const acknowledged = [...(result.acceptedOperationIds || []), ...(result.conflicts || []).map((item: { operationId: string }) => item.operationId)].filter((operationId: string) => operations.some(operation => operation.operationId === operationId))
       if (!acknowledged.length) throw new Error('Cloud did not acknowledge any queued changes. Retry sync.')
@@ -215,7 +224,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {
@@ -532,9 +541,9 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   }
   if (path.startsWith('/api/pos')) {
     try {
-      return json(await handlePos({ db, scope: 'business', branchId, user, path, method, input: method === 'GET' ? {} : await body(init),
+      return json(await handlePos({ db, scope: 'business', branchId, user, path, method, tillId: new Headers(init?.headers).get('X-Stockroom-Till') || '', input: method === 'GET' ? {} : await body(init),
         sales: async () => {
-          const loaded = (await db.query('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id=?', [branchId])).values || []
+          const loaded = (await db.query('SELECT id,total,payment_reference AS paymentReference,terminal_provider AS terminalProvider,cash_received AS cashReceived,change_given AS changeGiven,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id=?', [branchId])).values || []
           for (const sale of loaded) {
             sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
             sale.items = (await db.query('SELECT product_id AS productId,product_name AS productName,quantity,unit_cost AS unitCost,batch_allocations AS batchAllocations,unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid', [sale.id])).values || []
@@ -547,7 +556,20 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const subscription = await subscriptionStatus()
     if (subscription.blocked) return error(subscription.reason, 402)
     let sale = await body(init); sale.branchId = branchId; if (sale.paymentMethod === 'wallet' && (sale.paymentDetails as { creditApproved?: boolean } | undefined)?.creditApproved && user.role !== 'owner') return error('Only the owner may approve credit purchases.', 403); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
-    if ((await db.query('SELECT id FROM sales WHERE id = ?', [sale.id])).values?.length) return json({ ...sale, syncStatus: 'pending' })
+    const previousSale = (await db.query('SELECT id,total,branch_id AS branchId,payment_method AS paymentMethod,payment_reference AS paymentReference,terminal_provider AS terminalProvider,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE id=?', [sale.id])).values?.[0]
+    if (previousSale) {
+      if ((sale.paymentDetails as { counterOrder?: unknown } | undefined)?.counterOrder) {
+        try {
+          const counter = (sale.paymentDetails as { counterOrder: { id: string } }).counterOrder
+          const orderRow = (await db.query("SELECT payload FROM pos_records WHERE scope='business' AND id=?", [counter.id])).values?.[0]
+          const tillId = new Headers(init?.headers).get('X-Stockroom-Till') || ''
+          if (!tillId) throw new Error('Payment must be taken on the original till.')
+          validateCounterPayment(sale, orderRow ? JSON.parse(String(orderRow.payload)) : undefined, tillId)
+          validateCounterRetry(sale, { ...previousSale, paymentDetails: JSON.parse(String(previousSale.paymentDetails)) })
+        } catch (caught) { return error(caught instanceof Error ? caught.message : 'Order already paid.') }
+      }
+      return json({ ...sale, createdAt: previousSale.createdAt, syncStatus: 'pending' })
+    }
     if (!sale.items.length || sale.items.some((item: Record<string, unknown>) => !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) return error('Sale quantities and prices are invalid.')
     const total = sale.items.reduce((sum: number, item: Record<string, unknown>) => sum + Number(item.quantity) * Number(item.price), 0)
     if (!((sale.paymentDetails as { pos?: unknown } | undefined)?.pos) && Math.abs(total - Number(sale.total)) > 0.01) return error('Sale total does not match its items.')
@@ -569,6 +591,13 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
       const checkoutSettings = (await db.query("SELECT payload FROM pos_records WHERE scope='business' AND id='pos-settings'")).values?.[0]
       const checkoutPos = (sale.paymentDetails as {pos?: {tillId?: string}} | undefined)?.pos
       if (checkoutPos) checkoutPos.tillId = new Headers(init?.headers).get('X-Stockroom-Till') || ''
+      const counter = (sale.paymentDetails as { counterOrder?: { id: string } } | undefined)?.counterOrder
+      if (counter) {
+        const row = (await db.query("SELECT payload FROM pos_records WHERE scope='business' AND id=?", [counter.id])).values?.[0]
+        const tillId = new Headers(init?.headers).get('X-Stockroom-Till') || ''
+        if (!tillId) throw new Error('Payment must be taken on the original till.')
+        validateCounterPayment(sale, row ? JSON.parse(String(row.payload)) : undefined, tillId)
+      }
       validateCheckoutSettings(sale, checkoutSettings ? JSON.parse(String(checkoutSettings.payload)).value : undefined)
       const loyaltyCustomer = (sale.paymentDetails as { pos?: { customerId?: string } } | undefined)?.pos?.customerId
       if (loyaltyCustomer && !(await db.query('SELECT id FROM customers WHERE id=?', [loyaltyCustomer])).values?.length) throw new Error('Selected customer does not exist.')

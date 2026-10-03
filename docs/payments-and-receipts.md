@@ -6,6 +6,8 @@ In **Business settings → Business type**, choose **Payment screens**:
 - **Stock & checkout** for the existing product basket and inventory workflow.
 - **Both** for two separate navigation buttons.
 
+**Fast food only** selects the separate menu-ordering workspace. To combine it with these payment screens, use **Enable separate Fast food workspace**. See [Fast food workspace](fast-food-workspace.md).
+
 Click **Save payment screens**. Use Sync now to share the choice with other devices. Changing this choice preserves existing products, receipts and drafts.
 
 In Payments & receipts, enter **Payment for**, optional customer name/phone, **Amount paid**, and the payment method. Existing customer names can prefill their phone number. New customer details are saved on the receipt; this does not automatically create a customer account.

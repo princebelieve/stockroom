@@ -32,6 +32,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   function useTemplate() {
     const next = normalizeShopProfile({ mode: industry === 'general' ? 'general' : 'suggested', industry })
     next.workflows = draft.workflows
+    next.fastFood = draft.fastFood
     const ids = new Set(next.fields.map(field => field.id))
     next.fields.push(...draft.fields.filter(field => !ids.has(field.id)).map(field => ({ ...field, visible: false })))
     if (next.fields.length > 49) { setProblem('This template would exceed 40 custom fields. Customize your current fields instead.'); return }
@@ -54,9 +55,10 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     catch (error) { setProblem(error instanceof Error ? error.message : 'Check your fields.') }
   }
   return <section id="shop-setup" className="panel full-panel shop-wizard">
-    <label htmlFor="payment-screens">Payment screens</label><select id="payment-screens" value={draft.workflows || 'both'} onChange={event => change({ ...draft, workflows: event.target.value as ShopProfile['workflows'] })}><option value="payments">Payments &amp; receipts</option><option value="stock">Stock &amp; checkout</option><option value="both">Both</option></select><p>Payments &amp; receipts records a payment without changing stock. Both gives staff two separate screens.</p>
-    <AsyncButton className="primary-button" busyLabel="Saving screens..." onClick={async () => { const otherChanges = JSON.stringify({ ...draft, workflows: value.workflows }) !== JSON.stringify(value); await save(validateShopProfile({ ...value, workflows: draft.workflows })); setDirty(otherChanges); setMessage('Payment screens saved. Use Sync now to share this choice with your other devices.') }}>Save payment screens</AsyncButton>
-    <h2>Business type and product form</h2><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p>
+    <label htmlFor="payment-screens">Payment screens</label><select id="payment-screens" value={draft.workflows || 'both'} onChange={event => change({ ...draft, workflows: event.target.value as ShopProfile['workflows'] })}><option value="payments">Payments &amp; receipts</option><option value="stock">Stock &amp; checkout</option><option value="both">Both</option><option value="fast-food">Fast food only</option></select><p>Payments &amp; receipts records a payment without changing stock. Both gives staff two separate screens.</p>
+    <label><input type="checkbox" checked={draft.fastFood === true || draft.workflows === 'fast-food'} disabled={draft.workflows === 'fast-food'} onChange={event => change({ ...draft, fastFood: event.target.checked })} />Enable separate Fast food workspace</label><p>Use Fast food only for menu orders and preparation. Enable the checkbox with another screen choice for a mixed business.</p>
+    <AsyncButton className="primary-button" busyLabel="Saving screens..." onClick={async () => { const otherChanges = JSON.stringify({ ...draft, workflows: value.workflows, fastFood: value.fastFood }) !== JSON.stringify(value); await save(validateShopProfile({ ...value, workflows: draft.workflows, fastFood: draft.fastFood || draft.workflows === 'fast-food' })); setDirty(otherChanges); setMessage('Payment screens saved. Use Sync now to share this choice with your other devices.') }}>Save payment screens</AsyncButton>
+    {draft.workflows !== 'fast-food' && <><h2>Business type and product form</h2><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p>
     <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
     {step === 0 && <div className="shop-step">
       <h3>Start with a familiar template</h3><label>Business type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
@@ -95,6 +97,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
       <AsyncForm onSubmit={async () => { const next = validateShopProfile({ ...draft, categories: draft.categories.map(item => item.trim()).filter(Boolean), fields: draft.fields.map(field => ({ ...field, options: field.options.map(item => item.trim()).filter(Boolean) })) }); await save(next); setDirty(false); setMessage('Shop setup saved on this device. Use Sync now to share it with your other devices.') }}><SubmitButton className="primary-button">Save shop setup</SubmitButton></AsyncForm>
     </div>}
     <div className="shop-steps">{step > 0 && <button type="button" className="filter-button" onClick={() => go(step - 1)}>Back</button>}{step < 2 && <button type="button" className="primary-button" onClick={() => go(step + 1)}>Continue</button>}</div>
-    {problem && <p role="alert">{problem}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted">Unsaved draft - complete the preview step to apply it.</p>}
+    </>}
+    {problem && <p role="alert">{problem}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted">Unsaved changes. Save payment screens above; product form changes use Preview and save.</p>}
   </section>
 }

@@ -1,6 +1,6 @@
 ﻿# Business app scope and architecture review
 
-Updated: 2026-10-03, after adding the separate Payments & receipts workflow.
+Updated: 2026-10-03, after adding Payments & receipts and the separate Fast food workspace.
 
 ## Purpose
 
@@ -12,17 +12,22 @@ The original audit identified a real issue: changing product labels and template
 
 Owners can choose **Stock & checkout**, **Payments & receipts**, or **Both** in **Business settings → Business type → Payment screens**.
 
+Owners can also choose **Fast food only**, or enable Fast food alongside their existing screens. Its menu, orders, preparation queue and packaged-stock tools stay in a separate workspace. Supermarkets receive no Fast food screens unless the owner enables it.
+
 | Workflow | Behavior |
 | --- | --- |
 | Stock & checkout | Select stocked products, take payment, save a receipt and deduct stock. |
 | Payments & receipts | Enter what the customer is paying for, optional customer name/phone, amount and payment method; save and print/share a receipt without changing stock. |
 | Both | Staff switch between two separate screens. The payment form and product basket keep their own drafts. |
+| Fast food | Save menu orders, track Queued → Preparing → Ready → Collected, and record full payment against the same order. Prepared meals need no stock; linked packaged goods deduct stock on payment. |
 
 Business templates still customize product fields and wording. The saved payment-screen choice now controls the availability of the two workflows and relevant stock navigation independently of the template.
 
 The payment screen is useful across sectors when the task is simply recording an amount received and issuing a receipt. A printing press, church office or hotel can use it for that task. This does not imply that the app manages printing jobs, church administration or hotel reservations.
 
 See [Payments & receipts](payments-and-receipts.md) for setup and daily use.
+
+See [Fast food workspace](fast-food-workspace.md) for order operations, setup, device synchronization and current limits.
 
 ## Architecture worth preserving
 
@@ -35,7 +40,7 @@ Some core operations and schemas still have separate platform implementations. C
 
 ## Remaining limits
 
-Both workflows record fully paid transactions. The app does not currently provide independent operational records for unpaid orders, deposits, open bar tabs, kitchen preparation, room availability or hotel stays. Held baskets remain checkout drafts rather than managed hospitality orders.
+Stock checkout and direct payment entry record fully paid transactions. Fast food now has persistent unpaid orders and independent preparation progress, with full settlement required before handover. Deposits, open bar tabs, room availability and hotel stays remain outside the implemented scope. Held retail baskets remain checkout drafts.
 
 Existing financial reports summarize receipts, recorded stock costs, expenses and returns. A payment without stock carries no inventory cost; its receipt alone does not capture the business's full service delivery cost.
 
@@ -43,7 +48,7 @@ The current screen choice is a workspace setting. It does not introduce new staf
 
 ## Guidance for future changes
 
-Keep payment entry simple. Add a sector workflow only when a concrete business task requires it, and define that task before adding screens or backend entities. Restaurant ordering or hotel reservations would each need their own bounded design; they are optional extensions, not prerequisites for issuing receipts.
+Keep payment entry simple. Add a sector workflow only when a concrete business task requires it, and define that task before adding screens or backend entities. Fast food is the first separate operational extension. Table-service restaurants and hotel reservations still need their own bounded designs; they are optional extensions, not prerequisites for issuing receipts.
 
 For any extension, preserve existing records, validate amounts and permissions in the backend, and check persistence, retry and synchronization behavior on supported platforms. Templates should expose implemented behavior rather than imply capabilities through renamed fields.
 

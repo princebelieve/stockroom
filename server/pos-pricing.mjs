@@ -115,6 +115,7 @@ export function validateLoyaltyBalance(sale, sales, returns) {
 }
 
 export function validateCheckoutSettings(sale, value) {
+  if (sale.paymentDetails?.counterOrder) return
   if (sale.paymentDetails?.servicePayment && sale.items?.length && sale.items.every(item => String(item.productId).startsWith('service:'))) return
   const saved = posSettings(value)
   if (saved.offlineStockPoolsEnabled && saved.stockPools[sale.paymentDetails?.pos?.tillId] !== (sale.branchId || 'main')) throw new Error('Choose this till’s assigned stock location before selling. Ask the owner to assign this till if needed.')

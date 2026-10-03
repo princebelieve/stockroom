@@ -1,3 +1,4 @@
+import { validateCounterPayment, validateCounterRetry, counterConflictRecord } from './counter-service.mjs'
 import { validateLoyaltyBalance, validateCheckoutSettings } from './pos-pricing.mjs'
 import { stockChangeSync, stockTransferSync } from './stock-ledger.mjs'
 import { validQuantity } from './quantities.mjs'
@@ -325,7 +326,11 @@ export function markKnownLocalOperationsApplied() {
 export function recordSyncConflicts(conflicts) {
   if (!Array.isArray(conflicts)) return
   const insert = database.prepare('INSERT OR IGNORE INTO sync_conflicts (id, operation_id, entity_type, entity_id, reason, local_payload, remote_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-  for (const conflict of conflicts) insert.run(crypto.randomUUID(), conflict.operationId, conflict.entityType || 'unknown', conflict.entityId || '', conflict.reason || 'A newer change exists on another device.', JSON.stringify(conflict.localPayload || {}), JSON.stringify(conflict.remotePayload || {}), now())
+  for (const conflict of conflicts) {
+    insert.run(crypto.randomUUID(), conflict.operationId, conflict.entityType || 'unknown', conflict.entityId || '', conflict.reason || 'A newer change exists on another device.', JSON.stringify(conflict.localPayload || {}), JSON.stringify(conflict.remotePayload || {}), now())
+    const remote = counterConflictRecord(conflict)
+    if (remote) database.prepare('UPDATE pos_records SET payload=?,updated_at=? WHERE scope=? AND id=?').run(JSON.stringify(remote), remote.updatedAt, organizationId, remote.id)
+  }
 }
 
 export function listSyncConflicts() {
@@ -1027,11 +1032,20 @@ export function adjustStock(productId, amount, reason = 'manual-adjustment', sho
   return saved
 }
 
-export function createSale(sale, shouldSync = true, branchId = 'main') {
+export function createSale(sale, shouldSync = true, branchId = 'main', tillId) {
   sale = { ...sale, branchId: sale.branchId || branchId }
   sale = sale.paymentDetails ? recordPayment(sale, shouldSync ? database.prepare('SELECT payment_policy FROM app_settings WHERE organization_id = ?').get(organizationId)?.payment_policy : sale.paymentDetails.policy, true) : normalizeCashSale(sale)
+  if (sale.paymentDetails?.counterOrder && shouldSync) {
+    if (!tillId) throw new Error('Payment must be taken on the original till.')
+    const row = database.prepare('SELECT payload FROM pos_records WHERE scope=? AND id=?').get(organizationId, sale.paymentDetails.counterOrder.id)
+    validateCounterPayment(sale, row ? JSON.parse(row.payload) : undefined, tillId)
+  }
   if (sale.paymentMethod === 'wallet' && !sale.paymentDetails?.customerId) throw new Error('A wallet sale requires a selected customer.')
-  if (database.prepare('SELECT id FROM sales WHERE id = ?').get(sale.id)) return { ...sale, syncStatus: 'synced' }
+  const previousSale = database.prepare('SELECT id,total,branch_id AS branchId,payment_method AS paymentMethod,payment_reference AS paymentReference,terminal_provider AS terminalProvider,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE id=? AND organization_id=?').get(sale.id, organizationId)
+  if (previousSale) {
+    if (sale.paymentDetails?.counterOrder) validateCounterRetry(sale, { ...previousSale, paymentDetails: JSON.parse(previousSale.paymentDetails) })
+    return { ...sale, createdAt: previousSale.createdAt, syncStatus: 'synced' }
+  }
   database.exec('BEGIN')
   try {
     if (shouldSync) {
@@ -1078,19 +1092,19 @@ export function createSale(sale, shouldSync = true, branchId = 'main') {
 }
 
 let pendingPosAction = Promise.resolve()
-export function posAction(path, method, input, user, branchId) {
-  const action = pendingPosAction.then(() => performPosAction(path, method, input, user, branchId))
+export function posAction(path, method, input, user, branchId, tillId) {
+  const action = pendingPosAction.then(() => performPosAction(path, method, input, user, branchId, tillId))
   pendingPosAction = action.catch(() => undefined)
   return action
 }
-async function performPosAction(path, method, input, user, branchId) {
+async function performPosAction(path, method, input, user, branchId, tillId) {
   const db = {
     execute: sql => database.exec(sql),
     query: (sql, params = []) => ({ values: database.prepare(sql).all(...params) }),
     run: (sql, params = []) => database.prepare(sql).run(...params),
     beginTransaction: () => database.exec('BEGIN'), commitTransaction: () => database.exec('COMMIT'), rollbackTransaction: () => database.exec('ROLLBACK')
   }
-  return handlePos({ db, scope: organizationId, organizationId, branchId, user, path, method, input,
-    sales: () => database.prepare('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE organization_id=? AND branch_id=? ORDER BY created_at DESC').all(organizationId, branchId).map(sale => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_cost AS unitCost, batch_allocations AS batchAllocations, unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid').all(sale.id) })),
+  return handlePos({ db, scope: organizationId, organizationId, branchId, user, path, method, input, tillId,
+    sales: () => database.prepare('SELECT id,total,payment_reference AS paymentReference,terminal_provider AS terminalProvider,cash_received AS cashReceived,change_given AS changeGiven,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE organization_id=? AND branch_id=? ORDER BY created_at DESC').all(organizationId, branchId).map(sale => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_cost AS unitCost, batch_allocations AS batchAllocations, unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid').all(sale.id) })),
     publish: record => queueSync('pos_record', record.id, 'upsert', record) })
 }

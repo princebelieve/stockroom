@@ -517,3 +517,11 @@ body { background: #dfece5; }
 .service-payments[hidden] { display: none; }
 .service-payments > .panel { margin-bottom: 20px; }
 .service-payments .settings-form { max-width: none; }
+.counter-workspace { display: grid; gap: 1rem; min-width: 0; }
+.counter-tabs, .counter-menu-grid { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: 1rem; }
+.counter-menu-grid button { display: grid; gap: .4rem; min-width: 130px; text-align: left; }
+.counter-order-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 1rem; }
+.counter-order small { display: block; overflow-wrap: anywhere; }
+.counter-order button { margin: .3rem .4rem .3rem 0; }
+.counter-menu-editor, .counter-payment { display: grid; gap: .8rem; max-width: 850px; }
+.counter-menu-editor fieldset { display: grid; gap: .7rem; min-width: 0; }

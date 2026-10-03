@@ -1,4 +1,5 @@
 import { stockChange } from './stock-ledger.mjs'
+import { handleCounter } from './counter-service.mjs'
 import { posSettings, refundFor, loyaltyBalances } from './pos-pricing.mjs'
 export const posSchema = 'CREATE TABLE IF NOT EXISTS pos_records (scope TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,id));'
 export async function ensurePos(db) { await db.run(posSchema) }
@@ -35,8 +36,15 @@ export async function applyPosRecord(db, scope, record, organizationId) {
   await savePosRecord(db, scope, record)
 }
 const amount = value => { const n = Number(value); if (!Number.isFinite(n) || n < 0 || Math.abs(Math.round(n * 100) - n * 100) > 0.000001) throw new Error('Enter a non-negative amount with at most two decimals.'); return n }
-export async function handlePos({ db, scope, branchId, user, path, method, input, sales, publish, organizationId }) {
+export async function handlePos({ db, scope, branchId, user, path, method, input, sales, publish, organizationId, tillId }) {
   await ensurePos(db)
+  if (path.startsWith('/api/pos/counter')) {
+    const adapter = {
+      query: (sql, params = []) => db.query(sql, params), run: (sql, params = []) => db.run(sql, params, false),
+      beginTransaction: () => db.beginTransaction(), commitTransaction: () => db.commitTransaction(), rollbackTransaction: () => db.rollbackTransaction()
+    }
+    return handleCounter({ db: adapter, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
+  }
   const manager = ['owner', 'admin'].includes(user.role)
   const records = kind => posRecords(db, scope, kind, kind === 'settings' || kind === 'product' ? 'main' : branchId)
   const write = async record => { if(['basket','register'].includes(record.kind)){const previous=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.id])).values[0];record.expectedUpdatedAt=previous?JSON.parse(previous.payload).updatedAt:''} await db.beginTransaction(); try { await savePosRecord(db, scope, record); await publish(record); await db.commitTransaction() } catch(error) { await db.rollbackTransaction(); throw error } return record }

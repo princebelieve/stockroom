@@ -60,7 +60,8 @@ export function normalizeShopProfile(input) {
   }
   value.fields = normalizeFields(input.fields, industry, value.itemLabel)
   value.features = { services: typeof input.features?.services === 'boolean' ? input.features.services : industry !== 'supermarket' }
-  value.workflows = ['stock', 'payments', 'both'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
+  value.workflows = ['stock', 'payments', 'both', 'fast-food'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
+  value.fastFood = input.fastFood === true || value.workflows === 'fast-food'
   value.version = 2
   return value
 }
@@ -73,8 +74,9 @@ export function businessWorkspace(profile) {
     overviewTitle: supermarket ? 'Supermarket at a glance' : 'Business at a glance',
     overviewDescription: supermarket ? 'Review checkout sales, stock levels, and daily operations.' : 'Review business health, stock, and team activity.',
     services: value.features.services,
-    stock: value.workflows !== 'payments',
-    payments: value.workflows !== 'stock',
+    stock: ['stock', 'both'].includes(value.workflows),
+    payments: ['payments', 'both'].includes(value.workflows),
+    fastFood: value.fastFood,
   }
 }
 

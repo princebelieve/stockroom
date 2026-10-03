@@ -77,11 +77,11 @@ const server = createServer(async (request, response) => {
     const user = sessionUser(request)
     if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
     if (request.method === 'GET') {
-      try { return sendJson(response, 200, await posAction(request.url, 'GET', {}, user, requestBranch(request))) }
+      try { return sendJson(response, 200, await posAction(request.url, 'GET', {}, user, requestBranch(request), String(request.headers['x-stockroom-till'] || ''))) }
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     }
     return readJson(request, response, async input => {
-      try { return sendJson(response, 200, await posAction(request.url, request.method, input, user, requestBranch(request))) }
+      try { return sendJson(response, 200, await posAction(request.url, request.method, input, user, requestBranch(request), String(request.headers['x-stockroom-till'] || ''))) }
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
@@ -557,7 +557,7 @@ const server = createServer(async (request, response) => {
           input.terminalProvider = 'Paystack'; input.paymentReference = verified.reference
         }
         if (input.paymentDetails?.pos) input.paymentDetails.pos.tillId = String(request.headers['x-stockroom-till'] || '')
-        return sendJson(response, 201, await createSale({ ...input, branchId: requestBranch(request), staffId: user.id, staffName: user.name }, true, requestBranch(request)))
+        return sendJson(response, 201, await createSale({ ...input, branchId: requestBranch(request), staffId: user.id, staffName: user.name }, true, requestBranch(request), String(request.headers['x-stockroom-till'] || '')))
       } catch (error) {
         return sendJson(response, 400, { error: error.message })
       }

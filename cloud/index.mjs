@@ -1,5 +1,6 @@
 import { createSupermarketCoordinator } from './supermarket-coordination.mjs'
 import { validateRetailRecord } from '../server/retail.mjs'
+import { validateCounterRecord, validateCounterPayment, validateCounterRetry } from '../server/counter-service.mjs'
 import { createPosPaystack } from './pos-paystack.mjs'
 import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
@@ -42,6 +43,7 @@ const businessExitPayments = database.collection('business_exit_payments')
 await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
 await operations.createIndex({ businessId: 1, entityId: 1 }, { unique: true, partialFilterExpression: { entityType: 'retail_record' } })
 await operations.createIndex({businessId:1,'payload.branchId':1,'payload.supplierId':1},{unique:true,partialFilterExpression:{entityType:'retail_record','payload.kind':'supplier-opening'}})
+await operations.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { name: 'counter_order_receipt', unique: true, partialFilterExpression: { entityType: 'sale', 'payload.paymentDetails.counterOrder.id': { $exists: true } } })
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
 await businessSettings.createIndex({ businessId: 1 }, { unique: true })
@@ -445,6 +447,10 @@ const server = createServer(async (request, response) => {
       try { await sendPosReceipt({ to: input.to, sale: sale.payload }); return send(response, 200, { sent: true }) }
       catch { return send(response, 400, { error: 'Receipt email could not be sent. Check the address and Gmail configuration.' }) }
     }
+    if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
+      if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
+      return send(response, 200, { capabilities: ['counter-v1'] })
+    }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
       const businessId = String(input.businessId || '')
@@ -469,6 +475,15 @@ const server = createServer(async (request, response) => {
           acceptedOperationIds.push(document.operationId)
           continue
         }
+        if (document.entityType === 'sale' && document.payload.paymentDetails?.counterOrder) {
+          try {
+            if (document.action !== 'create' || document.entityId !== document.payload.id) throw new Error('Invalid counter payment operation.')
+            const order = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: document.payload.paymentDetails.counterOrder.id })
+            validateCounterPayment(document.payload, order?.payload)
+            const previous = await operations.findOne({ businessId, entityType: 'sale', entityId: document.entityId })
+            if (previous) { validateCounterRetry(document.payload, previous.payload); acceptedOperationIds.push(document.operationId); continue }
+          } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message }); continue }
+        }
         if (document.entityType === 'retail_record') {
           try {
             if (document.action !== 'create' || document.entityId !== document.payload.id) throw new Error('Invalid purchasing operation.')
@@ -490,7 +505,12 @@ const server = createServer(async (request, response) => {
         if (mutableEntities.has(document.entityType)) {
           if (document.entityType === 'settings') {
             if (document.payload?.shopProfile != null && document.payload.shopProfile !== 'null') {
-              try { document.payload.shopProfile = validateShopProfile(typeof document.payload.shopProfile === 'string' ? JSON.parse(document.payload.shopProfile) : document.payload.shopProfile) }
+              try {
+                const profile = typeof document.payload.shopProfile === 'string' ? JSON.parse(document.payload.shopProfile) : document.payload.shopProfile
+                const previous = await businessSettings.findOne({ businessId })
+                if (normalizeShopProfile(previous?.settings?.shopProfile).fastFood && profile.fastFood === undefined) throw new Error('Update this device before changing Fast food workspace settings.')
+                document.payload.shopProfile = validateShopProfile(profile)
+              }
               catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid shop setup. Save a valid setup and sync again.' }); continue }
             } else {
               const previous = await businessSettings.findOne({ businessId })
@@ -499,12 +519,19 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
+          if (document.entityType === 'pos_record' && ['counter-menu', 'counter-order'].includes(document.payload.kind)) {
+            try {
+              if (document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid counter-service operation.')
+              validateCounterRecord(document.payload, current?.payload)
+              if (document.payload.kind === 'counter-order' && document.payload.status === 'collected' && !await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })) throw new Error('Synchronize the order payment before handover.')
+            } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message, localPayload: document.payload, remotePayload: current?.payload || {} }); continue }
+          }
           if (document.entityType === 'product') {
             try { document.payload.customValues = { ...readCustomValues(current?.payload?.customValues), ...readCustomValues(document.payload.customValues) } }
             catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid custom product details.' }); continue }
           }
           if(document.entityType==='pos_record' && document.payload.expectedUpdatedAt!==undefined && document.payload.expectedUpdatedAt!==(current?.payload?.updatedAt||'')){
-            conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This basket or register was changed on another till. Refresh and review the other version.',localPayload:document.payload,remotePayload:current?.payload||{}});continue
+            conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This record was changed on another till. Refresh and review the other version.',localPayload:document.payload,remotePayload:current?.payload||{}});continue
           }
           if (!isNewerMutableOperation(document, current)) {
             conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'A newer version of this record was saved on another device.', localPayload: document.payload, remotePayload: current.payload })
@@ -513,7 +540,7 @@ const server = createServer(async (request, response) => {
           try {
             const guarded=document.entityType==='pos_record' && document.payload.expectedUpdatedAt!==undefined
             const result=await entityHeads.updateOne(guarded && current?{...filter,operationId:current.operationId}:filter,{ $set: { updatedAt: operationUpdatedAt(document), payload: document.payload, operationId: document.operationId, deviceId, receivedAt: new Date() } },{upsert:guarded?!current:true})
-            if(guarded && current && !result.matchedCount){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent till edit won. Refresh this basket or register.'});continue}
+            if(guarded && current && !result.matchedCount){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent till edit won. Refresh this record.'});continue}
           }catch(error){if(error.code!==11000)throw error;conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent till created this record. Refresh before editing.'});continue}
 
         }
@@ -553,7 +580,8 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
-      if (query.get('protocol') !== 'retail-v3' && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
+      if (query.get('capabilities') !== 'counter-v1' && query.get('protocol') !== 'business-v4' && rows.some(row => ['counter-menu', 'counter-order'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })
+      if (!['retail-v3', 'business-v4'].includes(query.get('protocol')) && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
       return send(response, 200, { operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })
     }
     return send(response, 404, { error: 'Not found.' })

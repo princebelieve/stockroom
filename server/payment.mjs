@@ -63,6 +63,12 @@ function paymentResult(sale, policyInput, legacy = false) {
 export function recordPayment(sale, policyInput, legacy = false) {
   const validated = validatePosSale(sale)
   const result = paymentResult(validated, policyInput, legacy)
+  if (String(sale.id).startsWith('counter-payment:') && !validated.paymentDetails?.counterOrder) throw new Error('Counter order payment details are required.')
+  if (validated.paymentDetails?.counterOrder) {
+    const details = validated.paymentDetails.counterOrder
+    if (typeof details.id !== 'string' || !details.id || details.id.length > 150 || typeof details.tillId !== 'string' || !details.tillId || details.tillId.length > 100) throw new Error('Invalid counter order payment link.')
+    result.paymentDetails.counterOrder = { id: details.id, tillId: details.tillId }
+  }
   if (validated.paymentDetails?.pos) result.paymentDetails = { ...result.paymentDetails, pos: validated.paymentDetails.pos }
   if (validated.paymentDetails?.servicePayment) {
     const details = validated.paymentDetails.servicePayment

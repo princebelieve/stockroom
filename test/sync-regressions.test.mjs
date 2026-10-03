@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 import vm from 'node:vm'
+import { requiresCounterSync, counterConflictRecord } from '../server/counter-service.mjs'
 
 for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
   const source = readFileSync(path, 'utf8')
@@ -35,6 +36,7 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
     }
     const code = source.slice(source.indexOf('async function syncNowImpl('), source.indexOf('\n// Pull-to-refresh'))
     const sync = vm.runInNewContext(stripTypeScriptTypes(`(${code})`), {
+      requiresCounterSync, counterConflictRecord,
       getMobileSyncConfiguration: async () => ({ syncApiUrl: 'https://test', businessId: 'shop', deviceId: 'device', deviceToken: 'token' }),
       openMobileDatabase: async () => db, now: () => '2026-01-01',
       pullLatestImpl: async () => ({ pending: pending.size, lastError: '' }),
