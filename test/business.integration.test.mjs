@@ -1,3 +1,4 @@
+import { priceOrder, posSettings } from '../server/pos-pricing.mjs'
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { createServer } from 'node:http'
@@ -436,4 +437,43 @@ test('purchasing API preserves existing data, receives cartons once, and writes 
   const snapshot=new DatabaseSync(join(dataDirectory,backup),{readOnly:true})
   try { assert.equal(snapshot.prepare('SELECT stock FROM branch_inventory WHERE product_id=?').get(item.id).stock,53) }
   finally {snapshot.close()}
+})
+
+
+test('offline POS earns and spends rewards, returns restore them, and till stock pools are enforced',async()=>{
+ const {baseUrl}=await startBusiness()
+ const token=await createOwner(baseUrl)
+ const headers={'Content-Type':'application/json',Authorization:`Bearer ${token}`,'X-Stockroom-Till':'till-a'}
+ const post=(path,input,override={})=>json(baseUrl+path,{method:'POST',headers:{...headers,...override},body:JSON.stringify(input)})
+ const item=await product(baseUrl,token,10)
+ const customer=await post('/api/customers',{name:'Rewards customer',phone:'555'})
+ assert.equal(customer.response.status,201)
+ const settings=posSettings({loyaltyEnabled:true,loyaltyRate:10,taxEnabled:true,taxRate:20,taxRates:{[item.id]:0}})
+ assert.equal((await post('/api/pos/settings',settings)).response.status,200)
+ const sell=async(id,rewards=0,override={})=>{
+  const items=[{productId:item.id,quantity:1,price:10}]
+  const pos={customerId:customer.body.id,loyaltyRedeemed:rewards,tax:settings}
+  const pricing=priceOrder(items,pos)
+  return post('/api/sales',{id,items,total:pricing.total,createdAt:new Date().toISOString(),paymentMethod:'cash',paymentDetails:{amountReceived:pricing.total,pos}},override)
+ }
+ assert.equal((await sell('earn')).response.status,201)
+ let data=await json(baseUrl+'/api/pos',{headers})
+ assert.equal(data.body.loyaltyBalances[customer.body.id],1)
+ assert.equal((await sell('spend',1)).response.status,201)
+ const rejected=await sell('overspend',1)
+ assert.equal(rejected.response.status,400)
+ assert.match(rejected.body.error,/Insufficient/)
+ const returned=await post('/api/pos/returns',{id:'return-rewards',saleId:'spend',reason:'Customer return',method:'cash',items:[{lineIndex:0,quantity:1,restock:true}]})
+ assert.equal(returned.response.status,200)
+ assert.equal(returned.body.total,9)
+ assert.equal(returned.body.loyaltyRestored,1)
+ data=await json(baseUrl+'/api/pos',{headers})
+ assert.equal(data.body.loyaltyBalances[customer.body.id],1)
+ const poolSettings={...settings,offlineStockPoolsEnabled:true,stockPools:{'till-a':'main'}}
+ assert.equal((await post('/api/pos/settings',poolSettings)).response.status,200)
+ assert.equal((await sell('own-pool')).response.status,201)
+ const wrong=await sell('other-till',0,{'X-Stockroom-Till':'till-b'})
+ assert.equal(wrong.response.status,400)
+ assert.match(wrong.body.error,/assigned stock/)
+ // No external cloud endpoint is needed for any sale above.
 })

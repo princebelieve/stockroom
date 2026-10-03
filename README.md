@@ -5,7 +5,7 @@ Stockroom Business is an offline-first business operations app for organizations
 ## What the app does
 
 - **Inventory:** maintain products, SKUs and barcodes, categories, costs, prices, quantities, and reorder points; record stock movements and stocktakes.
-- **Point of sale:** record cash, bank transfer, manually confirmed external-terminal, split, and supported wallet payments. Sales reduce stock and produce receipts.
+- **Point of sale:** record cash, bank transfer, manually confirmed external-terminal, split, and supported wallet payments. Sales reduce stock and produce receipts. Optional checkout settings support product-specific tax rates, customer reward redemption, and separate stock locations for offline tills.
 - **Customers and wallets:** keep customer records, record deposits, repayments, and withdrawals, and track balances owed or prepaid. Wallet checkout is available when enabled in the payment policy; only the owner can approve a credit purchase.
 - **Supermarket operations:** supplier orders, partial delivery receiving, pack conversions, supplier returns, wastage, optional expiry tracking, delivery-based costing and audited price/barcode changes. See [supermarket workflow](docs/supermarket-workspace.md).
 - **Sales operations:** review sales, receipts, payment evidence, cashier activity, and reports. Import provider CSV data for reconciliation without changing the original sales.

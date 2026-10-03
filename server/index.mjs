@@ -53,7 +53,7 @@ const server = createServer(async (request, response) => {
     } catch { return sendJson(response, 503, { error: 'Could not reach the cloud service. Check your connection and try again.' }) }
   }
   if (request.method === 'OPTIONS') {
-    response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Local-Session' })
+    response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Local-Session, X-Stockroom-Branch, X-Stockroom-Till' })
     return response.end()
   }
 
@@ -556,6 +556,7 @@ const server = createServer(async (request, response) => {
           if (!result.ok || !verified.paid || verified.amount !== input.total || verified.currency !== input.currency) throw new Error('Paystack has not verified this sale amount and currency.')
           input.terminalProvider = 'Paystack'; input.paymentReference = verified.reference
         }
+        if (input.paymentDetails?.pos) input.paymentDetails.pos.tillId = String(request.headers['x-stockroom-till'] || '')
         return sendJson(response, 201, await createSale({ ...input, branchId: requestBranch(request), staffId: user.id, staffName: user.name }, true, requestBranch(request)))
       } catch (error) {
         return sendJson(response, 400, { error: error.message })

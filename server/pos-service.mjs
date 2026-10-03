@@ -1,5 +1,5 @@
 import { stockChange } from './stock-ledger.mjs'
-import { posSettings, refundFor } from './pos-pricing.mjs'
+import { posSettings, refundFor, loyaltyBalances } from './pos-pricing.mjs'
 export const posSchema = 'CREATE TABLE IF NOT EXISTS pos_records (scope TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,id));'
 export async function ensurePos(db) { await db.run(posSchema) }
 export async function posRecords(db, scope, kind, branch = 'main') {
@@ -46,11 +46,16 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     const loaded = await sales()
     const customerHistory = loaded.filter(sale => sale.paymentDetails?.pos?.customerId)
     const customers = (await db.query(`SELECT id,name,phone,balance FROM customers${organizationId ? ' WHERE organization_id=?' : ''} ORDER BY name`, organizationId ? [organizationId] : [])).values
-    return { settings: posSettings(settings[0]?.value), baskets: baskets.filter(record => !record.deleted), registers, returns, products, customerHistory, customers }
+    return { settings: posSettings(settings[0]?.value), baskets: baskets.filter(record => !record.deleted), registers, returns, products, customerHistory, customers, loyaltyBalances: loyaltyBalances(loaded, returns) }
   }
   if (path === '/api/pos/settings') {
     if (user.role !== 'owner') throw new Error('Only the owner can change POS settings.')
-    return write({ ...stamp, branchId: 'main', id: 'pos-settings', kind: 'settings', value: posSettings(input) })
+    const value = posSettings(input)
+    if (value.offlineStockPoolsEnabled) for (const branch of Object.values(value.stockPools)) {
+      const found = (await db.query(`SELECT id FROM branches WHERE id=? AND is_active=1${organizationId ? ' AND organization_id=?' : ''}`, [branch, ...(organizationId ? [organizationId] : [])])).values[0]
+      if (!found) throw new Error('Each till must use an active stock location.')
+    }
+    return write({ ...stamp, branchId: 'main', id: 'pos-settings', kind: 'settings', value })
   }
   if (path === '/api/pos/products') {
     if (!manager) throw new Error('Owner or admin access required.')

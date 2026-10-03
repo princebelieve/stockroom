@@ -37,14 +37,15 @@ function* changeStock(input) {
   const product=(yield ['query','SELECT i.stock,p.cost_price AS cost FROM branch_inventory i JOIN products p ON p.id=i.product_id WHERE i.branch_id=? AND i.product_id=?',[branchId,productId]]).values[0]
   if(!product)throw new Error('Synchronize the product and branch before allocating stock.')
   let lots=(yield ['query','SELECT * FROM stock_batches WHERE branch_id=? AND product_id=? AND quantity>0',[branchId,productId]]).values
-  const discrepancy=input.reconcile===false?0:q(Number(product.stock)-lots.reduce((sum,lot)=>sum+Number(lot.quantity),0))
+  const discrepancy=input.reconcile===false || input.completedSale?0:q(Number(product.stock)-lots.reduce((sum,lot)=>sum+Number(lot.quantity),0))
   if(discrepancy>0) {
     const legacy={id:`opening:${branchId}:${productId}`,branch_id:branchId,product_id:productId,batch_number:'Opening / adjusted stock',expiry:'',quantity:discrepancy,unit_cost:Number(product.cost)||0,received_at:'1970-01-01T00:00:00.000Z',source_id:id}
     yield ['run','INSERT INTO stock_batches VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id,branch_id) DO UPDATE SET quantity=ROUND(stock_batches.quantity+excluded.quantity,3)',Object.values(legacy)]
     lots.push(legacy)
   } else if(discrepancy<0) {
-    for(const part of allocateStock(lots,-discrepancy,'',true)) {
-      yield ['run','UPDATE stock_batches SET quantity=ROUND(quantity-?,3) WHERE id=? AND branch_id=?',[part.quantity,part.id,branchId]]
+    const available = lots.reduce((sum,lot) => sum + Number(lot.quantity),0)
+    for(const part of (available > 0 ? allocateStock(lots,Math.min(-discrepancy,available),'',true) : [])) {
+      yield ['run',input.completedSale ? 'UPDATE stock_batches SET quantity=MAX(0,ROUND(quantity-?,3)) WHERE id=? AND branch_id=?' : 'UPDATE stock_batches SET quantity=ROUND(quantity-?,3) WHERE id=? AND branch_id=?',[part.quantity,part.id,branchId]]
       lots.find(lot=>lot.id===part.id).quantity=q(lots.find(lot=>lot.id===part.id).quantity-part.quantity)
     }
   }
@@ -58,12 +59,25 @@ function* changeStock(input) {
       VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id,branch_id) DO UPDATE SET quantity=ROUND(stock_batches.quantity+excluded.quantity,3)`,[lotId,branchId,productId,batchNumber,expiry,quantity(delta,0.001),incomingCost,input.createdAt,sourceId]]
     allocations=[{id:lotId,quantity:delta,unitCost:incomingCost,batchNumber,expiry}]
   } else if(delta<0) {
-    allocations=recorded || allocateStock(lots,-delta,input.createdAt.slice(0,10),allowExpired)
+    if (input.completedSale && !recorded?.length) {
+      let remaining = -delta
+      allocations = []
+      for (const lot of lots.sort((a,b) => (a.expiry || '9999').localeCompare(b.expiry || '9999'))) {
+        const units = Math.min(remaining, Number(lot.quantity))
+        if (units > 0) allocations.push({ id: lot.id, quantity: units, unitCost: Number(unitCost ?? lot.unit_cost), batchNumber: lot.batch_number, expiry: lot.expiry })
+        remaining = q(remaining - units)
+      }
+      if (remaining > 0) allocations.push({ id: `offline-shortage:${branchId}:${productId}`, quantity: remaining, unitCost: Number(unitCost ?? product.cost), batchNumber: 'Offline stock discrepancy', expiry: '' })
+    } else allocations=recorded || allocateStock(lots,-delta,input.createdAt.slice(0,10),allowExpired)
     if(q(allocations.reduce((sum,part)=>sum+Number(part.quantity),0))!==q(-delta))throw new Error('Stock allocation does not match the quantity.')
     for(const part of allocations) {
       const lot=lots.find(row=>row.id===part.id)
-      if(!lot || Number(lot.quantity)+0.000001<quantity(part.quantity,0.001))throw new Error('Batch changed on another till. Synchronize and resolve the stock conflict.')
-      yield ['run','UPDATE stock_batches SET quantity=ROUND(quantity-?,3) WHERE id=? AND branch_id=?',[part.quantity,part.id,branchId]]
+      if (input.completedSale) {
+        quantity(part.quantity,0.001)
+        if (!Number.isFinite(Number(part.unitCost)) || Number(part.unitCost) < 0) throw new Error('Invalid captured batch cost.')
+        yield ['run', 'INSERT OR IGNORE INTO stock_batches(id,branch_id,product_id,batch_number,expiry,quantity,unit_cost,received_at,source_id) VALUES(?,?,?,?,?,0,?,?,?)', [part.id,branchId,productId,part.batchNumber || '',part.expiry || '',Number(part.unitCost),input.createdAt,sourceId]]
+      } else if(!lot || Number(lot.quantity)+0.000001<quantity(part.quantity,0.001))throw new Error('Batch changed on another till. Synchronize and resolve the stock conflict.')
+      yield ['run',input.completedSale ? 'UPDATE stock_batches SET quantity=MAX(0,ROUND(quantity-?,3)) WHERE id=? AND branch_id=?' : 'UPDATE stock_batches SET quantity=ROUND(quantity-?,3) WHERE id=? AND branch_id=?',[part.quantity,part.id,branchId]]
     }
   }
   const result={...input,allocations,unitCost:allocations.reduce((sum,part)=>sum+part.quantity*part.unitCost,0)/(Math.abs(delta)||1)}
@@ -108,7 +122,7 @@ export async function applySyncedSale(db,payload,operation,walletDebit){
     for(const [index,item] of (payload.items||[]).entries()){
       const service=String(item.productId).startsWith('service:')
       let captured=Number(item.unitCost)||0
-      if(!service){const allocation=await stockChange(db,{id:`${payload.id}:sale:${index}`,branchId,productId:item.productId,delta:-Number(item.quantity),createdAt,allowExpired:true,allocations:item.batchAllocations});captured=item.unitCost??allocation.unitCost;await run('UPDATE branch_inventory SET stock=ROUND(stock-?,3) WHERE branch_id=? AND product_id=?',[item.quantity,branchId,item.productId])}
+      if(!service){const allocation=await stockChange(db,{id:`${payload.id}:sale:${index}`,branchId,productId:item.productId,delta:-Number(item.quantity),createdAt,allowExpired:true,completedSale:true,unitCost:item.unitCost,allocations:item.batchAllocations});captured=item.unitCost??allocation.unitCost;await run('UPDATE branch_inventory SET stock=ROUND(stock-?,3) WHERE branch_id=? AND product_id=?',[item.quantity,branchId,item.productId])}
       await run('INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,unit_price,unit_cost,batch_allocations) VALUES(?,?,?,?,?,?,?,?)',[`${payload.id}:item:${index}`,payload.id,item.productId,item.productName||item.productId,item.quantity,item.price,captured,JSON.stringify(item.batchAllocations||[])])
     }
     await db.commitTransaction()

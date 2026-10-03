@@ -1,3 +1,4 @@
+import { checkoutTillId } from './checkoutTill'
 import { useEffect, useState } from 'react'
 import type { Product } from '../types'
 import { emptyPosData, posRequest, type PosData } from '../PosTools'
@@ -13,12 +14,13 @@ export function usePosBasket({ user, branchId, headers, cart, setCart, orderId, 
   const [discountType, setDiscountType] = useState('amount')
   const [discountValue, setDiscountValue] = useState('0')
   const [customerId, setCustomerId] = useState('')
+  const [loyaltyRedeemed, setLoyaltyRedeemed] = useState('0')
   const [note, setNote] = useState('')
   const [ready, setReady] = useState('')
   const key = user ? `stockroom-pos-draft:${user.organizationId}:${user.id}:${branchId}` : ''
-  const snapshot = { cart, orderId, lines, overrides, discountType, discountValue, customerId, note }
+  const snapshot = { cart, orderId, lines, overrides, discountType, discountValue, customerId, note, loyaltyRedeemed }
   function restore(draft: any) {
-    setCart(draft.cart || {}); setOrderId(draft.orderId || crypto.randomUUID()); setLines(draft.lines || []); setOverrides(draft.overrides || {}); setDiscountType(draft.discountType || 'amount'); setDiscountValue(draft.discountValue || '0'); setCustomerId(draft.customerId || ''); setNote(draft.note || '')
+    setCart(draft.cart || {}); setOrderId(draft.orderId || crypto.randomUUID()); setLines(draft.lines || []); setOverrides(draft.overrides || {}); setDiscountType(draft.discountType || 'amount'); setDiscountValue(draft.discountValue || '0'); setCustomerId(draft.customerId || ''); setNote(draft.note || ''); setLoyaltyRedeemed(draft.loyaltyRedeemed || '0')
   }
   function clear() { restore({}) }
   useEffect(() => {
@@ -45,6 +47,8 @@ export function usePosBasket({ user, branchId, headers, cart, setCart, orderId, 
   const selected = catalogue.filter(product => Number(cart[product.id]) > 0)
   const items = selected.map(product => ({ productId: product.baseProductId || product.id, productName: product.name, quantity: cart[product.id], price: product.price }))
   let pricingError = '', pricing = priceOrder([])
-  try { pricing = priceOrder(items, { discountType, discountValue: Number(discountValue), tax: data.settings }) } catch (caught) { pricingError = caught instanceof Error ? caught.message : 'Invalid pricing.' }
-  return { data, error, setError, reload, clear, hold, resume, lines, setLines, overrides, setOverrides, discountType, setDiscountType, discountValue, setDiscountValue, customerId, setCustomerId, note, setNote, catalogue, items, pricing, pricingError }
+  try { pricing = priceOrder(items, { discountType, discountValue: Number(discountValue), tax: data.settings, customerId, loyaltyRedeemed: data.settings.loyaltyEnabled && customerId ? Number(loyaltyRedeemed) : 0 }) } catch (caught) { pricingError = caught instanceof Error ? caught.message : 'Invalid pricing.' }
+  if (data.settings.loyaltyEnabled && customerId && Number(loyaltyRedeemed) > Math.max(0, data.loyaltyBalances[customerId] || 0)) pricingError = 'The rewards used exceed the available customer balance.'
+  if (data.settings.offlineStockPoolsEnabled && data.settings.stockPools[checkoutTillId()] !== branchId) pricingError = 'Choose the assigned stock location for this till before selling.'
+  return { loyaltyRedeemed: data.settings.loyaltyEnabled && customerId ? loyaltyRedeemed : '0', setLoyaltyRedeemed, data, error, setError, reload, clear, hold, resume, lines, setLines, overrides, setOverrides, discountType, setDiscountType, discountValue, setDiscountValue, customerId, setCustomerId, note, setNote, catalogue, items, pricing, pricingError }
 }

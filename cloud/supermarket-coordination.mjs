@@ -9,6 +9,11 @@ export function coordinationChanges(document, original) {
     stock(p.branchId,line.productId,-Number(line.quantity),line.beforeStock)
     changes.push({key:`return:${p.id}:${index}`,delta:Number(line.quantity),initial:0,label:'Receipt return quantity exceeded'})
   }
+  if(document.entityType==='sale' && document.action==='create' && p.paymentDetails?.pos?.customerId) {
+    const pos=p.paymentDetails.pos
+    changes.push({key:`loyalty:${p.branchId||'main'}:${pos.customerId}`,delta:Number(pos.loyaltyEarned||0)-Number(pos.loyaltyRedeemed||0),initial:Number(pos.loyaltyBeforeBalance||0),label:'Customer rewards spent across offline tills'})
+  }
+  if(document.entityType==='pos_record' && p.kind==='return' && p.loyaltyCustomerId)changes.push({key:`loyalty:${p.branchId||'main'}:${p.loyaltyCustomerId}`,delta:Number(p.loyaltyRestored||0)-Number(p.loyaltyReversed||0),initial:0,label:'Customer rewards reversed after returns'})
   if(document.entityType==='branch_transfer') {stock(p.fromBranchId,p.productId,-Number(p.quantity),p.sourceBeforeStock);stock(p.toBranchId,p.productId,Number(p.quantity),p.destinationBeforeStock)}
   if(document.entityType==='stocktake' && document.action==='approved')for(const line of p.counts||[])stock(p.branchId,line.productId,Number(line.variance),line.beforeStock)
   if(document.entityType==='retail_record') {
@@ -44,7 +49,7 @@ export function createSupermarketCoordinator(database,client) {
         const key=`${document.businessId}:${change.key}`
         const current=await resources.findOne({_id:key},{session})
         const value=Math.round(((current?.value??change.initial)+change.delta)*1000)/1000
-        if(value<0)warnings.push(`${change.label}: ${change.key} is short by ${-value}. Review the original receipts and reconcile stock.`)
+        if(value<0)warnings.push(`${change.label}: ${change.key} is short by ${-value}. Review the original receipts and reconcile ${change.key.startsWith('loyalty:') ? 'customer rewards' : 'stock'}.`)
         await resources.updateOne({_id:key},{$set:{businessId:document.businessId,value,updatedAt:new Date(),operationId:document.operationId}},{upsert:true,session})
       }
       await admissions.insertOne({_id:admissionId,warnings,createdAt:new Date()},{session})

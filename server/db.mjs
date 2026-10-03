@@ -1,3 +1,4 @@
+import { validateLoyaltyBalance, validateCheckoutSettings } from './pos-pricing.mjs'
 import { stockChangeSync, stockTransferSync } from './stock-ledger.mjs'
 import { validQuantity } from './quantities.mjs'
 import { migrateRetail, handleRetail, retailStatements } from './retail.mjs'
@@ -1033,6 +1034,14 @@ export function createSale(sale, shouldSync = true, branchId = 'main') {
   if (database.prepare('SELECT id FROM sales WHERE id = ?').get(sale.id)) return { ...sale, syncStatus: 'synced' }
   database.exec('BEGIN')
   try {
+    if (shouldSync) {
+      const rewardSales = database.prepare('SELECT id,payment_details FROM sales WHERE organization_id=? AND branch_id=?').all(organizationId, sale.branchId).map(row => ({ id: row.id, paymentDetails: row.payment_details ? JSON.parse(row.payment_details) : undefined }))
+      const rewardReturns = database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='return'").all(organizationId, sale.branchId).map(row => JSON.parse(row.payload))
+      const checkoutSettings = database.prepare("SELECT payload FROM pos_records WHERE scope=? AND id='pos-settings'").get(organizationId)
+      validateCheckoutSettings(sale, checkoutSettings ? JSON.parse(checkoutSettings.payload).value : undefined)
+      if (sale.paymentDetails?.pos?.customerId && !database.prepare('SELECT id FROM customers WHERE id=? AND organization_id=?').get(sale.paymentDetails.pos.customerId, organizationId)) throw new Error('Selected customer does not exist.')
+      validateLoyaltyBalance(sale, rewardSales, rewardReturns)
+    }
     database.prepare('INSERT OR IGNORE INTO sales (id, organization_id, total, payment_method, payment_reference, terminal_provider, staff_id, staff_name, created_at, cash_received, change_given, payment_details, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(sale.id, organizationId, sale.total, sale.paymentMethod || 'external-pos', sale.paymentReference || '', sale.terminalProvider || '', sale.staffId || '', sale.staffName || '', sale.createdAt, sale.cashReceived ?? null, sale.changeGiven ?? null, sale.paymentDetails ? JSON.stringify(sale.paymentDetails) : null, sale.branchId)
     if (sale.paymentMethod === 'wallet') {
       const customerId = sale.paymentDetails.customerId
@@ -1049,9 +1058,9 @@ export function createSale(sale, shouldSync = true, branchId = 'main') {
       }
       const updatedAt = now()
       const product = database.prepare('SELECT i.stock, p.cost_price AS costPrice, p.name FROM products p JOIN branch_inventory i ON i.product_id = p.id WHERE p.id = ? AND p.organization_id = ? AND i.branch_id = ?').get(item.productId, organizationId, sale.branchId)
-      if (!product || product.stock < item.quantity) throw new Error('Insufficient stock for sale.')
+      if (!product || (shouldSync && product.stock < item.quantity)) throw new Error('Insufficient stock for sale.')
       item.beforeStock = Number(product.stock)
-      const allocation=stockChangeSync(retailDb,{id:`${sale.id}:sale:${sale.items.indexOf(item)}`,branchId:sale.branchId,productId:item.productId,delta:-Number(item.quantity),createdAt:sale.createdAt,allocations:shouldSync?undefined:item.batchAllocations})
+      const allocation=stockChangeSync(retailDb,{id:`${sale.id}:sale:${sale.items.indexOf(item)}`,branchId:sale.branchId,productId:item.productId,delta:-Number(item.quantity),createdAt:sale.createdAt,allocations:shouldSync?undefined:item.batchAllocations,completedSale:!shouldSync,unitCost:item.unitCost})
       item.unitCost=allocation.unitCost;item.batchAllocations=allocation.allocations
 
       database.prepare('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), sale.id, item.productId, item.productName || product.name, item.quantity, item.price, item.unitCost)

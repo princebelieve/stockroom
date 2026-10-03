@@ -2,6 +2,14 @@
 
 Load and save the supermarket template in Business settings. Existing products, customers and sales remain intact.
 
+## Small-store use
+
+Tax and loyalty are optional and off by default. Selecting the supermarket template does not require either feature. Tax supports a default rate, product-specific rates and exempt items. Loyalty supports earning and spending branch rewards, with return adjustments.
+
+A store selling branch stock through one till can continue its normal offline checkout. For multiple tills, the optional separate-stock mode assigns each till its own branch stock allocation through existing stock locations and transfers. Synchronize all tills before enabling it or changing assignments. When separate-stock mode is off and multiple independently offline tills sell the same branch inventory, each has its own stock view, so competing sales can exceed shared availability. Synchronize tills when connectivity is available and review reported discrepancies. Stock checks and conflict reporting remain active; they are safeguards, not optional business features.
+
+The project is already used in real stores, including with hardware, according to the project owner. Automated checks supplement that operating experience. Assess additional tills, devices or sector workflows against the particular store's needs rather than requiring every small business to adopt advanced features.
+
 Supplier ordering, partial delivery receiving, pack conversions, supplier returns and wastage are available in Purchasing. Receiving records capture purchase cost and automatically create internal batches. Batch labels and expiry dates are optional and tucked under Expiry / batch (optional); they are not needed to create a product or sell ordinary stock. Inventory shows batch balances, expired stock, stock expiring within 30 days, purchase value and audited price/barcode/batch corrections.
 
 Goods checkout allocates the earliest unexpired batch first. Expired stock cannot be sold. Transfers preserve batch dates and costs. Refunds restore the original batches and reverse captured costs. Legacy stock without batch history receives an opening balance at the catalogue cost; historical costs are not reconstructed.
