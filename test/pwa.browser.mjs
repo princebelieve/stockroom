@@ -201,7 +201,7 @@ try {
   await newPage.getByLabel('Password', { exact: true }).fill('test-password')
   await newPage.getByRole('button', { name: 'Sign in', exact: true }).click()
   await newPage.getByRole('button', { name: 'Log out' }).waitFor()
-  await newPage.getByRole('button', { name: 'Stock & checkout', exact: true }).click()
+  await newPage.getByRole('button', { name: 'Product sales', exact: true }).click()
   await newPage.locator('.pos-product').filter({ hasText: 'Tea' }).waitFor()
   assert.equal(await newPage.evaluate(async () => (await (await fetch('/api/products')).json()).products.find(p => p.id === 'remote').stock), 5)
   // Upload one real product on device A, then download it via Refresh on B.
@@ -270,7 +270,7 @@ try {
   assert.deepEqual(stocktakeOps.map(item => item.action), ['create', 'approved'])
   assert.equal(stocktakeOps[0].payload.status, 'approved')
   assert.equal(stocktakeOps[1].payload.counts.find(item => item.id === coffeeCount.id).variance, -2)
-  await navigateMobile('Stock & checkout')
+  await navigateMobile('Product sales')
   await page.locator('.pos-product').filter({ hasText: 'Coffee' }).click()
   await page.getByRole('button', { name: /Take payment/ }).click()
   await page.locator('#pos-payment').getByLabel('Payment method').selectOption('cash')
@@ -303,7 +303,7 @@ try {
   const walletCustomer = (await api('/api/customers', { name: 'Wallet browser customer' })).data
   assert.equal((await api('/api/customers/' + walletCustomer.id + '/wallet', { amount: 20, reason: 'Deposit' })).status, 200)
   await page.reload()
-  await navigateMobile('Stock & checkout')
+  await navigateMobile('Product sales')
   await page.locator('.pos-product').filter({ hasText: 'Coffee' }).click()
   await page.getByRole('button', { name: /Take payment/ }).click()
   await page.locator('#pos-payment').getByRole('combobox', { name: /^Payment method/ }).selectOption('wallet')
@@ -317,7 +317,7 @@ try {
   const forceAccess = () => page.evaluate(async () => (await fetch('/api/subscriptions/access', { headers: { 'X-Subscription-Refresh': 'true' } })).json())
   assert.equal((await forceAccess()).blocked, true)
   await page.reload()
-  await navigateMobile('Stock & checkout')
+  await navigateMobile('Product sales')
   await page.getByRole('heading', { name: 'POS access paused' }).waitFor()
   cloudOffline = true
   assert.equal((await api('/api/sales', { id: 'blocked-sale' })).status, 402)
@@ -410,7 +410,7 @@ try {
   assert.equal(restoredRestaurant.tabs[0].status,'closed');assert.equal(restoredRestaurant.orders[0].receiptId,tableSale.id)
   await context.setOffline(false);cloudOffline=false;restaurantSupported=false
   const unsupportedRestaurant=await api('/api/sync/now',{})
-  assert.match(unsupportedRestaurant.data.lastError,/Restaurant & bar/);assert.ok(unsupportedRestaurant.data.pending>0)
+  assert.match(unsupportedRestaurant.data.lastError,/Tables & tabs/);assert.ok(unsupportedRestaurant.data.pending>0)
   restaurantSupported=true;await api('/api/sync/now',{})
   assert.equal(pushed.filter(row=>row.entityType==='sale' && row.entityId===tableSale.id).length,1)
   await page.getByRole('button', { name: 'Log out' }).click()

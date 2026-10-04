@@ -14,14 +14,14 @@ This is an inspection of the current code, not a proposal to replace supermarket
 | Stock allocation for offline tills | Register and receipt tools on checkout and Sales history | Checkout validates the selected stock location | Move configuration to Sales settings; retain the checkout validation. |
 | Product variants and extras | Register and receipt tools on checkout and Sales history | Catalogue variant filter and product extras selection when adding to basket | Put configuration with product management; retain selection when selling. |
 | Receipt identity, footer and optional receipt tax | Payments & receipts > Receipt settings | New payment receipt and printing | Put configuration in a clearly named receipt settings destination. Keep payment entry separate. |
-| Fast food menu, packaged goods and recipes | Fast food > Setup | New order menu, selected extras, preparation and ingredient consumption | Preserve explicit Setup, separate from taking orders. |
-| Restaurant tables, seats and menu | Restaurant & bar > Setup | Tables and tabs, repeated orders, preparation and bill settlement | Preserve explicit Setup, separate from serving and taking payment. |
+| Fast food menu, packaged goods and recipes | Order counter > Setup | New order menu, selected extras, preparation and ingredient consumption | Preserve explicit Setup, separate from taking orders. |
+| Restaurant tables, seats and menu | Tables & tabs > Setup | Tables and tabs, repeated orders, preparation and bill settlement | Preserve explicit Setup, separate from serving and taking payment. |
 | Cash register | Register and receipt tools | Opening cash, cash movements and closing count | This is daily work, not configuration. Give it a clear operational destination. |
 | Refunds and receipt history | Sales history and workspace history | Receipt selection, reprint and authorised returns | Keep with records, away from new-sale entry. |
 
 ## Confirmed navigation problem
 
-The former Sell (POS) navigation was renamed Stock & checkout. It is shown only for stock or both workflow selections. Payments-only, Fast-food-only and Restaurant-only selections hide it and redirect away from it. Customer display navigation also depends on stock checkout. That explains how the original sales experience can become inaccessible without its code being deleted; it does not establish the setting on a particular running device.
+The former Sell (POS) navigation was renamed Product sales. It is shown only for stock or both workflow selections. Payments-only, Fast-food-only and Restaurant-only selections hide it and redirect away from it. Customer display navigation also depends on stock checkout. That explains how the original sales experience can become inaccessible without its code being deleted; it does not establish the setting on a particular running device.
 
 ## Safe next change
 

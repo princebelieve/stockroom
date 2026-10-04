@@ -1,12 +1,12 @@
-# Restaurant & bar workspace
+# Tables & tabs workspace
 
-In **Business settings > Business type > Payment screens**, choose **Restaurant & bar only**. For a mixed business, keep your existing payment-screen choice and check **Enable separate Restaurant & bar workspace**, then **Save payment screens**.
+In **Business settings > Business type > Payment screens**, choose **Tables & tabs only**. For a mixed business, keep your existing payment-screen choice and check **Enable separate Tables & tabs workspace**, then **Save payment screens**.
 
 This adds its own navigation screen, menu, table setup, bill sessions and orders. Fast food and supermarket screens keep their existing operations. Existing products can be linked explicitly to packaged menu offerings or recipes; payment-only receipt descriptions remain independent of stock.
 
 ## Everyday use
 
-1. Open **Restaurant & bar** from **Daily work**, or choose **Open tables and tabs** on Overview. The workspace starts at tables and tabs. The owner or administrator opens **Business settings > Restaurant menu & tables > Set up tables and seats** to add named tables and their seat counts. Occupied tables cannot be renamed, removed or resized. Use **Move to another table** to change seating while preserving the bill.
+1. Open **Tables & tabs** from **Daily work**, or choose **Open tables and tabs** on Overview. The workspace starts at tables and tabs. The owner or administrator opens **Business settings > Restaurant menu & tables > Set up tables and seats** to add named tables and their seat counts. Occupied tables cannot be renamed, removed or resized. Use **Move to another table** to change seating while preserving the bill.
 2. In **Business settings > Restaurant menu & tables > Menu**, add meals and drinks, prices and extras. Choose **Kitchen** or **Bar** for preparation tickets. Use **Recipes** for per-portion ingredients and extras, or **Packaged stock** for bottled drinks linked to a stock product.
 3. Select a free table and enter its guest count, or use **Open bar tab** to name a customer/group without a table. Each opening creates a new bill session. This device remembers the selected bill when you reload or switch screens; it never substitutes a later customer's session at the same table.
 4. Add menu items to a **New order**, selecting a seat or **Whole table / shared**. **Send for preparation** saves that round on the open bill. Submit another round whenever guests order more. Menu price changes do not alter saved rounds.

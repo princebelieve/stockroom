@@ -1,4 +1,4 @@
-# Fast food workspace
+# Order counter workspace
 
 Fast food is a separate, optional workspace for counter-service orders. Enabling it does not add menu or preparation controls to supermarket checkout.
 
@@ -7,7 +7,7 @@ Fast food is a separate, optional workspace for counter-service orders. Enabling
 Open **Business settings → Business type**:
 
 - Choose **Fast food only** under **Payment screens** for a dedicated workspace.
-- To keep stock checkout or payment entry as well, choose those screens and check **Enable separate Fast food workspace**.
+- To keep stock checkout or payment entry as well, choose those screens and check **Enable separate Order counter workspace**.
 - Click **Save payment screens**. Use **Sync now** to share the setting with other devices.
 
 Open **Fast food → Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.
@@ -83,12 +83,12 @@ Do not also record tracked ingredient purchases as expenses: supplier purchases 
 No new external service or paid subscription is introduced by these operations. Cross-device use requires all participating apps and the existing sync backend to support `counter-v3`; older deployments keep these uploads queued rather than accepting records they cannot handle.
 
 
-For tables, seats, open bills and serving before payment, enable the separate [Restaurant & bar workspace](restaurant-and-bar-workspace.md). Fast food retains its pay-before-handover flow and separate menu.
+For tables, seats, open bills and serving before payment, enable the separate [Tables & tabs workspace](restaurant-and-bar-workspace.md). Fast food retains its pay-before-handover flow and separate menu.
 
 ## Finding the transaction screen
 
 **Overview > Take a new order**, or **Daily work > Fast food**, opens the order-entry screen. Choose menu items and quantities. Use **Send and take payment** to save the order and open its payment form immediately, or **Send for preparation** when payment will be taken later. **Orders > Take payment** opens payment for an existing unpaid order.
 
-Menu editing, recipes and packaged stock are under **Business settings > Food menu & recipes**. They do not appear on the transaction screen. The separate Restaurant & bar screen starts at tables and tabs; its configuration is under Business settings and its history has separate navigation.
+Menu editing, recipes and packaged stock are under **Business settings > Food menu & recipes**. They do not appear on the transaction screen. The separate Tables & tabs screen starts at tables and tabs; its configuration is under Business settings and its history has separate navigation.
 
 Configuration now lives under **Business settings**, separate from transaction screens. Owners configure workspaces and sales rules; owners and admins can configure receipts, devices and enabled food/table workflows. Product variants and extras are under product management. **Cash register** is a separate daily-work screen; returns and customer history are under Sales history. The supermarket basket, POS receipt-reference scanner and customer display continue to use their existing operational controls.

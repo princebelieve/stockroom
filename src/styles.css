@@ -570,3 +570,10 @@ body { background: #dfece5; }
 @media(max-width: 900px) { .counter-entry-grid { grid-template-columns: minmax(0,1fr); } }
 
 .sidebar-section-label { margin: 18px 12px 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #aac5bc; }
+
+.transaction-options, .order-actions { margin: 14px 0; padding: 12px; border: 1px solid var(--border, #dce3e8); border-radius: 10px; }
+.transaction-options > summary, .order-actions > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.transaction-options[open] > summary, .order-actions[open] > summary { margin-bottom: 12px; }
+.order-actions .filter-button { margin: 6px 8px 0 0; }
+
+.pos-adjustments > .transaction-options { width: 100%; margin: 0 0 12px; }

@@ -209,11 +209,11 @@ async function syncNowImpl() {
     if (!operations.length) break
     if (operations.some(requiresRestaurantSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
-      if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Restaurant & bar. Records remain on this device.')
+      if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Tables & tabs. Records remain on this device.')
     }
     if (operations.some(requiresCounterSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
-      if (!support.ok || !(await support.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
+      if (!support.ok || !(await support.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing counter orders. Your records remain on this device.')
     }
     {
       const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
@@ -542,7 +542,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     if (!((sale.paymentDetails as { pos?: unknown } | undefined)?.pos) && Math.abs(total - Number(sale.total)) > 0.01) return error('Sale total does not match its items.')
     if (sale.paymentMethod === 'wallet' && !(sale.paymentDetails as { customerId?: unknown } | undefined)?.customerId) return error('Select the customer wallet.')
     const previousSale = (await db.query('SELECT id,total,branch_id AS branchId,payment_method AS paymentMethod,payment_reference AS paymentReference,terminal_provider AS terminalProvider,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE id=?', [sale.id])).values?.[0]
-    if((sale.paymentDetails as {restaurantBill?:unknown}|undefined)?.restaurantBill && !previousSale) return error('Use the Restaurant & bar bill payment action.')
+    if((sale.paymentDetails as {restaurantBill?:unknown}|undefined)?.restaurantBill && !previousSale) return error('Use the Tables & tabs bill payment action.')
     if (previousSale) {
       if((sale.paymentDetails as {restaurantBill?:unknown}|undefined)?.restaurantBill){const paymentDetails=JSON.parse(String(previousSale.paymentDetails));const items=(await db.query('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid',[sale.id])).values||[];if(restaurantPaymentFingerprint(sale)!==restaurantPaymentFingerprint({...previousSale,paymentDetails,items,currency:paymentDetails.restaurantBill.currency}))return error('This bill payment already has different details.')}
       if ((sale.paymentDetails as { counterOrder?: unknown } | undefined)?.counterOrder) {
