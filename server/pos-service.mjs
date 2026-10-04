@@ -1,3 +1,4 @@
+import { handleRestaurant } from './restaurant-service.mjs'
 import { receiptSettings } from './receipts.mjs'
 import { applyConsumption } from './counter-recipes.mjs'
 import { stockChange } from './stock-ledger.mjs'
@@ -52,7 +53,8 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     rollbackTransaction: () => connection.rollbackTransaction()
   }
   await ensurePos(db)
-  if (path.startsWith('/api/pos/counter')) return handleCounter({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
+  if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
+  if (path.startsWith('/api/pos/restaurant/counter') || path.startsWith('/api/pos/counter')) return handleCounter({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   const manager = ['owner', 'admin'].includes(user.role)
   const records = kind => posRecords(db, scope, kind, kind === 'settings' || kind === 'product' ? 'main' : branchId)
   const write = async record => { if(['basket','register'].includes(record.kind)){const previous=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.id])).values[0];record.expectedUpdatedAt=previous?JSON.parse(previous.payload).updatedAt:''} await db.beginTransaction(); try { await savePosRecord(db, scope, record); await publish(record); await db.commitTransaction() } catch(error) { await db.rollbackTransaction(); throw error } return record }

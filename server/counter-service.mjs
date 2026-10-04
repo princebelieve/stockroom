@@ -1,3 +1,4 @@
+import { validateRestaurantRecord } from './restaurant-service.mjs'
 import { consumeRecipe, consumptionId, recipeRequirements, validateRecipe } from './counter-recipes.mjs'
 import { normalizeShopProfile } from './shop-profile.mjs'
 import { posSettings, priceOrder, loyaltyBalances } from './pos-pricing.mjs'
@@ -12,6 +13,7 @@ const money = value => {
   return n
 }
 export const counterSaleId = id => `counter-payment:${id}`
+export const requiresRestaurantSync = operation => ['restaurant-layout','restaurant-tab'].includes(operation.payload?.kind) || operation.payload?.id === 'restaurant-menu' || Boolean(operation.payload?.tableService || operation.payload?.paymentDetails?.counterOrder?.tableService || operation.payload?.shopProfile?.restaurant || operation.payload?.shopProfile?.workflows === 'restaurant')
 export const requiresCounterSync = operation => ['counter-menu', 'counter-order', 'counter-consumption'].includes(operation.payload?.kind) || Boolean(operation.payload?.paymentDetails?.counterOrder) || operation.payload?.shopProfile?.fastFood === true
 export function counterPaymentFingerprint(sale) {
   return JSON.stringify([sale.id, sale.branchId, sale.total, sale.paymentMethod, sale.paymentReference || '', sale.terminalProvider || '', sale.paymentDetails?.amountReceived, sale.paymentDetails?.counterOrder, ['tillId','customerId','customerName','discountType','discountValue','loyaltyRedeemed','tax','note','registerId'].map(key => sale.paymentDetails?.pos?.[key])])
@@ -26,6 +28,7 @@ export function validateCounterPayment(sale, order, tillId) {
   if (sale.id !== counterSaleId(order.id) || sale.paymentDetails?.counterOrder?.id !== order.id) throw new Error('Use the order payment action to settle this order.')
   if (tillId && tillId !== order.tillId) throw new Error('Take payment on the till that created this order.')
   if (sale.paymentDetails.counterOrder.tillId !== order.tillId) throw new Error('Payment till does not match the order.')
+  if (JSON.stringify(sale.paymentDetails.counterOrder.tableService) !== JSON.stringify(order.tableService)) throw new Error('Payment must match the table bill and seat.');
   if (sale.currency !== order.currency) throw new Error('Payment currency must match the saved order.')
   const actual = sale.items?.map(({ productId, productName, quantity, price }) => ({ productId, productName, quantity, price }))
   if (JSON.stringify(actual) !== JSON.stringify(counterItems(order)) || money(sale.total) !== order.total) throw new Error('Payment must match the saved order items and total.')
@@ -40,12 +43,13 @@ export function validateCounterRecord(record, previous, snapshot = false) {
   text(record.id, 'a record ID', 150); text(record.branchId, 'a branch ID')
   if (!Number.isFinite(Date.parse(record.updatedAt)) || record.expectedUpdatedAt === undefined) throw new Error('Invalid counter-service revision.')
   if (record.kind === 'counter-menu') {
-    if (record.id !== 'counter-menu' || record.branchId !== 'main' || !Array.isArray(record.items) || record.items.length > 200) throw new Error('Invalid menu.')
+    if (!['counter-menu','restaurant-menu'].includes(record.id) || record.branchId !== 'main' || !Array.isArray(record.items) || record.items.length > 200) throw new Error('Invalid menu.')
     const ids = new Set()
     for (const item of record.items) {
       text(item.id, 'a menu item ID'); text(item.name, 'a menu item name', 100); money(item.price)
       if (ids.has(item.id) || typeof item.available !== 'boolean' || !['prepared', 'stock'].includes(item.type) || (item.type === 'stock' && !item.productId) || !Array.isArray(item.options) || item.options.length > 20) throw new Error('Invalid menu item.')
       ids.add(item.id)
+      if(item.station !== undefined && !['kitchen','bar'].includes(item.station)) throw new Error('Choose kitchen or bar.');
       validateRecipe(item.recipe)
       if (item.type === 'stock' && item.recipe?.length) throw new Error('Packaged goods cannot also consume a recipe.')
       const options = new Set()
@@ -54,6 +58,7 @@ export function validateCounterRecord(record, previous, snapshot = false) {
     return
   }
   if (!['queued', 'preparing', 'ready', 'collected', 'cancelled'].includes(record.status) || !Array.isArray(record.lines) || !record.lines.length || record.lines.length > 100 || !record.tillId || !Number.isFinite(Date.parse(record.createdAt)) || !/^[A-Z]{3}$/.test(record.currency) || typeof record.businessName !== 'string') throw new Error('Invalid counter order.')
+  if (record.tableService) { const t = record.tableService; text(t.tabId, 'a table bill ID',150); text(t.sessionId,'a bill session'); text(t.name,'a table name'); if (!Number.isInteger(t.seat) || t.seat < 0 || t.seat > 100) throw new Error('Invalid seat.'); }
   const ids = new Set()
   for (const line of record.lines) {
     text(line.id, 'a line ID'); text(line.name, 'an item name'); money(line.price)
@@ -69,11 +74,12 @@ export function validateCounterRecord(record, previous, snapshot = false) {
   if (record.action === 'edit' && previous.status === 'queued' && record.status === 'queued') {
     text(record.changeReason, 'an order correction reason', 300)
     if (['id','branchId','tillId','createdAt','currency','businessName'].some(key => record[key] !== previous[key])) throw new Error('Order identity cannot change.')
+    if (JSON.stringify(record.tableService) !== JSON.stringify(previous.tableService)) throw new Error('Order table and seat cannot change.');
     return
   }
-  const immutable = order => JSON.stringify([order.id, order.branchId, order.lines, order.total, order.tillId, order.createdAt, order.customerName, order.note, order.currency, order.businessName, order.pos])
+  const immutable = order => JSON.stringify([order.id, order.branchId, order.lines, order.total, order.tillId, order.createdAt, order.customerName, order.note, order.currency, order.businessName, order.pos, order.tableService])
   if (immutable(record) !== immutable(previous)) throw new Error('Submitted order details cannot be changed.')
-  if (record.status === 'cancelled' && !['collected','cancelled'].includes(previous.status)) { text(record.changeReason, 'a cancellation reason', 300); return }
+  if (record.status === 'cancelled' && previous.status !== 'cancelled' && (previous.status !== 'collected' || previous.tableService)) { text(record.changeReason, 'a cancellation reason', 300); return }
   const next = { queued: 'preparing', preparing: 'ready', ready: 'collected' }
   if (next[previous.status] !== record.status) throw new Error('Refresh the order and follow its preparation stages.')
 }
@@ -82,14 +88,18 @@ export function validateCounterRecord(record, previous, snapshot = false) {
 // version of the order/menu even when the rejected local timestamp is newer.
 export function counterConflictRecord(conflict) {
   const local = conflict.localPayload, remote = conflict.remotePayload
+  if(conflict.entityType === 'pos_record' && ['restaurant-layout','restaurant-tab'].includes(local?.kind) && remote?.kind === local.kind && remote.id === conflict.entityId) { validateRestaurantRecord(remote,undefined,true); return remote }
   if (conflict.entityType !== 'pos_record' || !['counter-menu', 'counter-order'].includes(local?.kind) || remote?.kind !== local.kind || remote.id !== conflict.entityId) return null
   validateCounterRecord(remote, undefined, true)
   return remote
 }
 
 export async function handleCounter({ db, scope, organizationId, branchId, user, method, path, input, tillId, sales, publish, saveRecord }) {
+  const restaurant = path.startsWith('/api/pos/restaurant/')
+  const menuId = restaurant ? 'restaurant-menu' : 'counter-menu'
+  if (restaurant) path = path.replace('/api/pos/restaurant/counter','/api/pos/counter')
   const profile = (await db.query(`SELECT shop_profile,app_name,currency FROM app_settings WHERE ${organizationId ? 'organization_id=?' : 'id=1'}`, organizationId ? [organizationId] : [])).values[0]
-  if (!normalizeShopProfile(profile?.shop_profile).fastFood) throw new Error('The owner must enable the Fast food workspace first.')
+  if (!(restaurant ? normalizeShopProfile(profile?.shop_profile).restaurant : normalizeShopProfile(profile?.shop_profile).fastFood)) throw new Error(restaurant ? 'The owner must enable Restaurant & bar first.' : 'The owner must enable the Fast food workspace first.')
   const records = (await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind IN ('counter-menu','counter-order','counter-consumption')", [scope])).values.map(row => JSON.parse(row.payload))
   const loadedSales = await sales()
   const otherRecords = (await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind IN ('settings','return','register')", [scope])).values.map(row => JSON.parse(row.payload))
@@ -97,16 +107,17 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
   const returns = otherRecords.filter(record => record.kind === 'return' && record.branchId === branchId)
   const customers = (await db.query(`SELECT id,name,phone,balance FROM customers${organizationId ? ' WHERE organization_id=?' : ''}`, organizationId ? [organizationId] : [])).values
   const refundTotal = id => Math.round(returns.filter(record => record.saleId === counterSaleId(id)).reduce((sum, record) => sum + record.total, 0) * 100) / 100
-  const menu = records.find(record => record.kind === 'counter-menu')
-  const orders = records.filter(record => record.kind === 'counter-order' && record.branchId === branchId)
+  const menu = records.find(record => record.kind === 'counter-menu' && record.id === menuId)
+  const orders = records.filter(record => record.kind === 'counter-order' && record.branchId === branchId && Boolean(record.tableService) === restaurant)
   if (method === 'GET') return {
     consumptions: records.filter(record => record.kind === 'counter-consumption' && record.branchId === branchId), settings, customers, loyaltyBalances: loyaltyBalances(loadedSales, returns), returns,
-    menu: menu || { id: 'counter-menu', updatedAt: '', items: [] },
+    menu: menu || { id: menuId, updatedAt: '', items: [] },
     orders: orders.map(order => ({ ...order, ingredientCost: records.find(record => record.id === consumptionId(order.id))?.totalCost, refundedTotal: refundTotal(order.id), receiptId: loadedSales.find(sale => sale.id === counterSaleId(order.id))?.id || '' })),
-    receipts: loadedSales.filter(sale => orders.some(order => sale.id === counterSaleId(order.id))).map(sale => { const order = orders.find(order => counterSaleId(order.id) === sale.id); return { ...sale, branchId, businessName: order.businessName, currency: order.currency, syncStatus: 'synced' } })
+    receipts: loadedSales.filter(sale => orders.some(order => sale.id === counterSaleId(order.id))).map(sale => { const order = orders.find(order => counterSaleId(order.id) === sale.id); return { ...sale, items:sale.items.map(item=>({...item,price:item.price ?? item.unitPrice})), branchId, businessName: order.businessName, currency: order.currency, syncStatus: 'synced' } })
   }
   if (method !== 'POST' || !tillId) throw new Error('A registered till is required.')
   const existing = records.find(record => record.id === input.id)
+  if (existing?.kind === 'counter-order' && Boolean(existing.tableService) !== restaurant) throw new Error('Use the workspace that created this order.')
   const request = JSON.stringify(input)
   if (existing?.lastCommandId === input.commandId && input.commandId) {
     if (existing.lastRequest !== request) throw new Error('This command ID has different details.')
@@ -119,8 +130,8 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
   let prepare = false
   if (path === '/api/pos/counter/menu') {
     if (!['owner', 'admin'].includes(user.role)) throw new Error('Only owner or admin can edit the menu.')
-    if (input.id !== 'counter-menu') throw new Error('Invalid menu ID.')
-    record = { ...stamp, id: 'counter-menu', kind: 'counter-menu', branchId: 'main', items: input.items }
+    if (input.id !== menuId) throw new Error('Invalid menu ID.')
+    record = { ...stamp, id: menuId, kind: 'counter-menu', branchId: 'main', items: input.items }
     validateCounterRecord(record, existing)
     record.items = record.items.map(item => ({ ...item, name: item.name.trim(), price: money(item.price), options: item.options.map(option => ({ ...option, name: option.name.trim(), price: money(option.price) })) }))
     for (const item of record.items) for (const entry of [...(item.recipe || []), ...item.options.flatMap(option => option.recipe || [])]) if (!(await db.query(`SELECT id FROM products WHERE id=?${organizationId ? ' AND organization_id=?' : ''}`, [entry.productId, ...(organizationId ? [organizationId] : [])])).values.length) throw new Error('Choose existing stock products for recipe ingredients.')
@@ -132,19 +143,31 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
     if ((!editing && existing) || !input.id || !Array.isArray(input.lines) || !input.lines.length || input.lines.length > 100) throw new Error('Enter a new order with 1 to 100 lines.')
     if (!editing && (await db.query('SELECT id FROM pos_records WHERE scope=? AND id=?', [scope, input.id])).values.length) throw new Error('This record ID is already in use.')
     if (input.menuUpdatedAt !== menu?.updatedAt) throw new Error('The menu changed. Refresh and review the order before submitting.')
+    let tableService = editing ? existing.tableService : undefined
+    let billCurrency = profile.currency, billBusinessName = profile.app_name
+    if (restaurant && !editing) {
+      const row = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope,input.tableService?.tabId || ''])).values[0]
+      const tab = row && JSON.parse(row.payload)
+      if (!tab || tab.kind !== 'restaurant-tab' || tab.branchId !== branchId || tab.status !== 'open' || tab.sessionId !== input.tableService?.sessionId) throw new Error('Choose an open table or bar tab.')
+      if (tab.tillId !== tillId) throw new Error('Add orders on the till that opened this bill.')
+      const seat = Number(input.tableService?.seat || 0)
+      if (!Number.isInteger(seat) || seat < 0 || seat > tab.guests) throw new Error('Choose a seat within the guest count on this bill.')
+      billCurrency = tab.currency; billBusinessName = tab.businessName
+      tableService = { tabId:tab.id, sessionId:tab.sessionId, name:tab.name, seat }
+    }
     const lines = await Promise.all(input.lines.map(async line => {
       const item = menu?.items.find(item => item.id === line.menuItemId && item.available)
       if (!item || !Array.isArray(line.optionIds) || new Set(line.optionIds).size !== line.optionIds.length) throw new Error('Choose available menu items and valid options.')
       const options = line.optionIds.map(id => { const option = item.options.find(option => option.id === id); if (!option) throw new Error('Menu options changed. Refresh the menu.'); return { ...option } })
       const ingredients = new Map()
-      for (const entry of [...(item.recipe || []), ...options.flatMap(option => option.recipe || [])]) {
+      for (const entry of [...(restaurant && item.type === 'stock' ? [{productId:item.productId,quantity:1}] : item.recipe || []), ...options.flatMap(option => option.recipe || [])]) {
         const product = (await db.query(`SELECT name,unit FROM products WHERE id=?${organizationId ? ' AND organization_id=?' : ''}`, [entry.productId, ...(organizationId ? [organizationId] : [])])).values[0]
         if (!product) throw new Error('A recipe ingredient is missing. Update the menu before ordering.')
         const ingredient = ingredients.get(entry.productId) || { productId: entry.productId, name: product.name, unit: product.unit, quantity: 0 }
         ingredient.quantity = Math.round((ingredient.quantity + Number(entry.quantity)) * 1000) / 1000
         ingredients.set(entry.productId, ingredient)
       }
-      return { id: text(line.id, 'a line ID'), menuItemId: item.id, name: item.name, productId: item.type === 'stock' ? item.productId : '', ingredients: [...ingredients.values()], options, quantity: line.quantity, price: Math.round((Number(item.price) + options.reduce((sum, option) => sum + Number(option.price), 0)) * 100) / 100 }
+      return { id: text(line.id, 'a line ID'), menuItemId: item.id, name: item.name, ...(restaurant ? {station:item.station || (item.type === 'stock' ? 'bar' : 'kitchen')} : {}), productId: item.type === 'stock' && !restaurant ? item.productId : '', ingredients: [...ingredients.values()], options, quantity: line.quantity, price: Math.round((Number(item.price) + options.reduce((sum, option) => sum + Number(option.price), 0)) * 100) / 100 }
     }))
     const customer = customers.find(customer => customer.id === input.customerId)
     if (input.customerId && !customer) throw new Error('Choose an existing customer account.')
@@ -152,7 +175,7 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
     const pos = { tillId, customerId: customer?.id || '', customerName: customer?.name || '', discountType: input.discountType === 'percent' ? 'percent' : 'amount', discountValue: money(input.discountValue || 0), loyaltyRedeemed: money(input.loyaltyRedeemed || 0), tax: settings, note: String(input.note || '').trim().slice(0,300) }
     if (pos.loyaltyRedeemed > Math.max(0, loyaltyBalances(loadedSales, returns)[pos.customerId] || 0)) throw new Error('Insufficient customer rewards.')
     pos.pricing = priceOrder(counterItems({ lines }), pos)
-    record = { ...stamp, id: input.id, kind: 'counter-order', branchId, status: 'queued', tillId, currency: editing ? existing.currency : profile.currency, businessName: editing ? existing.businessName : profile.app_name, createdAt: editing ? existing.createdAt : updatedAt, customerName: String(customer?.name || input.customerName || '').trim().slice(0, 100), note: String(input.note || '').trim().slice(0, 300), lines, pos, total: pos.pricing.total, ...(editing ? { action: 'edit', changeReason: input.reason.trim() } : {}), events: [...(editing ? existing.events : []), { status: 'queued', action: editing ? 'edit' : 'create', reason: editing ? input.reason.trim() : '', ...(editing ? { previousLines: existing.lines, previousTotal: existing.total } : {}), staffId: user.id, at: updatedAt }] }
+    record = { ...stamp, ...(tableService ? { tableService } : {}), id: input.id, kind: 'counter-order', branchId, status: 'queued', tillId, currency: editing ? existing.currency : billCurrency, businessName: editing ? existing.businessName : billBusinessName, createdAt: editing ? existing.createdAt : updatedAt, customerName: String(customer?.name || input.customerName || '').trim().slice(0, 100), note: String(input.note || '').trim().slice(0, 300), lines, pos, total: pos.pricing.total, ...(editing ? { action: 'edit', changeReason: input.reason.trim() } : {}), events: [...(editing ? existing.events : []), { status: 'queued', action: editing ? 'edit' : 'create', reason: editing ? input.reason.trim() : '', ...(editing ? { previousLines: existing.lines, previousTotal: existing.total } : {}), staffId: user.id, at: updatedAt }] }
     validateCounterRecord(record, editing ? existing : undefined)
   } else if (path === '/api/pos/counter/status') {
     if (!existing || existing.kind !== 'counter-order' || existing.branchId !== branchId) throw new Error('Order not found in this branch.')
@@ -161,9 +184,14 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
       if (settings.offlineStockPoolsEnabled && settings.stockPools[tillId] !== branchId) throw new Error("Prepare recipes at this till's assigned stock location.")
       prepare = !records.some(record => record.id === consumptionId(existing.id))
     }
+    if(input.status === 'cancelled' && existing.tableService) {
+      if(existing.status === 'collected' && !['owner','admin'].includes(user.role)) throw new Error('Only owner or admin can cancel served unpaid rounds.');
+      const tabRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,existing.tableService.tabId])).values[0]; const tab=tabRow && JSON.parse(tabRow.payload);
+      if(!tab || tab.status !== 'open' || tab.sessionId !== existing.tableService.sessionId) throw new Error('Closed bill orders cannot be cancelled. Record a refund against their receipt instead.');
+    }
     if (input.status === 'cancelled' && loadedSales.some(sale => sale.id === counterSaleId(existing.id)) && refundTotal(existing.id) < existing.total) throw new Error('Refund the paid order in full before cancelling it.')
     if (input.status !== 'cancelled' && refundTotal(existing.id) >= existing.total) throw new Error('Cancel a fully refunded order instead of preparing or handing it over.')
-    if (input.status === 'collected' && !loadedSales.some(sale => sale.id === counterSaleId(existing.id))) throw new Error('Take payment before handing over the order.')
+    if (input.status === 'collected' && !existing.tableService && !loadedSales.some(sale => sale.id === counterSaleId(existing.id))) throw new Error('Take payment before handing over the order.')
     record = { ...existing, ...stamp, action: 'status', changeReason: input.status === 'cancelled' ? text(input.reason, 'a cancellation reason', 300) : '', status: input.status, events: [...existing.events, { status: input.status, reason: input.status === 'cancelled' ? input.reason.trim() : '', staffId: user.id, at: updatedAt }] }
     validateCounterRecord(record, existing)
   } else throw new Error('Unknown counter-service action.')
@@ -171,6 +199,7 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
   try {
     const current = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
     if ((current ? JSON.parse(current.payload).updatedAt : '') !== (existing?.updatedAt || '')) throw new Error('This record changed. Refresh before continuing.')
+    if(record.tableService && record.status === 'queued') { const tabRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.tableService.tabId])).values[0]; const tab=tabRow && JSON.parse(tabRow.payload); if(!tab || tab.status !== 'open' || tab.sessionId !== record.tableService.sessionId) throw new Error('This table bill has closed. Open a new bill before adding orders.'); }
     const consumed = record.kind === 'counter-order' ? (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, consumptionId(record.id)])).values[0] : null
     if (record.action === 'edit' && consumed) throw new Error('Ingredients have already been consumed. Cancel this order instead of correcting it.')
     if (prepare && !consumed) {

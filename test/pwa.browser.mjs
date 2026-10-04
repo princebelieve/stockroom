@@ -20,6 +20,7 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true })
 console.log('Browser launched')
 try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  let restaurantSupported = true
   let pushed = []
   let remoteOperations = []
   let loginBodies = []
@@ -33,7 +34,7 @@ try {
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
     let result = {}
-    if (path === '/v1/sync/capabilities') result = { capabilities: counterSupported ? ['counter-v3'] : [] }
+    if (path === '/v1/sync/capabilities') result = { capabilities: [...(counterSupported ? ['counter-v3'] : []),...(restaurantSupported ? ['restaurant-v1'] : [])] }
     if (path === '/v1/subscriptions/access') result = subscription
     if (path === '/v1/auth/login') { loginBodies.push(body); result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' } }
     if (path === '/v1/devices/enroll') { enrollmentBodies.push(body); result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' } }
@@ -374,6 +375,38 @@ try {
   assert.equal(conflicts.length, 2)
   for (const conflict of conflicts) assert.equal((await api('/api/sync/conflicts/' + conflict.id + '/resolve', {})).status, 200)
   counterConflict = null
+  // Restaurant bills, served-before-payment orders and settlement survive offline reload.
+  await context.setOffline(true); cloudOffline = true
+  assert.equal(await page.evaluate(async()=>{const response=await fetch('/api/settings/shop-profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'general',industry:'general',workflows:'both',fastFood:true,restaurant:true})});return response.status}),200)
+  const restaurantLayout=await counterApi('/api/pos/restaurant/layout',{id:'restaurant-layout:main',commandId:'layout',expectedUpdatedAt:'',tables:[{id:'pwa-table',name:'Table 1',seats:2}]})
+  assert.equal(restaurantLayout.status,200,JSON.stringify(restaurantLayout.data))
+  const tab=await counterApi('/api/pos/restaurant/open',{id:'restaurant-tab:main:pwa-table',tableId:'pwa-table',sessionId:'pwa-table-session',guests:2,commandId:'open-table',expectedUpdatedAt:''})
+  assert.equal(tab.status,200,JSON.stringify(tab.data))
+  const restaurantMenu=await counterApi('/api/pos/restaurant/counter/menu',{id:'restaurant-menu',commandId:'restaurant-menu',expectedUpdatedAt:'',items:[{id:'drink',name:'Bottled drink',price:3,type:'stock',productId:created.data.id,available:true,station:'bar',options:[]}]})
+  assert.equal(restaurantMenu.status,200,JSON.stringify(restaurantMenu.data))
+  const beforeRestaurantStock=(await api('/api/products')).data.products.find(row=>row.id===created.data.id).stock
+  let tableOrder=await counterApi('/api/pos/restaurant/counter/orders',{id:'pwa-table-round',commandId:'table-order',expectedUpdatedAt:'',menuUpdatedAt:restaurantMenu.data.updatedAt,tableService:{tabId:tab.data.id,sessionId:tab.data.sessionId,seat:2},lines:[{id:'table-drink',menuItemId:'drink',quantity:1,optionIds:[]}]})
+  assert.equal(tableOrder.status,200,JSON.stringify(tableOrder.data))
+  for(const status of ['preparing','ready','collected']){
+    tableOrder=await counterApi('/api/pos/restaurant/counter/status',{id:tableOrder.data.id,commandId:'table-'+status,expectedUpdatedAt:tableOrder.data.updatedAt,status})
+    assert.equal(tableOrder.status,200,JSON.stringify(tableOrder.data))
+  }
+  assert.ok(Math.abs((await api('/api/products')).data.products.find(row=>row.id===created.data.id).stock-(beforeRestaurantStock-1))<0.000001)
+  assert.equal((await counterApi('/api/pos/restaurant/close',{id:tab.data.id,commandId:'unpaid-close',expectedUpdatedAt:tab.data.updatedAt})).status,400)
+  const tableSale={id:'counter-payment:'+tableOrder.data.id,currency:tab.data.currency,total:3,paymentMethod:'cash',createdAt:new Date().toISOString(),items:[{productId:'service:counter:table-drink',productName:'Bottled drink',quantity:1,price:3}],paymentDetails:{amountReceived:5,pos:tableOrder.data.pos,counterOrder:{id:tableOrder.data.id,tillId:'counter-pwa-till',tableService:tableOrder.data.tableService}}}
+  assert.equal((await counterApi('/api/sales',tableSale)).status,201)
+  assert.equal((await counterApi('/api/sales',tableSale)).status,200)
+  assert.ok(Math.abs((await api('/api/products')).data.products.find(row=>row.id===created.data.id).stock-(beforeRestaurantStock-1))<0.000001)
+  const closedBill=await counterApi('/api/pos/restaurant/close',{id:tab.data.id,commandId:'paid-close',expectedUpdatedAt:tab.data.updatedAt})
+  assert.equal(closedBill.status,200,JSON.stringify(closedBill.data))
+  await page.reload();await page.getByRole('button',{name:'Log out'}).waitFor()
+  const restoredRestaurant=(await counterApi('/api/pos/restaurant')).data
+  assert.equal(restoredRestaurant.tabs[0].status,'closed');assert.equal(restoredRestaurant.orders[0].receiptId,tableSale.id)
+  await context.setOffline(false);cloudOffline=false;restaurantSupported=false
+  const unsupportedRestaurant=await api('/api/sync/now',{})
+  assert.match(unsupportedRestaurant.data.lastError,/Restaurant & bar/);assert.ok(unsupportedRestaurant.data.pending>0)
+  restaurantSupported=true;await api('/api/sync/now',{})
+  assert.equal(pushed.filter(row=>row.entityType==='sale' && row.entityId===tableSale.id).length,1)
   await page.getByRole('button', { name: 'Log out' }).click()
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   assert.equal((await api('/api/settings')).data.existingBusiness, true)

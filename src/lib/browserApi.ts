@@ -3,7 +3,7 @@ import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../
 import { validQuantity } from '../../server/quantities.mjs'
 import { handleRetail, applyRetailRecord } from '../../server/retail.mjs'
 import { buildReports } from '../../server/reports.mjs'
-import { validateCounterPayment, validateCounterRetry, counterConflictRecord, requiresCounterSync } from '../../server/counter-service.mjs'
+import { validateCounterPayment, validateCounterRetry, counterConflictRecord, requiresCounterSync, requiresRestaurantSync } from '../../server/counter-service.mjs'
 import { handlePos, ensurePos, applyPosRecord } from '../../server/pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from '../../server/shop-fields.mjs'
 import { normalizeShopProfile, validateShopProfile } from '../../server/shop-profile.mjs'
@@ -182,6 +182,10 @@ async function syncNowImpl() {
     const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
     if (!operations.length) break
+    if (operations.some(requiresRestaurantSync)) {
+      const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
+      if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v1')) throw new Error('Update the existing sync server before synchronizing Restaurant & bar. Records remain on this device.')
+    }
     if (operations.some(requiresCounterSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
       if (!support.ok || !(await support.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
@@ -224,7 +228,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {

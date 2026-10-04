@@ -1,0 +1,139 @@
+import { createServer } from 'node:http'
+import { chromium } from '@playwright/test'
+import { spawn } from 'node:child_process'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { once } from 'node:events'
+import assert from 'node:assert/strict'
+
+const data = await mkdtemp(join(tmpdir(), 'stockroom-restaurant-browser-'))
+const base = 'http://127.0.0.1:9477'
+const cloud = createServer(async (request, response) => {
+  response.setHeader('Content-Type', 'application/json')
+  if (request.url === '/v1/sync/capabilities') { response.end(JSON.stringify({ capabilities: ['counter-v3','restaurant-v1'] })); return }
+  if (request.url.startsWith('/v1/sync/push')) {
+    let raw = ''; for await (const chunk of request) raw += chunk
+    response.end(JSON.stringify({ acceptedOperationIds: JSON.parse(raw).operations.map(row => row.operationId), conflicts: [] })); return
+  }
+  if (request.url.startsWith('/v1/sync/pull')) { response.end(JSON.stringify({ operations: [], cursor: '' })); return }
+  response.end(JSON.stringify({ businessId: 'restaurant-test', testMode: true }))
+})
+await new Promise(resolve => cloud.listen(9479, '127.0.0.1', resolve))
+const child = spawn(process.execPath, ['server/index.mjs'], { env: { ...process.env, PORT: '9477', CUSTOMER_DISPLAY_PORT: '9478', STOCKROOM_DATA_DIR: data, SYNC_CONFIG_PATH: join(data, 'sync.json'), SYNC_API_URL: 'http://127.0.0.1:9479', SYNC_DEVICE_TOKEN: 'test', BUSINESS_ID: 'restaurant-test', DEVICE_ID: 'restaurant-device' }, stdio: 'ignore' })
+let browser
+try {
+  for(let n=0;n<100;n++){try{if((await fetch(base+'/api/health')).ok)break}catch{};await new Promise(resolve=>setTimeout(resolve,100))}
+  const account=await (await fetch(base+'/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appName:'Corner Cafe',ownerName:'Owner',email:'restaurant@test.local',password:'long-test-password'})})).json()
+  const headers={'Content-Type':'application/json',Authorization:`Bearer ${account.token}`}
+  browser=await chromium.launch({channel:'msedge',headless:true})
+  const page=await browser.newPage({viewport:{width:1366,height:900}})
+  const errors=[];page.on('pageerror',error=>errors.push(error.message))
+  await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort())
+  await page.route('**/api/subscriptions/access',route=>route.fulfill({json:{testMode:true,blocked:false,status:'test'}}))
+  await page.addInitScript(account=>{localStorage.setItem('stockroom-token',account.token);localStorage.setItem('stockroom-user',JSON.stringify(account.user))},account)
+  await page.goto(base)
+  await page.getByRole('button',{name:'Stock & checkout',exact:true}).waitFor()
+  assert.equal(await page.getByRole('button',{name:'Restaurant & bar',exact:true}).count(),0)
+  await page.getByRole('button',{name:'Business settings',exact:true}).click()
+  await page.getByRole('button',{name:'Business type',exact:true}).click()
+  await page.getByLabel('Payment screens',{exact:true}).selectOption('restaurant')
+  await page.getByRole('button',{name:'Save payment screens',exact:true}).click()
+  await page.getByText('Payment screens saved. Use Sync now to share this choice with your other devices.',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'Restaurant & bar',exact:true}).click()
+  const workspace=page.locator('.restaurant-workspace'), counter=workspace.locator('.counter-workspace')
+  await workspace.getByRole('heading',{name:'Restaurant & bar',exact:true}).waitFor()
+  assert.equal(await page.getByRole('button',{name:'Stock & checkout',exact:true}).count(),0)
+  assert.equal(await page.getByRole('button',{name:'Fast food',exact:true}).count(),0)
+  await workspace.getByRole('button',{name:'Set up tables and seats',exact:true}).click()
+  await workspace.getByRole('button',{name:'Add table',exact:true}).click()
+  await workspace.getByLabel('Table name',{exact:true}).fill('Garden 1')
+  await workspace.getByLabel('Number of seats',{exact:true}).fill('4')
+  await workspace.getByRole('button',{name:'Save tables',exact:true}).click()
+  await workspace.getByText('Table setup saved.',{exact:true}).waitFor()
+  // Configure both kitchen and bar offerings in this workspace, not in Fast food.
+  await counter.getByRole('button',{name:'Menu',exact:true}).click()
+  await counter.getByRole('button',{name:'Add menu item',exact:true}).click()
+  await counter.getByLabel('Menu item name',{exact:true}).fill('Grilled meal')
+  await counter.getByLabel('Menu price',{exact:true}).fill('10')
+  await counter.getByRole('button',{name:'Save menu',exact:true}).click()
+  await counter.getByText('Menu saved.',{exact:true}).waitFor()
+  const drink=await (await fetch(base+'/api/products',{method:'POST',headers,body:JSON.stringify({name:'Bottled juice',price:3,cost:1,stock:8,reorder:1,unit:'bottle',category:'Packaged goods',sku:'JUICE'})})).json()
+  const menu=(await (await fetch(base+'/api/pos/restaurant/counter',{headers})).json()).menu
+  const menuResponse=await fetch(base+'/api/pos/restaurant/counter/menu',{method:'POST',headers:{...headers,'X-Stockroom-Till':await page.evaluate(()=>localStorage.getItem('stockroom-checkout-till-id'))},body:JSON.stringify({id:'restaurant-menu',commandId:crypto.randomUUID(),expectedUpdatedAt:menu.updatedAt,items:[...menu.items,{id:'juice',name:'Bottled juice',price:3,type:'stock',productId:drink.id,available:true,station:'bar',options:[]}]})})
+  assert.equal(menuResponse.ok,true,await menuResponse.text())
+  await workspace.getByRole('button',{name:/Garden 1.*Free/}).click()
+  await workspace.getByLabel('Number of guests',{exact:true}).fill('2')
+  await workspace.getByRole('button',{name:'Open bill',exact:true}).click()
+  await workspace.getByRole('heading',{name:'Bill for Garden 1',exact:true}).waitFor()
+  async function addRound(name,seat){
+    await counter.getByRole('button',{name:'New order',exact:true}).click()
+    await counter.getByRole('button',{name:new RegExp(name)}).click()
+    await counter.getByRole('button',{name:'Add to order',exact:true}).click()
+    await counter.getByLabel('Seat',{exact:true}).selectOption(String(seat))
+    await counter.getByRole('button',{name:'Send for preparation',exact:true}).click()
+    await counter.getByRole('heading',{name:'Open orders',exact:true}).waitFor()
+  }
+  await addRound('Grilled meal',1)
+  await addRound('Bottled juice',2)
+  const bill=workspace.locator('.restaurant-bill')
+  assert.match(await bill.textContent(),/Grilled meal/)
+  assert.match(await bill.textContent(),/Bottled juice/)
+  assert.equal(await bill.getByRole('button',{name:'Close bill and free table',exact:true}).isDisabled(),true)
+  // Preparation is real, and restaurant orders can be served while their bill remains unpaid.
+  for(const card of await counter.locator('.counter-order').all()){
+    await card.getByRole('button',{name:'Start preparing',exact:true}).click()
+    await card.getByRole('button',{name:'Mark ready',exact:true}).click()
+    await card.getByRole('button',{name:'Mark served',exact:true}).click()
+  }
+  const before=await (await fetch(base+'/api/products',{headers})).json()
+  assert.equal(before.products.find(row=>row.id===drink.id).stock,7)
+  await page.evaluate(()=>{window.print=()=>{window.billPrint=document.querySelector('.print-order')?.textContent}})
+  await bill.getByRole('button',{name:'Print itemized bill',exact:true}).click()
+  await page.waitForFunction(()=>typeof window.billPrint==='string')
+  assert.match(await page.evaluate(()=>window.billPrint),/ITEMIZED BILL/)
+  assert.match(await page.evaluate(()=>window.billPrint),/unpaid bill/)
+  assert.match(await page.evaluate(()=>window.billPrint),/Seat 2/)
+  await bill.getByRole('button',{name:'Settle remaining bill',exact:true}).click()
+  await workspace.getByLabel('Bill cash received',{exact:true}).fill('20')
+  await workspace.getByRole('button',{name:'Save bill payments',exact:true}).click()
+  await workspace.getByText('Bill payments saved. Print the itemized bill or individual receipts, then close the bill when every order is served.',{exact:true}).waitFor()
+  const sales=(await (await fetch(base+'/api/sales',{headers})).json()).sales
+  assert.equal(sales.length,2);assert.equal(sales.reduce((sum,sale)=>sum+sale.total,0),13)
+  assert.equal(sales.reduce((sum,sale)=>sum+(sale.changeGiven||0),0),7)
+  assert.ok(sales.every(sale=>sale.paymentDetails.counterOrder.tableService.name==='Garden 1'))
+  const retry=await fetch(base+'/api/sales',{method:'POST',headers:{...headers,'X-Stockroom-Till':await page.evaluate(()=>localStorage.getItem('stockroom-checkout-till-id'))},body:JSON.stringify({...sales[0],currency:'USD',branchId:'main',items:sales[0].items.map(item=>({...item,price:item.unitPrice}))})})
+  assert.equal(retry.ok,true,await retry.text())
+  assert.equal((await (await fetch(base+'/api/products',{headers})).json()).products.find(row=>row.id===drink.id).stock,7)
+  await bill.getByRole('button',{name:'Print itemized bill',exact:true}).click()
+  await page.waitForFunction(()=>window.billPrint?.includes('Paid bill'))
+  assert.match(await page.evaluate(()=>window.billPrint),/Paid bill/)
+  assert.doesNotMatch(await page.evaluate(()=>window.billPrint),/Payment has not been recorded/)
+  await page.reload()
+  await workspace.getByRole('button',{name:/Garden 1.*Open bill/}).click()
+  await workspace.getByRole('heading',{name:'Bill for Garden 1',exact:true}).waitFor()
+  await bill.getByRole('button',{name:'Close bill and free table',exact:true}).click()
+  await workspace.getByText('Bill closed. The table is free.',{exact:true}).waitFor()
+  assert.equal(await workspace.getByRole('button',{name:/Garden 1.*Free/}).count(),1)
+  await workspace.getByRole('button',{name:'Open bar tab',exact:true}).click()
+  await workspace.getByLabel('Tab name',{exact:true}).fill('Ada party')
+  await workspace.getByRole('button',{name:'Open bill',exact:true}).click()
+  await workspace.getByRole('heading',{name:'Bill for Ada party',exact:true}).waitFor()
+  await addRound('Bottled juice',1)
+  const barRound=counter.locator('.counter-order').first()
+  await barRound.getByRole('button',{name:'Start preparing',exact:true}).click()
+  await barRound.getByRole('button',{name:'Mark ready',exact:true}).click()
+  await barRound.getByRole('button',{name:'Mark served',exact:true}).click()
+  await barRound.getByRole('button',{name:'Cancel order',exact:true}).click()
+  await counter.getByLabel('Cancellation reason',{exact:true}).fill('Customer left without paying')
+  await counter.getByRole('button',{name:'Confirm cancellation',exact:true}).click()
+  await counter.getByText('Order cancelled. Its history is retained.',{exact:true}).waitFor()
+  assert.equal((await (await fetch(base+'/api/products',{headers})).json()).products.find(row=>row.id===drink.id).stock,6)
+  assert.equal((await (await fetch(base+'/api/sales',{headers})).json()).sales.length,2)
+  await bill.getByRole('button',{name:'Close bill and free table',exact:true}).click()
+  await workspace.getByText('Bill closed. The table is free.',{exact:true}).waitFor()
+  await page.setViewportSize({width:390,height:844})
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
+  assert.deepEqual(errors,[])
+  console.log('PASS: opt-in restaurant-only workspace, table/seat setup, separate menu, repeated rounds, serving before payment, bill printing, settlement/change/stock, reload, closing and named bar tabs')
+}catch(error){if(browser){const page=browser.contexts()[0]?.pages()[0];if(page)console.log('DEBUG PAGE:',await page.locator('body').innerText())}throw error}finally{if(browser)await browser.close();child.kill();await once(child,'exit').catch(()=>{});await rm(data,{recursive:true,force:true});cloud.close()}

@@ -1,3 +1,4 @@
+import { validateRestaurantRecord, validateRestaurantClose } from '../server/restaurant-service.mjs'
 import { validateConsumption, recipeRequirements, consumptionId } from '../server/counter-recipes.mjs'
 import { createSupermarketCoordinator } from './supermarket-coordination.mjs'
 import { validateRetailRecord } from '../server/retail.mjs'
@@ -450,7 +451,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v1'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -509,7 +510,7 @@ const server = createServer(async (request, response) => {
               try {
                 const profile = typeof document.payload.shopProfile === 'string' ? JSON.parse(document.payload.shopProfile) : document.payload.shopProfile
                 const previous = await businessSettings.findOne({ businessId })
-                if (normalizeShopProfile(previous?.settings?.shopProfile).fastFood && profile.fastFood === undefined) throw new Error('Update this device before changing Fast food workspace settings.')
+                if ((normalizeShopProfile(previous?.settings?.shopProfile).fastFood && profile.fastFood === undefined) || (normalizeShopProfile(previous?.settings?.shopProfile).restaurant && profile.restaurant === undefined)) throw new Error('Update this device before changing Fast food workspace settings.')
                 document.payload.shopProfile = validateShopProfile(profile)
               }
               catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid shop setup. Save a valid setup and sync again.' }); continue }
@@ -520,6 +521,27 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
+          if (document.entityType === 'pos_record' && ['restaurant-layout','restaurant-tab'].includes(document.payload.kind)) {
+            try {
+              if(document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid restaurant operation.')
+              validateRestaurantRecord(document.payload,current?.payload)
+              if(document.payload.kind === 'restaurant-layout') {
+                const active=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-tab','payload.branchId':document.payload.branchId,'payload.status':'open'}).toArray()
+                for(const row of active.filter(row=>row.payload.tableId)) {
+                  const before=current?.payload.tables.find(table=>table.id===row.payload.tableId), after=document.payload.tables.find(table=>table.id===row.payload.tableId)
+                  if(!before || JSON.stringify(before)!==JSON.stringify(after)) throw new Error('Close the table bill before changing its setup.')
+                }
+              } else if(document.payload.status === 'open' && document.payload.tableId) {
+                const layout=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:`restaurant-layout:${document.payload.branchId}`})
+                const table=layout?.payload.tables.find(table=>table.id===document.payload.tableId)
+                if(!table || table.name!==document.payload.name || document.payload.guests>table.seats) throw new Error('Synchronize table setup before opening its bill.')
+              } else if(document.payload.status === 'closed') {
+                const orders=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'counter-order','payload.tableService.tabId':document.payload.id,'payload.tableService.sessionId':document.payload.sessionId}).toArray()
+                const paid=await operations.find({businessId,entityType:'sale',entityId:{$in:orders.map(row=>`counter-payment:${row.entityId}`)}}).toArray()
+                validateRestaurantClose(document.payload,orders.map(row=>row.payload),paid.map(row=>row.payload))
+              }
+            } catch(error) { conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue }
+          }
           if (document.entityType === 'pos_record' && document.payload.kind === 'counter-consumption') {
             try {
               if (document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid recipe consumption operation.')
@@ -532,6 +554,10 @@ const server = createServer(async (request, response) => {
             try {
               if (document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid counter-service operation.')
               validateCounterRecord(document.payload, current?.payload)
+              if(document.payload.tableService && (!current || document.payload.action === 'edit' || document.payload.status === 'cancelled')) {
+                const tab=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.tableService.tabId})
+                if(!tab?.payload || tab.payload.status!=='open' || tab.payload.sessionId!==document.payload.tableService.sessionId || tab.payload.branchId!==document.payload.branchId || tab.payload.tillId!==document.payload.tillId || tab.payload.currency!==document.payload.currency || tab.payload.businessName!==document.payload.businessName || document.payload.tableService.seat>tab.payload.guests) throw new Error('Synchronize the open table bill before adding its orders.')
+              }
               if (document.payload.kind === 'counter-order' && ['preparing','ready','collected'].includes(document.payload.status) && recipeRequirements(document.payload).length && !await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: consumptionId(document.entityId) })) throw new Error('Synchronize ingredient consumption before preparation progress.')
               if (document.payload.kind === 'counter-order' && (document.payload.action === 'edit' || current)) {
                 const paid = await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })
@@ -543,7 +569,7 @@ const server = createServer(async (request, response) => {
                   if (document.payload.status === 'cancelled' && refunded < Math.round(document.payload.total * 100)) throw new Error('Synchronize the full refund before cancelling a paid order.')
                 }
               }
-              if (document.payload.kind === 'counter-order' && document.payload.status === 'collected' && !await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })) throw new Error('Synchronize the order payment before handover.')
+              if (document.payload.kind === 'counter-order' && document.payload.status === 'collected' && !document.payload.tableService && !await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })) throw new Error('Synchronize the order payment before handover.')
             } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message, localPayload: document.payload, remotePayload: current?.payload || {} }); continue }
           }
           if (document.entityType === 'product') {
@@ -600,6 +626,7 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
+      if (query.get('restaurantCapability') !== 'restaurant-v1' && rows.some(row=>['restaurant-layout','restaurant-tab'].includes(row.payload?.kind) || row.payload?.id === 'restaurant-menu' || row.payload?.tableService || row.payload?.paymentDetails?.counterOrder?.tableService || row.payload?.shopProfile?.restaurant || row.payload?.shopProfile?.workflows === 'restaurant')) return send(response,426,{error:'Update this device to synchronize Restaurant & bar tables, bills and orders.'})
       if (query.get('capabilities') !== 'counter-v3' && rows.some(row => ['counter-menu', 'counter-order', 'counter-consumption'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })
       if (!['retail-v3', 'business-v4'].includes(query.get('protocol')) && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
       return send(response, 200, { operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })

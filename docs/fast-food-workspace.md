@@ -81,3 +81,6 @@ Do not also record tracked ingredient purchases as expenses: supplier purchases 
 
 
 No new external service or paid subscription is introduced by these operations. Cross-device use requires all participating apps and the existing sync backend to support `counter-v3`; older deployments keep these uploads queued rather than accepting records they cannot handle.
+
+
+For tables, seats, open bills and serving before payment, enable the separate [Restaurant & bar workspace](restaurant-and-bar-workspace.md). Fast food retains its pay-before-handover flow and separate menu.

@@ -1,6 +1,6 @@
 ﻿# Business app scope and architecture review
 
-Updated: 2026-10-03, after adding Payments & receipts and the separate Fast food workspace.
+Updated: 2026-10-03, after adding Payments & receipts, Fast food, and the separate Restaurant & bar workspace.
 
 ## Purpose
 
@@ -12,12 +12,13 @@ The original audit identified a real issue: changing product labels and template
 
 Owners can choose **Stock & checkout**, **Payments & receipts**, or **Both** in **Business settings → Business type → Payment screens**.
 
-Owners can also choose **Fast food only**, or enable Fast food alongside their existing screens. Its menu, orders, preparation queue and packaged-stock tools stay in a separate workspace. Supermarkets receive no Fast food screens unless the owner enables it.
+Owners can also choose **Fast food only**, or enable Fast food alongside their existing screens. Its menu, orders, preparation queue and packaged-stock tools stay in a separate workspace. Supermarkets receive no Fast food screens unless the owner enables it. **Restaurant & bar only**, or its separate enable checkbox, adds its own menu, tables, seats, named tabs and open bills.
 
 | Workflow | Behavior |
 | --- | --- |
 | Stock & checkout | Select stocked products, take payment, save a receipt and deduct stock. |
 | Payments & receipts | Enter what the customer is paying for, optional customer name/phone, amount and payment method; save and print/share a receipt without changing stock. |
+| Restaurant & bar | Open table or named bar bills, add rounds with seats and quantities, print kitchen/bar tickets, serve before payment, settle remaining rounds or individual orders, and close fully resolved bills. Restaurant ingredients and linked drinks leave stock at preparation; later payment does not deduct them again. |
 | Both | Staff switch between two separate screens. The payment form and product basket keep their own drafts. |
 | Fast food | Save menu orders, track Queued → Preparing → Ready → Collected, and record full payment against the same order, with saved tax/discounts/rewards, unpaid corrections, cancellation, refunds and preparation tickets. Prepared recipes consume ingredient stock and capture costs when preparation starts; linked packaged goods deduct stock on payment. |
 
@@ -26,6 +27,8 @@ Business templates still customize product fields and wording. The saved payment
 The payment screen is useful across sectors when the task is simply recording an amount received and issuing a receipt. A printing press, church office or hotel can use it for that task. This does not imply that the app manages printing jobs, church administration or hotel reservations.
 
 See [Payments & receipts](payments-and-receipts.md) for setup and daily use.
+
+See [Restaurant & bar workspace](restaurant-and-bar-workspace.md) for table service, settlement and synchronization.
 
 See [Fast food workspace](fast-food-workspace.md) for order operations, setup, device synchronization and current limits.
 
@@ -40,7 +43,7 @@ Some core operations and schemas still have separate platform implementations. C
 
 ## Remaining limits
 
-Stock checkout and direct payment entry record fully paid transactions. Fast food now has persistent unpaid orders and independent preparation progress, with full settlement required before handover. Deposits, open bar tabs, room availability and hotel stays remain outside the implemented scope. Held retail baskets remain checkout drafts.
+Stock checkout and direct payment entry record fully paid transactions. Fast food now has persistent unpaid orders and independent preparation progress, with full settlement required before handover. Restaurant & bar supports open tabs and serving before payment. Deposits, arbitrary splitting of a single round, reservations, room availability and hotel stays remain outside the implemented scope. Held retail baskets remain checkout drafts.
 
 Existing financial reports summarize receipts, recorded stock costs, expenses and returns. A payment without stock carries no inventory cost; its receipt alone does not capture the business's full service delivery cost.
 
@@ -48,7 +51,7 @@ The current screen choice is a workspace setting. It does not introduce new staf
 
 ## Guidance for future changes
 
-Keep payment entry simple. Add a sector workflow only when a concrete business task requires it, and define that task before adding screens or backend entities. Fast food is the first separate operational extension. Table-service restaurants and hotel reservations still need their own bounded designs; they are optional extensions, not prerequisites for issuing receipts.
+Keep payment entry simple. Add a sector workflow only when a concrete business task requires it, and define that task before adding screens or backend entities. Fast food is the first separate operational extension. Restaurant & bar now adds table service; hotel reservations still need their own bounded design; they are optional extensions, not prerequisites for issuing receipts.
 
 For any extension, preserve existing records, validate amounts and permissions in the backend, and check persistence, retry and synchronization behavior on supported platforms. Templates should expose implemented behavior rather than imply capabilities through renamed fields.
 

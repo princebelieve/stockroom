@@ -7,3 +7,5 @@ export function validateCounterPayment(sale: any, order: any, tillId?: string): 
 export function validateCounterRecord(record: any, previous?: any, snapshot?: boolean): void
 export function counterConflictRecord(conflict: any): any
 export function handleCounter(options: any): Promise<any>
+
+export function requiresRestaurantSync(operation: any): boolean
