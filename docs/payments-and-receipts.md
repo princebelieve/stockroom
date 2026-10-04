@@ -10,9 +10,15 @@ In **Business settings → Business type**, choose **Payment screens**:
 
 Click **Save payment screens**. Use Sync now to share the choice with other devices. Changing this choice preserves existing products, receipts and drafts.
 
-In Payments & receipts, enter **Payment for**, optional customer name/phone, **Amount paid**, and the payment method. Existing customer names can prefill their phone number. New customer details are saved on the receipt; this does not automatically create a customer account.
+In Payments & receipts, enter **Payment for**, optional customer name/phone, **Unit price**, and the payment method. Existing customer names can prefill their phone number. New customer details are saved on the receipt; this does not automatically create a customer account.
 
-Cash received defaults to the amount paid; enter a larger cash amount to calculate change. For transfer or terminal payments, record the provider/reference and confirm success on the bank/terminal before saving. These methods record an externally received payment; they do not initiate a connected terminal charge.
+Quantity defaults to one. Use **Add another item** when the customer pays for several things together. These are plain receipt descriptions; there is no SKU, stock lookup or inventory deduction.
+
+Owners and administrators can open **Customize receipt** to save business contact details and their own footer. Each payment retains those details for later reprinting. Tax is disabled by default: entry, printed receipts and digital receipts omit it. Businesses that need it can explicitly enable it in receipt settings.
+
+Receipts include the receipt number, date, time, transaction type, cashier, descriptions, quantities, unit prices, subtotal, grand total, payment method, amount received and change.
+
+Cash received defaults to the grand total; enter a larger cash amount to calculate change. For transfer or terminal payments, record the provider/reference and confirm success on the bank/terminal before saving. These methods record an externally received payment; they do not initiate a connected terminal charge.
 
 Click **Save payment**, then **Print receipt** or open **Digital receipt** to download, share/copy, or open email/SMS. Automated Gmail delivery uses the existing configured cloud service and requires the receipt to be synchronized. Printing or sharing does not record another payment.
 

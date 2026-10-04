@@ -1,3 +1,5 @@
+import { receiptSettings } from './receipts.mjs'
+import { applyConsumption } from './counter-recipes.mjs'
 import { stockChange } from './stock-ledger.mjs'
 import { handleCounter } from './counter-service.mjs'
 import { posSettings, refundFor, loyaltyBalances } from './pos-pricing.mjs'
@@ -12,7 +14,10 @@ export async function savePosRecord(db, scope, record) {
   await db.run('INSERT INTO pos_records (scope,id,kind,branch_id,payload,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(scope,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at WHERE excluded.updated_at >= pos_records.updated_at', [scope, record.id, record.kind, record.branchId || 'main', JSON.stringify(record), record.updatedAt])
 }
 export async function applyPosRecord(db, scope, record, organizationId) {
+  const connection = db
+  db = { query: (sql, params = []) => connection.query(sql, params), run: (sql, params = []) => connection.run(sql, params, false) }
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
+  if (record.kind === 'counter-consumption') await applyConsumption(db, record, organizationId)
   if (record.kind === 'return' && !found) {
     for (const item of record.items) if (item.restock && !String(item.productId).startsWith('service:')) {
       const result = await db.query('SELECT stock FROM branch_inventory WHERE product_id=? AND branch_id=?', [item.productId, record.branchId])
@@ -52,6 +57,13 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   const records = kind => posRecords(db, scope, kind, kind === 'settings' || kind === 'product' ? 'main' : branchId)
   const write = async record => { if(['basket','register'].includes(record.kind)){const previous=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.id])).values[0];record.expectedUpdatedAt=previous?JSON.parse(previous.payload).updatedAt:''} await db.beginTransaction(); try { await savePosRecord(db, scope, record); await publish(record); await db.commitTransaction() } catch(error) { await db.rollbackTransaction(); throw error } return record }
   const stamp = { branchId, updatedAt: new Date().toISOString(), staffId: user.id, staffName: user.name }
+  if (path === '/api/pos/receipt-settings') {
+    const saved = (await posRecords(db, scope, 'receipt-settings', 'main'))[0]
+    if (method === 'GET') return receiptSettings(saved?.value)
+    if (!manager) throw new Error('Owner or admin access required to customize receipts.')
+    if (method !== 'POST') throw new Error('Unknown receipt settings action.')
+    return write({ ...stamp, id: 'receipt-settings', kind: 'receipt-settings', branchId: 'main', value: receiptSettings(input) })
+  }
   if (method === 'GET') {
     const [settings, baskets, registers, returns, products] = await Promise.all(['settings', 'basket', 'register', 'return', 'product'].map(records))
     const loaded = await sales()

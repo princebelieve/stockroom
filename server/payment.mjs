@@ -1,3 +1,4 @@
+import { receiptSnapshot } from './receipts.mjs'
 import { validatePosSale } from './pos-pricing.mjs'
 export const extraReasons = { tip: 'Voluntary tip', rounding: 'Agreed rounding', donation: 'Voluntary donation', other: 'Other — explanation required' }
 export function paymentPolicy(value) {
@@ -70,11 +71,14 @@ export function recordPayment(sale, policyInput, legacy = false) {
     result.paymentDetails.counterOrder = { id: details.id, tillId: details.tillId }
   }
   if (validated.paymentDetails?.pos) result.paymentDetails = { ...result.paymentDetails, pos: validated.paymentDetails.pos }
+  if (validated.paymentDetails?.receipt) result.paymentDetails.receipt = receiptSnapshot(validated.paymentDetails.receipt)
   if (validated.paymentDetails?.servicePayment) {
     const details = validated.paymentDetails.servicePayment
     if (!sale.items?.length || sale.items.some(item => !String(item.productId).startsWith('service:'))) throw new Error('Service payments cannot include stock products.')
     if (typeof details.customerName !== 'string' || details.customerName.length > 200 || typeof details.customerPhone !== 'string' || details.customerPhone.length > 80) throw new Error('Enter valid customer details.')
-    if (!Number.isFinite(Number(sale.total)) || Number(sale.total) <= 0 || Math.round(sale.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0) * 100) !== Math.round(Number(sale.total) * 100)) throw new Error('Service payment amount does not match its description line.')
+    if (!Number.isFinite(Number(sale.total)) || Number(sale.total) <= 0 || Math.round((validated.paymentDetails?.pos?.pricing?.total ?? sale.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)) * 100) !== Math.round(Number(sale.total) * 100)) throw new Error('Service payment amount does not match its description line.')
+    if (sale.items.length > 100 || sale.items.some(item => !Number.isFinite(Number(item.price)) || Number(item.price) < 0 || Math.abs(Number(item.price) * 100 - Math.round(Number(item.price) * 100)) > 0.000001 || !String(item.productName || '').trim() || String(item.productName).length > 200)) throw new Error('Use up to 100 named receipt items and unit prices with at most two decimals.')
+    if (validated.paymentDetails?.pos && (validated.paymentDetails.pos.customerId || validated.paymentDetails.pos.discountValue || validated.paymentDetails.pos.loyaltyRedeemed || validated.paymentDetails.pos.tax?.loyaltyEnabled)) throw new Error('Basic payment receipts support tax without customer rewards or discounts.')
     result.paymentDetails.servicePayment = { customerName: details.customerName.trim(), customerPhone: details.customerPhone.trim() }
   }
   return result

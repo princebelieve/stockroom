@@ -1,3 +1,4 @@
+import { applyConsumptionSync } from './counter-recipes.mjs'
 import { validateCounterPayment, validateCounterRetry, counterConflictRecord } from './counter-service.mjs'
 import { validateLoyaltyBalance, validateCheckoutSettings } from './pos-pricing.mjs'
 import { stockChangeSync, stockTransferSync } from './stock-ledger.mjs'
@@ -456,7 +457,7 @@ export function getReports(branchId = 'main') {
   for(const product of listProducts(branchId))stockChangeSync(retailDb,{id:`report:${branchId}:${product.id}`,branchId,productId:product.id,delta:0,createdAt:now()})
   const retail=database.prepare("SELECT payload FROM retail_records WHERE scope=? AND (branch_id=? OR kind='supplier')").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
   const batches=database.prepare('SELECT * FROM stock_batches WHERE branch_id=? AND quantity>0').all(branchId)
-  const adjustments=database.prepare('SELECT payload FROM stock_events').all().map(row=>JSON.parse(row.payload)).filter(row=>row.branchId===branchId && row.category==='stock-loss')
+  const adjustments=database.prepare('SELECT payload FROM stock_events').all().map(row=>JSON.parse(row.payload)).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption'].includes(row.category))
   const registers=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='register'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
   return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers })
 }
@@ -706,6 +707,7 @@ export function applyRemoteOperations(operations) {
         const existing = database.prepare('SELECT payload FROM pos_records WHERE scope=? AND id=?').get(organizationId, payload.id)
         database.exec('BEGIN')
         try {
+          if (payload.kind === 'counter-consumption') applyConsumptionSync(retailDb, payload, organizationId)
           if (payload.kind === 'return' && !existing) {
             for (const item of payload.items) if (item.restock) {
               if (!database.prepare('SELECT 1 FROM branch_inventory WHERE product_id=? AND branch_id=?').get(item.productId,payload.branchId)) throw new Error('Returned product has not synchronized yet.')

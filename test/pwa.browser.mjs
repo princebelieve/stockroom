@@ -33,7 +33,7 @@ try {
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
     let result = {}
-    if (path === '/v1/sync/capabilities') result = { capabilities: counterSupported ? ['counter-v2'] : [] }
+    if (path === '/v1/sync/capabilities') result = { capabilities: counterSupported ? ['counter-v3'] : [] }
     if (path === '/v1/subscriptions/access') result = subscription
     if (path === '/v1/auth/login') { loginBodies.push(body); result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' } }
     if (path === '/v1/devices/enroll') { enrollmentBodies.push(body); result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' } }
@@ -335,7 +335,7 @@ try {
     return { status: response.status, data: await response.json() }
   }, { path, body })
   await context.setOffline(true); cloudOffline = true
-  const counterMenu = await counterApi('/api/pos/counter/menu', { id: 'counter-menu', commandId: 'pwa-menu', expectedUpdatedAt: '', items: [{ id: 'sandwich', name: 'Sandwich', price: 5, type: 'prepared', available: true, productId: '', options: [] }, { id: 'coffee', name: 'Packaged coffee', price: 2, type: 'stock', available: true, productId: created.data.id, options: [] }] })
+  const counterMenu = await counterApi('/api/pos/counter/menu', { id: 'counter-menu', commandId: 'pwa-menu', expectedUpdatedAt: '', items: [{ id: 'sandwich', name: 'Sandwich', price: 5, type: 'prepared', available: true, productId: '', options: [], recipe: [{ productId: created.data.id, quantity: 0.1 }] }, { id: 'coffee', name: 'Packaged coffee', price: 2, type: 'stock', available: true, productId: created.data.id, options: [] }] })
   assert.equal(counterMenu.status, 200, JSON.stringify(counterMenu.data))
   const counterRequest = { id: 'pwa-counter', commandId: 'pwa-create', expectedUpdatedAt: '', menuUpdatedAt: counterMenu.data.updatedAt, lines: [{ id: 'pwa-food', menuItemId: 'sandwich', quantity: 1, optionIds: [] }, { id: 'pwa-coffee', menuItemId: 'coffee', quantity: 1, optionIds: [] }] }
   const counterOrder = await counterApi('/api/pos/counter/orders', counterRequest)
@@ -353,7 +353,8 @@ try {
   assert.equal(paymentResult.status, 201, JSON.stringify(paymentResult.data))
   assert.equal((await counterApi('/api/sales', counterSale)).status, 200)
   assert.equal((await counterApi('/api/sales', { ...counterSale, paymentDetails: { ...counterSale.paymentDetails, amountReceived: 20 } })).status, 400)
-  assert.equal((await api('/api/products')).data.products.find(row => row.id === created.data.id).stock, beforeCounterStock - 1)
+  assert.ok(Math.abs((await api('/api/products')).data.products.find(row => row.id === created.data.id).stock - (beforeCounterStock - 1.1)) < 0.000001)
+  assert.equal((await counterApi('/api/pos/counter')).data.consumptions.length, 1)
   assert.equal((await counterApi('/api/pos/counter/status', { id: counter.id, commandId: 'collect', expectedUpdatedAt: counter.updatedAt, status: 'collected' })).status, 200)
   await page.reload()
   await page.getByRole('button', { name: 'Log out' }).waitFor()

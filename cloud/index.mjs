@@ -1,3 +1,4 @@
+import { validateConsumption, recipeRequirements, consumptionId } from '../server/counter-recipes.mjs'
 import { createSupermarketCoordinator } from './supermarket-coordination.mjs'
 import { validateRetailRecord } from '../server/retail.mjs'
 import { validateCounterRecord, validateCounterPayment, validateCounterRetry } from '../server/counter-service.mjs'
@@ -449,7 +450,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v2'] })
+      return send(response, 200, { capabilities: ['counter-v3'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -519,10 +520,19 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
+          if (document.entityType === 'pos_record' && document.payload.kind === 'counter-consumption') {
+            try {
+              if (document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid recipe consumption operation.')
+              const order = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: document.payload.orderId })
+              if (!order?.payload || order.payload.kind !== 'counter-order') throw new Error('Synchronize the saved order before its ingredient consumption.')
+              validateConsumption(document.payload, order.payload, current?.payload)
+            } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message, localPayload: document.payload, remotePayload: current?.payload || {} }); continue }
+          }
           if (document.entityType === 'pos_record' && ['counter-menu', 'counter-order'].includes(document.payload.kind)) {
             try {
               if (document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid counter-service operation.')
               validateCounterRecord(document.payload, current?.payload)
+              if (document.payload.kind === 'counter-order' && ['preparing','ready','collected'].includes(document.payload.status) && recipeRequirements(document.payload).length && !await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: consumptionId(document.entityId) })) throw new Error('Synchronize ingredient consumption before preparation progress.')
               if (document.payload.kind === 'counter-order' && (document.payload.action === 'edit' || current)) {
                 const paid = await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })
                 if (paid && document.payload.action === 'edit') throw new Error('A paid order cannot be corrected. Refund it and create a new order.')
@@ -590,7 +600,7 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
-      if (query.get('capabilities') !== 'counter-v2' && rows.some(row => ['counter-menu', 'counter-order'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })
+      if (query.get('capabilities') !== 'counter-v3' && rows.some(row => ['counter-menu', 'counter-order', 'counter-consumption'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })
       if (!['retail-v3', 'business-v4'].includes(query.get('protocol')) && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
       return send(response, 200, { operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })
     }

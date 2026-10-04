@@ -525,3 +525,24 @@ body { background: #dfece5; }
 .counter-order button { margin: .3rem .4rem .3rem 0; }
 .counter-menu-editor, .counter-payment { display: grid; gap: .8rem; max-width: 850px; }
 .counter-menu-editor fieldset { display: grid; gap: .7rem; min-width: 0; }
+
+/* Consistent, readable controls across the business workspaces. */
+.app-shell :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea) { box-sizing: border-box; min-width: 0; min-height: 44px; padding: 11px 13px; font: inherit; font-size: 16px; line-height: 1.4; color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+.app-shell :is(input, select, textarea):focus-visible { outline: 2px solid #39715b; outline-offset: 2px; }
+.app-shell label { font-size: 14px; line-height: 1.5; }
+.app-shell label > :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea), .app-shell form > select { width: 100%; margin-top: 6px; }
+.app-shell input:is([type="checkbox"], [type="radio"]) { width: 18px; height: 18px; flex: 0 0 18px; padding: 0; accent-color: #39715b; }
+.app-shell .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.payment-entry { display: grid; gap: 18px; max-width: 920px; }
+.payment-entry > label, .payment-entry .form-grid label, .payment-line label { display: grid; gap: 6px; font-weight: 600; }
+.payment-entry h2, .payment-entry h3, .payment-entry > p { margin: 0; }
+.payment-lines { display: grid; gap: 16px; }
+.payment-line { border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; display: grid; gap: 12px; }
+.payment-line legend { padding: 0 6px; font-weight: 600; }
+.payment-line-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.payment-line-total, .payment-summary p { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.payment-summary { background: #f3f7f3; border: 1px solid var(--line); border-radius: 10px; padding: 8px 18px; }
+.payment-grand-total { font-size: 20px; border-top: 1px solid var(--line); padding-top: 12px; }
+.receipt-multiline { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 650px) { .app-shell .form-grid { grid-template-columns: minmax(0, 1fr); } .payment-line-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media print { .print-receipt h1 { font-size: 15px; margin: 0 0 10px; } .print-receipt h2 { font-size: 16px; } .print-receipt h3 { font-size: 12px; margin: 8px 0; } .print-receipt section { border-top: 1px dashed #777; padding: 8px 0; } .print-receipt :is(p, small, footer) { overflow-wrap: anywhere; } .print-receipt .receipt-items { min-width: 0; width: 100%; table-layout: fixed; border-collapse: collapse; margin: 8px 0; } .print-receipt .receipt-items :is(th, td) { font-size: 10px; padding: 5px 2px; color: #000; background: none; overflow-wrap: anywhere; border-bottom: 1px solid #bbb; } .print-receipt .receipt-items th:first-child { width: 40%; } .print-receipt .receipt-items th:nth-child(2) { width: 12%; } .print-receipt .receipt-items td:not(:first-child) { text-align: right; } .print-receipt footer { border-top: 1px dashed #777; margin-top: 12px; padding-top: 12px; text-align: center; } }

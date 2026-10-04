@@ -208,7 +208,7 @@ async function syncNowImpl() {
     if (!operations.length) break
     if (operations.some(requiresCounterSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
-      if (!support.ok || !(await support.json()).capabilities?.includes('counter-v2')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
+      if (!support.ok || !(await support.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
     }
     {
       const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
@@ -243,7 +243,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
   try {
     let cursor = await setting('syncCursor')
     while (true) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v2&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) await applyOperation(operation)
@@ -644,7 +644,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     const returns = ((await db.query("SELECT payload FROM pos_records WHERE scope = 'business' AND branch_id = ? AND kind = 'return'", [branchId])).values || []).map(row => JSON.parse(String(row.payload)))
     const retail=((await db.query("SELECT payload FROM retail_records WHERE scope=? AND (branch_id=? OR kind='supplier')",['business',branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
     const batchData=await batchReport(db,branchId)
-    const adjustments=((await db.query('SELECT payload FROM stock_events')).values||[]).map(row=>JSON.parse(String(row.payload))).filter(row=>row.branchId===branchId && row.category==='stock-loss')
+    const adjustments=((await db.query('SELECT payload FROM stock_events')).values||[]).map(row=>JSON.parse(String(row.payload))).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption'].includes(row.category))
     const registers=((await db.query("SELECT payload FROM pos_records WHERE scope='business' AND branch_id=? AND kind='register'",[branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
     return json(buildReports({ sales, items, products, expenses, returns,retail,batches:batchData.lots,adjustments,registers }))
   }

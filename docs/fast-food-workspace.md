@@ -25,13 +25,13 @@ Payment can be recorded before or during preparation. Its state is separate from
 
 Submitted orders retain their item names, options, quantities, prices, tax, discounts, rewards, business identity and currency. Later menu or settings edits do not change them. **Correct order** can replace an unpaid Queued order on its original till; the correction must include a reason and retains the previous items and amount in its history. Once preparation or payment has started, refund/cancel as appropriate and create a new order instead. Drafts are saved per business, staff member and branch and restore after a reload.
 
-Creating or preparing an order does not deduct stock. Saving payment deducts only linked packaged goods, once. Unpaid orders do not reserve stock; insufficient packaged stock blocks payment. Prepared food does not consume ingredients automatically.
+Creating an order does not deduct or reserve stock. **Start preparing** deducts saved recipe ingredients once; **Save order payment** deducts linked packaged goods once. Insufficient or expired ingredient stock blocks preparation, and insufficient packaged stock blocks payment. Prepared items without a recipe do not consume ingredients.
 
 ## Devices and recovery
 
 Orders, progress changes, receipts and their outbound sync records persist locally. The workspace refreshes local order data every five seconds. **Sync orders** uploads local changes and downloads changes from other devices; it requires configured cloud synchronization and a connection. Saving orders, progress, menu changes and packaged-stock changes also attempts synchronization through the existing backend. If synchronization fails, saved local changes remain queued for retry. Printing receipts works locally. Sending an email receipt uses the existing online receipt service and synchronizes first.
 
-Take payment on the original till. Another synchronized device can display and update preparation progress. Updates carry an expected revision, so stale local edits are rejected. Rejected edits remain in the sync-conflict log; the accepted cloud order/menu version is restored when returned by the cloud. Offline devices do not provide exclusive ownership of a shared preparation queue. An owner/admin should review **Sync issues** before relying on a conflicted order.
+Take payment on the original till. For orders with recipes, start preparation on the original order till so separate offline devices cannot consume the same order twice. Another synchronized device can display the queue and mark an already-preparing order Ready or Collected. Orders without recipes keep their existing preparation controls. Updates carry an expected revision, so stale local edits are rejected. Rejected edits remain in the sync-conflict log; the accepted cloud order/menu version is restored when returned by the cloud. Offline devices do not provide exclusive ownership of a shared preparation queue. An owner/admin should review **Sync issues** before relying on a conflicted order.
 
 Here, "cloud server" means the project's existing Stockroom synchronization backend (`cloud/index.mjs`), currently configured with a Render address. This workspace adds no hosting provider, paid synchronization service or subscription. The desktop server also retains its existing background synchronization worker, which runs every 30 seconds. The explicit sync buttons remain available. These changes do not establish the hosting account's pricing or usage limits.
 
@@ -59,9 +59,25 @@ The counter-service workflow supports ordering, preparation, full payment, recei
 
 - **Tables and open tabs:** for customers who remain seated or add purchases before paying, typically table-service restaurants and bars.
 - **Deposits:** for advance payments on future orders. Counter orders currently settle in full.
-- **Recipes and ingredient consumption:** for tracking how much flour, meat, oil and other ingredients each prepared item uses, including wastage. Prepared food currently does not deduct ingredient stock.
 - **Kitchen-printer routing:** for automatically sending specific items to separate kitchen/bar printers. Manual preparation tickets are available now.
 
-Financial reports include saved receipts, refunds, receipt tax, packaged-stock costs and recorded expenses. They do not calculate recipe costs. To avoid overstating prepared-food profit, record ingredient costs as expenses when you are not already accounting for them through stock. Reliable item-by-item prepared-food margins require a future recipe/costing workflow. Do not charge the same costs through both stock and expenses.
+## Recipes, ingredient stock and food cost
 
-No new external service or paid subscription is introduced by these operations. Cross-device use requires all participating apps and the existing sync backend to support `counter-v2`; older deployments keep these uploads queued rather than accepting records they cannot handle.
+Open **Fast food -> Recipes** (owner/admin):
+
+1. Expand **Ingredient stock** to add flour, meat, oil and other ingredients, or use existing stock products. Choose a stock unit, purchase cost per unit, opening quantity and low-stock level.
+2. Choose a prepared menu item. Use **Add recipe ingredient** to set what one portion consumes. Quantities use the ingredient's stock unit, with up to three decimals: 125 grams is `0.125` when flour is stocked in kg; 50 ml is `0.05` when oil is stocked in litres.
+3. Configure additional ingredients under each extra, such as one extra cheese slice. Base and selected-extra quantities are combined, then multiplied by the number of portions ordered.
+4. **Save recipe**. The screen shows estimated ingredient cost using current purchase costs. Existing submitted orders keep their saved ingredient quantities, names and units.
+5. Restock ingredients here at their saved cost, or use Purchasing for supplier invoices and batches with new costs/expiry dates. Never change a stock unit without converting the stock and recipe quantities consistently.
+
+Ingredient availability is checked when **Start preparing** is saved. The app consumes unexpired stock batches in expiry order, captures their actual purchase costs, and saves ingredient usage, preparation status and outbound sync records together. A failure rolls the whole operation back; retrying does not consume twice. Preparation on the original till is required for recipe orders. Ingredient stock is not reserved by unpaid queued orders.
+
+Cooking is a physical stock event. Cancelling before preparation consumes nothing. Cancelling after preparation, refunding the customer, or rejecting a conflicting preparation-status edit does not restore ingredients already used. Ingredient usage persists independently of the order's editable progress, including after restart and synchronization. Prepared food is never automatically put back into raw ingredient stock. Record separate spoilage or damage through the existing wastage/stock-adjustment tools; do not also record the same cooked ingredients as wastage.
+
+Financial reports include captured ingredient costs once when preparation happens, alongside packaged-stock costs, receipt tax, refunds and recorded expenses. Cancelled/refunded cooked food retains its ingredient cost. Order cards show the actual ingredient cost used. Revenue and food cost can fall in different reporting periods if an order is paid and prepared on different dates.
+
+Do not also record tracked ingredient purchases as expenses: supplier purchases add stock, preparation charges its consumed cost. Prepared items without recipes and ingredients with missing purchase costs still overstate profit; add recipes and accurate purchase costs before relying on food margins. This implementation handles per-portion recipes and option extras. It does not add advance batch production or conversions between separate stock units.
+
+
+No new external service or paid subscription is introduced by these operations. Cross-device use requires all participating apps and the existing sync backend to support `counter-v3`; older deployments keep these uploads queued rather than accepting records they cannot handle.

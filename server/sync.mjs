@@ -69,7 +69,7 @@ async function pullRemoteChanges({ url, token, businessId, deviceId }) {
   markKnownLocalOperationsApplied()
   let cursor = getSyncCursor()
   while (true) {
-  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v2&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
+  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
   if (!pulled.ok) throw new Error(`Cloud pull failed (${pulled.status}).`)
   const result = await pulled.json()
   applyRemoteOperations(result.operations || [])
@@ -113,7 +113,7 @@ export async function syncNow() {
     if (pending.length) {
       if (pending.some(requiresCounterSync)) {
         const response = await fetch(`${url}/v1/sync/capabilities`, { headers })
-        if (!response.ok || !(await response.json()).capabilities?.includes('counter-v2')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
+        if (!response.ok || !(await response.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')
       }
       const pushed = await fetch(`${url}/v1/sync/push`, { method: 'POST', headers, body: JSON.stringify({ businessId, deviceId, operations: pending }) })
       if (!pushed.ok) throw new Error(`Cloud push failed (${pushed.status}).`)

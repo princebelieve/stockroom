@@ -6,7 +6,7 @@ For payments without inventory, use the separate **Payments & receipts** screen.
 
 Unpaid baskets are saved on the current device per staff member and branch. **Hold sale** saves a named basket for later; hold or clear the current basket before resuming another. The existing explicit void action keeps its reason requirement. Ordinary quantity changes do not ask for a reason.
 
-Owners and admins can add a fixed or percentage basket discount and override a selling price. Weighted quantities support three decimal places. Product variants use separate existing SKUs; **Product variants and extras** groups those products and adds optional priced extras. Extras do not deduct separate ingredient inventory.
+Owners and admins can add a fixed or percentage basket discount and override a selling price. Weighted quantities support three decimal places. Product variants use separate existing SKUs; **Product variants and extras** groups those products and adds optional priced extras. Stock-checkout extras do not deduct separate ingredient inventory. Fast food recipes and their option ingredients use the separate [Fast food workspace](fast-food-workspace.md).
 
 **Cash register** records starting cash, reasoned cash-in and cash-out movements, and a counted closing balance. Cash sales and cash refunds linked to the session determine expected cash. A difference needs an explanation.
 

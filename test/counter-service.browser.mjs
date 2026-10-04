@@ -11,7 +11,7 @@ const data = await mkdtemp(join(tmpdir(), 'stockroom-counter-browser-'))
 const base = 'http://127.0.0.1:9467'
 const cloud = createServer(async (request, response) => {
   response.setHeader('Content-Type', 'application/json')
-  if (request.url === '/v1/sync/capabilities') { response.end(JSON.stringify({ capabilities: ['counter-v2'] })); return }
+  if (request.url === '/v1/sync/capabilities') { response.end(JSON.stringify({ capabilities: ['counter-v3'] })); return }
   if (request.url.startsWith('/v1/sync/push')) {
     let raw = ''; for await (const chunk of request) raw += chunk
     response.end(JSON.stringify({ acceptedOperationIds: JSON.parse(raw).operations.map(row => row.operationId), conflicts: [] })); return
@@ -74,6 +74,34 @@ try {
   await groups.nth(1).getByLabel('Linked stock product', { exact: true }).selectOption(drink.id)
   await workspace.getByRole('button', { name: 'Save menu', exact: true }).click()
   await workspace.getByText('Menu saved.', { exact: true }).waitFor()
+  await workspace.getByRole('button', { name: 'Recipes', exact: true }).click()
+  await workspace.getByText('Ingredient stock', { exact: true }).click()
+  for (const ingredient of [{ name: 'Flour', unit: 'kg', cost: '4', stock: '10' }, { name: 'Cheese ingredient', unit: 'piece', cost: '0.5', stock: '10' }]) {
+    await workspace.getByLabel('Ingredient name', { exact: true }).fill(ingredient.name)
+    await workspace.getByLabel('Stock unit', { exact: true }).selectOption(ingredient.unit)
+    await workspace.getByLabel('Purchase cost per stock unit', { exact: true }).fill(ingredient.cost)
+    await workspace.getByLabel('Opening ingredient stock', { exact: true }).fill(ingredient.stock)
+    await workspace.getByRole('button', { name: 'Add ingredient', exact: true }).click()
+    await workspace.getByText('Ingredient saved. Add it to a recipe.', { exact: true }).waitFor()
+    await page.waitForFunction(() => document.querySelector('.counter-workspace input[name="name"]')?.value === '')
+  }
+  const ingredients = (await (await fetch(base + '/api/products', { headers })).json()).products
+  const flour = ingredients.find(row => row.name === 'Flour'), cheese = ingredients.find(row => row.name === 'Cheese ingredient')
+  await workspace.getByLabel('Restock Flour (kg)', { exact: true }).fill('0.5')
+  await workspace.getByLabel('Restock Flour (kg)', { exact: true }).locator('..').locator('..').getByRole('button', { name: 'Restock ingredient', exact: true }).click()
+  await workspace.getByText('Ingredient stock updated.', { exact: true }).waitFor()
+  const burgerMenu = (await (await fetch(base + '/api/pos/counter', { headers })).json()).menu
+  await workspace.getByLabel('Prepared menu item', { exact: true }).selectOption(burgerMenu.items[0].id)
+  await workspace.getByRole('button', { name: 'Add recipe ingredient', exact: true }).first().click()
+  await workspace.getByLabel('Ingredient', { exact: true }).first().selectOption(flour.id)
+  await workspace.getByLabel('Quantity per portion', { exact: true }).first().fill('0.1')
+  await workspace.getByText('Cheese: extra ingredients', { exact: true }).click()
+  await workspace.getByRole('button', { name: 'Add recipe ingredient', exact: true }).last().click()
+  await workspace.getByLabel('Ingredient', { exact: true }).last().selectOption(cheese.id)
+  await workspace.getByLabel('Quantity per portion', { exact: true }).last().fill('1')
+  await workspace.getByRole('button', { name: 'Save recipe', exact: true }).click()
+  await workspace.getByText('Recipe saved. Existing orders keep their original ingredients.', { exact: true }).waitFor()
+
   await workspace.getByRole('button', { name: 'New order', exact: true }).click()
   await workspace.getByRole('button', { name: /^Burger/ }).click()
   await workspace.getByLabel(/Cheese/).check()
@@ -93,6 +121,11 @@ try {
   assert.equal(await workspace.getByRole('button', { name: 'Take payment', exact: true }).count(), 0)
   await workspace.getByRole('button', { name: 'Start preparing', exact: true }).click()
   await workspace.getByRole('button', { name: 'Mark ready', exact: true }).waitFor()
+  const afterPreparation = (await (await fetch(base + '/api/products', { headers })).json()).products
+  assert.equal(afterPreparation.find(row => row.id === flour.id).stock, 10.3)
+  assert.equal(afterPreparation.find(row => row.id === cheese.id).stock, 8)
+  assert.match(await workspace.locator('.counter-order').textContent(), /Ingredient cost used:.*1.80/)
+
   await workspace.getByRole('button', { name: 'Mark ready', exact: true }).click()
   assert.equal(await workspace.getByRole('button', { name: 'Hand over', exact: true }).isDisabled(), true)
   await workspace.getByRole('button', { name: 'Orders', exact: true }).click()
@@ -146,6 +179,12 @@ try {
   await workspace.getByRole('button', { name: 'Confirm cancellation', exact: true }).click()
   await workspace.getByText('Order cancelled. Its history is retained.', { exact: true }).waitFor()
   await workspace.getByText('Cancelled orders', { exact: true }).waitFor()
+  const finalIngredients = (await (await fetch(base + '/api/products', { headers })).json()).products
+  assert.equal(finalIngredients.find(row => row.id === flour.id).stock, 10.3, 'refund and unprepared cancellation cannot alter consumed ingredients')
+  const reports = await (await fetch(base + '/api/reports', { headers })).json()
+  assert.equal(reports.profit.ingredientCost, 1.8)
+  assert.equal(reports.profit.amount, -1.8)
+
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   await page.setViewportSize({ width: 1366, height: 900 })
@@ -161,7 +200,7 @@ try {
   await workspace.getByRole('button', { name: 'Orders', exact: true }).click()
   await workspace.getByText('Collected orders (1)', { exact: true }).waitFor()
   assert.deepEqual(errors, [])
-  console.log('PASS: isolated workspace, menu/options, draft reload, saved preparation stages, linked payment, stock, tax, discounts, correction, cancellation, refunds and printing')
+  console.log('PASS: isolated workspace, menu/options, draft reload, saved preparation stages, linked payment, stock, tax, discounts, correction, cancellation, refunds, recipes, ingredient costs and printing')
 } finally {
   await browser?.close()
   if (child.exitCode === null) { child.kill(); await once(child, 'exit') }
