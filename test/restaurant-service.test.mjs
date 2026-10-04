@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { handlePos } from '../server/pos-service.mjs'
 import { businessWorkspace, normalizeShopProfile } from '../server/shop-profile.mjs'
-import { tableTabId, validateRestaurantRecord } from '../server/restaurant-service.mjs'
+import { tableTabId, validateRestaurantRecord, restaurantBillFingerprint } from '../server/restaurant-service.mjs'
 import { counterItems, counterSaleId, validateCounterPayment, requiresRestaurantSync, counterConflictRecord } from '../server/counter-service.mjs'
 import { recordPayment } from '../server/payment.mjs'
 const owner={id:'owner',name:'Owner',role:'owner'}
@@ -90,5 +90,20 @@ test('named bar tabs need no tables and command retries are idempotent',async()=
   const retry=await f.call('restaurant/open',request);assert.equal(retry.updatedAt,tab.updatedAt);assert.equal(f.published.length,1)
   await assert.rejects(f.call('restaurant/open',{...request,name:'Different'}),/different/)
   await assert.rejects(f.command('restaurant/open',{id:'restaurant-tab:main:wrong',tableId:'missing',sessionId:'a',guests:1}),/configured/)
+ }finally{f.sqlite.close()}
+})
+
+test('bill payment fingerprint ignores preparation but detects corrected, paid, cancelled and newly added rounds',async()=>{
+ const f=fixture();try{
+  const {tab,menu}=await setup(f);const order=await newOrder(f,tab,menu)
+  const original=restaurantBillFingerprint(tab,[order])
+  assert.equal(restaurantBillFingerprint(tab,[{...order,status:'ready',updatedAt:'later'}]),original)
+  assert.notEqual(restaurantBillFingerprint(tab,[{...order,total:order.total+1}]),original)
+  assert.notEqual(restaurantBillFingerprint(tab,[{...order,receiptId:'paid'}]),original)
+  assert.notEqual(restaurantBillFingerprint(tab,[{...order,status:'cancelled'}]),original)
+  const added=await newOrder(f,tab,menu,'another-round')
+  assert.notEqual(restaurantBillFingerprint(tab,[order,added]),original)
+  assert.equal(restaurantBillFingerprint(tab,[order,added]),restaurantBillFingerprint(tab,[added,order]))
+  assert.notEqual(restaurantBillFingerprint({...tab,sessionId:'new-session'},[order]),original)
  }finally{f.sqlite.close()}
 })

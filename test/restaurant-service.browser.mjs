@@ -80,6 +80,25 @@ try {
   assert.match(await bill.textContent(),/Grilled meal/)
   assert.match(await bill.textContent(),/Bottled juice/)
   assert.equal(await bill.getByRole('button',{name:'Close bill and free table',exact:true}).isDisabled(),true)
+  // Reject payment against a bill corrected after payment entry began.
+  await bill.getByRole('button',{name:'Settle remaining bill',exact:true}).click()
+  await workspace.getByLabel('Bill cash received',{exact:true}).fill('50')
+  const counterHeaders={...headers,'X-Stockroom-Till':await page.evaluate(()=>localStorage.getItem('stockroom-checkout-till-id'))}
+  const counterState=(await (await fetch(base+'/api/pos/restaurant/counter',{headers})).json())
+  let changed=counterState.orders.find(order=>order.lines.some(line=>line.name==='Grilled meal'))
+  async function correctQuantity(quantity){
+    const response=await fetch(base+'/api/pos/restaurant/counter/edit',{method:'POST',headers:counterHeaders,body:JSON.stringify({id:changed.id,commandId:crypto.randomUUID(),expectedUpdatedAt:changed.updatedAt,menuUpdatedAt:counterState.menu.updatedAt,reason:'Correct guest quantity',lines:changed.lines.map(line=>({id:line.id,menuItemId:line.menuItemId,optionIds:line.options.map(option=>option.id),quantity}))})})
+    assert.equal(response.ok,true);changed=await response.json()
+  }
+  await correctQuantity(2)
+  await workspace.getByRole('button',{name:'Save bill payments',exact:true}).click()
+  await workspace.getByText('This bill changed. Cancel payment entry, review the bill and start payment again.',{exact:true}).waitFor()
+  assert.equal((await (await fetch(base+'/api/sales',{headers})).json()).sales.length,0)
+  await workspace.getByRole('button',{name:'Cancel payment entry',exact:true}).click()
+  await correctQuantity(1)
+  await page.reload()
+  await workspace.getByRole('heading',{name:'Bill for Garden 1',exact:true}).waitFor()
+  await counter.getByRole('button',{name:'Orders',exact:true}).click()
   // Preparation is real, and restaurant orders can be served while their bill remains unpaid.
   for(const card of await counter.locator('.counter-order').all()){
     await card.getByRole('button',{name:'Start preparing',exact:true}).click()
@@ -110,7 +129,6 @@ try {
   assert.match(await page.evaluate(()=>window.billPrint),/Paid bill/)
   assert.doesNotMatch(await page.evaluate(()=>window.billPrint),/Payment has not been recorded/)
   await page.reload()
-  await workspace.getByRole('button',{name:/Garden 1.*Open bill/}).click()
   await workspace.getByRole('heading',{name:'Bill for Garden 1',exact:true}).waitFor()
   await bill.getByRole('button',{name:'Close bill and free table',exact:true}).click()
   await workspace.getByText('Bill closed. The table is free.',{exact:true}).waitFor()

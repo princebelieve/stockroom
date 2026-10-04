@@ -2,6 +2,13 @@ import { normalizeShopProfile } from './shop-profile.mjs'
 import { counterSaleId } from './counter-service.mjs'
 const text = (value, label, max = 100) => { if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`Enter ${label}.`); return value.trim() }
 export const tableTabId = (branch, table) => `restaurant-tab:${branch}:${table}`
+// Preparation progress does not alter the amount a cashier reviewed.
+export function restaurantBillFingerprint(tab, orders) {
+  return JSON.stringify([tab.id,tab.sessionId,tab.currency,tab.tillId,
+    orders.filter(order=>order.tableService?.tabId===tab.id && order.tableService.sessionId===tab.sessionId && order.status!=='cancelled' && !order.receiptId)
+      .sort((a,b)=>a.id.localeCompare(b.id))
+      .map(order=>[order.id,order.currency,order.tillId,order.total,order.lines,order.pos,order.tableService])])
+}
 export function validateRestaurantRecord(record, previous, snapshot = false) {
   text(record.id, 'a record ID', 150); text(record.branchId, 'a branch');
   if (!Number.isFinite(Date.parse(record.updatedAt)) || record.expectedUpdatedAt === undefined) throw new Error('Invalid restaurant revision.')
