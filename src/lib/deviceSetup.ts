@@ -1,6 +1,6 @@
 export type DeviceKind = 'receipt' | 'report' | 'drawer' | 'cutter' | 'terminal' | 'scanner' | 'display'
 export type DeviceProfile = { model: string; connection: string; status: 'configured' | 'confirmed' | 'unavailable'; signature: string; updatedAt: string }
-export const deviceLabels: Record<DeviceKind, string> = { receipt: 'Receipt printer', report: 'A4 printer', drawer: 'Cash drawer', cutter: 'Paper cutter', terminal: 'Payment terminal', scanner: 'Barcode scanner', display: 'Customer display' }
+export const deviceLabels: Record<DeviceKind, string> = { receipt: 'Receipt printer', report: 'A4 printer', drawer: 'Cash drawer', cutter: 'Paper cutter', terminal: 'POS', scanner: 'Barcode scanner', display: 'Customer display' }
 export function configurationSignature(kind: DeviceKind, businessId: string) {
   const key = kind === 'terminal' ? `stockroom-terminal:${businessId}` : kind === 'scanner' ? 'stockroom-scanner' : kind === 'drawer' || kind === 'cutter' ? 'stockroom-hardware' : kind === 'display' ? 'stockroom-display' : 'stockroom-printers'
   return localStorage.getItem(key) || ''

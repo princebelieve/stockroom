@@ -17,7 +17,7 @@ export function PaystackTerminalPayment({ orderId, amount, currency, branchId, h
   async function verify() {
     const result = await posRequest('/api/integrations/paystack/verify', headers, { orderId })
     if (result.status === 'not-started') localStorage.removeItem(`stockroom-paystack-pending:${orderId}`)
-    setStatus(result.paid ? 'Payment verified. You can complete the sale.' : result.status === 'not-started' ? 'Ready to send this amount to the terminal.' : `Waiting for payment (${result.status}).`)
+    setStatus(result.paid ? 'Payment verified. You can complete the sale.' : result.status === 'not-started' ? 'Ready to send this amount to the POS.' : `Waiting for payment (${result.status}).`)
     onStatus(result)
   }
   useEffect(() => {
@@ -32,7 +32,7 @@ export function PaystackTerminalPayment({ orderId, amount, currency, branchId, h
         if (!active) return
         if (sending.current) return
         if (result.status === 'not-started') localStorage.removeItem(`stockroom-paystack-pending:${orderId}`)
-        setStatus(result.paid ? 'Payment verified. You can complete the sale.' : result.status === 'not-started' ? 'Ready to send this amount to the terminal.' : `Waiting for payment (${result.status}).`)
+        setStatus(result.paid ? 'Payment verified. You can complete the sale.' : result.status === 'not-started' ? 'Ready to send this amount to the POS.' : `Waiting for payment (${result.status}).`)
         setError(''); onStatus(result)
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : 'Could not check payment.') }
       finally { checking = false }
@@ -41,19 +41,19 @@ export function PaystackTerminalPayment({ orderId, amount, currency, branchId, h
     const timer = window.setInterval(() => { void poll() }, 5000)
     return () => { active = false; window.clearInterval(timer) }
   }, [config?.configured, orderId])
-  return <div className="pos-paystack"><p>Paystack terminal {config?.terminalId || ''}{config?.testMode ? ' · Test mode' : ''}</p>{config && !config.configured && <p>Ask the owner to connect this shop’s Paystack account and terminal.</p>}
-    <AsyncButton className="filter-button" busyLabel="Sending to terminal..." disabled={!config?.configured || status.startsWith('Payment verified') || status.startsWith('Waiting')} onClick={async () => {
+  return <div className="pos-paystack"><p>Paystack POS {config?.terminalId || ''}{config?.testMode ? ' · Test mode' : ''}</p>{config && !config.configured && <p>Ask the owner to connect this shop’s Paystack account and POS.</p>}
+    <AsyncButton className="filter-button" busyLabel="Sending to POS..." disabled={!config?.configured || status.startsWith('Payment verified') || status.startsWith('Waiting')} onClick={async () => {
       setError('')
       sending.current = true
       try {
         localStorage.setItem(`stockroom-paystack-pending:${orderId}`, JSON.stringify({ orderId, amount, currency, branchId }))
         onStatus({ orderId, amount, currency, reference: '', status: 'sending', paid: false })
-        setStatus('Waiting for the terminal request.')
+        setStatus('Waiting for the POS request.')
         const result = await posRequest('/api/integrations/paystack/start', headers, { orderId, amount, currency, branchId })
-        onStatus(result); setStatus(result.paid ? 'Payment verified. You can complete the sale.' : 'Waiting for payment on the terminal.')
+        onStatus(result); setStatus(result.paid ? 'Payment verified. You can complete the sale.' : 'Waiting for payment on the POS.')
       } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not send payment.'); await verify().catch(() => undefined) }
       finally { sending.current = false }
-    }}>Send amount to Paystack terminal</AsyncButton>
+    }}>Send amount to Paystack POS</AsyncButton>
     <AsyncButton className="text-button" busyLabel="Checking payment..." disabled={sending.current} onClick={verify}>Check payment status</AsyncButton>
     {status && <p role="status">{status}</p>}{error && <p role="alert">{error}</p>}<small>Complete the sale after Paystack confirms payment. If the connection drops, check status before taking another payment.</small>
   </div>

@@ -32,6 +32,9 @@ try {
  await page.addInitScript(account=>{localStorage.setItem('stockroom-token',account.token);localStorage.setItem('stockroom-user',JSON.stringify(account.user));localStorage.setItem(`stockroom-active-screen:${account.user.organizationId}:${account.user.id}`,'POS')},account)
  await page.goto(base)
  await page.getByRole('heading',{name:'Basket',exact:true}).waitFor({timeout:30000})
+ assert.equal(await page.getByText('Optional tax and loyalty settings',{exact:true}).count(),0)
+ await page.getByRole('button',{name:'Business settings',exact:true}).click()
+ await page.getByRole('button',{name:'Sales',exact:true}).click()
  await page.getByText('Optional tax and loyalty settings',{exact:true}).click()
  await page.getByLabel('Calculate tax on sales',{exact:true}).check()
  await page.getByLabel('Rate (%)',{exact:true}).fill('20')
@@ -42,6 +45,7 @@ try {
  await page.getByLabel('Reward percentage of purchase',{exact:true}).fill('10')
  await page.getByRole('button',{name:'Save POS settings',exact:true}).click()
  await page.waitForFunction(async()=>{const r=await fetch('/api/pos',{headers:{Authorization:`Bearer ${localStorage.getItem('stockroom-token')}`}});return (await r.json()).settings.loyaltyRate===10})
+ await page.getByRole('button',{name:'Stock & checkout',exact:true}).click()
  async function checkout(redeem){
   await page.getByRole('button',{name:/^Add Orange juice,/}).click()
   await page.getByRole('button',{name:/^Add Wholemeal bread,/}).click()
@@ -66,6 +70,39 @@ try {
  assert.equal(spent.paymentDetails.pos.loyaltyEarned,2.35)
  const pos=await (await fetch(base+'/api/pos',{headers})).json()
  assert.equal(pos.loyaltyBalances[customer.id],2.9)
+ await page.getByRole('button',{name:'Cash register',exact:true}).click()
+ await page.getByLabel('Starting cash',{exact:true}).fill('50')
+ await page.getByRole('button',{name:'Open register',exact:true}).click()
+ await page.getByLabel('Cash counted at closing',{exact:true}).fill('50')
+ await page.getByRole('button',{name:'Close register',exact:true}).click()
+ await page.getByLabel('Starting cash',{exact:true}).waitFor()
+ assert.equal(await page.getByText('Optional tax and loyalty settings',{exact:true}).count(),0)
+ // UI role fixtures; server authorization is unchanged and separately tested.
+ for(const role of ['cashier','admin']) {
+  const rolePage=await browser.newPage()
+  const identity={...account.user,role,operationalAccess:false}
+  await rolePage.route('**/api/auth/session',route=>route.fulfill({json:{user:identity,token:account.token}}))
+  await rolePage.route('**/api/subscriptions/access',route=>route.fulfill({json:{testMode:true,blocked:false,status:'test'}}))
+  await rolePage.addInitScript(({identity,token})=>{localStorage.setItem('stockroom-token',token);localStorage.setItem('stockroom-user',JSON.stringify(identity))},{identity,token:account.token})
+  await rolePage.goto(base)
+  await rolePage.locator('.sidebar').waitFor()
+  if(role==='cashier') {
+   await rolePage.getByRole('heading',{name:'Basket',exact:true}).waitFor()
+   assert.equal(await rolePage.getByRole('button',{name:'Business settings',exact:true}).count(),0)
+   assert.equal(await rolePage.getByText('Product variants and extras',{exact:true}).count(),0)
+   await rolePage.getByRole('button',{name:'Cash register',exact:true}).click()
+   await rolePage.getByLabel('Starting cash',{exact:true}).waitFor()
+  } else {
+   await rolePage.getByRole('button',{name:'Business settings',exact:true}).click()
+   await rolePage.getByRole('heading',{name:'Device setup wizard',exact:true}).waitFor()
+   assert.equal(await rolePage.getByRole('button',{name:'Workspaces',exact:true}).count(),0)
+   await rolePage.getByRole('button',{name:'Receipts',exact:true}).click()
+   await rolePage.getByRole('button',{name:'Customize receipt',exact:true}).waitFor()
+   await rolePage.reload()
+   await rolePage.getByRole('heading',{name:'Device setup wizard',exact:true}).waitFor()
+  }
+  await rolePage.close()
+ }
  assert.deepEqual(errors,[])
  assert.deepEqual(dialogs,[])
  console.log('PASS: optional product tax settings, exempt goods, earn rewards and redeem them through cash checkout without external network access')

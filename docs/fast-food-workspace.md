@@ -84,3 +84,11 @@ No new external service or paid subscription is introduced by these operations. 
 
 
 For tables, seats, open bills and serving before payment, enable the separate [Restaurant & bar workspace](restaurant-and-bar-workspace.md). Fast food retains its pay-before-handover flow and separate menu.
+
+## Finding the transaction screen
+
+**Overview > Take a new order**, or **Daily work > Fast food**, opens the order-entry screen. Choose menu items and quantities. Use **Send and take payment** to save the order and open its payment form immediately, or **Send for preparation** when payment will be taken later. **Orders > Take payment** opens payment for an existing unpaid order.
+
+Menu editing, recipes and packaged stock are under **Business settings > Food menu & recipes**. They do not appear on the transaction screen. The separate Restaurant & bar screen starts at tables and tabs; its configuration is under Business settings and its history has separate navigation.
+
+Configuration now lives under **Business settings**, separate from transaction screens. Owners configure workspaces and sales rules; owners and admins can configure receipts, devices and enabled food/table workflows. Product variants and extras are under product management. **Cash register** is a separate daily-work screen; returns and customer history are under Sales history. The supermarket basket, POS receipt-reference scanner and customer display continue to use their existing operational controls.

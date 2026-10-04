@@ -13,8 +13,8 @@ export async function posRequest(path: string, headers: Record<string, string>, 
   if (!response.ok) throw new Error(result.error || 'Could not save POS changes.')
   return result
 }
-export function PosTools({ data, headers, reload, user, branches, products, customers, sales, money, restored }: {
-  branches: Array<{id: string; name: string; isActive?: boolean}>; data: PosData; headers: Record<string, string>; reload: () => Promise<void>; user: { id: string; role: string }; products: Product[]; customers: Customer[]; sales: Sale[]; money: (n: number) => string; restored: () => Promise<void>
+export function PosTools({ data, headers, reload, user, branches, products, customers, sales, money, restored, stockEnabled = true, mode = 'operations' }: {
+  mode?:'operations'|'settings'|'products'|'register'|'history';stockEnabled?:boolean;branches: Array<{id: string; name: string; isActive?: boolean}>; data: PosData; headers: Record<string, string>; reload: () => Promise<void>; user: { id: string; role: string }; products: Product[]; customers: Customer[]; sales: Sale[]; money: (n: number) => string; restored: () => Promise<void>
 }) {
   const [error, setError] = useState('')
   const [settings, setSettings] = useState(data.settings)
@@ -33,8 +33,8 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
     setError('')
     try { await posRequest(path, headers, input); await reload(); await restored() } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save changes.'); throw caught }
   }
-  return <section className="panel full-panel pos-tools"><div className="panel-heading"><h2>POS tools</h2></div>{error && <p role="alert">{error}</p>}
-    <details><summary>Cash register</summary>
+  return <details open={mode!=='operations'} className="panel full-panel pos-tools"><summary>{mode==='settings'?'Sales settings':mode==='products'?'Product options':mode==='register'?'Cash register':'Returns and customer history'}</summary>{error && <p role="alert">{error}</p>}
+    {['operations','register'].includes(mode) && <details open={mode==='register'}><summary>Cash register</summary>
       <p>Track the cash held during your session. Cash sales, cash returns and supplier cash payments/refunds made during this session are included automatically. Do not enter those supplier payments again as cash-out. Closing shortages reduce reported profit; surplus increases it.</p>
       {!session ? <AsyncForm onSubmit={async event => { const form = new FormData(event.currentTarget); await act('/api/pos/registers', { action: 'open', amount: form.get('amount') }) }} busyLabel="Opening register..."><label>Starting cash<input name="amount" type="number" min="0" step="0.01" required /></label><SubmitButton className="filter-button">Open register</SubmitButton></AsyncForm> : <>
         <p>Opened {new Date(session.openedAt).toLocaleString()} · starting cash {money(session.openingCash)}</p>
@@ -45,7 +45,8 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
       </>}
       {data.registers.filter(record => record.closedAt && (user.role !== 'cashier' || record.staffId === user.id)).map(record => <p key={record.id}>{record.staffName} · {new Date(record.closedAt).toLocaleString()} · expected {money(record.expectedCash)} · counted {money(record.countedCash)} · difference {money(record.difference)}{record.closingReason && ` · ${record.closingReason}`}</p>)}
     </details>
-    {['owner', 'admin'].includes(user.role) && <details><summary>Return items from a completed receipt</summary><p>Choose the receipt and returned quantities. Restock only goods that can be sold again.</p>
+    }
+    {['operations','history'].includes(mode) && <>{['owner', 'admin'].includes(user.role) && <details><summary>Return items from a completed receipt</summary><p>Choose the receipt and returned quantities. Restock only goods that can be sold again.</p>
       <label>Receipt<select value={selectedSale} onChange={event => { setSelectedSale(event.target.value); setQuantities({}); setRestock({}) }}><option value="">Choose receipt</option>{sales.map(record => <option key={record.id} value={record.id}>{new Date(record.createdAt).toLocaleString()} · {record.id} · {money(record.total)}</option>)}</select></label>
       {sale && <AsyncForm busyLabel="Saving return..." onSubmit={async event => {
         const form = new FormData(event.currentTarget)
@@ -56,7 +57,7 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
           const returned = data.returns.filter(record => record.saleId === sale.id).flatMap(record => record.items).filter(line => line.lineIndex === index).reduce((sum, line) => sum + line.quantity, 0)
           return <div key={index} className="pos-return-line"><strong>{item.productName || item.productId}</strong><span>{item.quantity - returned} remaining</span><label>Return quantity<input type="number" min="0" max={item.quantity - returned} step="0.001" value={quantities[index] || ''} onChange={event => setQuantities(current => ({ ...current, [index]: event.target.value }))} /></label><label><input type="checkbox" disabled={item.productId.startsWith('service:')} checked={!item.productId.startsWith('service:') && (restock[index] || false)} onChange={event => setRestock(current => ({ ...current, [index]: event.target.checked }))} />Return to stock</label></div>
         })}
-        <label>Refund method<select value={method} onChange={event => setMethod(event.target.value)}><option value="cash">Cash</option><option value="external-pos">External terminal</option><option value="bank-transfer">Bank transfer</option><option value="wallet">Customer account credit</option></select></label>
+        <label>Refund method<select value={method} onChange={event => setMethod(event.target.value)}><option value="cash">Cash</option><option value="external-pos">POS</option><option value="bank-transfer">Bank transfer</option><option value="wallet">Customer account credit</option></select></label>
         {['external-pos', 'bank-transfer'].includes(method) && <><label>Refund reference<input name="reference" required /></label><label><input name="confirmed" type="checkbox" required />I have completed the refund with the provider</label></>}
         <label>Return reason<input name="reason" minLength={3} required /></label><SubmitButton className="filter-button">Record return and refund</SubmitButton>
       </AsyncForm>}
@@ -66,7 +67,8 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
       {customerId && <p>Reward balance at this stock location: {money(data.loyaltyBalances[customerId] || 0)}</p>}
       {customerId && data.customerHistory.filter(record => record.paymentDetails?.pos?.customerId === customerId).map(record => <p key={record.id}>{new Date(record.createdAt).toLocaleString()} · {record.id} · {money(record.total)} · {record.paymentMethod}{record.paymentDetails?.pos?.loyaltyEarned ? ` · reward earned ${money(record.paymentDetails.pos.loyaltyEarned)}` : ''}</p>)}
     </details>
-    {user.role === 'owner' && <details><summary>Optional tax and loyalty settings</summary><AsyncForm busyLabel="Saving POS settings..." onSubmit={() => act('/api/pos/settings', settings)}>
+    </>}
+    {mode==='settings' && stockEnabled && user.role === 'owner' && <details><summary>Optional tax and loyalty settings</summary><AsyncForm busyLabel="Saving POS settings..." onSubmit={() => act('/api/pos/settings', settings)}>
       <p>Tax and loyalty are off by default. Leave them off if your business does not use them; checkout works without either.</p>
       <p>Tax is optional. Enable it only if your shop needs a tax calculation on its receipts. These settings do not submit tax returns or pay tax.</p>
       <label><input type="checkbox" checked={settings.taxEnabled} onChange={event => setSettings(current => ({ ...current, taxEnabled: event.target.checked }))} />Calculate tax on sales</label>
@@ -84,14 +86,14 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
       </details>
       <SubmitButton className="filter-button">Save POS settings</SubmitButton>
     </AsyncForm></details>}
-    {['owner', 'admin'].includes(user.role) && <details><summary>Product variants and extras</summary><p>Each stock variant uses its own existing product/SKU. Group them here and optionally configure extras that add to its selling price.</p><label>Product<select value={productId} onChange={event => setProductId(event.target.value)}><option value="">Choose product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label>
+    {mode==='products' && stockEnabled && ['owner', 'admin'].includes(user.role) && <details><summary>Product variants and extras</summary><p>Each stock variant uses its own existing product/SKU. Group them here and optionally configure extras that add to its selling price.</p><label>Product<select value={productId} onChange={event => setProductId(event.target.value)}><option value="">Choose product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label>
       {productId && <AsyncForm key={productId} busyLabel="Saving product options..." onSubmit={async event => {
         const form = new FormData(event.currentTarget)
         const modifiers = String(form.get('modifiers') || '').split('\n').filter(line => line.trim()).map(line => { const index = line.lastIndexOf('|'); if (index < 1) throw new Error('Use Extra name | price for each line.'); return { name: line.slice(0, index).trim(), price: Number(line.slice(index + 1).trim()) } })
         await act('/api/pos/products', { productId, variantGroup: form.get('group'), variantLabel: form.get('variant'), modifiers })
       }}><label>Variant group<input name="group" defaultValue={data.products.find(record => record.productId === productId)?.variantGroup || ''} placeholder="e.g. T-shirt" /></label><label>Variant label<input name="variant" defaultValue={data.products.find(record => record.productId === productId)?.variantLabel || ''} placeholder="e.g. Blue / Medium" /></label><label>Extras, one per line: name | price<textarea name="modifiers" defaultValue={(data.products.find(record => record.productId === productId)?.modifiers || []).map((modifier: any) => `${modifier.name} | ${modifier.price}`).join('\n')} placeholder="Extra cheese | 1.50" /></label><SubmitButton className="filter-button">Save product options</SubmitButton></AsyncForm>}
     </details>}
-  </section>
+  </details>
 }
 
 export function DigitalReceipt({ sale, headers, beforeSend }: { sale: Sale; headers: Record<string, string>; beforeSend: () => Promise<void> }) {

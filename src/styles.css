@@ -558,3 +558,15 @@ body { background: #dfece5; }
 .restaurant-payment label { display: grid; gap: 6px; }
 .restaurant-payment .table-scroll input { width: 90px; max-width: 100%; }
 .restaurant-workspace .customer-row span { min-width: 0; overflow-wrap: anywhere; }
+
+.workspace-overview { margin-bottom: 24px; }
+.workspace-launch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.workspace-launch { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.workspace-launch :is(h3,p) { margin: 0; }
+.workspace-launch button { margin-top: auto; width: 100%; }
+.counter-entry-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.counter-entry-grid > .panel { min-width: 0; }
+.pos-tools > summary { font-weight: 600; cursor: pointer; }
+@media(max-width: 900px) { .counter-entry-grid { grid-template-columns: minmax(0,1fr); } }
+
+.sidebar-section-label { margin: 18px 12px 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #aac5bc; }
