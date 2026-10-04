@@ -1,0 +1,12 @@
+export function restaurantLedgerId(sessionId:string):string
+export function selectionsForOrder(sale:any,order:any):any[]
+export function restaurantOrderPayment(order:any,sales:any[]):any
+export function restaurantBillLines(tab:any,orders:any[],sales:any[]):any[]
+export function restaurantPortion(tab:any,orders:any[],sales:any[],selections:any[]):any
+export function validateRestaurantPaymentShape(sale:any):any
+export function restaurantPaymentFingerprint(sale:any):string
+export function restaurantReceiptHash(sale:any):Promise<string>
+export function validateRestaurantPayment(sale:any,tab:any,orders:any[],previousSales:any[]):void
+export function validateRestaurantLedger(record:any,previous:any,tab:any,orders:any[],legacySales?:any[]):Promise<void>
+export function restaurantSaleStatements(sale:any,organizationId?:string):Array<[string,any[]]>
+export function saveRestaurantSale(db:any,sale:any,organizationId?:string,consumeStock?:boolean|'remote'):Promise<void>

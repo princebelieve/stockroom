@@ -550,3 +550,11 @@ body { background: #dfece5; }
 .restaurant-table-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:12px 0}.restaurant-table-grid button{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-height:90px;text-align:left}.restaurant-bill .table-scroll{overflow-x:auto}.restaurant-workspace fieldset{min-width:0;margin:12px 0;padding:16px}
 
 @media print{.print-order table{min-width:0;width:100%;table-layout:fixed;font-size:10px}.print-order td,.print-order th{padding:5px 2px;overflow-wrap:anywhere}.print-order td:first-child,.print-order th:first-child{width:40%}.print-order td:nth-child(2),.print-order th:nth-child(2){width:12%}}
+
+.restaurant-workspace { display: grid; gap: 1rem; min-width: 0; }
+.restaurant-workspace > .panel { min-width: 0; }
+.restaurant-workspace select { width: 100%; max-width: 100%; }
+.restaurant-payment { display: grid; gap: 14px; }
+.restaurant-payment label { display: grid; gap: 6px; }
+.restaurant-payment .table-scroll input { width: 90px; max-width: 100%; }
+.restaurant-workspace .customer-row span { min-width: 0; overflow-wrap: anywhere; }

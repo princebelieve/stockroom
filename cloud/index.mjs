@@ -1,3 +1,6 @@
+import { floorId,restaurantTabs,billContains,validateRestaurantFloor } from '../server/restaurant-floor.mjs'
+import { validateRestaurantLedger, restaurantLedgerId, restaurantReceiptHash, restaurantOrderPayment } from '../server/restaurant-payments.mjs'
+import { recordPayment } from '../server/payment.mjs'
 import { validateRestaurantRecord, validateRestaurantClose } from '../server/restaurant-service.mjs'
 import { validateConsumption, recipeRequirements, consumptionId } from '../server/counter-recipes.mjs'
 import { createSupermarketCoordinator } from './supermarket-coordination.mjs'
@@ -192,6 +195,15 @@ const googlePlayBilling = createGooglePlayBilling({ database, accounts, verifyTo
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook, notifications })
 const productFormReader = await createProductFormReader({ database, accounts, verifyToken, readJson, send })
 const posPaystack = await createPosPaystack({ database })
+// Keep dependent floor, payment-allocation and bill-close operations in order
+// across simultaneous pushes to this existing sync server.
+const businessSyncJobs=new Map()
+async function serializeBusinessSync(businessId,job) {
+  const previous=businessSyncJobs.get(businessId)||Promise.resolve()
+  const next=previous.catch(()=>{}).then(job)
+  businessSyncJobs.set(businessId,next)
+  try{return await next}finally{if(businessSyncJobs.get(businessId)===next)businessSyncJobs.delete(businessId)}
+}
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   // Referral percentages are intentionally public. They are displayed on the
@@ -451,7 +463,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v1'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -460,7 +472,8 @@ const server = createServer(async (request, response) => {
       const incoming = Array.isArray(input.operations) ? input.operations.slice(0, 500) : []
       if (!businessId || !deviceId || !incoming.length || claims.businessId !== businessId || claims.deviceId !== deviceId) return send(response, 403, { error: 'Token does not authorize this business/device.' })
       if (await businessExitPayments.findOne({ _id: businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
-      const containsNewSale = await Promise.all(incoming.filter(operation => operation.entityType === 'sale' && operation.action === 'create').map(operation => operations.findOne({ businessId, operationId: String(operation.operationId) }, { projection: { _id: 1 } }).then(existing => !existing)))
+      return await serializeBusinessSync(businessId,async()=>{
+      const containsNewSale = await Promise.all(incoming.filter(operation => (operation.entityType === 'sale' && operation.action === 'create') || (operation.entityType==='pos_record' && operation.payload?.kind==='restaurant-ledger')).map(operation => operations.findOne({ businessId, operationId: String(operation.operationId) }, { projection: { _id: 1 } }).then(existing => !existing)))
       if (containsNewSale.some(Boolean)) {
         const access = await subscriptionHandler.access(businessId)
         if (access.blocked) return send(response, 402, { error: access.reason, status: access.status })
@@ -477,11 +490,26 @@ const server = createServer(async (request, response) => {
           acceptedOperationIds.push(document.operationId)
           continue
         }
+        if(document.entityType==='sale' && document.payload.paymentDetails?.restaurantBill) {
+          try {
+            if(document.action!=='create' || document.entityId!==document.payload.id) throw new Error('Invalid bill payment operation.')
+            const ledger=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:restaurantLedgerId(document.payload.paymentDetails.restaurantBill.sessionId)})
+            const entry=ledger?.payload.payments.find(entry=>entry.id===document.entityId)
+            if(!entry || entry.receiptHash!==await restaurantReceiptHash(document.payload)) throw new Error('Synchronize the accepted bill payment allocation before its receipt.')
+            recordPayment(document.payload)
+            const previous=await operations.findOne({businessId,entityType:'sale',entityId:document.entityId})
+            if(previous) { if(await restaurantReceiptHash(previous.payload)!==entry.receiptHash) throw new Error('A different payment already uses this receipt ID.'); acceptedOperationIds.push(document.operationId);continue }
+          }catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message});continue}
+        }
         if (document.entityType === 'sale' && document.payload.paymentDetails?.counterOrder) {
           try {
             if (document.action !== 'create' || document.entityId !== document.payload.id) throw new Error('Invalid counter payment operation.')
             const order = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: document.payload.paymentDetails.counterOrder.id })
             validateCounterPayment(document.payload, order?.payload)
+            if(order?.payload.tableService) {
+              const ledgers=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-ledger','payload.branchId':order.payload.branchId}).toArray()
+              if(ledgers.some(ledger=>ledger.payload.payments.some(payment=>payment.selections.some(part=>part.orderId===order.entityId)))) throw new Error('Use bill splitting to settle this partially paid order.')
+            }
             const previous = await operations.findOne({ businessId, entityType: 'sale', entityId: document.entityId })
             if (previous) { validateCounterRetry(document.payload, previous.payload); acceptedOperationIds.push(document.operationId); continue }
           } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message }); continue }
@@ -521,24 +549,60 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
+          if(document.entityType==='pos_record' && document.payload.kind?.startsWith('restaurant-') && current?.operationId===document.operationId) {
+            if(JSON.stringify(current.payload)!==JSON.stringify(document.payload)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This operation ID already has different details.'});continue}
+            // Recover a response/database interruption between storing the
+            // accepted head and appending its downloadable operation.
+            try{await operations.insertOne(document)}catch(error){if(error.code!==11000)throw error}
+            acceptedOperationIds.push(document.operationId);continue
+          }
+          const restaurantFloor=document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-')||document.payload.tableService) ? await entityHeads.findOne({businessId,entityType:'pos_record',entityId:floorId(document.payload.branchId)}) : null
+          if(document.entityType==='pos_record' && document.payload.kind==='restaurant-floor') {
+            try {
+              if(document.action!=='upsert'||document.entityId!==document.payload.id)throw new Error('Invalid table arrangement operation.')
+              const tabs=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-tab','payload.branchId':document.payload.branchId}).toArray()
+              const layout=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:`restaurant-layout:${document.payload.branchId}`})
+              const sales=await operations.find({businessId,entityType:'sale'}).toArray()
+              const ledgers=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-ledger','payload.branchId':document.payload.branchId}).toArray()
+              validateRestaurantFloor(document.payload,current?.payload,tabs.map(row=>row.payload),layout?.payload||{tables:[]},[...sales.map(row=>row.payload),...ledgers.map(row=>row.payload.latestSale)])
+            }catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
+          }
+          if(document.entityType==='pos_record' && document.payload.kind==='restaurant-ledger') {
+            try {
+              if(document.action!=='upsert' || document.entityId!==document.payload.id) throw new Error('Invalid bill payment allocation.')
+              const tab=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.tabId})
+              const orders=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'counter-order','payload.branchId':document.payload.branchId}).toArray()
+              const legacy=await operations.find({businessId,entityType:'sale',entityId:{$in:orders.map(row=>`counter-payment:${row.entityId}`)}}).toArray()
+              recordPayment(document.payload.latestSale)
+              const effective=tab&&restaurantTabs([tab.payload],restaurantFloor?.payload)[0]
+              await validateRestaurantLedger(document.payload,current?.payload,effective,orders.map(row=>row.payload).filter(order=>effective&&billContains(effective,order)),legacy.map(row=>row.payload))
+            }catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
+          }
           if (document.entityType === 'pos_record' && ['restaurant-layout','restaurant-tab'].includes(document.payload.kind)) {
             try {
               if(document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid restaurant operation.')
               validateRestaurantRecord(document.payload,current?.payload)
+              if(document.payload.kind==='restaurant-tab' && document.payload.status==='open' && (!current || current.payload.sessionId!==document.payload.sessionId)){const duplicate=await entityHeads.findOne({businessId,entityType:'pos_record','payload.kind':'restaurant-tab',$or:[{'payload.sessionId':document.payload.sessionId},{'payload.history.sessionId':document.payload.sessionId}]});if(duplicate)throw new Error('Use a new unique bill session.')}
+
               if(document.payload.kind === 'restaurant-layout') {
-                const active=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-tab','payload.branchId':document.payload.branchId,'payload.status':'open'}).toArray()
-                for(const row of active.filter(row=>row.payload.tableId)) {
-                  const before=current?.payload.tables.find(table=>table.id===row.payload.tableId), after=document.payload.tables.find(table=>table.id===row.payload.tableId)
+                const activeRecords=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-tab','payload.branchId':document.payload.branchId,'payload.status':'open'}).toArray()
+                const active=restaurantTabs(activeRecords.map(row=>row.payload),restaurantFloor?.payload).filter(tab=>!tab.mergedInto)
+                for(const tab of active.filter(tab=>tab.displayTableId)) {
+                  const before=current?.payload.tables.find(table=>table.id===tab.displayTableId), after=document.payload.tables.find(table=>table.id===tab.displayTableId)
                   if(!before || JSON.stringify(before)!==JSON.stringify(after)) throw new Error('Close the table bill before changing its setup.')
                 }
               } else if(document.payload.status === 'open' && document.payload.tableId) {
                 const layout=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:`restaurant-layout:${document.payload.branchId}`})
                 const table=layout?.payload.tables.find(table=>table.id===document.payload.tableId)
-                if(!table || table.name!==document.payload.name || document.payload.guests>table.seats) throw new Error('Synchronize table setup before opening its bill.')
+                const bills=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-tab','payload.branchId':document.payload.branchId,'payload.status':'open'}).toArray()
+                if(!current || current.payload.sessionId!==document.payload.sessionId) if(restaurantTabs(bills.map(row=>row.payload),restaurantFloor?.payload).some(tab=>!tab.mergedInto&&tab.displayTableId===document.payload.tableId))throw new Error('This table already has an open bill.')
+                if(!table || document.payload.guests>table.seats) throw new Error('Synchronize table setup before opening its bill.')
               } else if(document.payload.status === 'closed') {
-                const orders=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'counter-order','payload.tableService.tabId':document.payload.id,'payload.tableService.sessionId':document.payload.sessionId}).toArray()
+                const orders=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'counter-order','payload.branchId':document.payload.branchId}).toArray()
                 const paid=await operations.find({businessId,entityType:'sale',entityId:{$in:orders.map(row=>`counter-payment:${row.entityId}`)}}).toArray()
-                validateRestaurantClose(document.payload,orders.map(row=>row.payload),paid.map(row=>row.payload))
+                const ledger=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:restaurantLedgerId(document.payload.sessionId)})
+                const billPayments=(ledger?.payload.payments||[]).map(entry=>({id:entry.id,paymentDetails:{restaurantBill:{selections:entry.selections}}}))
+                validateRestaurantClose(restaurantTabs([document.payload],restaurantFloor?.payload)[0],orders.map(row=>row.payload),[...paid.map(row=>row.payload),...billPayments])
               }
             } catch(error) { conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue }
           }
@@ -555,18 +619,27 @@ const server = createServer(async (request, response) => {
               if (document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid counter-service operation.')
               validateCounterRecord(document.payload, current?.payload)
               if(document.payload.tableService && (!current || document.payload.action === 'edit' || document.payload.status === 'cancelled')) {
-                const tab=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.tableService.tabId})
-                if(!tab?.payload || tab.payload.status!=='open' || tab.payload.sessionId!==document.payload.tableService.sessionId || tab.payload.branchId!==document.payload.branchId || tab.payload.tillId!==document.payload.tillId || tab.payload.currency!==document.payload.currency || tab.payload.businessName!==document.payload.businessName || document.payload.tableService.seat>tab.payload.guests) throw new Error('Synchronize the open table bill before adding its orders.')
+                const tabHead=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.tableService.tabId})
+                let tab=tabHead?{payload:restaurantTabs([tabHead.payload],restaurantFloor?.payload)[0]}:null
+                if(tab?.payload.mergedInto && document.payload.status==='cancelled'){const parent=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:tab.payload.mergedInto.tabId});tab=parent?{payload:restaurantTabs([parent.payload],restaurantFloor?.payload)[0]}:null}
+                if(!tab?.payload || tab.payload.mergedInto || tab.payload.status!=='open' || !billContains(tab.payload,document.payload) || tab.payload.branchId!==document.payload.branchId || tab.payload.tillId!==document.payload.tillId || tab.payload.currency!==document.payload.currency || tab.payload.businessName!==document.payload.businessName || document.payload.tableService.seat>tab.payload.guests) throw new Error('Synchronize the open table bill before adding its orders.')
               }
               if (document.payload.kind === 'counter-order' && ['preparing','ready','collected'].includes(document.payload.status) && recipeRequirements(document.payload).length && !await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: consumptionId(document.entityId) })) throw new Error('Synchronize ingredient consumption before preparation progress.')
               if (document.payload.kind === 'counter-order' && (document.payload.action === 'edit' || current)) {
-                const paid = await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })
-                if (paid && document.payload.action === 'edit') throw new Error('A paid order cannot be corrected. Refund it and create a new order.')
-                if (paid && document.payload.action !== 'edit') {
-                  const refunds = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'return', 'payload.saleId': `counter-payment:${document.entityId}` }).toArray()
-                  const refunded = Math.round(refunds.reduce((sum, row) => sum + Number(row.payload.total || 0), 0) * 100)
-                  if (document.payload.status !== 'cancelled' && refunded >= Math.round(document.payload.total * 100)) throw new Error('Cancel a fully refunded order instead of preparing or handing it over.')
-                  if (document.payload.status === 'cancelled' && refunded < Math.round(document.payload.total * 100)) throw new Error('Synchronize the full refund before cancelling a paid order.')
+                const legacy=await operations.findOne({businessId,entityType:'sale',entityId:`counter-payment:${document.entityId}`})
+                const ledgers=document.payload.tableService?await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-ledger','payload.branchId':document.payload.branchId}).toArray():[]
+                const linked=ledgers.flatMap(row=>row.payload.payments).filter(payment=>payment.selections.some(part=>part.orderId===document.entityId)).map(entry=>({id:entry.id,paymentDetails:{restaurantBill:{selections:entry.selections}}}))
+                const payments=[...(legacy?[legacy.payload]:[]),...linked],state=restaurantOrderPayment(document.payload,payments)
+                if(state.paymentStarted && document.payload.action==='edit') throw new Error('A paid order cannot be corrected. Refund it and create a new order.')
+                if(state.paymentStarted && document.payload.action!=='edit') {
+                  const refunds=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:payments.map(sale=>sale.id)}}).toArray()
+                  const refunded=Math.round(refunds.reduce((sum,row)=>{
+                    const sale=payments.find(sale=>sale.id===row.payload.saleId)
+                    if(sale?.paymentDetails?.counterOrder)return sum+Number(row.payload.total||0)
+                    return sum+row.payload.items.filter(item=>sale?.paymentDetails.restaurantBill.selections[item.lineIndex]?.orderId===document.entityId).reduce((n,item)=>n+Number(item.amount),0)
+                  },0)*100)
+                  if(document.payload.status!=='cancelled' && refunded>=Math.round(document.payload.total*100))throw new Error('Cancel a fully refunded order instead of preparing or serving it.')
+                  if(document.payload.status==='cancelled' && refunded<Math.round(state.paidAmount*100))throw new Error('Synchronize the full paid portion refund before cancelling this order.')
                 }
               }
               if (document.payload.kind === 'counter-order' && document.payload.status === 'collected' && !document.payload.tableService && !await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })) throw new Error('Synchronize the order payment before handover.')
@@ -612,6 +685,7 @@ const server = createServer(async (request, response) => {
         acceptedOperationIds.push(document.operationId)
       }
       return send(response, 200, { acceptedOperationIds, conflicts })
+      })
     }
     if (request.method === 'GET' && request.url?.startsWith('/v1/sync/pull')) {
       const query = new URL(request.url, `http://${request.headers.host}`).searchParams
@@ -626,7 +700,7 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
-      if (query.get('restaurantCapability') !== 'restaurant-v1' && rows.some(row=>['restaurant-layout','restaurant-tab'].includes(row.payload?.kind) || row.payload?.id === 'restaurant-menu' || row.payload?.tableService || row.payload?.paymentDetails?.counterOrder?.tableService || row.payload?.shopProfile?.restaurant || row.payload?.shopProfile?.workflows === 'restaurant')) return send(response,426,{error:'Update this device to synchronize Restaurant & bar tables, bills and orders.'})
+      if (query.get('restaurantCapability') !== 'restaurant-v2' && rows.some(row=>['restaurant-layout','restaurant-tab','restaurant-ledger','restaurant-floor'].includes(row.payload?.kind) || row.payload?.paymentDetails?.restaurantBill || row.payload?.id === 'restaurant-menu' || row.payload?.tableService || row.payload?.paymentDetails?.counterOrder?.tableService || row.payload?.shopProfile?.restaurant || row.payload?.shopProfile?.workflows === 'restaurant')) return send(response,426,{error:'Update this device to synchronize Restaurant & bar tables, bills and orders.'})
       if (query.get('capabilities') !== 'counter-v3' && rows.some(row => ['counter-menu', 'counter-order', 'counter-consumption'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })
       if (!['retail-v3', 'business-v4'].includes(query.get('protocol')) && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
       return send(response, 200, { operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })

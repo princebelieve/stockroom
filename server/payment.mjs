@@ -1,3 +1,4 @@
+import { validateRestaurantPaymentShape } from './restaurant-payments.mjs'
 import { receiptSnapshot } from './receipts.mjs'
 import { validatePosSale } from './pos-pricing.mjs'
 export const extraReasons = { tip: 'Voluntary tip', rounding: 'Agreed rounding', donation: 'Voluntary donation', other: 'Other — explanation required' }
@@ -33,7 +34,11 @@ function paymentResult(sale, policyInput, legacy = false) {
       return { method, amount, provider, reference }
     })
     if (parts.reduce((sum, part) => sum + part.amount, 0) !== total) throw new Error('Split payment amounts must equal the sale total exactly.')
-    return { ...sale, cashReceived: null, changeGiven: null, paymentDetails: { version: 1, amountReceived: total / 100, changeGiven: 0, extraKept: 0, reason: '', note: '', printExtraDetails: false, allocations: parts.map(part => ({ ...part, amount: part.amount / 100 })), policy } }
+    const cashPart=parts.filter(part=>part.method==='cash').reduce((sum,part)=>sum+part.amount,0)
+    const handed=input.cashReceived==null?null:cents(input.cashReceived,'Cash received')
+    if(handed!=null && handed<cashPart)throw new Error('Cash received is less than the cash payment parts.')
+    const change=handed==null?0:handed-cashPart
+    return { ...sale, cashReceived: handed==null?null:handed/100, changeGiven: handed==null?null:change/100, paymentDetails: { version: 1, amountReceived: (total+change) / 100, changeGiven: change/100, extraKept: 0, reason: '', note: '', printExtraDetails: false, allocations: parts.map(part => ({ ...part, amount: part.amount / 100 })), policy } }
   }
   if (sale.paymentMethod === 'wallet') {
     if (!policy.allowWallet) throw new Error('The owner has not enabled wallet payments.')
@@ -62,8 +67,10 @@ function paymentResult(sale, policyInput, legacy = false) {
 }
 
 export function recordPayment(sale, policyInput, legacy = false) {
-  const validated = validatePosSale(sale)
+  const validated = sale.paymentDetails?.restaurantBill ? validateRestaurantPaymentShape(sale) : validatePosSale(sale)
   const result = paymentResult(validated, policyInput, legacy)
+  if(String(sale.id).startsWith('restaurant-payment:') && !validated.paymentDetails?.restaurantBill) throw new Error('Restaurant bill payment details are required.');
+  if(validated.paymentDetails?.restaurantBill) result.paymentDetails.restaurantBill=validated.paymentDetails.restaurantBill
   if (String(sale.id).startsWith('counter-payment:') && !validated.paymentDetails?.counterOrder) throw new Error('Counter order payment details are required.')
   if (validated.paymentDetails?.counterOrder) {
     const details = validated.paymentDetails.counterOrder

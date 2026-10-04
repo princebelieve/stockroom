@@ -1,3 +1,4 @@
+import { restaurantSaleStatements, restaurantPaymentFingerprint } from './restaurant-payments.mjs'
 import { applyConsumptionSync } from './counter-recipes.mjs'
 import { validateCounterPayment, validateCounterRetry, counterConflictRecord } from './counter-service.mjs'
 import { validateLoyaltyBalance, validateCheckoutSettings } from './pos-pricing.mjs'
@@ -707,6 +708,16 @@ export function applyRemoteOperations(operations) {
         const existing = database.prepare('SELECT payload FROM pos_records WHERE scope=? AND id=?').get(organizationId, payload.id)
         database.exec('BEGIN')
         try {
+          if(payload.kind==='restaurant-ledger' && !database.prepare('SELECT id FROM sales WHERE id=?').get(payload.latestSale.id)) {
+            const sale=payload.latestSale
+            for(const [index,item] of sale.items.entries()) if(!item.productId.startsWith('service:')) {
+              stockChangeSync(retailDb,{id:`${sale.id}:sale:${index}`,branchId:sale.branchId,productId:item.productId,delta:-item.quantity,createdAt:sale.createdAt,allocations:item.batchAllocations,completedSale:true,unitCost:item.unitCost})
+              database.prepare('UPDATE branch_inventory SET stock=stock-? WHERE product_id=? AND branch_id=?').run(item.quantity,item.productId,sale.branchId)
+              database.prepare('INSERT INTO inventory_movements (id,organization_id,product_id,quantity,reason,created_at,branch_id) VALUES (?,?,?,?,?,?,?)').run(`${sale.id}:movement:${index}`,organizationId,item.productId,-item.quantity,'sale',sale.createdAt,sale.branchId)
+            }
+            for(const [sql,args] of restaurantSaleStatements(sale,organizationId)) database.prepare(sql).run(...args)
+            for(const [index,item] of sale.items.entries()) if(item.batchAllocations) database.prepare('UPDATE sale_items SET batch_allocations=? WHERE id=?').run(JSON.stringify(item.batchAllocations),`${sale.id}:${index}`)
+          }
           if (payload.kind === 'counter-consumption') applyConsumptionSync(retailDb, payload, organizationId)
           if (payload.kind === 'return' && !existing) {
             for (const item of payload.items) if (item.restock) {
@@ -1040,11 +1051,15 @@ export function createSale(sale, shouldSync = true, branchId = 'main', tillId) {
   if (sale.paymentDetails?.counterOrder && shouldSync) {
     if (!tillId) throw new Error('Payment must be taken on the original till.')
     const row = database.prepare('SELECT payload FROM pos_records WHERE scope=? AND id=?').get(organizationId, sale.paymentDetails.counterOrder.id)
-    validateCounterPayment(sale, row ? JSON.parse(row.payload) : undefined, tillId)
+    const order=row?JSON.parse(row.payload):undefined
+    if(shouldSync && order?.tableService){const ledgers=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='restaurant-ledger'").all(organizationId,sale.branchId);if(ledgers.some(ledger=>JSON.parse(ledger.payload).payments.some(payment=>payment.selections.some(part=>part.orderId===order.id)))) throw new Error('Use bill splitting to pay this partially settled order.')}
+    validateCounterPayment(sale, order, tillId)
   }
   if (sale.paymentMethod === 'wallet' && !sale.paymentDetails?.customerId) throw new Error('A wallet sale requires a selected customer.')
   const previousSale = database.prepare('SELECT id,total,branch_id AS branchId,payment_method AS paymentMethod,payment_reference AS paymentReference,terminal_provider AS terminalProvider,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE id=? AND organization_id=?').get(sale.id, organizationId)
+  if(shouldSync && sale.paymentDetails?.restaurantBill && !previousSale) throw new Error('Use the Restaurant & bar bill payment action.');
   if (previousSale) {
+    if(sale.paymentDetails?.restaurantBill){ const paymentDetails=JSON.parse(previousSale.paymentDetails); const items=database.prepare('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid').all(sale.id); if(restaurantPaymentFingerprint(sale)!==restaurantPaymentFingerprint({...previousSale,paymentDetails,items,currency:paymentDetails.restaurantBill.currency})) throw new Error('This bill payment already has different details.'); }
     if (sale.paymentDetails?.counterOrder) validateCounterRetry(sale, { ...previousSale, paymentDetails: JSON.parse(previousSale.paymentDetails) })
     return { ...sale, createdAt: previousSale.createdAt, syncStatus: 'synced' }
   }
@@ -1108,5 +1123,5 @@ async function performPosAction(path, method, input, user, branchId, tillId) {
   }
   return handlePos({ db, scope: organizationId, organizationId, branchId, user, path, method, input, tillId,
     sales: () => database.prepare('SELECT id,total,payment_reference AS paymentReference,terminal_provider AS terminalProvider,cash_received AS cashReceived,change_given AS changeGiven,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE organization_id=? AND branch_id=? ORDER BY created_at DESC').all(organizationId, branchId).map(sale => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_cost AS unitCost, batch_allocations AS batchAllocations, unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid').all(sale.id) })),
-    publish: record => queueSync('pos_record', record.id, 'upsert', record) })
+    publish: (record,entityType='pos_record') => queueSync(entityType, record.id, entityType==='sale'?'create':'upsert', record) })
 }

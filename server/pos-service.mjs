@@ -1,3 +1,4 @@
+import { saveRestaurantSale } from './restaurant-payments.mjs'
 import { handleRestaurant } from './restaurant-service.mjs'
 import { receiptSettings } from './receipts.mjs'
 import { applyConsumption } from './counter-recipes.mjs'
@@ -18,6 +19,7 @@ export async function applyPosRecord(db, scope, record, organizationId) {
   const connection = db
   db = { query: (sql, params = []) => connection.query(sql, params), run: (sql, params = []) => connection.run(sql, params, false) }
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
+  if(record.kind==='restaurant-ledger') await saveRestaurantSale(db,record.latestSale,organizationId,'remote')
   if (record.kind === 'counter-consumption') await applyConsumption(db, record, organizationId)
   if (record.kind === 'return' && !found) {
     for (const item of record.items) if (item.restock && !String(item.productId).startsWith('service:')) {
@@ -53,7 +55,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     rollbackTransaction: () => connection.rollbackTransaction()
   }
   await ensurePos(db)
-  if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
+  if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close','/api/pos/restaurant/settle','/api/pos/restaurant/arrange'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   if (path.startsWith('/api/pos/restaurant/counter') || path.startsWith('/api/pos/counter')) return handleCounter({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   const manager = ['owner', 'admin'].includes(user.role)
   const records = kind => posRecords(db, scope, kind, kind === 'settings' || kind === 'product' ? 'main' : branchId)

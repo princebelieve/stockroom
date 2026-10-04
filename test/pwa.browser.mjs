@@ -1,3 +1,5 @@
+import { restaurantBillFingerprint } from '../server/restaurant-service.mjs'
+import { restaurantBillLines } from '../server/restaurant-payments.mjs'
 import { chromium } from '@playwright/test'
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -34,7 +36,7 @@ try {
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
     let result = {}
-    if (path === '/v1/sync/capabilities') result = { capabilities: [...(counterSupported ? ['counter-v3'] : []),...(restaurantSupported ? ['restaurant-v1'] : [])] }
+    if (path === '/v1/sync/capabilities') result = { capabilities: [...(counterSupported ? ['counter-v3'] : []),...(restaurantSupported ? ['restaurant-v2'] : [])] }
     if (path === '/v1/subscriptions/access') result = subscription
     if (path === '/v1/auth/login') { loginBodies.push(body); result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' } }
     if (path === '/v1/devices/enroll') { enrollmentBodies.push(body); result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' } }
@@ -393,9 +395,13 @@ try {
   }
   assert.ok(Math.abs((await api('/api/products')).data.products.find(row=>row.id===created.data.id).stock-(beforeRestaurantStock-1))<0.000001)
   assert.equal((await counterApi('/api/pos/restaurant/close',{id:tab.data.id,commandId:'unpaid-close',expectedUpdatedAt:tab.data.updatedAt})).status,400)
-  const tableSale={id:'counter-payment:'+tableOrder.data.id,currency:tab.data.currency,total:3,paymentMethod:'cash',createdAt:new Date().toISOString(),items:[{productId:'service:counter:table-drink',productName:'Bottled drink',quantity:1,price:3}],paymentDetails:{amountReceived:5,pos:tableOrder.data.pos,counterOrder:{id:tableOrder.data.id,tillId:'counter-pwa-till',tableService:tableOrder.data.tableService}}}
-  assert.equal((await counterApi('/api/sales',tableSale)).status,201)
-  assert.equal((await counterApi('/api/sales',tableSale)).status,200)
+  const tableState=(await counterApi('/api/pos/restaurant')).data
+  const billTab=tableState.tabs.find(row=>row.id===tab.data.id)
+  const billInput={id:'restaurant-payment:pwa-table',tabId:tab.data.id,sessionId:tab.data.sessionId,expectedUpdatedAt:'',billFingerprint:restaurantBillFingerprint(billTab,tableState.orders),selections:restaurantBillLines(billTab,tableState.orders,tableState.receipts).map(line=>({orderId:line.orderId,lineId:line.lineId,quantity:line.remaining})),method:'cash',cash:'5'}
+  const paidBill=await counterApi('/api/pos/restaurant/settle',billInput)
+  assert.equal(paidBill.status,200,JSON.stringify(paidBill.data));assert.equal(paidBill.data.changeGiven,2)
+  const tableSale=paidBill.data
+  assert.equal((await counterApi('/api/pos/restaurant/settle',billInput)).status,200)
   assert.ok(Math.abs((await api('/api/products')).data.products.find(row=>row.id===created.data.id).stock-(beforeRestaurantStock-1))<0.000001)
   const closedBill=await counterApi('/api/pos/restaurant/close',{id:tab.data.id,commandId:'paid-close',expectedUpdatedAt:tab.data.updatedAt})
   assert.equal(closedBill.status,200,JSON.stringify(closedBill.data))

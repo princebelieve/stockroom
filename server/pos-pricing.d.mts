@@ -1,5 +1,5 @@
 export type PosSettings = { taxEnabled: boolean; taxRate: number; taxRates: Record<string, number>; taxIncluded: boolean; taxLabel: string; loyaltyEnabled: boolean; loyaltyRate: number; offlineStockPoolsEnabled: boolean; stockPools: Record<string, string> }
-export type Pricing = { subtotal: number; discount: number; tax: number; total: number; lines: Array<{ productId: string; quantity: number; subtotal: number; discount: number; tax: number; total: number }>; taxSettings: PosSettings }
+export type Pricing = { addedTax?:number;includedTax?:number;subtotal: number; discount: number; tax: number; total: number; lines: Array<{ productId: string; quantity: number; subtotal: number; discount: number; tax: number; total: number }>; taxSettings: PosSettings }
 export type PosSaleDetails = { tillId?: string; terminalRequestId?: string; customerId?: string; customerName?: string; registerId?: string; discountType?: string; discountValue?: number; tax?: PosSettings; pricing?: Pricing; note?: string; loyaltyEarned?: number; loyaltyRedeemed?: number; loyaltyBeforeBalance?: number }
 export function posSettings(value?: unknown): PosSettings
 export function priceOrder(items: Array<{ productId: string; quantity: number; price: number }>, options?: PosSaleDetails): Pricing

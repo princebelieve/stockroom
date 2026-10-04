@@ -69,7 +69,7 @@ async function pullRemoteChanges({ url, token, businessId, deviceId }) {
   markKnownLocalOperationsApplied()
   let cursor = getSyncCursor()
   while (true) {
-  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v1&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
+  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
   if (!pulled.ok) throw new Error(`Cloud pull failed (${pulled.status}).`)
   const result = await pulled.json()
   applyRemoteOperations(result.operations || [])
@@ -113,7 +113,7 @@ export async function syncNow() {
     if (pending.length) {
       if (pending.some(requiresRestaurantSync)) {
         const support = await fetch(`${url}/v1/sync/capabilities`, { headers })
-        if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v1')) throw new Error('Update the existing sync server before synchronizing Restaurant & bar. Records remain on this device.')
+        if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Restaurant & bar. Records remain on this device.')
       }
       if (pending.some(requiresCounterSync)) {
         const response = await fetch(`${url}/v1/sync/capabilities`, { headers })
