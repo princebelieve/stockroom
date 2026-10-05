@@ -94,6 +94,10 @@ try {
    assert.equal(await rolePage.getByText('Product variants and extras',{exact:true}).count(),0)
    await rolePage.getByRole('button',{name:'Cash register',exact:true}).click()
    await rolePage.getByLabel('Starting cash',{exact:true}).waitFor()
+   await rolePage.getByRole('button',{name:'How to use the app',exact:true}).click()
+   await rolePage.getByLabel('Search guide',{exact:true}).fill('receipt scanning')
+   await rolePage.getByRole('heading',{name:'Devices > POS and receipt scanning',exact:true}).waitFor()
+   assert.equal(await rolePage.getByRole('button',{name:'Business settings',exact:true}).count(),0)
   } else {
    await rolePage.getByRole('button',{name:'Business settings',exact:true}).click()
    await rolePage.getByRole('heading',{name:'Device setup wizard',exact:true}).waitFor()

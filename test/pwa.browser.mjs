@@ -116,6 +116,12 @@ try {
   await page.evaluate(() => Promise.race([navigator.serviceWorker.ready, new Promise((_, reject) => setTimeout(() => reject(new Error('Service worker not ready')), 15000))]))
   console.log('Offline shell ready')
   await context.setOffline(true)
+  await navigateMobile('How to use the app')
+  await page.getByRole('heading',{name:'Owner and cashier guide',exact:true}).waitFor()
+  await page.getByLabel('Search guide',{exact:true}).fill('receipt scanning')
+  await page.getByRole('heading',{name:'Devices > POS and receipt scanning',exact:true}).waitFor()
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
+  await navigateMobile('Overview')
   cloudOffline = true
   const beforeSale = (await api('/api/sync/status')).data.pending
   const sale = { id: 'sale-test', total: 10, items: [{ productId: created.data.id, quantity: 2, price: 5 }], paymentMethod: 'cash', cashReceived: 20, changeGiven: 999 }

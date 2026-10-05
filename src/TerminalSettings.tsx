@@ -1,3 +1,4 @@
+import { WorkspaceHelp } from './WorkspaceHelp'
 import { AsyncForm, SubmitButton } from './AsyncControls'
 import { useState } from 'react'
 import { readTerminalSettings, saveTerminalSettings } from './lib/terminalSettings'
@@ -23,7 +24,7 @@ export function TerminalSettings({ businessId, defaultProvider, onSaved }: { bus
     {settings.connection !== 'manual' && <label className="checkbox-label"><input type="checkbox" checked={settings.manualFallback} onChange={event => { setSettings({ ...settings, manualFallback: event.target.checked }); setMessage('Unsaved changes') }} />Allow manual payment confirmation while integration is unavailable</label>}
     <p role="status">{settings.connection === 'manual' ? 'Receipt confirmation: scan the receipt barcode/QR, read a photo, or enter its reference. Check approval, amount and currency before recording the sale.' : 'Integration unavailable. This profile cannot send payments or verify approvals.'}</p>
     <button type="button" className="filter-button" disabled title="A supported provider adapter must be installed first">Test connection (unavailable)</button>
-    <p>API credentials belong in the secure payment backend. Do not enter keys or passwords in these fields.</p>
+    <WorkspaceHelp><p>API credentials belong in the secure payment backend. Do not enter keys or passwords in these fields.</p></WorkspaceHelp>
     <SubmitButton className="primary-button">Save POS profile</SubmitButton><p role="status">{message}</p>
   </AsyncForm>
 }

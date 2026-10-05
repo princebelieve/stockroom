@@ -30,3 +30,7 @@ Choose a table or open a named tab, then add orders to its bill. Take payment op
 Owners configure Business, Workspaces and Sales. Owners and admins configure Receipts, Devices and enabled menus/recipes/tables where existing permissions allow it. Product variants and extras are under product management. Cash register has its own daily-work screen for opening cash, movements and closing counts. Sales history contains receipt records, customer history and authorised returns.
 
 These names describe workflows, not full industry packages. Order counter still uses the existing menu/preparation model; Tables & tabs manages open bills, not hotel reservations or club memberships. Validate the four workflows with real staff and hardware before adding another sector.
+
+## Visual guidance
+
+Product sales uses green, Payments & receipts blue, Order counter orange and Tables & tabs purple. Overview pairs icons and business examples with compact totals and a single start action. Routine instructions are available under Help. Order statuses retain text labels beside colour; table tiles display Free or Open bill. Errors, payment confirmations and empty-screen guidance remain visible. Detailed cost information is available under Cost details rather than competing with payment actions.

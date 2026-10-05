@@ -1,3 +1,4 @@
+import { WorkspaceHelp } from './WorkspaceHelp'
 import { useState } from 'react'
 import { AsyncButton } from './AsyncControls'
 import { PrinterSettings } from './PrinterSettings'
@@ -15,7 +16,7 @@ type Props = { businessId: string; defaultProvider: string; onTerminalSaved: () 
 export function DeviceSetup(props: Props) {
   const [kind, setKind] = useState<DeviceKind | null>(props.initialKind || null)
   const [revision, setRevision] = useState(0)
-  return <section className="settings-form device-setup"><h3>Device setup wizard</h3><p>Set up each device on this checkout. Enter the model from its label or manual; a model name alone does not install a driver.</p>
+  return <section className="settings-form device-setup"><h3>Device setup wizard</h3><WorkspaceHelp><p>Set up each device on this checkout. Enter the model from its label or manual; a model name alone does not install a driver.</p></WorkspaceHelp>
     {!kind ? <div className="device-grid">{(Object.keys(deviceLabels) as DeviceKind[]).map(device => {
       const profile = readDeviceProfile(device, props.businessId)
       return <button type="button" className="filter-button" key={`${device}-${revision}`} onClick={() => setKind(device)}><strong>{deviceLabels[device]}</strong><span>{profile ? `${profile.model || 'Device'} · ${profile.status === 'confirmed' ? 'Test confirmed by user' : profile.status === 'unavailable' ? 'Integration unavailable' : device === 'terminal' ? 'Manual settings saved — automatic integration unavailable' : 'Configured — test needed'}` : 'Not set up'}</span></button>
@@ -62,10 +63,10 @@ function SetupSteps({ kind, close, ...props }: Props & { kind: DeviceKind; close
   }
   return <div><h4>{deviceLabels[kind]} setup</h4><p aria-live="polite">Step {step} of 3: {step === 1 ? 'Identify' : step === 2 ? 'Configure' : 'Test and finish'}</p>
     <fieldset className="submission-fields" disabled={busy}>
-    {step === 1 && <><p>{guidance}</p>{kind !== 'terminal' && <label>Manufacturer and model<input value={model} maxLength={200} placeholder={kind === 'display' ? 'Optional for standard monitors/tablets' : 'Enter the model printed on the device'} onChange={e => setModel(e.target.value)} /></label>}
+    {step === 1 && <><WorkspaceHelp><p>{guidance}</p></WorkspaceHelp>{kind !== 'terminal' && <label>Manufacturer and model<input value={model} maxLength={200} placeholder={kind === 'display' ? 'Optional for standard monitors/tablets' : 'Enter the model printed on the device'} onChange={e => setModel(e.target.value)} /></label>}
       {kind !== 'terminal' && <label>Connection / printing method<select value={connection} onChange={e => setConnection(e.target.value)}>{choices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
       <button type="button" className="primary-button" disabled={!model.trim() && !['display', 'terminal'].includes(kind)} onClick={() => setStep(2)}>Continue to configuration</button></>}
-    {step === 2 && <><p>{guidance}</p>
+    {step === 2 && <><WorkspaceHelp><p>{guidance}</p></WorkspaceHelp>
       {(kind === 'receipt' || kind === 'report') && <PrinterSettings onConfigured={configured} />}
       {hardware && (unavailable ? <><p role="status">This connection cannot send drawer/cutter commands. Save the device details for later, or choose Network ESC/POS.</p><AsyncButton onClick={configured}>Save device details</AsyncButton></> : <HardwareSettings onConfigured={configured} />)}
       {kind === 'terminal' && <TerminalSettings businessId={props.businessId} defaultProvider={props.defaultProvider} onSaved={() => { props.onTerminalSaved(); configured() }} />}
@@ -77,7 +78,7 @@ function SetupSteps({ kind, close, ...props }: Props & { kind: DeviceKind; close
       {!unavailable && kind === 'scanner' && connection === 'keyboard' ? <label>Scan a known barcode into this field<input value={sample} onChange={e => { setSample(e.target.value); setAttempted(false); setConfirmed(false) }} onKeyDown={e => { if (e.key === suffix) { e.preventDefault(); setAttempted(Boolean(e.currentTarget.value.trim())); setMessage('Compare the captured value with the barcode on the product.') } }} /></label> : !unavailable && kind !== 'terminal' && <AsyncButton className="filter-button" busyLabel="Testing..." onClick={test}>{kind === 'display' ? 'Open test display / pairing link' : kind === 'scanner' ? 'Test camera scan' : kind === 'drawer' ? 'Test: open drawer' : kind === 'cutter' ? 'Test: feed and cut paper' : 'Print test page'}</AsyncButton>}
       {kind === 'scanner' && sample && <p>Captured: <strong>{sample}</strong></p>}
       {kind === 'display' && attempted && props.pairing && <p>Open this link on the customer device: <a href={props.pairing.url} target="_blank" rel="noreferrer">{props.pairing.url}</a></p>}
-      {hardware && <p>Wait for any receipt to finish before testing the cutter. The drawer pulse is 50 ms on / 500 ms off; confirm compatibility in the manual.</p>}
+      {hardware && <WorkspaceHelp><p>Wait for any receipt to finish before testing the cutter. The drawer pulse is 50 ms on / 500 ms off; confirm compatibility in the manual.</p></WorkspaceHelp>}
       {!unavailable && kind !== 'terminal' && <label className="checkbox-label"><input type="checkbox" checked={confirmed} disabled={!attempted} onChange={e => setConfirmed(e.target.checked)} />I observed the correct {kind === 'scanner' ? 'barcode value' : kind === 'display' ? 'customer display on the intended screen' : hardware ? 'physical operation' : 'printed output'}.</label>}
       <p role="status">{message}</p>
       <AsyncButton className="primary-button" onClick={() => { saveDeviceProfile(kind, props.businessId, { model: kind === 'terminal' ? terminal.model : model, connection: kind === 'terminal' ? terminal.connection : connection, status: unavailable ? 'unavailable' : confirmed ? 'confirmed' : 'configured' }); close() }}>{unavailable ? 'Finish — integration unavailable' : kind === 'terminal' ? 'Finish — manual mode only' : confirmed ? 'Finish — test confirmed' : 'Finish — testing still needed'}</AsyncButton>
