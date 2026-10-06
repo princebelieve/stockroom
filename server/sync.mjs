@@ -1,3 +1,4 @@
+import { requiresServiceJobSync } from './service-jobs.mjs'
 import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markKnownLocalOperationsApplied, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -69,7 +70,7 @@ async function pullRemoteChanges({ url, token, businessId, deviceId }) {
   markKnownLocalOperationsApplied()
   let cursor = getSyncCursor()
   while (true) {
-  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
+  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
   if (!pulled.ok) throw new Error(`Cloud pull failed (${pulled.status}).`)
   const result = await pulled.json()
   applyRemoteOperations(result.operations || [])
@@ -111,6 +112,10 @@ export async function syncNow() {
     const pending = getPendingSyncOperations()
     if (!pending.length) break
     if (pending.length) {
+      if(pending.some(requiresServiceJobSync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('service-jobs-v1'))throw new Error('Update the existing sync server before sharing service jobs. Records remain on this device.')
+      }
       if (pending.some(requiresRestaurantSync)) {
         const support = await fetch(`${url}/v1/sync/capabilities`, { headers })
         if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Restaurant & bar. Records remain on this device.')

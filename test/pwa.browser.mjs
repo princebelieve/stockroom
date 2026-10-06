@@ -23,6 +23,7 @@ console.log('Browser launched')
 try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
   let restaurantSupported = true
+  let jobsSupported = true
   let pushed = []
   let remoteOperations = []
   let loginBodies = []
@@ -36,7 +37,7 @@ try {
     const path = new URL(route.request().url()).pathname
     const body = route.request().postDataJSON() || {}
     let result = {}
-    if (path === '/v1/sync/capabilities') result = { capabilities: [...(counterSupported ? ['counter-v3'] : []),...(restaurantSupported ? ['restaurant-v2'] : [])] }
+    if (path === '/v1/sync/capabilities') result = { capabilities: [...(jobsSupported?['service-jobs-v1']:[]),...(counterSupported ? ['counter-v3'] : []),...(restaurantSupported ? ['restaurant-v2'] : [])] }
     if (path === '/v1/subscriptions/access') result = subscription
     if (path === '/v1/auth/login') { loginBodies.push(body); result = { account: { id: 'owner', businessId: body.email === 'other@test.com' ? 'other-shop' : 'shop', name: 'Owner', email: body.email, role: 'owner' }, accessToken: 'access' } }
     if (path === '/v1/devices/enroll') { enrollmentBodies.push(body); result = { businessId: 'shop', deviceId: body.deviceId, deviceToken: 'device' } }
@@ -67,6 +68,7 @@ try {
   await registrationPage.getByRole('button', { name: 'I already have a key' }).click()
   await registrationPage.getByRole('heading', { name: 'Set up your shop' }).waitFor()
   await registrationPage.getByLabel('Business registration key').fill(`SBIT-${'b'.repeat(48)}`)
+  await registrationPage.getByLabel('Business type',{exact:true}).selectOption('printing')
   await registrationPage.getByLabel('Owner name', { exact: true }).fill('Owner')
   await registrationPage.getByLabel('Email', { exact: true }).fill('owner@test.com')
   await registrationPage.getByLabel('Password', { exact: true }).fill('test-password')
@@ -79,6 +81,10 @@ try {
   assert.equal(new URL(registrationPage.url()).hostname, '127.0.0.1')
   const registeredSettings = await registrationPage.evaluate(async () => (await fetch('/api/settings')).json())
   assert.equal(registeredSettings.cloudConfigured, true)
+  await registrationPage.waitForFunction(async()=>{const settings=await(await fetch('/api/settings')).json();const profile=typeof settings.shopProfile==='string'?JSON.parse(settings.shopProfile):settings.shopProfile;return profile?.workflows==='payments'})
+  await registrationPage.getByRole('button',{name:'Product sales',exact:true}).waitFor({state:'detached'})
+  assert.equal(await registrationPage.getByRole('button',{name:'Product sales',exact:true}).count(),0)
+  assert.equal((await registrationPage.evaluate(async()=>await(await fetch('/api/products')).json())).products.length,0)
   await registrationContext.close()
   loginBodies = []; enrollmentBodies = []
   await context.route('https://stockroom-0vm5.onrender.com/**', cloudRoute)
@@ -312,7 +318,7 @@ try {
   await navigateMobile('Product sales')
   await page.locator('.pos-product').filter({ hasText: 'Coffee' }).click()
   await page.getByRole('button', { name: /Take payment/ }).click()
-  await page.locator('#pos-payment').getByRole('combobox', { name: /^Payment method/ }).selectOption('wallet')
+  await page.locator('#pos-payment').getByRole('combobox', { name: /^Payment Method/ }).selectOption('wallet')
   await page.getByRole('combobox', { name: /^Customer wallet/ }).selectOption(walletCustomer.id)
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click()
   await page.getByText('Scan or select a product to begin.', { exact: true }).waitFor()
@@ -419,6 +425,41 @@ try {
   assert.match(unsupportedRestaurant.data.lastError,/Tables & tabs/);assert.ok(unsupportedRestaurant.data.pending>0)
   restaurantSupported=true;await api('/api/sync/now',{})
   assert.equal(pushed.filter(row=>row.entityType==='sale' && row.entityId===tableSale.id).length,1)
+  // Jobs and deposits persist offline without changing product stock.
+  await context.setOffline(true);cloudOffline=true
+  const jobStock=(await api('/api/products')).data.products.find(row=>row.id===created.data.id).stock
+  let serviceJob=await counterApi('/api/pos/service-jobs',{id:'service-job:pwa',commandId:'job-create',expectedUpdatedAt:'',title:'Printing flyers',customerName:'Ada',lines:[{id:'flyers',description:'Flyers',quantity:200,price:0.5}]})
+  assert.equal(serviceJob.status,200,JSON.stringify(serviceJob.data))
+  let job=serviceJob.data.job
+  const depositInput={id:job.id,commandId:'job-deposit',expectedUpdatedAt:job.updatedAt,amount:'30',method:'cash'}
+  serviceJob=await counterApi('/api/pos/service-jobs/pay',depositInput)
+  assert.equal(serviceJob.status,200,JSON.stringify(serviceJob.data))
+  assert.equal(serviceJob.data.sale.paymentDetails.serviceJob.balanceDue,70)
+  await page.reload();await page.getByRole('button',{name:'Log out'}).waitFor()
+  job=(await counterApi('/api/pos/service-jobs')).data.jobs.find(row=>row.id==='service-job:pwa')
+  assert.equal(job.balance.due,70)
+  assert.equal((await counterApi('/api/pos/service-jobs/pay',depositInput)).status,200)
+  const balancePayment=await counterApi('/api/pos/service-jobs/pay',{id:job.id,commandId:'job-balance',expectedUpdatedAt:job.updatedAt,amount:'70',method:'cash'})
+  assert.equal(balancePayment.status,200,JSON.stringify(balancePayment.data))
+  job=(await counterApi('/api/pos/service-jobs')).data.jobs.find(row=>row.id==='service-job:pwa')
+  assert.equal(job.balance.due,0);assert.equal(job.payments.length,2)
+  assert.equal((await api('/api/products')).data.products.find(row=>row.id===created.data.id).stock,jobStock)
+  await context.setOffline(false);cloudOffline=false
+  const uploadsBeforeRefresh=pushed.length
+  remoteOperations.push({operationId:'other-till-job',entityType:'pos_record',entityId:job.id,action:'upsert',createdAt:job.updatedAt,payload:{...job,payments:[],updatedAt:'2099-01-01T00:00:00.000Z'}})
+  const pendingRefresh=await api('/api/sync/pull',{})
+  assert.match(pendingRefresh.data.lastError,/pending local work/)
+  assert.equal((await counterApi('/api/pos/service-jobs')).data.jobs.find(row=>row.id===job.id).payments.length,2)
+  assert.equal(pushed.length,uploadsBeforeRefresh)
+  remoteOperations.pop()
+  jobsSupported=false
+  const oldJobServer=await api('/api/sync/now',{})
+  assert.match(oldJobServer.data.lastError,/sharing service jobs/);assert.ok(oldJobServer.data.pending>0)
+  assert.equal(pushed.length,uploadsBeforeRefresh)
+  jobsSupported=true
+  const jobSync=await api('/api/sync/now',{})
+  assert.equal(jobSync.data.lastError,'',JSON.stringify(jobSync.data))
+  assert.ok(pushed.some(row=>row.entityType==='pos_record' && row.payload?.kind==='service-job' && row.payload.payments.length===2))
   await page.getByRole('button', { name: 'Log out' }).click()
   await page.getByRole('heading', { name: 'Sign in to your shop' }).waitFor()
   assert.equal((await api('/api/settings')).data.existingBusiness, true)
@@ -437,5 +478,5 @@ try {
   await desktopPage.getByRole('heading', { name: 'Add another device' }).waitFor()
   assert.equal(await desktopPage.evaluate(async () => (await (await fetch('/api/health')).json()).desktopServer), true)
   await desktop.close()
-  console.log('PWA passed: enrollment, business isolation, login/logout, offline reload, durable sales/outbox, duplicate retry, rollback, sync, menu and mobile width.')
+  console.log('PWA passed: business preset, invoice deposits/balances, pending-job refresh protection, sync compatibility, enrollment, business isolation, login/logout, offline reload, durable sales/outbox, duplicate retry, rollback, sync, menu and mobile width.')
 } finally { await browser.close(); server.close() }

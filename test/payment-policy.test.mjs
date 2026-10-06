@@ -29,3 +29,9 @@ test('bank transfers can return or retain an overpayment, and split payments req
   assert.deepEqual(split.paymentDetails.allocations.map(part => part.amount), [5, 7])
   assert.throws(() => recordPayment({ paymentMethod: 'multiple', total: 12, paymentDetails: { allocations: [{ method: 'cash', amount: '5' }, { method: 'bank-transfer', amount: '6', provider: 'Example Bank', reference: 'TRX-101' }] } }), /equal the sale total/)
 })
+
+test('split-payment cash change survives normalization and retry',()=>{
+ const sale=recordPayment({total:27,paymentMethod:'multiple',paymentDetails:{cashReceived:'13',allocations:[{method:'cash',amount:'10'},{method:'bank-transfer',amount:'17',provider:'Test bank',reference:'REF'}]}})
+ assert.equal(sale.changeGiven,3)
+ assert.deepEqual(recordPayment(sale),sale)
+})

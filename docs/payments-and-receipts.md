@@ -1,31 +1,52 @@
 # Payments & receipts
 
-In **Business settings → Business type**, choose **Payment screens**:
+Use this workspace for payments described by the cashier, without product stock or ingredient deduction. It has three tabs: **New payment**, **Jobs & invoices**, and **Payment history**.
 
-- **Payments & receipts** for direct payment entry without stock.
-- **Stock & checkout** for the existing product basket and inventory workflow.
-- **Both** for two separate navigation buttons.
+## Start using it
 
-**Fast food only** selects the separate menu-ordering workspace. To combine it with these payment screens, use **Enable separate Fast food workspace**. See [Fast food workspace](fast-food-workspace.md).
+A new owner can choose **Printing and copy shop** or **Services / church office** during account setup. Existing owners can preview and apply a preset in **Business settings > Workspaces**, or enable this workspace alongside other screens. Changing workspace choices preserves products, orders and receipts. Use **Sync now** to share a saved choice.
 
-Click **Save payment screens**. Use Sync now to share the choice with other devices. Changing this choice preserves existing products, receipts and drafts.
+## Immediate payment
 
-In Payments & receipts, enter **Payment for**, optional customer name/phone, **Unit price**, and the payment method. Existing customer names can prefill their phone number. New customer details are saved on the receipt; this does not automatically create a customer account.
+1. Open **New payment**. Enter what the customer is paying for, quantity and unit price.
+2. Use **Add another item** for more descriptions. Customer name and phone are optional; receipt details can be expanded when needed.
+3. Choose **Payment Method**: **Cash**, **POS Terminal**, or **Bank Transfer**. Selected POS terminals from Business settings populate the dropdown; the first selected terminal is the default.
+4. For cash, enter the amount handed over if it exceeds the total. For POS Terminal or Bank Transfer, confirm success outside the app and record its reference.
+5. Save once, then print or share the receipt. Reprinting does not create another payment.
 
-Quantity defaults to one. Use **Add another item** when the customer pays for several things together. These are plain receipt descriptions; there is no SKU, stock lookup or inventory deduction.
+These are descriptive receipt lines, with no SKU or inventory lookup. Saving clears this form's draft for the next customer. Switching screens or reloading preserves an unfinished draft independently of the supermarket basket.
 
-Owners and administrators can open **Customize receipt** to save business contact details and their own footer. Each payment retains those details for later reprinting. Tax is disabled by default: entry, printed receipts and digital receipts omit it. Businesses that need it can explicitly enable it in receipt settings.
+## Work that needs an invoice or deposit
 
-Receipts include the receipt number, date, time, transaction type, cashier, descriptions, quantities, unit prices, subtotal, grand total, payment method, amount received and change.
+1. Open **Jobs & invoices > New job / estimate**. Enter a job description, customer, item descriptions, quantities and prices. Add an optional due date or instructions.
+2. Save directly as a job/invoice, or check **Start as an estimate**. An estimate cannot receive payment until **Accept estimate / issue invoice** is selected.
+3. Select the job and use **Take payment**. Enter a deposit or the full balance. Each payment has a separate receipt showing that amount and the remaining balance.
+4. Use **Job details and actions** to mark work **In progress**, **Ready**, then **Completed**. Ready describes the work; paid describes the money. Completion requires no remaining balance.
+5. Return to the same job for later payments. Payment history retains every receipt and supports reprinting.
 
-Cash received defaults to the grand total; enter a larger cash amount to calculate change. For transfer or terminal payments, record the provider/reference and confirm success on the bank/terminal before saving. These methods record an externally received payment; they do not initiate a connected terminal charge.
+Example: an invoice for 100, paid 30 then 70, has two receipts, 100 collected and no balance. The invoice itself is not another sale. Existing sales reports count collected payments and recorded refunds; the jobs list and Overview show outstanding invoices separately.
 
-Click **Save payment**, then **Print receipt** or open **Digital receipt** to download, share/copy, or open email/SMS. Automated Gmail delivery uses the existing configured cloud service and requires the receipt to be synchronized. Printing or sharing does not record another payment.
+Draft form entries remain editable before saving. Saved job descriptions, prices, customer details and receipt settings are retained as snapshots. To replace an issued job, the owner/admin refunds any retained payment, cancels the job and creates its replacement. Cancelled jobs and original receipts remain in history.
 
-Payment history supports description, customer name, phone, receipt ID and payment reference searches, plus reprinting and digital receipt actions. Service payments also remain in the existing sales/reporting records, identified by their service-payment details. Owner/admin history includes downloaded branch receipts; synchronize devices to obtain newer remote records.
+## Refunds
 
-The service form has its own local draft per business, staff member and branch. Switching between screens preserves it and the product basket independently; reopening the app restores the saved service draft. Saving a payment clears that draft for the next customer.
+Owners and admins can refund an immediate payment from **Payment history** or an invoice payment from its job's **Payment history**. Invoice refunds use a money amount, not a product quantity. The shared returns engine prevents refunding more than remains on the receipt. A refund increases the invoice balance; cancellation requires all retained money to be refunded. External refunds must be completed outside the app and confirmed with a reference.
 
-Service payments save as validated non-stock service receipt lines through the existing local database and sync infrastructure. They do not reduce products, create stock movements or allocate batches. Product checkout remains separate. Older app versions may display these as ordinary service receipts without the new screen/customer fields; update clients to use the new workflow consistently.
+## Printing and receipt settings
 
-This screen records fully paid transactions. It does not introduce invoices, deposits, instalments, bookings or job tracking.
+**Business settings > Receipts** holds contact details, the custom footer and optional receipt tax. Tax is off by default. Old receipts retain their saved settings.
+
+Use the same configured 58 mm or 80 mm receipt printer for all selected documents:
+
+- **Estimate:** the quoted items and amount.
+- **Job ticket:** customer, quantities and work instructions.
+- **Invoice:** items, amount paid and balance due.
+- **Payment receipt:** the money actually received, method/reference and change where applicable.
+
+An estimate, job ticket or invoice is not proof of payment. Detailed operational history stays in the app; the small printed documents contain the relevant details. Digital receipt sharing uses the existing controls.
+
+## Offline work and sharing devices
+
+Jobs, payment drafts, receipts and queued changes save locally. Interrupted payment requests can be retried without duplicating receipts. Manage a job on its original till and branch. Refresh downloads updates without uploading local work; it preserves a job with pending changes and reports when Sync is needed to reconcile it. **Sync now** deliberately uploads and downloads.
+
+Shared-device invoice operations require the updated app and existing sync server to support `service-jobs-v1`. An older server keeps uploads queued. This adds no paid service. Printer hardware and deployed server compatibility must be checked before shared-device rollout.

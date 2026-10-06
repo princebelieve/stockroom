@@ -1,3 +1,4 @@
+import { validateServiceJob } from './service-jobs.mjs'
 import { floorId,restaurantTabs,billContains,validateFloorSnapshot } from './restaurant-floor.mjs'
 import { restaurantOrderPayment, selectionsForOrder } from './restaurant-payments.mjs'
 import { validateRestaurantRecord } from './restaurant-service.mjs'
@@ -18,7 +19,7 @@ export const counterSaleId = id => `counter-payment:${id}`
 export const requiresRestaurantSync = operation => ['restaurant-layout','restaurant-tab','restaurant-ledger','restaurant-floor'].includes(operation.payload?.kind) || operation.payload?.id === 'restaurant-menu' || Boolean(operation.payload?.tableService || operation.payload?.paymentDetails?.restaurantBill || operation.payload?.paymentDetails?.counterOrder?.tableService || operation.payload?.shopProfile?.restaurant || operation.payload?.shopProfile?.workflows === 'restaurant')
 export const requiresCounterSync = operation => ['counter-menu', 'counter-order', 'counter-consumption'].includes(operation.payload?.kind) || Boolean(operation.payload?.paymentDetails?.counterOrder) || operation.payload?.shopProfile?.fastFood === true
 export function counterPaymentFingerprint(sale) {
-  return JSON.stringify([sale.id, sale.branchId, sale.total, sale.paymentMethod, sale.paymentReference || '', sale.terminalProvider || '', sale.paymentDetails?.amountReceived, sale.paymentDetails?.counterOrder, ['tillId','customerId','customerName','discountType','discountValue','loyaltyRedeemed','tax','note','registerId'].map(key => sale.paymentDetails?.pos?.[key])])
+  return JSON.stringify([sale.id, sale.branchId, sale.total, sale.paymentMethod, sale.paymentReference || '', sale.terminalProvider || '', sale.paymentDetails?.amountReceived, sale.paymentDetails?.allocations, sale.paymentDetails?.cashReceived, sale.paymentDetails?.changeGiven, sale.paymentDetails?.counterOrder, ['tillId','customerId','customerName','discountType','discountValue','loyaltyRedeemed','tax','note','registerId'].map(key => sale.paymentDetails?.pos?.[key])])
 }
 export function validateCounterRetry(sale, previous) {
   if (counterPaymentFingerprint(sale) !== counterPaymentFingerprint(previous)) throw new Error('This order is already paid with different payment details. Reprint its existing receipt.')
@@ -29,6 +30,7 @@ export function validateCounterPayment(sale, order, tillId) {
   if (order.status === 'cancelled') throw new Error('Cancelled orders cannot be paid.')
   if (sale.id !== counterSaleId(order.id) || sale.paymentDetails?.counterOrder?.id !== order.id) throw new Error('Use the order payment action to settle this order.')
   if (tillId && tillId !== order.tillId) throw new Error('Take payment on the till that created this order.')
+  if (!order.tableService && (sale.paymentDetails.counterOrder.diningOption || 'Takeaway') !== (order.diningOption || 'Takeaway')) throw new Error('Payment must match the order type.')
   if (sale.paymentDetails.counterOrder.tillId !== order.tillId) throw new Error('Payment till does not match the order.')
   if (JSON.stringify(sale.paymentDetails.counterOrder.tableService) !== JSON.stringify(order.tableService)) throw new Error('Payment must match the table bill and seat.');
   if (sale.currency !== order.currency) throw new Error('Payment currency must match the saved order.')
@@ -38,7 +40,7 @@ export function validateCounterPayment(sale, order, tillId) {
     const fields = ['tillId','customerId','customerName','discountType','discountValue','loyaltyRedeemed','tax','note']
     if (fields.some(key => JSON.stringify(sale.paymentDetails?.pos?.[key]) !== JSON.stringify(order.pos[key]))) throw new Error('Payment adjustments must match the saved order.')
   } else if (sale.paymentDetails?.pos) throw new Error('This saved order has no payment adjustments.')
-  if (!['cash', 'bank-transfer', 'external-pos'].includes(sale.paymentMethod) || sale.paymentDetails?.servicePayment) throw new Error('Choose a supported order payment method.')
+  if (!['cash', 'bank-transfer', 'external-pos', 'multiple'].includes(sale.paymentMethod) || sale.paymentDetails?.servicePayment) throw new Error('Choose a supported order payment method.')
 }
 export function validateCounterRecord(record, previous, snapshot = false) {
   if (!record || !['counter-menu', 'counter-order'].includes(record.kind)) throw new Error('Invalid counter-service record.')
@@ -60,6 +62,7 @@ export function validateCounterRecord(record, previous, snapshot = false) {
     return
   }
   if (!['queued', 'preparing', 'ready', 'collected', 'cancelled'].includes(record.status) || !Array.isArray(record.lines) || !record.lines.length || record.lines.length > 100 || !record.tillId || !Number.isFinite(Date.parse(record.createdAt)) || !/^[A-Z]{3}$/.test(record.currency) || typeof record.businessName !== 'string') throw new Error('Invalid counter order.')
+  if(record.diningOption!==undefined && !['Takeaway','Dine in','Delivery'].includes(record.diningOption))throw new Error('Choose a valid order type.')
   if (record.tableService) { const t = record.tableService; text(t.tabId, 'a table bill ID',150); text(t.sessionId,'a bill session'); text(t.name,'a table name'); if (!Number.isInteger(t.seat) || t.seat < 0 || t.seat > 100) throw new Error('Invalid seat.'); }
   const ids = new Set()
   for (const line of record.lines) {
@@ -80,7 +83,7 @@ export function validateCounterRecord(record, previous, snapshot = false) {
     if (JSON.stringify(record.tableService) !== JSON.stringify(previous.tableService)) throw new Error('Order table and seat cannot change.');
     return
   }
-  const immutable = order => JSON.stringify([order.id, order.branchId, order.lines, order.total, order.tillId, order.createdAt, order.customerName, order.note, order.currency, order.businessName, order.pos, order.tableService])
+  const immutable = order => JSON.stringify([order.id, order.branchId, order.lines, order.total, order.tillId, order.createdAt, order.customerName, order.note, order.currency, order.businessName, order.pos, order.tableService, order.diningOption])
   if (immutable(record) !== immutable(previous)) throw new Error('Submitted order details cannot be changed.')
   if (record.status === 'cancelled' && previous.status !== 'cancelled' && (previous.status !== 'collected' || previous.tableService)) { text(record.changeReason, 'a cancellation reason', 300); return }
   if(record.tableService && record.action==='station-ready') {
@@ -97,6 +100,7 @@ export function validateCounterRecord(record, previous, snapshot = false) {
 // version of the order/menu even when the rejected local timestamp is newer.
 export function counterConflictRecord(conflict) {
   const local = conflict.localPayload, remote = conflict.remotePayload
+  if(conflict.entityType==='pos_record' && local?.kind==='service-job' && remote?.kind==='service-job' && remote.id===conflict.entityId)return validateServiceJob(remote,undefined,true)
   if(conflict.entityType==='pos_record' && local?.kind==='restaurant-floor' && remote?.kind===local.kind && remote.id===conflict.entityId && remote.branchId===local.branchId)return validateFloorSnapshot(remote)
   if(conflict.entityType === 'pos_record' && ['restaurant-layout','restaurant-tab'].includes(local?.kind) && remote?.kind === local.kind && remote.id === conflict.entityId) { validateRestaurantRecord(remote,undefined,true); return remote }
   if (conflict.entityType !== 'pos_record' || !['counter-menu', 'counter-order'].includes(local?.kind) || remote?.kind !== local.kind || remote.id !== conflict.entityId) return null
@@ -189,7 +193,7 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
     const pos = { tillId, customerId: customer?.id || '', customerName: customer?.name || '', discountType: input.discountType === 'percent' ? 'percent' : 'amount', discountValue: money(input.discountValue || 0), loyaltyRedeemed: money(input.loyaltyRedeemed || 0), tax: settings, note: String(input.note || '').trim().slice(0,300) }
     if (pos.loyaltyRedeemed > Math.max(0, loyaltyBalances(loadedSales, returns)[pos.customerId] || 0)) throw new Error('Insufficient customer rewards.')
     pos.pricing = priceOrder(counterItems({ lines }), pos)
-    record = { ...stamp, ...(tableService ? { tableService } : {}), id: input.id, kind: 'counter-order', branchId, status: 'queued', tillId, currency: editing ? existing.currency : billCurrency, businessName: editing ? existing.businessName : billBusinessName, createdAt: editing ? existing.createdAt : updatedAt, customerName: String(customer?.name || input.customerName || '').trim().slice(0, 100), note: String(input.note || '').trim().slice(0, 300), lines, pos, total: pos.pricing.total, ...(editing ? { action: 'edit', changeReason: input.reason.trim() } : {}), events: [...(editing ? existing.events : []), { status: 'queued', action: editing ? 'edit' : 'create', reason: editing ? input.reason.trim() : '', ...(editing ? { previousLines: existing.lines, previousTotal: existing.total } : {}), staffId: user.id, at: updatedAt }] }
+    record = { ...stamp, ...(!restaurant ? {diningOption:input.diningOption || 'Takeaway'} : {}), ...(tableService ? { tableService } : {}), id: input.id, kind: 'counter-order', branchId, status: 'queued', tillId, currency: editing ? existing.currency : billCurrency, businessName: editing ? existing.businessName : billBusinessName, createdAt: editing ? existing.createdAt : updatedAt, customerName: String(customer?.name || input.customerName || '').trim().slice(0, 100), note: String(input.note || '').trim().slice(0, 300), lines, pos, total: pos.pricing.total, ...(editing ? { action: 'edit', changeReason: input.reason.trim() } : {}), events: [...(editing ? existing.events : []), { status: 'queued', action: editing ? 'edit' : 'create', reason: editing ? input.reason.trim() : '', ...(editing ? { previousLines: existing.lines, previousTotal: existing.total } : {}), staffId: user.id, at: updatedAt }] }
     validateCounterRecord(record, editing ? existing : undefined)
   } else if (path === '/api/pos/counter/status') {
     if (!existing || existing.kind !== 'counter-order' || existing.branchId !== branchId) throw new Error('Order not found in this branch.')

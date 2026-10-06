@@ -1,3 +1,4 @@
+import { handleServiceJobs, applyServiceJob } from './service-jobs.mjs'
 import { saveRestaurantSale } from './restaurant-payments.mjs'
 import { handleRestaurant } from './restaurant-service.mjs'
 import { receiptSettings } from './receipts.mjs'
@@ -18,6 +19,7 @@ export async function savePosRecord(db, scope, record) {
 export async function applyPosRecord(db, scope, record, organizationId) {
   const connection = db
   db = { query: (sql, params = []) => connection.query(sql, params), run: (sql, params = []) => connection.run(sql, params, false) }
+  if(record.kind==='service-job') await applyServiceJob(db,scope,record,organizationId)
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
   if(record.kind==='restaurant-ledger') await saveRestaurantSale(db,record.latestSale,organizationId,'remote')
   if (record.kind === 'counter-consumption') await applyConsumption(db, record, organizationId)
@@ -56,6 +58,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   }
   await ensurePos(db)
   if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close','/api/pos/restaurant/settle','/api/pos/restaurant/arrange'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
+  if(path.startsWith('/api/pos/service-jobs')) return handleServiceJobs({db,scope,organizationId,branchId,user,path,method,input,tillId,sales,publish,saveRecord:savePosRecord})
   if (path.startsWith('/api/pos/restaurant/counter') || path.startsWith('/api/pos/counter')) return handleCounter({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   const manager = ['owner', 'admin'].includes(user.role)
   const records = kind => posRecords(db, scope, kind, kind === 'settings' || kind === 'product' ? 'main' : branchId)

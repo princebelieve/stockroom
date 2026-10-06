@@ -126,6 +126,7 @@ try {
   await bill.getByRole('button',{name:'Print itemized bill',exact:true}).click()
   await page.waitForFunction(()=>typeof window.billPrint==='string')
   assert.match(await page.evaluate(()=>window.billPrint),/ITEMIZED BILL/)
+  assert.match(await page.evaluate(()=>window.billPrint),/Balance due:/)
   assert.match(await page.evaluate(()=>window.billPrint),/unpaid bill/)
   assert.match(await page.evaluate(()=>window.billPrint),/Seat 2/)
   await bill.getByRole('button',{name:/^Take payment -/}).click()

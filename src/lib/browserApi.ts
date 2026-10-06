@@ -1,3 +1,4 @@
+import { requiresServiceJobSync } from '../../server/service-jobs.mjs'
 import { restaurantPaymentFingerprint } from '../../server/restaurant-payments.mjs'
 import { validateLoyaltyBalance, validateCheckoutSettings } from '../../server/pos-pricing.mjs'
 import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../server/stock-ledger.mjs'
@@ -96,6 +97,7 @@ async function applyOperation(operation: Operation) {
     await db.beginTransaction()
     try { await applyRetailRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
   } else if (operation.entityType === 'pos_record') {
+    if(payload.kind==='service-job' && (await db.query("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1",[payload.id])).values?.length) throw new Error('An invoice has pending local work. Refresh kept it; use Sync now to reconcile this job.')
     await ensurePos(db)
     await db.beginTransaction()
     try { await applyPosRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
@@ -183,6 +185,10 @@ async function syncNowImpl() {
     const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
     if (!operations.length) break
+    if(operations.some(requiresServiceJobSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('service-jobs-v1'))throw new Error('Update the existing sync server before sharing service jobs. Records remain on this device.')
+    }
     if (operations.some(requiresRestaurantSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
       if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Tables & tabs. Records remain on this device.')
@@ -229,7 +235,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {
@@ -544,7 +550,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     try { return json(await handleRetail({ currency: (await hydrateBusinessSettings()).currency, db, scope: 'business', branchId, user, method, input: method === 'GET' ? {} : await body(init), publish: (record: Record<string, unknown>) => queue('retail_record', String(record.id), 'create', record) }), method === 'GET' ? 200 : 201) }
     catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not save purchasing changes.') }
   }
-  if(path==='/api/pos/restaurant/settle' && method==='POST') { const access=await subscriptionStatus();if(access.blocked)return error(access.reason,402) }
+  if(['/api/pos/restaurant/settle','/api/pos/service-jobs/pay'].includes(path) && method==='POST') { const access=await subscriptionStatus();if(access.blocked)return error(access.reason,402) }
   if (path.startsWith('/api/pos')) {
     try {
       return json(await handlePos({ db, scope: 'business', branchId, user, path, method, tillId: new Headers(init?.headers).get('X-Stockroom-Till') || '', input: method === 'GET' ? {} : await body(init),
@@ -563,6 +569,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (subscription.blocked) return error(subscription.reason, 402)
     let sale = await body(init); sale.branchId = branchId; if (sale.paymentMethod === 'wallet' && (sale.paymentDetails as { creditApproved?: boolean } | undefined)?.creditApproved && user.role !== 'owner') return error('Only the owner may approve credit purchases.', 403); try { sale = sale.paymentDetails ? recordPayment(sale, (await db.query('SELECT payment_policy FROM app_settings WHERE id = 1')).values?.[0]?.payment_policy) : normalizeCashSale(sale) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid cash amount.') }; if (!sale.id || !Array.isArray(sale.items) || !Number.isFinite(Number(sale.total))) return error('Sale is invalid.')
     const previousSale = (await db.query('SELECT id,total,branch_id AS branchId,payment_method AS paymentMethod,payment_reference AS paymentReference,terminal_provider AS terminalProvider,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE id=?', [sale.id])).values?.[0]
+    if((sale.paymentDetails as {serviceJob?:unknown}|undefined)?.serviceJob && !previousSale) return error('Use the Jobs & invoices payment action.')
     if((sale.paymentDetails as {restaurantBill?:unknown}|undefined)?.restaurantBill && !previousSale) return error('Use the Tables & tabs bill payment action.')
     if (previousSale) {
       if((sale.paymentDetails as {restaurantBill?:unknown}|undefined)?.restaurantBill){const paymentDetails=JSON.parse(String(previousSale.paymentDetails));const items=(await db.query('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid',[sale.id])).values||[];if(restaurantPaymentFingerprint(sale)!==restaurantPaymentFingerprint({...previousSale,paymentDetails,items,currency:paymentDetails.restaurantBill.currency}))return error('This bill payment already has different details.')}

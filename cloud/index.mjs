@@ -1,3 +1,4 @@
+import { validateServiceJob, requiresServiceJobSync } from '../server/service-jobs.mjs'
 import { floorId,restaurantTabs,billContains,validateRestaurantFloor } from '../server/restaurant-floor.mjs'
 import { validateRestaurantLedger, restaurantLedgerId, restaurantReceiptHash, restaurantOrderPayment } from '../server/restaurant-payments.mjs'
 import { recordPayment } from '../server/payment.mjs'
@@ -456,14 +457,15 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'POST' && request.url === '/v1/receipts/send') {
       const input = await readJson(request)
-      const sale = await operations.findOne({ businessId: claims.businessId, entityType: 'sale', entityId: String(input.saleId || '') })
+      let sale = await operations.findOne({ businessId: claims.businessId, entityType: 'sale', entityId: String(input.saleId || '') })
+      if(!sale){const job=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.payments.sale.id':String(input.saleId||'')});const receipt=job?.payload.payments.find(entry=>entry.sale.id===String(input.saleId||'')).sale;if(receipt)sale={payload:receipt}}
       if (!sale) return send(response, 409, { error: 'Synchronize this receipt before sending it.' })
       try { await sendPosReceipt({ to: input.to, sale: sale.payload }); return send(response, 200, { sent: true }) }
       catch { return send(response, 400, { error: 'Receipt email could not be sent. Check the address and Gmail configuration.' }) }
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -474,6 +476,11 @@ const server = createServer(async (request, response) => {
       if (await businessExitPayments.findOne({ _id: businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       return await serializeBusinessSync(businessId,async()=>{
       const containsNewSale = await Promise.all(incoming.filter(operation => (operation.entityType === 'sale' && operation.action === 'create') || (operation.entityType==='pos_record' && operation.payload?.kind==='restaurant-ledger')).map(operation => operations.findOne({ businessId, operationId: String(operation.operationId) }, { projection: { _id: 1 } }).then(existing => !existing)))
+      for(const operation of incoming.filter(operation=>operation.entityType==='pos_record' && operation.payload?.kind==='service-job')) {
+        const existing=await operations.findOne({businessId,operationId:String(operation.operationId)})
+        const head=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:String(operation.entityId)})
+        if(!existing && (operation.payload.payments?.length||0)>(head?.payload.payments?.length||0)) containsNewSale.push(true)
+      }
       if (containsNewSale.some(Boolean)) {
         const access = await subscriptionHandler.access(businessId)
         if (access.blocked) return send(response, 402, { error: access.reason, status: access.status })
@@ -489,6 +496,9 @@ const server = createServer(async (request, response) => {
           for(const reason of previouslyStored.coordinationWarnings||[])conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason})
           acceptedOperationIds.push(document.operationId)
           continue
+        }
+        if(document.entityType==='sale' && document.payload.paymentDetails?.serviceJob) {
+          conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'Synchronize invoice payments through their job record.'});continue
         }
         if(document.entityType==='sale' && document.payload.paymentDetails?.restaurantBill) {
           try {
@@ -549,12 +559,16 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
-          if(document.entityType==='pos_record' && document.payload.kind?.startsWith('restaurant-') && current?.operationId===document.operationId) {
+          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job') && current?.operationId===document.operationId) {
             if(JSON.stringify(current.payload)!==JSON.stringify(document.payload)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This operation ID already has different details.'});continue}
             // Recover a response/database interruption between storing the
             // accepted head and appending its downloadable operation.
             try{await operations.insertOne(document)}catch(error){if(error.code!==11000)throw error}
             acceptedOperationIds.push(document.operationId);continue
+          }
+          if(document.entityType==='pos_record' && document.payload.kind==='service-job') {
+            try { if(document.entityId!==document.payload.id || document.action!=='upsert')throw new Error('Invalid service job operation.');const refunds=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:(current?.payload?.payments||[]).map(entry=>entry.sale.id)}}).toArray();validateServiceJob(document.payload,current?.payload,false,refunds.map(row=>row.payload));for(const entry of document.payload.payments){recordPayment(entry.sale);if(await entityHeads.findOne({businessId,entityType:'pos_record',entityId:{$ne:document.entityId},'payload.kind':'service-job','payload.payments.sale.id':entry.sale.id}))throw new Error('This payment ID is already used by another job.')} }
+            catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
           }
           const restaurantFloor=document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-')||document.payload.tableService) ? await entityHeads.findOne({businessId,entityType:'pos_record',entityId:floorId(document.payload.branchId)}) : null
           if(document.entityType==='pos_record' && document.payload.kind==='restaurant-floor') {
@@ -700,6 +714,7 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
+      if(query.get('serviceJobCapability')!=='service-jobs-v1' && rows.some(requiresServiceJobSync)) return send(response,426,{error:'Update this device to synchronize service jobs and invoice payments.'})
       if (query.get('restaurantCapability') !== 'restaurant-v2' && rows.some(row=>['restaurant-layout','restaurant-tab','restaurant-ledger','restaurant-floor'].includes(row.payload?.kind) || row.payload?.paymentDetails?.restaurantBill || row.payload?.id === 'restaurant-menu' || row.payload?.tableService || row.payload?.paymentDetails?.counterOrder?.tableService || row.payload?.shopProfile?.restaurant || row.payload?.shopProfile?.workflows === 'restaurant')) return send(response,426,{error:'Update this device to synchronize Restaurant & bar tables, bills and orders.'})
       if (query.get('capabilities') !== 'counter-v3' && rows.some(row => ['counter-menu', 'counter-order', 'counter-consumption'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })
       if (!['retail-v3', 'business-v4'].includes(query.get('protocol')) && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })

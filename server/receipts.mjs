@@ -30,11 +30,12 @@ export function receiptText(sale) {
   const details = sale.paymentDetails || {}
   const pricing = details.pos?.pricing
   const date = new Date(sale.createdAt)
-  const method = sale.paymentMethod === 'external-pos' ? receipt?.cardType || 'Payment terminal' : { cash: 'Cash', 'bank-transfer': 'Bank transfer', multiple: 'Split payment', wallet: 'Customer wallet' }[sale.paymentMethod] || sale.paymentMethod
+  const method = sale.paymentMethod === 'external-pos' ? receipt?.cardType || 'POS Terminal' : { cash: 'Cash', 'bank-transfer': 'Bank Transfer', multiple: 'Split payment', wallet: 'Customer wallet' }[sale.paymentMethod] || sale.paymentMethod
   return [
     'PAYMENT RECEIPT', sale.businessName || 'Receipt',
     receipt?.address && `Address: ${receipt.address}`, receipt?.phone && `Phone: ${receipt.phone}`, receipt?.email && `Email: ${receipt.email}`,
     `Receipt: ${receipt?.number || sale.id}`, receipt?.number && `Transaction ID: ${sale.id}`,
+    details.counterOrder?.diningOption && `Order type: ${details.counterOrder.diningOption}`,
     details.counterOrder && `Order: ${details.counterOrder.id.slice(0,8).toUpperCase()}`,
     `Date: ${date.toLocaleDateString('en', { year: 'numeric', month: 'long', day: 'numeric' })}`, `Time: ${date.toLocaleTimeString('en')}`,
     `Transaction type: ${receipt?.transactionType || (details.counterOrder?.tableService ? 'Restaurant / bar order' : details.counterOrder ? 'Fast food order' : details.servicePayment ? 'Payment' : 'In-store shopping')}`,
@@ -42,6 +43,7 @@ export function receiptText(sale) {
     details.counterOrder?.tableService && `Table / tab: ${details.counterOrder.tableService.name}${details.counterOrder.tableService.seat ? ' / Seat '+details.counterOrder.tableService.seat : ''}`,
     `Cashier: ${sale.staffName || sale.staffId || 'Not recorded'}`,
     details.servicePayment?.customerName && `Customer: ${details.servicePayment.customerName}`, details.servicePayment?.customerPhone && `Customer phone: ${details.servicePayment.customerPhone}`,
+    details.serviceJob && `Invoice: #${details.serviceJob.number} / ${details.serviceJob.title}\nInvoice total: ${format(details.serviceJob.invoiceTotal)}\nBalance due: ${format(details.serviceJob.balanceDue)}`,
     details.pos?.customerName && `Customer: ${details.pos.customerName}`, '', 'Items | Qty | Unit price | Total',
     ...sale.items.map((item,index) => `${item.productName || item.productId} | ${item.quantity} | ${format(item.price)} | ${format(sale.paymentDetails?.restaurantBill ? pricing.lines[index].subtotal : Math.round(item.quantity * item.price * 100) / 100)}`), '',
     `Subtotal: ${format(pricing?.subtotal ?? sale.items.reduce((sum,item) => sum + item.quantity * item.price, 0))}`,
@@ -50,9 +52,9 @@ export function receiptText(sale) {
     details.restaurantBill && pricing?.includedTax>0 && `Tax included in prices: ${format(pricing.includedTax)}`,
     !details.restaurantBill && pricing?.taxSettings?.taxEnabled && `${pricing?.taxSettings?.taxLabel || 'Tax'} (${pricing?.taxSettings?.taxEnabled ? pricing.taxSettings.taxRate : 0}%${pricing?.taxSettings?.taxIncluded ? ', included' : ''}): ${format(pricing?.tax || 0)}`,
     details.pos?.loyaltyRedeemed > 0 && `Rewards spent (included in discount): ${format(details.pos.loyaltyRedeemed)}`,
-    `GRAND TOTAL: ${format(sale.total)}`, '', `Payment: ${method}`,
+    `GRAND TOTAL: ${format(sale.total)}`, '', `Payment Method: ${method}`,
     `Amount paid: ${format(details.amountReceived ?? sale.cashReceived ?? sale.total)}`, `Change given: ${format(details.changeGiven ?? sale.changeGiven ?? 0)}`,
-    ...(details.allocations||[]).map(part=>`${part.method==='cash'?'Cash':part.method==='bank-transfer'?'Bank transfer':'Payment terminal'}: ${format(part.amount)}${part.provider?' / '+part.provider:''}${part.reference?' / '+part.reference:''}`),
+    ...(details.allocations||[]).map(part=>`${part.method==='cash'?'Cash':part.method==='bank-transfer'?'Bank Transfer':'POS Terminal'}: ${format(part.amount)}${part.provider?' / '+part.provider:''}${part.reference?' / '+part.reference:''}`),
     sale.terminalProvider && `Provider: ${sale.terminalProvider}`, sale.paymentReference && `Reference: ${sale.paymentReference}`,
     details.printExtraDetails && details.extraKept > 0 && `Extra retained: ${format(details.extraKept)} (${details.reason})`,
     details.pos?.note && `Note: ${details.pos.note}`, '', receipt?.footer ?? 'Thank you for your business!'

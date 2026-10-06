@@ -56,12 +56,15 @@ export function validatePosSale(sale) {
 }
 export function refundFor(sale, existing, selections) {
   const pricing = sale.paymentDetails?.pos?.pricing || priceOrder(sale.items)
-  const items = selections.filter(item => Number(item.quantity) > 0).map(selection => {
+  const invoicePayment=Boolean(sale.paymentDetails?.serviceJob)
+  const items = selections.filter(item => Number(item.quantity) > 0 || (invoicePayment && Number(item.amount)>0)).map(selection => {
     const index = Number(selection.lineIndex)
     const original = sale.items[index], line = pricing.lines[index]
-    const quantity = Number(selection.quantity)
+    const monetary=invoicePayment && selection.amount!==undefined
+    if(monetary && (!/^\d+(?:\.\d{1,2})?$/.test(String(selection.amount)) || !Number.isSafeInteger(money(selection.amount))))throw new Error('Enter a refund amount with at most two decimals.')
+    const quantity = monetary && original ? money(selection.amount)/money(line.total)*original.quantity : Number(selection.quantity)
     const returned = existing.flatMap(record => record.items).filter(item => item.lineIndex === index).reduce((sum, item) => sum + Number(item.quantity), 0)
-    if (!original || !Number.isFinite(quantity) || quantity <= 0 || Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 0.000001 || quantity + returned > original.quantity + 0.000001) throw new Error('Return quantity exceeds the quantity remaining on the receipt.')
+    if (!original || !Number.isFinite(quantity) || quantity <= 0 || (!monetary && Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 0.000001) || quantity + returned > original.quantity + 0.000001) throw new Error('Return quantity exceeds the quantity remaining on the receipt.')
     const amount = (Math.round(money(line.total) * (returned + quantity) / original.quantity) - Math.round(money(line.total) * returned / original.quantity)) / 100
     let offset=returned,remaining=quantity
     const allocations=[]

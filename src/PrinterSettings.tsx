@@ -13,7 +13,7 @@ export function PrinterSettings({ onConfigured }: { onConfigured?: () => void } 
     catch (error) { setMessage(String(error)) }
   }
   useEffect(() => { if (window.stockroomDesktop) void refresh() }, [])
-  return <><section className="settings-form"><h3>Printers &amp; hardware</h3><p>Printer preferences apply only to this device.</p>
+  return <><section className="settings-form"><h3>Printers &amp; hardware</h3><p>The same receipt printer prints payment receipts, order reviews, bills and preparation tickets. Printer preferences apply only to this device.</p>
     {!window.stockroomDesktop ? <p>{isNativeMobile() ? 'Android opens its system print dialog. Enable a compatible printer service in Android settings, or choose Save as PDF. Automatic receipts open the dialog after each sale.' : 'Open the Windows desktop app to select installed printers. Browser printing uses the system print dialog.'}</p> : <>
       <AsyncButton busyLabel="Loading printers..." className="filter-button" onClick={refresh}>Refresh printer list</AsyncButton>
       {(['receipt', 'report'] as const).map(kind => <label key={kind}>{kind === 'receipt' ? 'Receipt printer' : 'A4 report printer'}<select value={settings[kind]} onChange={event => setSettings({ ...settings, [kind]: event.target.value })}><option value="">Ask each time (print dialog)</option>{settings[kind] && !printers.some(p => p.name === settings[kind]) && <option value={settings[kind]}>{settings[kind]} (unavailable)</option>}{printers.map(p => <option key={p.name} value={p.name}>{p.displayName || p.name}</option>)}</select></label>)}

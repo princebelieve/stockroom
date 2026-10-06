@@ -4,13 +4,13 @@ Fast food is a separate, optional workspace for counter-service orders. Enabling
 
 ## Setup
 
-Open **Business settings → Business type**:
+Open **Business settings > Workspaces**:
 
-- Choose **Fast food only** under **Payment screens** for a dedicated workspace.
+- Choose **Order counter only** under **Payment screens** for a dedicated workspace.
 - To keep stock checkout or payment entry as well, choose those screens and check **Enable separate Order counter workspace**.
 - Click **Save payment screens**. Use **Sync now** to share the setting with other devices.
 
-Open **Fast food → Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.
+Open **Business settings > Food menu & recipes > Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.
 
 Choose **Prepared food** for meals made to order. They require no inventory product and do not deduct stock. Choose **Packaged goods** for bottled drinks or other stocked goods and link an existing product. **Packaged stock** lets owners/admins create and restock packaged products within this workspace. Restocking there is a stock adjustment at the product's saved cost; it is not a supplier invoice or payment.
 
@@ -87,8 +87,17 @@ For tables, seats, open bills and serving before payment, enable the separate [T
 
 ## Finding the transaction screen
 
-**Overview > Take a new order**, or **Daily work > Fast food**, opens the order-entry screen. Choose menu items and quantities. Use **Send and take payment** to save the order and open its payment form immediately, or **Send for preparation** when payment will be taken later. **Orders > Take payment** opens payment for an existing unpaid order.
+**Overview > Take a new order**, or **Order counter**, opens the order-entry screen. Choose menu items and quantities. Use **Send and take payment** to save the order and open its payment form immediately, or **Send for preparation** when payment will be taken later. **Orders > Take payment** opens payment for an existing unpaid order.
 
 Menu editing, recipes and packaged stock are under **Business settings > Food menu & recipes**. They do not appear on the transaction screen. The separate Tables & tabs screen starts at tables and tabs; its configuration is under Business settings and its history has separate navigation.
 
 Configuration now lives under **Business settings**, separate from transaction screens. Owners configure workspaces and sales rules; owners and admins can configure receipts, devices and enabled food/table workflows. Product variants and extras are under product management. **Cash register** is a separate daily-work screen; returns and customer history are under Sales history. The supermarket basket, POS receipt-reference scanner and customer display continue to use their existing operational controls.
+
+
+Printing uses the same configured 58 mm or 80 mm receipt printer for payment receipts, order reviews, preparation tickets and itemized bills. The selected action determines the document. Preparation tickets contain quantities and instructions, not payment totals. Customer documents retain item quantities/prices and applicable financial summaries. Detailed history stays available in the app. No additional printer is required.
+
+## Order type and split payment
+
+In **New order > Customer and order details**, choose **Takeaway** (default), **Dine in**, or **Delivery**. This describes how to hand over the order; it does not add table billing or dispatch tracking. The saved order and preparation ticket retain the choice.
+
+Use **Take payment > Payment Method > Split payment** when one order is paid using more than one method. Enter each cash, POS Terminal or Bank Transfer part; the parts must match the order total. If cash handed over exceeds its part, enter it to calculate change. Confirm external payment parts before saving. One receipt lists the parts; stock and ingredients are still charged only once.

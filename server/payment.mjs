@@ -1,3 +1,4 @@
+import { validateServiceJobPayment } from './service-jobs.mjs'
 import { validateRestaurantPaymentShape } from './restaurant-payments.mjs'
 import { receiptSnapshot } from './receipts.mjs'
 import { validatePosSale } from './pos-pricing.mjs'
@@ -35,7 +36,8 @@ function paymentResult(sale, policyInput, legacy = false) {
     })
     if (parts.reduce((sum, part) => sum + part.amount, 0) !== total) throw new Error('Split payment amounts must equal the sale total exactly.')
     const cashPart=parts.filter(part=>part.method==='cash').reduce((sum,part)=>sum+part.amount,0)
-    const handed=input.cashReceived==null?null:cents(input.cashReceived,'Cash received')
+    const received=input.cashReceived ?? sale.cashReceived
+    const handed=received==null?null:cents(received,'Cash received')
     if(handed!=null && handed<cashPart)throw new Error('Cash received is less than the cash payment parts.')
     const change=handed==null?0:handed-cashPart
     return { ...sale, cashReceived: handed==null?null:handed/100, changeGiven: handed==null?null:change/100, paymentDetails: { version: 1, amountReceived: (total+change) / 100, changeGiven: change/100, extraKept: 0, reason: '', note: '', printExtraDetails: false, allocations: parts.map(part => ({ ...part, amount: part.amount / 100 })), policy } }
@@ -67,15 +69,17 @@ function paymentResult(sale, policyInput, legacy = false) {
 }
 
 export function recordPayment(sale, policyInput, legacy = false) {
-  const validated = sale.paymentDetails?.restaurantBill ? validateRestaurantPaymentShape(sale) : validatePosSale(sale)
+  const validated = sale.paymentDetails?.serviceJob ? validateServiceJobPayment(sale) : sale.paymentDetails?.restaurantBill ? validateRestaurantPaymentShape(sale) : validatePosSale(sale)
   const result = paymentResult(validated, policyInput, legacy)
   if(String(sale.id).startsWith('restaurant-payment:') && !validated.paymentDetails?.restaurantBill) throw new Error('Restaurant bill payment details are required.');
+  if(validated.paymentDetails?.serviceJob) result.paymentDetails.serviceJob=validated.paymentDetails.serviceJob
   if(validated.paymentDetails?.restaurantBill) result.paymentDetails.restaurantBill=validated.paymentDetails.restaurantBill
   if (String(sale.id).startsWith('counter-payment:') && !validated.paymentDetails?.counterOrder) throw new Error('Counter order payment details are required.')
   if (validated.paymentDetails?.counterOrder) {
     const details = validated.paymentDetails.counterOrder
     if (typeof details.id !== 'string' || !details.id || details.id.length > 150 || typeof details.tillId !== 'string' || !details.tillId || details.tillId.length > 100) throw new Error('Invalid counter order payment link.')
     result.paymentDetails.counterOrder = { id: details.id, tillId: details.tillId }
+    if(details.diningOption!==undefined) {if(!['Takeaway','Dine in','Delivery'].includes(details.diningOption))throw new Error('Choose a valid order type.');result.paymentDetails.counterOrder.diningOption=details.diningOption}
     if(details.tableService) { const t=details.tableService; if(typeof t.tabId !== 'string' || !t.tabId || t.tabId.length>150 || typeof t.sessionId !== 'string' || !t.sessionId || t.sessionId.length>100 || typeof t.name !== 'string' || !t.name || t.name.length>100 || !Number.isInteger(t.seat) || t.seat<0 || t.seat>100) throw new Error('Invalid table bill payment link.'); result.paymentDetails.counterOrder.tableService={tabId:t.tabId,sessionId:t.sessionId,name:t.name,seat:t.seat} }
   }
   if (validated.paymentDetails?.pos) result.paymentDetails = { ...result.paymentDetails, pos: validated.paymentDetails.pos }

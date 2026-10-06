@@ -81,7 +81,7 @@ const server = createServer(async (request, response) => {
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     }
     return readJson(request, response, async input => {
-      if(request.url==='/api/pos/restaurant/settle'){ const access=await getSubscriptionAccess(); if(access.blocked)return sendJson(response,402,{error:access.reason}) }
+      if(['/api/pos/restaurant/settle','/api/pos/service-jobs/pay'].includes(request.url)){ const access=await getSubscriptionAccess(); if(access.blocked)return sendJson(response,402,{error:access.reason}) }
       try { return sendJson(response, 200, await posAction(request.url, request.method, input, user, requestBranch(request), String(request.headers['x-stockroom-till'] || ''))) }
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     })

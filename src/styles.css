@@ -621,3 +621,15 @@ body { background: #dfece5; }
 .guide-chapter li { padding-left: 8px; margin-bottom: 16px; }
 .guide-note { border-left: 4px solid var(--ink); padding: 14px 18px; background: var(--mint); border-radius: 8px; }
 .guide-note p { margin: 6px 0 0; }
+
+@media print {
+ .thermal-document h1 { font-size: 14px; margin: 6px 0; }
+ .thermal-document h2 { font-size: 16px; margin: 0 0 6px; }
+ .thermal-line { border-bottom: 1px dashed #999; padding: 5px 0; break-inside: avoid; }
+ .thermal-line strong { display: block; font-weight: normal; overflow-wrap: anywhere; }
+ .thermal-line-amount { display: flex; justify-content: space-between; gap: 6px; }
+ .thermal-line-amount span:last-child { flex-shrink: 0; }
+ .thermal-document footer { border-top: 1px dashed #999; padding-top: 6px; margin-top: 8px; }
+}
+
+.job-list-item{display:flex;flex-direction:column;align-items:flex-start;gap:6px;width:100%;margin:8px 0;padding:14px;text-align:left}.service-jobs{max-width:900px}.service-jobs fieldset{min-width:0}.service-jobs .customer-row{flex-wrap:wrap}

@@ -22,28 +22,29 @@ This guide follows the current app screens. Availability depends on your workspa
 16. Product management: purchasing, receiving, batches and wastage
 17. Product sales: basket to receipt
 18. Payments & receipts: manually entered payment
-19. Order counter > New order
-20. Order counter > Orders and Preparation
-21. Order counter > Order actions
-22. Tables & tabs > Tables and tabs
-23. Tables & tabs > Take payment and close a bill
-24. Tables & tabs > Bill actions, History and refunds
-25. Cash register
-26. Sales history: receipts, voids and customer history
-27. Stock count and Stock movements
-28. Customer display
-29. Customer accounts
-30. Business performance and Reports
-31. Staff & access and Staff activity
-32. Sync now and Sync issues
-33. Close your account, exports and referrals
-34. End-of-day checklist and when help is needed
+19. Payments & receipts > Jobs & invoices
+20. Order counter > New order
+21. Order counter > Orders and Preparation
+22. Order counter > Order actions
+23. Tables & tabs > Tables and tabs
+24. Tables & tabs > Take payment and close a bill
+25. Tables & tabs > Bill actions, History and refunds
+26. Cash register
+27. Sales history: receipts, voids and customer history
+28. Stock count and Stock movements
+29. Customer display
+30. Customer accounts
+31. Business performance and Reports
+32. Staff & access and Staff activity
+33. Sync now and Sync issues
+34. Close your account, exports and referrals
+35. End-of-day checklist and when help is needed
 
 ## Start here: install, register and sign in
 
 1. Open Download / install Stockroom from the app or its welcome page. Choose the available Windows, Android or browser installation option for your device. A disabled download means that release is not available yet.
 2. For a new business, use the registration request on the welcome/sign-in journey. Enter your business details and owner email. Check that email for the registration key and its expiry instructions.
-3. Choose New business with a key. Use the issued key and matching owner email, create your owner password, and complete registration while connected to the internet.
+3. Choose New business with a key. Use the issued key and matching owner email, create your owner password, and complete registration while connected to the internet. Choose your business type; its preset opens the matching selling workspace.
 4. For a business already registered, choose Existing business and enter the existing owner email and password. Give the device a recognisable label. Do not create a second business just to add a device.
 5. Sign in. The owner configures the business; cashiers use the sales screens. Keep your owner password private.
 
@@ -62,7 +63,7 @@ This guide follows the current app screens. Availability depends on your workspa
 ## Your first working setup
 
 1. Open Business settings > Business. Save the business name, currency and payment rules.
-2. Open Workspaces and enable only the transaction screens you need. Select Save payment screens.
+2. Open Business settings > Workspaces if you want to change the preset chosen during setup. Preview and apply it; existing products, menus and receipts are kept.
 3. For Product sales, add products and opening stock in product management. For Order counter, configure a menu. For Tables & tabs, configure its own menu and tables.
 4. Open Devices and configure only the scanner, POS, printer and customer display you actually use. Run a test where supported.
 5. Create staff accounts in Staff & access, then practice one transaction in each enabled workspace. Confirm the receipt, stock effect and payment amount.
@@ -132,7 +133,7 @@ This guide follows the current app screens. Availability depends on your workspa
 
 1. Open Devices and select the device: Receipt printer, A4 printer, Cash drawer, Paper cutter, POS, Barcode scanner or Customer display.
 2. Enter the actual model and choose the supported connection. Continue to configuration.
-3. Save the device-specific options. For a printer, choose the installed queue or supported print method and paper size. For a keyboard scanner, match its terminator.
+3. Save the device-specific options. For a printer, choose the installed queue or supported print method and paper size. For a keyboard scanner, match its terminator. Choose each document action to use the same receipt printer for receipts, order reviews, preparation tickets, bills and job documents.
 4. Run the offered test, observe the result and confirm it only when it is correct.
 5. Finish the wizard. Reopen the device later to adjust or retest it.
 
@@ -213,17 +214,32 @@ This guide follows the current app screens. Availability depends on your workspa
 1. Open Payments & receipts > New payment. Enter Payment for, quantity and unit price.
 2. Select Add another item for each additional description. Review each line total and the grand total.
 3. Expand Customer and receipt details (optional) to add customer name/phone or transaction type.
-4. Choose Cash, Bank transfer or Card / POS. Enter required provider/reference for non-cash payment. Review cash/change when cash is tendered.
+4. Choose Cash, Bank Transfer or POS Terminal. Enter required provider/reference for non-cash payment. Review cash/change when cash is tendered.
 5. Save the payment and print or share its receipt. Open Payment history to find a previous payment.
+6. For work that needs a deposit or later payment, open Jobs & invoices; New payment stays the simple full-payment form.
+7. Owners/admins use Payment history > Refund payment when money must be returned. The original receipt remains saved.
 
 **Remember:** These descriptions are non-stock receipt lines: no product deduction or ingredient consumption. Confirm externally received payment before saving a manual POS/transfer entry.
+
+## Payments & receipts > Jobs & invoices
+
+1. Select New job / estimate. Enter the work description, customer, item descriptions, quantities and prices. Add an optional due date or instructions.
+2. Save as a job, or start as an estimate. Select Accept estimate / issue invoice before collecting money for an estimate.
+3. Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal or Bank Transfer; confirm external payments and their references before saving.
+4. Print the saved payment receipt. It shows the amount received and remaining invoice balance. For a 100 invoice paid 30 then 70, there are two receipts and a zero balance.
+5. Use Job details and actions to mark In progress and Ready. Collect the balance before marking Completed.
+6. Choose Print estimate, Print job ticket or Print invoice for the document needed. These use the existing receipt printer. An invoice shows what is owed; a job ticket shows work instructions.
+7. Owners/admins can open the job payment history and refund a payment by money amount. Refund retained payments before cancelling; history is kept.
+8. Reopen the same job for later payments or receipt reprints. Jobs and payment drafts survive offline reload. Use its original till; Sync now shares saved work with other devices.
+
+**Remember:** Saved job details and prices are snapshots. Correct an issued job by refunding retained payments, cancelling and creating its replacement. Reports count payments and refunds; creating an estimate or invoice does not record revenue.
 
 ## Order counter > New order
 
 1. Choose a menu item, quantity and any extras, then select Add to order. Repeat for the complete order.
 2. Review the order lines and total. Remove an incorrect line before submitting.
-3. Expand Customer and order details (optional) to add a customer/account or preparation note. Use Discount only when permitted.
-4. Select Send and take payment to save the order and open payment immediately. Choose method, record tender/reference and Save order payment.
+3. Expand Customer and order details (optional) to add a customer/account or preparation note. Use Discount only when permitted. Choose Takeaway, Dine in or Delivery when needed; Takeaway is the default.
+4. Select Send and take payment to save the order and open payment immediately. Choose method, record tender/reference and Save order payment. Split payment accepts cash/POS Terminal/Bank Transfer parts that add up to the order total.
 5. Alternatively select Send for preparation and collect payment later through Orders > Take payment.
 
 **Remember:** Submitted orders retain their saved prices. Pay on the till that created the order. Payment entry temporarily hides the order queue; Close payment returns to it.
@@ -231,7 +247,7 @@ This guide follows the current app screens. Availability depends on your workspa
 ## Order counter > Orders and Preparation
 
 1. Open Preparation to see queued work. Select Start preparing, then Mark ready when the order is ready.
-2. Print the preparation ticket when needed. Read the preparation note and selected extras.
+2. Print the preparation ticket when needed. Read the preparation note and selected extras. Preparation tickets omit payment prices and totals.
 3. Open Orders to collect any unpaid amount. Save the payment and print its receipt.
 4. Use Hand over once the order is ready and paid. Collected orders move into their separate history section.
 5. Use Sync orders to share preparation changes with other configured devices.
@@ -368,7 +384,7 @@ This guide follows the current app screens. Availability depends on your workspa
 
 ## End-of-day checklist and when help is needed
 
-1. Finish or identify outstanding payments. Review open orders and open table bills.
+1. Finish or identify outstanding payments. Review open orders and open table bills. Check Jobs & invoices for outstanding service balances.
 2. Print/reprint any required receipts. Confirm returns and separate cash movements are recorded once.
 3. Count and close the cash register. Review differences and the day's sales.
 4. Synchronize when connected and review unresolved sync issues. Log out when handing the device to another user.
