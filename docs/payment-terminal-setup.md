@@ -1,12 +1,12 @@
 # Payment terminal configuration
 
-Owners set the shared default provider in Business settings. Owners and admins can
+Owners set the ordered allowed POS providers in Business settings; the first selected provider is the checkout default. A local device profile does not override this allowed-provider list. Owners and admins can
 save a terminal profile for the current business on each checkout device:
 provider override, model, terminal ID/serial number, planned transport, and optional
 network host/port. These local assignments do not sync to other computers.
 
 Connected Paystack Terminal checkout is implemented through a separate server adapter; see [Paystack setup](paystack-terminal.md). OPay and other providers still use manual confirmation. Saving an ordinary device profile never connects a device.
-The connection-test button remains disabled. Checkout requires manual confirmation;
+The ordinary device-profile connection-test button remains disabled. Non-integrated external-POS checkout requires manual confirmation;
 if a planned integration is selected and manual fallback is disabled, external-POS
 checkout is blocked. Cash and other existing payment methods are unaffected.
 

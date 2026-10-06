@@ -121,3 +121,12 @@ export async function cloudEnrollDeviceAsInstaller(syncApiUrl, adminApiKey, inpu
 }
 export async function cloudPasswordResetRequest(email) { return request('/v1/auth/password-reset/request', { email }, 30_000) }
 export async function cloudPasswordResetConfirm(token, password) { return request('/v1/auth/password-reset/confirm', { token, password }, 30_000) }
+
+export async function cloudRemoveStaff(accessToken, userId, ownerPassword) {
+ const { url } = await getCloudConfiguration()
+ if (!url || !accessToken) throw new Error('Connect and sign in as owner before removing staff.')
+ const response = await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/remove`, { method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`}, body:JSON.stringify({ownerPassword,confirmation:'REMOVE'}) })
+ const result=await response.json().catch(()=>({}))
+ if (!response.ok) throw new Error(result.error || 'Could not remove staff.')
+ return result
+}

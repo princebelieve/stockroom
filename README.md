@@ -1,26 +1,27 @@
 # Stockroom Business
 
-Stockroom Business is an offline-first business operations app for organizations that manage products, stock, sales, customers, and staff. Its implemented stock and checkout workflows suit retail shops and supermarkets. Business templates customize product forms and wording; they do not implement every sector's operating rules. The PWA is a complete installation option; the Windows installer and Android APK are optional clients for businesses that prefer installed apps.
+Stockroom Business is an offline-first business operations app for organizations that manage products, stock, sales, customers, and staff. Its implemented workspaces cover stocked product sales, non-stock payments and service jobs, counter-service orders, and restaurant/table billing. Business templates customize product forms and wording; they do not implement every sector's operating rules. The PWA is a complete installation option; the Windows installer and Android APK are optional clients for businesses that prefer installed apps.
 
 ## What the app does
 
 - **Inventory:** maintain products, SKUs and barcodes, categories, costs, prices, quantities, and reorder points; record stock movements and stocktakes.
 - **Point of sale:** record cash, bank transfer, manually confirmed external-terminal, split, and supported wallet payments. Sales reduce stock and produce receipts. Optional checkout settings support product-specific tax rates, customer reward redemption, and separate stock locations for offline tills.
-- **Payments & receipts:** record a description, customer details and full payment without changing stock, using a separate screen.
-- **Fast food:** an owner-enabled workspace for menu orders, priced extras, preparation progress, payment and handover. Prepared food needs no stock; linked packaged goods deduct stock when paid. See [Fast food workspace](docs/fast-food-workspace.md) for setup and current limits.
+- **Payments & receipts:** record descriptive items and immediate full payment without changing stock. Its optional Jobs & invoices tab supports estimates, service progress, deposits, balance payments and refunds. See [Payments & receipts](docs/payments-and-receipts.md).
+- **Order counter:** an owner-enabled workspace for menu orders, extras, preparation, full settlement and handover. Recipes consume ingredients when preparation starts; prepared items without recipes have no tracked ingredient consumption. Linked packaged goods deduct stock when paid. Dining options and mixed payments are supported. See [Order counter](docs/fast-food-workspace.md).
+- **Tables & tabs:** a separate restaurant/bar workspace with tables, seats, named tabs, repeated rounds, kitchen/bar progress, partial bill settlement, moves, merges and refunds. Ingredients and packaged goods consume stock at preparation; settlement uses the original till. See [Tables & tabs](docs/restaurant-and-bar-workspace.md).
 - **Customers and wallets:** keep customer records, record deposits, repayments, and withdrawals, and track balances owed or prepaid. Wallet checkout is available when enabled in the payment policy; only the owner can approve a credit purchase.
 - **Supermarket operations:** supplier orders, partial delivery receiving, pack conversions, supplier returns, wastage, optional expiry tracking, delivery-based costing and audited price/barcode changes. See [supermarket workflow](docs/supermarket-workspace.md).
 - **Sales operations:** review sales, receipts, payment evidence, cashier activity, and reports. Import provider CSV data for reconciliation without changing the original sales.
-- **Staff and access:** owners manage admin and cashier accounts. Cashiers can be limited to POS; owners can grant additional operational access.
-- **Business and device setup:** set the business name, logo, currency, payment policy, and device-specific printer or checkout settings. The device wizard records setup and test status; connected Paystack checkout uses a separate server configuration.
+- **Staff and access:** owners manage admin and cashier accounts, including Remove staff to revoke access while retaining sales and activity history. Cashiers without additional operational access can use enabled selling workspaces, Cash register and Help; owners can grant broader operational access.
+- **Business and device setup:** set the business name, logo, currency, payment policy, and device-specific printer or checkout settings. Owners choose a synchronized reporting timezone under Business settings > Workspaces; existing businesses default to UTC. The device wizard records setup and test status; connected Paystack checkout uses a separate server configuration.
 - **Subscriptions and referrals:** owners can manage subscription payments and share business invitations. Visitor promoters can create an account, share a tracked link, and review verified rewards in their wallet.
-- **Account closure:** signed-in owners can deactivate a business and schedule cloud record deletion; visitor promoters can close their account from the promoter wallet. The developer sets the waiting period (90 days by default). Offline device copies are not remotely erased.
+- **Account closure:** owners can close the business; staff have no account-deletion control; visitor promoters can close their promoter account. The waiting period defaults to 14 days. Offline device copies are not remotely erased. The confirmation screen explains the effects and offers Cancel and a red confirmation button.
 
 See [hardware setup](docs/hardware-setup.md), [subscription behavior](docs/subscriptions.md), and [PWA deployment and platform limitations](PWA-DEPLOYMENT.md) for details.
 
 ### Easy shop setup
 
-Owners can open **Business settings → Shop setup** for a three-step wizard: choose a business template, customize fields, then preview and save. General purpose, supermarket, printing, restaurant and other presets supply a starting point. Owners can rename labels, edit placeholders, reorder fields, remove/restore optional fields, and add up to 40 custom text, number, date or dropdown inputs. Custom fields can be required. Item names, catalogue names, usual units and suggested categories remain editable. Name, unit, stock and selling price remain available for stock and sales calculations.
+Owners can open **Business settings > Workspaces** for a three-step wizard: choose a business template, customize fields, then preview and save. General purpose, supermarket, printing, restaurant and other presets supply a starting point. Owners can rename labels, edit placeholders, reorder fields, remove/restore optional fields, and add up to 40 custom text, number, date or dropdown inputs. Custom fields can be required. Item names, catalogue names, usual units and suggested categories remain editable. Name, unit, stock and selling price remain available for stock and sales calculations.
 
 Upload a clear JPG, PNG or WebP screenshot/photo of an old app or printed form to read headings locally using the bundled English OCR engine. Pasted text also works. Review suggested labels and connect them to existing fields or new custom fields before applying them to the draft. This creates a starting form; it does not copy an old app's design, calculations or inventory data. No Google recognition service is required for template reading.
 
@@ -50,7 +51,7 @@ For an existing catalogue, use CSV import and review the rows rather than re-ent
 
 ### Expenses and estimated profit
 
-The current-month estimate is net receipt revenue excluding checkout tax, minus net captured sold-stock costs, dated running expenses, recorded wastage, costed stock shortages and closed-register cash shortages, plus cash surplus. A negative result is a loss. Purchases remaining in stock are valued separately. Approved stock-count shortages and manual reductions capture the removed stock cost and deduct it from profit. Closed-register cash shortages are deducted and surplus is added. Zero or missing goods costs trigger a report warning; entering a new cost does not rewrite historical sale costs. See [report calculations and limits](docs/report-calculations.md).
+The current-month estimate is net receipt revenue excluding checkout tax, minus net captured sold-stock and consumed recipe-ingredient costs, dated running expenses, recorded wastage, costed stock shortages and closed-register cash shortages, plus cash surplus. A negative result is a loss. Purchases remaining in stock are valued separately. Approved stock-count shortages and manual reductions capture the removed stock cost and deduct it from profit. Closed-register cash shortages are deducted and surplus is added. Zero or missing goods costs trigger a report warning; entering a new cost does not rewrite historical sale costs. See [report calculations and limits](docs/report-calculations.md).
 
 ## Offline work and synchronization
 
@@ -62,7 +63,7 @@ Each client keeps its own local database:
 
 A new business can register in the PWA while online. New devices and browser profiles need internet for enrollment, initial sign-in, and download of business data. After setup, the saved workspace can reopen offline. Local sales and other supported changes are saved on the device first and queued for synchronization. Use **Sync now** when online to upload queued work; **Refresh** downloads cloud changes without discarding local work. Sync regularly, especially before changing or clearing browser/device storage.
 
-Each browser profile or installed client is connected to one business at a time. For a new browser/PWA, staff can use the business-specific sign-in link shown to the owner in **Team management**, then sign in with their own username and password. The link identifies the business; it does not replace staff credentials. Each browser profile has separate storage and must download its own workspace.
+Each browser profile or installed client is connected to one business at a time. For a new browser/PWA, staff can use the business-specific sign-in link shown to the owner in **Staff & access**, then sign in with their own username and password. The link identifies the business; it does not replace staff credentials. Each browser profile has separate storage and must download its own workspace.
 
 Offline availability depends on data already downloaded and locally cached. New sign-ins, initial downloads, adding devices, cloud staff administration, subscription actions, and synchronization require internet. Some features also depend on platform hardware or operating-system services.
 
@@ -84,7 +85,7 @@ Account holders can request closure at [stockroom.globalcreest.com/account-delet
 
 ## Development
 
-Requirements: Node.js and npm. Install dependencies and start the local Vite development server:
+Requirements: Node.js 22.13 or newer (the desktop/local API uses built-in SQLite) and npm. Install dependencies and start Vite. For standard-mode development, also start `npm run api` in another terminal; Vite proxies `/api` to port 8787. For browser/PWA development, use `npm run dev -- --mode pwa` instead.
 
 ```powershell
 npm install
@@ -111,3 +112,6 @@ Deployment guides:
 - [Public landing page and business registration](docs/LANDING-AND-REGISTRATION.md)
 - [Subscription configuration and behavior](docs/subscriptions.md)
 - [Hardware setup and limitations](docs/hardware-setup.md)
+- [Owner and cashier guide](docs/user-guide.md)
+- [Workspace selection](docs/workspaces.md)
+- [Documentation alignment review](docs/documentation-alignment.md)

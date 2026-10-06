@@ -16,6 +16,7 @@ const currencies = ['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF']
 
 function VisitorPortal() {
   const [wallet, setWallet] = useState<Wallet | null>(null)
+  const [confirmDeletion, setConfirmDeletion] = useState(false)
   const [deletion, setDeletion] = useState<DeletionStatus | null>(null)
   const [registering, setRegistering] = useState(true)
   const [expandedGroup, setExpandedGroup] = useState<'promote' | 'wallet' | null>('promote')
@@ -70,7 +71,7 @@ function VisitorPortal() {
     setBusy(true); setError(''); setMessage('')
     try {
       const result = await portalRequest<DeletionStatus>('/v1/account-deletion/me', { method: 'POST', body: JSON.stringify({ action, confirmation: 'DELETE' }) }, visitorPortalKeys)
-      setDeletion(result)
+      setDeletion(result); setConfirmDeletion(false)
       if (result.status === 'active') await load()
       else setWallet(null)
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not update account deletion request.') }
@@ -106,7 +107,7 @@ function VisitorPortal() {
       {wallet?.automaticTransfersEnabled && <div id="visitor-bank-account" className="portal-panel"><PayoutBankForm request={(path, init) => portalRequest(path, init || {}, visitorPortalKeys)} onSaved={load} className="portal-form" buttonClass="portal-btn" />{wallet.profiles.map(profile => <div className="portal-alert success" key={profile.currency}>{profile.name} / {profile.bankName || 'Bank account'} ending {profile.accountLast4} ({profile.currency})</div>)}</div>}
       <div id="visitor-reward-history" className="portal-panel"><h3>Reward history</h3><Records rows={wallet?.commissions || []} /></div><div id="visitor-payout-history" className="portal-panel"><h3>Payout history</h3><PayoutHistory rows={wallet?.payouts || []} /></div>
     </>}
-    <div id="visitor-account" className="portal-panel"><h3>Close promoter account</h3><p>Deactivation is immediate. Your personal account details are scheduled for deletion after the {deletion?.graceDays || 14}-day waiting period (14 days by default); paid payout records may be retained for financial and legal record keeping.</p><button className="portal-btn secondary" disabled={busy || deletion?.status === 'pending'} onClick={() => { if (window.confirm('Deactivate your promoter account now and schedule its deletion? You can cancel during the waiting period.')) void changeDeletion('request') }}>{busy ? 'Submitting…' : 'Deactivate and schedule deletion'}</button></div>
+    <div id="visitor-account" className="portal-panel"><h3>Close promoter account</h3><p>Deactivation is immediate. Your personal account details are scheduled for deletion after the {deletion?.graceDays || 14}-day waiting period (14 days by default); paid payout records may be retained for financial and legal record keeping.</p><button className="portal-btn secondary" disabled={busy || deletion?.status === 'pending'} onClick={() => setConfirmDeletion(true)}>{busy ? 'Submitting…' : 'Deactivate and schedule deletion'}</button></div>{confirmDeletion && <div className="portal-closure-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="promoter-closure-title"><section className="portal-panel"><h2 id="promoter-closure-title">Delete your promoter account?</h2><p>Your promoter access stops immediately. Personal account details are scheduled for deletion after {deletion?.graceDays || 14} days. You can cancel before the scheduled deadline. Completed deletion cannot be undone; financial payout records may be retained. Referred businesses remain active.</p><div className="portal-actions"><button className="portal-btn secondary" disabled={busy} onClick={() => setConfirmDeletion(false)}>Cancel</button><button className="portal-btn portal-closure-confirm" disabled={busy} onClick={() => void changeDeletion('request')}>{busy ? 'Submitting...' : 'Confirm account deletion'}</button></div>{error && <div role="alert">{error}</div>}</section></div>}
   </div></main></div>
 }
 function Metric({ title, value, detail }: { title: string; value: number | string; detail: string }) { return <article className="portal-card"><span>{title}</span><strong>{value}</strong><small>{detail}</small></article> }

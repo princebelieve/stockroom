@@ -15,7 +15,7 @@ Open Product sales in Daily work. Scan or tap products to add them to the basket
 
 ## Payments & receipts
 
-Start with the receipt items. Add another item for each description and quantity paid for. Customer name, phone and transaction type are under Customer and receipt details (optional). Choose the payment method and save. Print or share the saved receipt. Payment history is a separate view. These entries never deduct stock.
+Start with the receipt items. Add another item for each description and quantity paid for. Customer name, phone and transaction type are under Customer and receipt details (optional). Choose the payment method and save. Print or share the saved receipt. Payment history is a separate view. These entries never deduct stock. Jobs & invoices is a separate optional tab for estimates, work progress, deposits and balance payments; see [Payments & receipts](payments-and-receipts.md).
 
 ## Order counter
 
@@ -37,7 +37,7 @@ Product sales uses green, Payments & receipts blue, Order counter orange and Tab
 
 ## Business presets
 
-Owners can open Business settings ? Workspaces ? Start with your business, choose a preset and preview it. Apply preset and start selling saves the workspace choice and opens its selling screen. Retail/supermarket uses Product sales; printing/services uses Payments & receipts; takeaway uses Order counter; restaurant/bar uses Tables & tabs.
+Owners can open Business settings > Workspaces > Start with your business, choose a preset and preview it. Apply preset and start selling saves the workspace choice and opens its selling screen. Retail/supermarket uses Product sales; printing/services uses Payments & receipts; takeaway uses Order counter; restaurant/bar uses Tables & tabs.
 
 Applying a preset hides other selling screens without deleting their records. Existing product fields and custom catalogue configuration are retained. Menu items, recipes, tables, receipts, payment settings, devices and branding are not replaced. Add actual menu items/prices or tables in the relevant settings tab. Extra workspaces can be enabled below the preset chooser. Sharing settings with other devices still uses Sync now. Presets do not implement hotel bookings or other sector-specific operations.
 
@@ -46,3 +46,7 @@ Applying a preset hides other selling screens without deleting their records. Ex
 Payment Method offers Cash, POS Terminal and Bank Transfer where supported. POS provider choices come from the ordered selections in Business settings. The first selected provider is the default; removing it promotes the next selected provider. Cashiers can choose another selected provider. Device configuration does not override this list.
 
 Refresh downloads business updates and reloads selling data without uploading queued local work. Desktop offline product creations, stock adjustments and sales are overlaid on the downloaded catalogue; pending settings remain local. Refresh leaves baskets and order/payment drafts open. Sync now uploads pending changes and downloads updates; it has not been changed to upload-only. Cloud changes made offline on another device cannot be downloaded until that device uploads them.
+
+## Reporting timezone
+
+Owners set **Business settings > Workspaces > Reporting timezone**, save, then use **Sync now** to share the setting. Choose an IANA timezone such as `Africa/Lagos`; businesses without a saved choice default to UTC. Reports and their expired-stock summary use the business calendar across updated devices. See [report calculations](report-calculations.md).

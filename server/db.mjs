@@ -1,3 +1,4 @@
+import { businessDate } from './report-timezone.mjs'
 import { validateServiceJob } from './service-jobs.mjs'
 import { restaurantSaleStatements, restaurantPaymentFingerprint } from './restaurant-payments.mjs'
 import { applyConsumptionSync } from './counter-recipes.mjs'
@@ -262,6 +263,7 @@ if (!database.prepare('PRAGMA table_info(sales)').all().some(row => row.name ===
 if (!database.prepare('PRAGMA table_info(stocktakes)').all().some(row => row.name === 'approval_reason')) database.exec("ALTER TABLE stocktakes ADD COLUMN approval_reason TEXT NOT NULL DEFAULT ''")
 if (!database.prepare('PRAGMA table_info(products)').all().some(row => row.name === 'cost_price')) database.exec("ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DEFAULT 0")
 if (!database.prepare('PRAGMA table_info(sale_items)').all().some(row => row.name === 'unit_cost')) database.exec("ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0")
+database.exec('CREATE TABLE IF NOT EXISTS staff_removals (id TEXT PRIMARY KEY, removed_at TEXT NOT NULL)')
 if (!database.prepare('PRAGMA table_info(users)').all().some(row => row.name === 'operational_access')) database.exec("ALTER TABLE users ADD COLUMN operational_access INTEGER NOT NULL DEFAULT 0")
 if (!database.prepare('PRAGMA table_info(users)').all().some(row => row.name === 'username')) database.exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
 if (!database.prepare('PRAGMA table_info(branches)').all().some(row => row.name === 'is_active')) database.exec('ALTER TABLE branches ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1')
@@ -386,7 +388,7 @@ export async function createOwnerSetup(input) {
 
 export function authenticateUser(identifier, password) {
   const value = String(identifier || '').trim().toLowerCase()
-  const user = database.prepare("SELECT id, name, email, username, password_hash AS passwordHash, role, operational_access AS operationalAccess FROM users WHERE organization_id = ? AND ((role = 'owner' AND email = ?) OR (role IN ('admin', 'cashier') AND username = ?))").get(organizationId, value, value)
+  const user = database.prepare("SELECT id, name, email, username, password_hash AS passwordHash, role, operational_access AS operationalAccess FROM users WHERE organization_id = ? AND id NOT IN (SELECT id FROM staff_removals) AND ((role = 'owner' AND email = ?) OR (role IN ('admin', 'cashier') AND username = ?))").get(organizationId, value, value)
   if (!user) return null
   if (!matchesPassword(password, user.passwordHash)) return null
   if (!String(user.passwordHash).includes(':')) database.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id)
@@ -394,7 +396,7 @@ export function authenticateUser(identifier, password) {
 }
 
 export function getUserById(id) {
-  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ?').get(id, organizationId)
+  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND id NOT IN (SELECT id FROM staff_removals)').get(id, organizationId)
   return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId } : null
 }
 
@@ -461,7 +463,7 @@ export function getReports(branchId = 'main') {
   const batches=database.prepare('SELECT * FROM stock_batches WHERE branch_id=? AND quantity>0').all(branchId)
   const adjustments=database.prepare('SELECT payload FROM stock_events').all().map(row=>JSON.parse(row.payload)).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption'].includes(row.category))
   const registers=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='register'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
-  return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers })
+  return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers,reportingTimeZone: normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile).reportingTimeZone })
 }
 
 export function exportSalesCsv(branchId = 'main') {
@@ -480,7 +482,7 @@ function normalizeCreatedAt(value) {
 }
 
 export function listUsers() {
-  return database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }))
+  return database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? AND id NOT IN (SELECT id FROM staff_removals) ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }))
 }
 
 // Cloud staff details are cached so the Team screen remains useful offline. The
@@ -491,6 +493,7 @@ export function cacheCloudUsers(accounts) {
   try {
     for (const account of Array.isArray(accounts) ? accounts : []) {
       const remoteId = String(account?.id || '').trim()
+      if (account?.removedAt && remoteId) { recordStaffRemovalLocal(remoteId, String(account.removedAt)); continue }
       const name = String(account?.name || '').trim()
       const email = String(account?.email || '').trim().toLowerCase()
       const username = String(account?.username || '').trim().toLowerCase()
@@ -545,7 +548,7 @@ export function updateUserRole(id, role, operationalAccess = false) {
   if (!['admin', 'cashier'].includes(nextRole)) throw new Error('Only admin and cashier roles can be updated here.')
   const result = database.prepare("UPDATE users SET role = ?, operational_access = ? WHERE id = ? AND organization_id = ? AND role IN ('admin', 'cashier')").run(nextRole, operationalAccess ? 1 : 0, id, organizationId)
   if (!result.changes) throw new Error('Staff account not found.')
-  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ? AND organization_id = ?').get(id, organizationId)
+  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ? AND organization_id = ? AND id NOT IN (SELECT id FROM staff_removals)').get(id, organizationId)
   queueSync('user', id, 'upsert', user)
   return { ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }
 }
@@ -597,8 +600,10 @@ export function createExpense(input, branchId = 'main', staff = {}) {
 }
 
 export function getStaffActivity(branchId, from, to) {
+  const zone=normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id=?').get(organizationId)?.shop_profile).reportingTimeZone
+  const dayFrom=businessDate(from,zone), dayTo=businessDate(to,zone)
   const sales = database.prepare("SELECT staff_id AS staffId, staff_name AS staffName, id, total AS amount, created_at AS occurredAt, payment_method AS detail FROM sales WHERE organization_id = ? AND branch_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC").all(organizationId, branchId, from, to)
-  const expenses = database.prepare("SELECT staff_id AS staffId, staff_name AS staffName, id, amount, incurred_at AS occurredAt, category || ': ' || description AS detail, created_at AS recordedAt FROM expenses WHERE organization_id = ? AND branch_id = ? AND incurred_at >= ? AND incurred_at < ? ORDER BY incurred_at DESC").all(organizationId, branchId, from, to)
+  const expenses = database.prepare("SELECT staff_id AS staffId, staff_name AS staffName, id, amount, incurred_at AS occurredAt, category || ': ' || description AS detail, created_at AS recordedAt FROM expenses WHERE organization_id = ? AND branch_id = ? AND ((length(incurred_at)=10 AND incurred_at >= ? AND incurred_at < ?) OR (length(incurred_at)>10 AND incurred_at >= ? AND incurred_at < ?)) ORDER BY incurred_at DESC").all(organizationId, branchId, dayFrom, dayTo, from, to)
   const voids = database.prepare("SELECT staff_id AS staffId, staff_name AS staffName, id, quantity * unit_price AS amount, created_at AS occurredAt, quantity || ' x ' || product_name || ': ' || reason AS detail FROM sale_item_voids WHERE organization_id = ? AND branch_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC").all(organizationId, branchId, from, to)
   const users = database.prepare("SELECT id, name, role FROM users WHERE organization_id = ? ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, name").all(organizationId)
   const summary = new Map(users.map(user => [user.id, { staffId: user.id, staffName: user.name, role: user.role, salesCount: 0, salesTotal: 0, expensesCount: 0, expensesTotal: 0, voidsCount: 0, voidsTotal: 0 }]))
@@ -777,6 +782,8 @@ export function applyRemoteOperations(operations) {
         adjustCustomerWallet(payload.customerId, Number(payload.amount), payload.reason || 'remote-wallet', false)
       } else if (operation.entityType === 'expense' && operation.action === 'create') {
         database.prepare('INSERT OR IGNORE INTO expenses (id, organization_id, category, description, amount, incurred_at, created_at, branch_id, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(payload.id, organizationId, payload.category, payload.description, Number(payload.amount), payload.incurredAt, payload.createdAt || now(), payload.branchId || 'main', payload.staffId || '', payload.staffName || '')
+      } else if (operation.entityType === 'staff_removal' && operation.action === 'remove') {
+        recordStaffRemovalLocal(String(payload.id), String(payload.removedAt))
       } else if (operation.entityType === 'user' && operation.action === 'upsert') {
         // Password hashes remain device-local until hosted account authentication is enabled.
         const existing = database.prepare('SELECT id FROM users WHERE id = ?').get(payload.id)
@@ -1129,4 +1136,11 @@ async function performPosAction(path, method, input, user, branchId, tillId) {
   return handlePos({ db, scope: organizationId, organizationId, branchId, user, path, method, input, tillId,
     sales: () => database.prepare('SELECT id,total,payment_reference AS paymentReference,terminal_provider AS terminalProvider,cash_received AS cashReceived,change_given AS changeGiven,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE organization_id=? AND branch_id=? ORDER BY created_at DESC').all(organizationId, branchId).map(sale => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_cost AS unitCost, batch_allocations AS batchAllocations, unit_price AS price FROM sale_items WHERE sale_id=? ORDER BY rowid').all(sale.id) })),
     publish: (record,entityType='pos_record') => queueSync(entityType, record.id, entityType==='sale'?'create':'upsert', record) })
+}
+
+export function recordStaffRemovalLocal(id, removedAt) {
+ database.prepare('INSERT OR IGNORE INTO staff_removals (id, removed_at) VALUES (?, ?)').run(id, removedAt)
+ database.prepare("UPDATE users SET operational_access=0 WHERE id=? AND role IN ('admin','cashier')").run(id)
+ database.prepare('DELETE FROM auth_sessions WHERE user_id=?').run(id)
+ return { id, removedAt, removed: true }
 }

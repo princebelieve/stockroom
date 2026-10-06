@@ -70,3 +70,12 @@ test('explicit business presets activate only their operational workspace and pr
   assert.equal(current.restaurant, true)
   assert.throws(() => applyBusinessPreset(current, '__proto__'), /Choose/)
 })
+
+
+test('reporting timezone survives normalization, presets and serialized settings', () => {
+  const profile = validateShopProfile({ ...normalizeShopProfile(), reportingTimeZone: 'Africa/Lagos' })
+  assert.equal(normalizeShopProfile(JSON.stringify(profile)).reportingTimeZone, 'Africa/Lagos')
+  assert.equal(applyBusinessPreset(profile, 'restaurant').reportingTimeZone, 'Africa/Lagos')
+  assert.equal(normalizeShopProfile().reportingTimeZone, 'UTC')
+  assert.throws(() => validateShopProfile({ ...profile, reportingTimeZone: 'invalid/zone' }), /valid reporting timezone/)
+})

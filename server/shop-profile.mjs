@@ -1,10 +1,12 @@
 import { normalizeFields, validateFields } from './shop-fields.mjs'
+import { reportTimeZone } from './report-timezone.mjs'
 export const businessModes = {
   printing: { label: 'Printing and copy shop', unit: 'copy', note: 'Set up a catalogue of printed items, copying and finishing charges.' },
   general: { label: 'General purpose', unit: 'item', note: 'Use for mixed packaged goods and everyday retail.' },
   grocery: { label: 'Grocery and provisions', unit: 'pack', note: 'New products default to pack; change the unit per product when needed.' },
   supermarket: { label: 'Supermarket and convenience store', unit: 'piece', note: 'For mixed food, household, and everyday retail goods.' },
   wholesale: { label: 'Wholesale and distribution', unit: 'carton', note: 'For case, carton, and bulk distribution; choose the right unit per product.' },
+  liquids: { label: 'Liquids, oils, and fuels', unit: 'litre', note: 'For edible oils, fuels, lubricants, and other measured liquids. Set each product up in one stock and selling unit.' },
   'food-service': { label: 'Restaurant, fast food, and catering', unit: 'portion', note: 'For ingredients, prepared food, and serving portions.' },
   'food-manufacturing': { label: 'Food processing and manufacturing', unit: 'kg', note: 'For ingredients and finished goods; choose the right unit per product.' },
   bakery: { label: 'Bakery and confectionery', unit: 'piece', note: 'For baked goods, ingredients, and confectionery.' },
@@ -37,6 +39,7 @@ const suggestions = {
   grocery: { categories: ['Food', 'Drinks', 'Household goods', 'Fresh produce'] },
   supermarket: { categories: ['Groceries', 'Drinks', 'Household goods', 'Personal care'] },
   wholesale: { categories: ['Packaged goods', 'Beverages', 'Bulk supplies'] },
+  liquids: { itemLabel: 'Liquid product', inventoryLabel: 'Liquid stock', categories: ['Edible oils', 'Petrol and diesel', 'Gas', 'Lubricants', 'Other liquids', 'Supplies'] },
   pharmacy: { categories: ['Medicines', 'Health supplies', 'Personal care'] },
   electronics: { categories: ['Phones', 'Computers', 'Accessories', 'Appliances', 'Parts'] },
   drinks: { categories: ['Water', 'Soft drinks', 'Juices', 'Alcoholic beverages'] },
@@ -63,6 +66,7 @@ export function normalizeShopProfile(input) {
   value.workflows = ['stock', 'payments', 'both', 'fast-food', 'restaurant'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
   value.fastFood = input.fastFood === true || value.workflows === 'fast-food'
   value.restaurant = input.restaurant === true || value.workflows === 'restaurant'
+  try { value.reportingTimeZone = reportTimeZone(input.reportingTimeZone ?? 'UTC') } catch { value.reportingTimeZone = 'UTC' }
   value.version = 2
   return value
 }
@@ -83,6 +87,7 @@ export function businessWorkspace(profile) {
 }
 
 export function validateShopProfile(input) {
+  reportTimeZone(input?.reportingTimeZone ?? 'UTC')
   validateFields(input?.fields)
   if (!input || typeof input !== 'object' || Array.isArray(input) || !['general', 'suggested', 'custom'].includes(input.mode)
     || !Object.hasOwn(businessModes, input.industry)) throw new Error('Choose a valid shop setup.')
@@ -99,6 +104,7 @@ export function validateShopProfile(input) {
 export const businessPresets = {
   retail: { label: 'Retail shop / mini-mart', industry: 'general', workflow: 'stock', screen: 'POS', workspace: 'Product sales' },
   supermarket: { label: 'Supermarket', industry: 'supermarket', workflow: 'stock', screen: 'POS', workspace: 'Product sales' },
+  liquids: { label: 'Liquid goods, oils, and fuels', industry: 'liquids', workflow: 'stock', screen: 'POS', workspace: 'Liquid goods sales', unit: 'litre', itemLabel: 'Liquid product', inventoryLabel: 'Liquid stock', categories: ['Edible oils', 'Petrol and diesel', 'Gas', 'Lubricants', 'Other liquids', 'Supplies'] },
   printing: { label: 'Printing and copy shop', industry: 'printing', workflow: 'payments', screen: 'Payments', workspace: 'Payments & receipts' },
   services: { label: 'Services / church office', industry: 'services', workflow: 'payments', screen: 'Payments', workspace: 'Payments & receipts' },
   takeaway: { label: 'Fast food / takeaway', industry: 'food-service', workflow: 'fast-food', screen: 'Counter', workspace: 'Order counter' },
@@ -109,7 +115,8 @@ export function applyBusinessPreset(profile, key) {
   if (!Object.hasOwn(businessPresets, key)) throw new Error('Choose a business preset.')
   const preset = businessPresets[key]
   const current = normalizeShopProfile(profile)
-  return validateShopProfile({ ...current, industry: preset.industry,
+  const defaults = current.mode === 'custom' ? {} : Object.fromEntries(['unit', 'itemLabel', 'inventoryLabel', 'categories'].filter(name => preset[name] !== undefined).map(name => [name, preset[name]]))
+  return validateShopProfile({ ...current, ...defaults, industry: preset.industry,
     mode: current.mode === 'custom' ? 'custom' : 'suggested',
     workflows: preset.workflow, fastFood: preset.workflow === 'fast-food', restaurant: preset.workflow === 'restaurant' })
 }

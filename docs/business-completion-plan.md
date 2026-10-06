@@ -34,7 +34,7 @@ These sources establish comparable workflows, not exact equivalence, platform av
 
 Product sales stays catalogue -> basket -> Payment Method -> receipt.
 
-Payments & receipts starts on New payment. Add Jobs & invoices as a second, optional tab. Its first screen is a short list of open jobs with customer, due date, status and balance, plus New job. Details open only when a job is selected. Keep receipt history separate from unpaid invoices. The New payment screen must not acquire stock, recipes, tables or mandatory invoicing fields.
+Payments & receipts starts on New payment and includes Jobs & invoices as a second, optional tab. Its first screen is a short list of open jobs with customer, due date, status and balance, plus New job. Details open only when a job is selected. Keep receipt history separate from unpaid invoices. The New payment screen must not acquire stock, recipes, tables or mandatory invoicing fields.
 
 Order counter stays New order, Orders and Preparation. Menu, recipes, printer destinations and policy belong in Business settings.
 
@@ -55,12 +55,14 @@ Printing must offer separately labelled Estimate, Job ticket, Invoice and Paymen
 
 Reuse the existing receipt, customer, monetary calculation, permission, printing, reporting and synchronization infrastructure. Introduce a distinct service-job/invoice aggregate; do not represent debt as a fake fully paid sale, restaurant table or stock product.
 
-Do not count an invoice and its collected payments twice in revenue. Separate invoiced totals, money collected, outstanding balances and refunds. Explicitly define reporting treatment before implementing it; existing sales reports must continue reconciling to receipts. Recipe/stock costs remain unrelated to non-stock service jobs.
+Do not count an invoice and its collected payments twice in revenue. Separate invoiced totals, money collected, outstanding balances and refunds. Current reporting counts collected receipts and refunds; issued invoice totals are not additional revenue. Keep this treatment when extending reporting. Recipe/stock costs remain unrelated to non-stock service jobs.
 
 ## Acceptance checks before release
 
+The operations below are implemented locally. These are verification criteria, not a list of missing features; production deployment and physical-device acceptance remain separate.
+
 1. **Finish the existing selling and printing journeys.** Correct preparation-ticket layout, document labels and outdated guides; verify POS selection/default/removal and Refresh across active data views. Acceptance: each workspace can start, calculate, collect, print/reprint, recover after reload and handle a correction/refund without entering owner configuration mid-sale.
-2. **Implement service jobs, invoices and deposit/balance payments as one complete slice.** Include local persistence, stable IDs, transaction/retry safety, issued-price snapshots, receipts, returns, permissions, reports, all supported local engines and compatible cloud synchronization. Acceptance: a 100-unit invoice paid 30 then 70 has two receipts, zero balance and no duplicated 100-unit sale; reload/retry and later price edits preserve it. Also test partial refund, cancellation after deposit, concurrent stale edits and offline recovery.
+2. **Verify the implemented service jobs, invoices and deposit/balance payments.** Include local persistence, stable IDs, transaction/retry safety, issued-price snapshots, receipts, returns, permissions, reports, all supported local engines and compatible cloud synchronization. Acceptance: a 100-unit invoice paid 30 then 70 has two receipts, zero balance and no duplicated 100-unit sale; reload/retry and later price edits preserve it. Also test partial refund, cancellation after deposit, concurrent stale edits and offline recovery.
 3. **Finish shared-printer document handling and cross-device operations.** Acceptance: receipt, order review, preparation ticket and bill layouts use the same existing supported receipt printer, reprints are identifiable, printer failure never duplicates a payment, original-till restrictions are enforced and conflicts remain reviewable. Do not claim automatic routing from content filtering alone.
 4. **Finish first-use setup and owner guidance.** Acceptance: a new owner chooses a preset, enters real items/menu/tables only as needed and completes a first transaction; advanced fields remain optional. An existing supermarket retains its basket/display/scanner and can decline a preset.
 5. **Conduct realistic acceptance sessions and release checks.** Use a supermarket queue, takeaway order paid before preparation, takeaway paid at collection, restaurant with two rounds/two payers, a bar tab and a print job with deposit. Repeat essential recovery cases on desktop, offline PWA and Android. Physical printers/scanners/POS devices require real hardware checks. Audit deployed sync compatibility before shared-device use.

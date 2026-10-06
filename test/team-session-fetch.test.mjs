@@ -10,7 +10,7 @@ test('every desktop team action receives the shared refreshed session without ch
   const calls = []
   let token = 'refreshed-owner'
   const request = teamSessionFetch(async (input, init) => { calls.push({ input, init }); return Response.json({}) }, 'http://localhost', async () => token)
-  for (const [path, method] of [['/api/users', 'GET'], ['/api/users', 'POST'], ['/api/users/staff/role', 'PUT'], ['/api/users/staff/operational-access', 'PUT'], ['/api/users/staff/password', 'PUT']]) {
+  for (const [path, method] of [['/api/users', 'GET'], ['/api/users', 'POST'], ['/api/users/staff/role', 'PUT'], ['/api/users/staff/operational-access', 'PUT'], ['/api/users/staff/password', 'PUT'], ['/api/users/staff/remove', 'POST']]) {
     const body = method === 'GET' ? undefined : JSON.stringify({ ownerPassword: 'confirmation', role: 'cashier' })
     await request(path, { method, body, headers: { Authorization: 'Bearer local-session', 'X-Cloud-Access-Token': 'stale-token' } })
     assert.equal(calls.at(-1).init.headers.get('X-Cloud-Access-Token'), token)

@@ -1,0 +1,1 @@
+export function salesHistory(db: any, options: { branchId: string; organizationId?: string; timeZone?: string; query?: string; from?: string; to?: string; page?: number; pageSize?: number }): Promise<{ sales: any[]; total: number; page: number; pageSize: number; timeZone: string }>

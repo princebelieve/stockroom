@@ -1,10 +1,14 @@
 import { supplierAccounts } from './supplier-accounts.mjs'
+import { reportCalendar, reportTimeZone } from './report-timezone.mjs'
 // All adapters use receipt totals once and the costs captured at sale time.
-export function buildReports({ sales, items, products, expenses, returns = [], retail = [], batches = [], adjustments = [], registers = [] }, date = new Date()) {
-  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const week = new Date(day); week.setDate(day.getDate() - ((day.getDay() + 6) % 7))
-  const month = new Date(date.getFullYear(), date.getMonth(), 1)
-  const within = (value, start) => Date.parse(value) >= start.getTime() && Date.parse(value) <= date.getTime()
+export function buildReports({ sales, items, products, expenses, returns = [], retail = [], batches = [], adjustments = [], registers = [], reportingTimeZone = 'UTC' }, date = new Date()) {
+  reportingTimeZone = reportTimeZone(reportingTimeZone)
+  const calendar = reportCalendar(reportingTimeZone, date)
+  const day = calendar(date.toISOString())
+  const monday = new Date(`${day}T00:00:00Z`); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7))
+  const week = monday.toISOString().slice(0, 10)
+  const month = `${day.slice(0, 7)}-01`
+  const within = (value, start) => { const civil = calendar(value); return Boolean(civil && civil >= start && civil <= day) }
   const round = value => Math.round((value + Number.EPSILON) * 100) / 100
   const window = start => {
     const selected = sales.filter(sale => within(sale.createdAt, start))
@@ -54,9 +58,10 @@ export function buildReports({ sales, items, products, expenses, returns = [], r
   const revenue = round(window(month).total-tax)
   const expenseTotal = expenses.filter(expense => within(expense.incurredAt, month)).reduce((sum, expense) => sum + Number(expense.amount), 0)
   return {
+    reportingTimeZone,
     daily: window(day), weekly: window(week), monthly: window(month),
     inventory: { value: round(products.reduce((sum, product) => sum + Number(product.stock || 0) * Number(product.price || 0), 0)), products: products.length, lowStock: products.filter(product => Number(product.stock) <= Number(product.reorder)).length },
-    supermarket: { suppliers:supplierAccounts(retail), stockLoss:round(stockLoss),cashShortage:round(registers.filter(row=>row.closedAt && within(row.closedAt,month)).reduce((sum,row)=>sum+Math.max(0,-Number(row.difference||0)),0)),cashSurplus:round(registers.filter(row=>row.closedAt && within(row.closedAt,month)).reduce((sum,row)=>sum+Math.max(0,Number(row.difference||0)),0)),zeroCostSaleLines, tax:round(tax),costValue: round(costValue), purchases: round(purchases), wastage: round(waste), outstanding, bestSellers: [...sellers.values()].filter(row=>row.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,20), expired: batches.filter(lot=>lot.quantity>0 && lot.expiry && lot.expiry<date.toISOString().slice(0,10)) },
+    supermarket: { suppliers:supplierAccounts(retail), stockLoss:round(stockLoss),cashShortage:round(registers.filter(row=>row.closedAt && within(row.closedAt,month)).reduce((sum,row)=>sum+Math.max(0,-Number(row.difference||0)),0)),cashSurplus:round(registers.filter(row=>row.closedAt && within(row.closedAt,month)).reduce((sum,row)=>sum+Math.max(0,Number(row.difference||0)),0)),zeroCostSaleLines, tax:round(tax),costValue: round(costValue), purchases: round(purchases), wastage: round(waste), outstanding, bestSellers: [...sellers.values()].filter(row=>row.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,20), expired: batches.filter(lot=>lot.quantity>0 && lot.expiry && lot.expiry<day) },
     profit: { revenue, cost: round(cost + ingredientCost), ...(ingredientCost ? { ingredientCost: round(ingredientCost) } : {}), expenses: round(expenseTotal), amount: round(revenue - cost - ingredientCost - expenseTotal - waste - stockLoss + cashDifference) },
   }
 }

@@ -35,3 +35,7 @@ Configuration now lives under **Business settings**, separate from transaction s
 
 
 Printing uses the same configured 58 mm or 80 mm receipt printer for payment receipts, order reviews, preparation tickets and itemized bills. The selected action determines the document. Preparation tickets contain quantities and instructions, not payment totals. Customer documents retain item quantities/prices and applicable financial summaries. Detailed history stays available in the app. No additional printer is required.
+
+## Reporting periods
+
+Financial reports use the saved business reporting timezone, configured under Business settings > Workspaces and shared with Sync now. Existing businesses default to UTC. See [report calculations](report-calculations.md) for period boundaries and stock-cost treatment.

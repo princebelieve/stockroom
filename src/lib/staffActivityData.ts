@@ -1,3 +1,5 @@
+import { businessDate } from '../../server/report-timezone.mjs'
+import { normalizeShopProfile } from '../../server/shop-profile.mjs'
 type ActivityDb = {
   query(sql: string, parameters?: unknown[]): Promise<{ values?: Array<Record<string, unknown>> }>
 }
@@ -14,10 +16,12 @@ export type StaffActivityEvent = {
 }
 
 export async function collectStaffActivity(db: ActivityDb, branchId: string, from: string, to: string) {
+  const zone=normalizeShopProfile((await db.query('SELECT shop_profile FROM app_settings WHERE id=1')).values?.[0]?.shop_profile).reportingTimeZone
+  const dayFrom=businessDate(from,zone),dayTo=businessDate(to,zone)
   const [usersResult, salesResult, expensesResult, voidsResult] = await Promise.all([
     db.query("SELECT id, name, role FROM users ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, name"),
     db.query('SELECT id, staff_id AS staffId, staff_name AS staffName, total AS amount, payment_method AS detail, created_at AS occurredAt FROM sales WHERE branch_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC', [branchId, from, to]),
-    db.query('SELECT id, staff_id AS staffId, staff_name AS staffName, amount, incurred_at AS occurredAt, created_at AS recordedAt, category, description FROM expenses WHERE branch_id = ? AND incurred_at >= ? AND incurred_at < ? ORDER BY incurred_at DESC', [branchId, from, to]),
+    db.query('SELECT id, staff_id AS staffId, staff_name AS staffName, amount, incurred_at AS occurredAt, created_at AS recordedAt, category, description FROM expenses WHERE branch_id = ? AND ((length(incurred_at)=10 AND incurred_at >= ? AND incurred_at < ?) OR (length(incurred_at)>10 AND incurred_at >= ? AND incurred_at < ?)) ORDER BY incurred_at DESC', [branchId, dayFrom, dayTo, from, to]),
     db.query('SELECT id, staff_id AS staffId, staff_name AS staffName, quantity * unit_price AS amount, created_at AS occurredAt, quantity, product_name AS productName, reason FROM sale_item_voids WHERE branch_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC', [branchId, from, to]),
   ])
   const staff = new Map<string, StaffActivitySummary>()

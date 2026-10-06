@@ -21,7 +21,7 @@ to the build and are included in PWA offline caching after installation finishes
 
 ## Guided device setup
 
-Owners and admins can open Settings → Device setup wizard. It covers receipt
+Owners and admins can open Business settings > Devices. It covers receipt
 printers, A4 printers, drawers, cutters, payment terminals, scanners, and customer
 displays. Each flow identifies the device, saves its operational settings, then
 offers a supported test and an explicit confirmation of the observed result.
@@ -61,7 +61,7 @@ receipt printing opens the dialog; it is not silent Android printing.
 
 ## Cash drawer and paper cutter
 
-In Admin Settings, configure a network ESC/POS printer's hostname/IPv4 address,
+In Business settings > Devices, configure a network ESC/POS printer's hostname/IPv4 address,
 TCP port (usually 9100), drawer pin, and full/partial cut mode. These settings
 are local to each device. Both Windows and Android provide manual Open cash
 drawer and Feed & cut paper controls. The drawer must connect to the printer's
@@ -82,7 +82,7 @@ Check the device after an error before sending another command.
 
 ## Device-specific checks when changing equipment
 
-These checks apply when installing a new client or changing equipment. They do not imply that the two shops already using Stockroom must restart hardware acceptance before using the supermarket workflow.
+These checks apply when installing a new client or changing equipment. Repository checks do not certify physical devices or establish which shops have deployed the current version.
 
 - Build/install the updated Android APK and test printing, cancellation, repeat
   jobs, app close/reopen, Save as PDF, both roll widths, long receipts, and A4.

@@ -1,6 +1,6 @@
 # Service payment workflow research
 
-Researched: 2026-10-03. This document records research and proposed design; it does not describe newly implemented features.
+Researched: 2026-10-03. This is a historical research/design snapshot, not the current capability inventory. Immediate payments and Jobs & invoices, including deposits and balance payments, have since been implemented. Use [Payments & receipts](payments-and-receipts.md) and [workspaces](workspaces.md) for current operations. Unimplemented ideas below remain proposals, and external references reflect the research date.
 
 ## Research scope
 

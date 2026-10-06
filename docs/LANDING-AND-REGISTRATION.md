@@ -4,7 +4,7 @@ This updates the existing Render service and Vercel project; do not create a sec
 
 The public page is available after deployment at `https://stockroom.globalcreest.com/welcome` using the app's existing domain. Vercel clean URLs hide the `.html` suffix. This works without adding another domain. `sbi.globalcreest.com` already serves a separate website and should remain attached to that deployment.
 
-The build contains two entry points:
+The build contains the main app plus public landing, developer, visitor and account-deletion entry points. The two ordinary customer URLs are:
 
 - `https://stockroom.globalcreest.com/welcome`: public landing page for Stockroom Business by S. B. Ibhadode technology.
 - `https://stockroom.globalcreest.com/`: existing PWA and sign-in page.
@@ -25,11 +25,11 @@ VITE_DESKTOP_DOWNLOAD_URL=<HTTPS URL of your published Windows installer>
 Download controls remain visibly unavailable until valid HTTPS release URLs are supplied. For large installers, use a **public Vercel Blob store** connected to this Vercel project rather than committing binaries into the app repository. Create it from the Vercel project's **Storage** tab, then upload production artifacts using the Vercel CLI, for example:
 
 ```powershell
-vercel blob put .\release\android\Stockroom-release.apk --pathname downloads/Stockroom-release.apk --access public
-vercel blob put ".\release\Stockroom Business Setup 1.0.7.exe" --pathname downloads/Stockroom-Business-Setup-1.0.7.exe --access public
+vercel blob put .\release\android\Stockroom-Android-VERSION-VERSIONCODE.apk --pathname downloads/Stockroom-Android-VERSION-VERSIONCODE.apk --access public
+vercel blob put ".\release\Stockroom Business Setup VERSION.exe" --pathname downloads/Stockroom-Business-Setup-VERSION.exe --access public
 ```
 
-Copy the public HTTPS URLs printed by the CLI into `VITE_APK_DOWNLOAD_URL` and `VITE_DESKTOP_DOWNLOAD_URL` in the Vercel project environment settings, then redeploy the frontend. Link the Windows `.exe` directly. Use Blob rather than the Hobby static deployment because this installer is about 188 MB, above the 100 MB static file limit. Vercel Blob is available on Hobby with a free allowance; monitor storage and download transfer in the Vercel dashboard because use beyond included quotas may be restricted on Hobby. The Android release command requires a production keystore through `ANDROID_RELEASE_KEYSTORE`, `ANDROID_RELEASE_STORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD`; it fails rather than silently shipping a debug-signed or unsigned APK. Keep the keystore and passwords private and backed up. Never put signing secrets or the cloud admin key in a `VITE_` variable.
+Copy the public HTTPS URLs printed by the CLI into `VITE_APK_DOWNLOAD_URL` and `VITE_DESKTOP_DOWNLOAD_URL` in the Vercel project environment settings, then redeploy the frontend. Replace VERSION and VERSIONCODE with the generated release filenames; `scripts/publish-android-release.mjs` creates versioned Android artifacts and refuses overwrites. Link the Windows `.exe` directly. Choose storage that accepts the actual artifact size and check your hosting account's current limits and charges; the repository does not establish its allowance. The Android release command requires a production keystore through `ANDROID_RELEASE_KEYSTORE`, `ANDROID_RELEASE_STORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD`; it fails rather than silently shipping a debug-signed or unsigned APK. Keep the keystore and passwords private and backed up. Never put signing secrets or the cloud admin key in a `VITE_` variable.
 
 On the cloud deployment configure:
 
@@ -64,6 +64,6 @@ The old owner-registration endpoint now requires a valid enrolled device token f
 
 ## Referrals and installation
 
-The public page fetches the configured business-owner and visitor-promoter reward percentages from `/v1/public/landing`. Visitors can create promoter accounts on `/welcome`; the account provides an invitation link and a view of verified commissions. New businesses opened from either kind of invitation retain the referral code through registration. Each referred business can generate rewards on up to four successful subscription payments. Every payment counts once regardless of whether it grants monthly, yearly or Enterprise access. Rates are saved when checkout starts. Payouts are arranged manually.
+The public page fetches the configured business-owner and visitor-promoter reward percentages from `/v1/public/landing`. Visitors can create promoter accounts on `/welcome`; the account provides an invitation link and a view of verified commissions. New businesses opened from either kind of invitation retain the referral code through registration. Each referred business can generate rewards on up to four successful subscription payments. Every payment counts once regardless of whether it grants monthly, yearly or Enterprise access. Rates are saved when checkout starts. Payouts support configured Paystack transfers for supported destinations and currencies, with manual handling or review when required; see [subscriptions and payouts](subscriptions.md).
 
-PWA installation belongs to the **app origin**. On the separate public domain the PWA button opens the app, where supported browsers expose installation. On iOS use Safari's Share → Add to Home Screen. Do not install a second copy on the marketing origin and expect it to share the app origin's local database.
+PWA installation belongs to the **app origin**. The public landing page uses the same configured Stockroom domain and its PWA button opens the app, where supported browsers expose installation. On iOS use Safari's Share → Add to Home Screen. Do not install a second copy on the marketing origin and expect it to share the app origin's local database.

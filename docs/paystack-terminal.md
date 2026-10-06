@@ -1,6 +1,6 @@
 # Paystack Terminal setup
 
-The cashier adds items, chooses **Payment terminal**, enables **Use connected Paystack terminal**, and presses **Send amount to Paystack terminal**. The customer pays on the terminal. The app checks Paystack and enables **Complete sale** after the payment amount and currency match. No card details are entered into Stockroom.
+The cashier adds items, chooses **POS**, enables **Use connected Paystack POS**, and presses **Send amount to Paystack POS**. The customer pays on the terminal. The app checks Paystack and enables **Complete sale** after the payment amount and currency match. No card details are entered into Stockroom.
 
 ## What the shop needs
 
@@ -35,7 +35,7 @@ The app stores the order's invoice before sending it to the terminal. Repeated r
 
 If the connection fails, use **Check payment status** before asking the customer to pay again. Keep the basket unchanged while its payment is unresolved. If invoice creation is marked uncertain, reconcile it in the Paystack dashboard with the server operator before taking a replacement payment; automatic cancellation and uncertain-request recovery are not implemented.
 
-This integration does not issue automatic Paystack refunds. For an external refund, complete it through the provider, then record the returned items and refund reference in **POS tools**. Ordinary basket quantity changes remain ordinary edits to an unpaid basket.
+This integration does not issue automatic Paystack refunds. For an external refund, complete it through the provider, then record the returned items and refund reference in **Sales history > Returns**. Ordinary basket quantity changes remain ordinary edits to an unpaid basket.
 
 ## Verification before use
 

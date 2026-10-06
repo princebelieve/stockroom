@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildReports } from '../server/reports.mjs'
 
-const date = new Date(2026, 9, 14, 12)
-const current = new Date(2026, 9, 14, 10).toISOString()
-const old = new Date(2026, 8, 30, 10).toISOString()
+const date = new Date('2026-10-14T12:00:00Z')
+const current = '2026-10-14T10:00:00Z'
+const old = '2026-09-30T10:00:00Z'
 const data = {
   sales: [{ id: 'basket', total: 30, createdAt: current }, { id: 'old', total: 100, createdAt: old }],
   items: [{ saleId: 'basket', quantity: 2, unitCost: 4 }, { saleId: 'basket', quantity: 1, unitCost: 6 }, { saleId: 'old', quantity: 1, unitCost: 40 }],
@@ -76,4 +76,41 @@ test('stock shortages and closed-register differences affect profit once; suppli
   assert.equal(result.supermarket.cashSurplus,2)
   assert.equal(result.profit.amount,2)
   assert.equal(result.profit.expenses,3)
+})
+
+
+test('business timezone controls day, Monday week, month, expenses and expiry', () => {
+  const result = buildReports({ sales: [
+    { id: 'before', total: 10, createdAt: '2026-10-31T22:59:59Z' },
+    { id: 'start', total: 20, createdAt: '2026-10-31T23:00:00Z' },
+    { id: 'future', total: 99, createdAt: '2026-11-01T01:00:01Z' },
+  ], items: [], products: [], expenses: [{ amount: 3, incurredAt: '2026-11-01' }],
+    reportingTimeZone: 'Africa/Lagos', batches: [{ quantity: 1, expiry: '2026-10-31' }, { quantity: 1, expiry: '2026-11-01' }],
+  }, new Date('2026-11-01T01:00:00Z'))
+  assert.deepEqual(result.daily, { total: 20, count: 1 })
+  assert.deepEqual(result.monthly, { total: 20, count: 1 })
+  assert.deepEqual(result.weekly, { total: 30, count: 2 })
+  assert.equal(result.profit.expenses, 3)
+  assert.equal(result.supermarket.expired.length, 1)
+})
+
+test('business days follow daylight saving and offset changes', () => {
+  const result = buildReports({ sales: [
+    { id: 'previous', total: 1, createdAt: '2026-11-01T06:59:59Z' },
+    { id: 'midnight', total: 2, createdAt: '2026-11-01T07:00:00Z' },
+    { id: 'first-hour', total: 3, createdAt: '2026-11-01T08:30:00Z' },
+    { id: 'repeated-hour', total: 4, createdAt: '2026-11-01T09:30:00Z' },
+  ], items: [], products: [], expenses: [], reportingTimeZone: 'America/Los_Angeles' }, new Date('2026-11-02T07:59:59Z'))
+  assert.deepEqual(result.daily, { total: 9, count: 3 })
+  assert.deepEqual(result.monthly, { total: 9, count: 3 })
+})
+
+test('report results do not depend on host timezone', () => {
+  const original = process.env.TZ
+  try {
+    process.env.TZ = 'Pacific/Auckland'
+    const first = buildReports({ ...data, reportingTimeZone: 'America/Los_Angeles' }, date)
+    process.env.TZ = 'America/New_York'
+    assert.deepEqual(buildReports({ ...data, reportingTimeZone: 'America/Los_Angeles' }, date), first)
+  } finally { if (original === undefined) delete process.env.TZ; else process.env.TZ = original }
 })

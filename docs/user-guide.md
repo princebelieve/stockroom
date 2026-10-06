@@ -1,6 +1,6 @@
 # Stockroom owner and cashier user guide
 
-This guide follows the current app screens. Availability depends on your workspace, role and platform. Use the amounts, plan terms and warnings displayed in your installed app.
+This guide follows the current app screens. Availability depends on your workspace, role and platform. Use the amounts, plan terms and warnings displayed in your installed app. Its chapters match `src/user-guide.json`, used by Help and Download full guide.
 
 ## Contents
 
@@ -106,6 +106,7 @@ This guide follows the current app screens. Availability depends on your workspa
 3. Choose Order counter only or Tables & tabs only when that is your main workflow. The separate enable checkboxes can add these workflows to another screen selection.
 4. Select Save payment screens. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.
 5. For stock/product forms, use Choose template, Customize fields, then Preview and save. Review categories, unit, labels and custom fields before saving.
+6. Set Reporting timezone to the business timezone, such as Africa/Lagos. Select Save reporting timezone, then Sync now. Businesses without a saved timezone default to UTC.
 
 **Remember:** Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices.
 
@@ -167,7 +168,7 @@ This guide follows the current app screens. Availability depends on your workspa
 4. Save the recipe and test a clearly identified preparation order.
 5. When preparation starts, check the ingredient reduction and recorded cost. Review the recipe if quantities or units are wrong.
 
-**Remember:** Ingredients are consumed when preparation starts, once per saved preparation batch. Payment must not consume them again. Cancelling/refunding prepared food does not automatically restore ingredients already used.
+**Remember:** Ingredients are consumed when preparation starts, once per saved order. Payment must not consume them again. Cancelling/refunding prepared food does not automatically restore ingredients already used.
 
 ## Menu settings > Packaged stock
 
@@ -351,17 +352,17 @@ This guide follows the current app screens. Availability depends on your workspa
 4. Use the offered report export/print action for the current data.
 5. Review missing costs before relying on the profit estimate.
 
-**Remember:** Reports use saved records. Prepared items without recipes have untracked ingredient costs. The performance view is platform-dependent; do not enter purchased stock again as a running expense.
+**Remember:** Reports use saved records. Prepared items without recipes have untracked ingredient costs. The performance view is platform-dependent; do not enter purchased stock again as a running expense. Reports use the saved business reporting timezone shown on the report; date-only expenses keep their entered business date. Synchronize settings and records before comparing devices.
 
 ## Staff & access and Staff activity
 
 1. As owner, open Staff & access > Team members to review names, usernames, roles and operational access.
 2. Choose Add staff, enter the requested details and temporary password, then confirm the username and owner credentials when prompted.
 3. Give the staff member their username and temporary password securely. Grant only the access their job needs.
-4. Use Staff passwords for the supported recovery/reset process.
+4. Use Staff passwords for recovery/reset. To revoke access, choose Remove staff beside an admin or cashier, read the warning, and enter your owner password. Cancel makes no change; the red Confirm staff removal button submits the request. Synchronize other devices afterward.
 5. Open Staff activity to select branch/person/date range and review recorded sales, expenses and voids.
 
-**Remember:** Staff creation/recovery requires the appropriate online owner verification. Cashiers use their staff username; the owner uses the registered email. Admin access does not automatically grant every owner setting.
+**Remember:** Staff creation/recovery requires the appropriate online owner verification. Cashiers use their staff username; the owner uses the registered email. Only owners can remove staff. Removal preserves sales and activity history, blocks cloud access immediately, and reaches offline devices when they reconnect and sync. Removed usernames remain reserved for historical identity. Admin access does not automatically grant every owner setting.
 
 ## Sync now and Sync issues
 
@@ -377,10 +378,10 @@ This guide follows the current app screens. Availability depends on your workspa
 
 1. Open Subscription for owner referral links, rewards and payout controls where available. Customer accounts are a different balance system.
 2. Before leaving, use the offered export controls and check that you can open the downloaded files.
-3. Open Close your account only when you intend the displayed account/business closure. Read the confirmation and effects before submitting.
+3. Only owners can open Close business account. Choose Delete business account to read the warning screen. Choose Cancel to leave without submitting, or type DELETE and use the red Confirm account deletion button when ready. Staff cannot close their accounts.
 4. Manage recurring billing through its supplied subscription/provider controls as directed; do not assume deleting local app files cancels billing.
 
-**Remember:** Closing an account is consequential. Follow the actual confirmation screen and retain necessary business records first.
+**Remember:** Closure deactivates cloud access immediately and schedules deletion after the displayed waiting period (14 days by default). Cancel before the deadline to restore access. Export necessary records and manage recurring subscriptions separately. Offline device copies are not remotely erased.
 
 ## End-of-day checklist and when help is needed
 

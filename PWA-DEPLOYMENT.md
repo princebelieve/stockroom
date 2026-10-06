@@ -69,7 +69,7 @@ sign-in after logout, staff administration and password reset need internet acce
 After setup, an existing signed-in session can reopen and work offline. Owner
 sign-in renews the same device's token without deleting its database or outbox.
 Account deletion requests and cancellation require an online cloud connection.
-The developer sets the waiting period in the Control Centre; it defaults to 90
+The developer sets the waiting period in the Control Centre; it defaults to 14
 days. Closing a business owner account stops its cloud sync immediately and
 deletes its cloud records on the scheduled date. Offline device copies remain on
 those devices and must be cleared separately.
@@ -77,7 +77,7 @@ those devices and must be cleared separately.
 ## Daily use and updates
 
 - Inventory, cash/external-terminal sales, customer balances, expenses, reports,
-  CSV export, staff management and cloud sync have browser implementations.
+  CSV export, staff management and cloud sync have browser implementations. Payments & receipts (including Jobs & invoices), Order counter and Tables & tabs are also implemented; see [workspaces](docs/workspaces.md).
 - **Sync now** is visible on phones and uploads queued changes. Keep the app open
   until it finishes. If more than 500 changes were queued, repeat until the queued
   count reaches zero. iOS background execution is not required or promised.
@@ -95,10 +95,10 @@ those devices and must be cleared separately.
   applies the variance to current stock, preserving sales recorded since counting
   began, and refuses any adjustment that would make local stock negative.
   Update the Android APK before relying on it to receive stocktake approvals;
-  this change adds the missing Android reader for those sync operations.
+  current Android clients include the reader for those sync operations.
 - Customer balance adjustments and policy-enabled wallet checkout are supported;
   credit approval is owner-only. Physical terminal and printer support depends on the browser;
-  external-terminal payments use manual references and receipts use browser print.
+  external-terminal payments use manual references or the configured connected Paystack POS integration in Product sales; receipts use browser print.
 
 Before live use, verify on the actual iPhone: enrollment, login/logout, an offline
 sale, closing/reopening offline, reconnecting and syncing, stock arriving from

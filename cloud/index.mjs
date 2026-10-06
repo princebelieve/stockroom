@@ -1,3 +1,4 @@
+import { createStaffRemoval } from './staff-removal.mjs'
 import { validateServiceJob, requiresServiceJobSync } from '../server/service-jobs.mjs'
 import { floorId,restaurantTabs,billContains,validateRestaurantFloor } from '../server/restaurant-floor.mjs'
 import { validateRestaurantLedger, restaurantLedgerId, restaurantReceiptHash, restaurantOrderPayment } from '../server/restaurant-payments.mjs'
@@ -205,6 +206,8 @@ async function serializeBusinessSync(businessId,job) {
   businessSyncJobs.set(businessId,next)
   try{return await next}finally{if(businessSyncJobs.get(businessId)===next)businessSyncJobs.delete(businessId)}
 }
+const staffRemoval = createStaffRemoval({ accounts, refreshTokens, operations, verifyToken, ownerPasswordIsValid, readJson, send })
+
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   // Referral percentages are intentionally public. They are displayed on the
@@ -226,6 +229,8 @@ const server = createServer(async (request, response) => {
         visitorRecurringReferralPercent: plan?.visitorRecurringReferralPercent == null ? null : Number(plan.visitorRecurringReferralPercent),
       })
     }
+    if (await staffRemoval.blocked(request)) return send(response, 403, { error: 'Your staff access has been removed by the owner.' })
+    if (await staffRemoval.handle(request, response)) return
     if (await accountDeletion.handle(request, response)) return
     const deletionBlock = await accountDeletion.blocked(request)
     if (deletionBlock) return send(response, 403, { error: deletionBlock })
@@ -279,7 +284,7 @@ const server = createServer(async (request, response) => {
       const account = email
         ? await accounts.findOne({ email, role: 'owner' })
         : await accounts.findOne({ businessId, username: staffUsername, role: { $in: ['admin', 'cashier'] } })
-      if (!account || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Username or password is incorrect.' })
+      if (!account || account.removedAt || !matchesPassword(String(input.password || ''), account.passwordHash)) return send(response, 401, { error: 'Username or password is incorrect.' })
       if (await businessExitPayments.findOne({ _id: account.businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       return send(response, 200, await cloudSession(account))
     }
@@ -292,7 +297,7 @@ const server = createServer(async (request, response) => {
       const saved = await refreshTokens.findOne({ tokenHash, expiresAt: { $gt: new Date() } })
       if (!saved) return send(response, 401, { error: 'Cloud session renewal expired. Sign in again.' })
       const account = await accounts.findOne({ _id: saved.accountId })
-      if (!account) return send(response, 401, { error: 'Cloud account is no longer available.' })
+      if (!account || account.removedAt) return send(response, 401, { error: 'Cloud account is no longer available.' })
       if (await businessExitPayments.findOne({ _id: account.businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       return send(response, 200, { account: publicAccount(account), accessToken: accessToken(account), refreshToken: String(input.refreshToken) })
     }
@@ -302,7 +307,7 @@ const server = createServer(async (request, response) => {
       const account = claims.role === 'owner'
         ? await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
         : await accounts.findOne({ businessId: claims.businessId, username: claims.username, role: { $in: ['admin', 'cashier'] } })
-      if (!account) return send(response, 401, { error: 'Account not found.' })
+      if (!account || account.removedAt) return send(response, 401, { error: 'Account not found.' })
       return send(response, 200, { account: publicAccount(account) })
     }
     if (request.method === 'POST' && request.url === '/v1/auth/password-reset/request') {
@@ -400,7 +405,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/v1/staff') {
       if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       const staff = await Promise.all((await accounts.find({ businessId: claims.businessId }).sort({ createdAt: 1 }).toArray()).map(assignLegacyStaffUsername))
-      return send(response, 200, { users: staff.map((account) => ({ ...publicAccount(account), createdAt: account.createdAt })) })
+      return send(response, 200, { users: staff.map((account) => ({ ...publicAccount(account), createdAt: account.createdAt, removedAt: account.removedAt || null })) })
     }
     const accessMatch = request.url?.match(/^\/v1\/staff\/([^/]+)\/operational-access$/)
     if (request.method === 'PUT' && accessMatch) {
@@ -408,7 +413,7 @@ const server = createServer(async (request, response) => {
       if (!ObjectId.isValid(accessMatch[1])) return send(response, 400, { error: 'Invalid staff account.' })
       const input = await readJson(request)
       if (!await ownerPasswordIsValid(claims, input.ownerPassword)) return send(response, 401, { error: 'Owner password confirmation is required to change cashier access.' })
-      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(accessMatch[1]), businessId: claims.businessId, role: 'cashier' }, { $set: { operationalAccess: input.enabled === true } }, { returnDocument: 'after' })
+      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(accessMatch[1]), businessId: claims.businessId, role: 'cashier', removedAt: { $exists: false } }, { $set: { operationalAccess: input.enabled === true } }, { returnDocument: 'after' })
       if (!updated) return send(response, 404, { error: 'Cashier account not found.' })
       return send(response, 200, { account: publicAccount(updated) })
     }
@@ -421,7 +426,7 @@ const server = createServer(async (request, response) => {
       const role = String(input.role || '').trim().toLowerCase()
       if (!['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Role must be admin or cashier.' })
       const operationalAccess = role === 'admin' ? true : input.operationalAccess === true
-      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(roleMatch[1]), businessId: claims.businessId, role: { $in: ['admin', 'cashier'] } }, { $set: { role, operationalAccess } }, { returnDocument: 'after' })
+      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(roleMatch[1]), businessId: claims.businessId, role: { $in: ['admin', 'cashier'] }, removedAt: { $exists: false } }, { $set: { role, operationalAccess } }, { returnDocument: 'after' })
       if (!updated) return send(response, 404, { error: 'Staff account not found.' })
       return send(response, 200, { account: publicAccount(updated) })
     }
@@ -432,7 +437,7 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request)
       const password = String(input.password || '')
       if (password.length < 10) return send(response, 400, { error: 'Password must be at least 10 characters.' })
-      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(passwordMatch[1]), businessId: claims.businessId, role: { $in: ['admin', 'cashier'] } }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
+      const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(passwordMatch[1]), businessId: claims.businessId, role: { $in: ['admin', 'cashier'] }, removedAt: { $exists: false } }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
       if (!updated) return send(response, 404, { error: 'Staff account not found.' })
       await refreshTokens.deleteMany({ accountId: updated._id })
       return send(response, 200, { account: publicAccount(updated) })
@@ -485,6 +490,7 @@ const server = createServer(async (request, response) => {
         const access = await subscriptionHandler.access(businessId)
         if (access.blocked) return send(response, 402, { error: access.reason, status: access.status })
       }
+      if (incoming.some(operation => operation.entityType === 'staff_removal')) return send(response, 403, { error: 'Staff removal requires owner authentication.' })
       const documents = incoming.map((operation) => ({ businessId, deviceId, operationId: String(operation.operationId), entityType: String(operation.entityType), entityId: String(operation.entityId), action: String(operation.action), payload: operation.payload || {}, createdAt: operation.createdAt || new Date().toISOString(), receivedAt: new Date() }))
       const acceptedOperationIds = []
       const conflicts = []
@@ -714,6 +720,7 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
+      if (query.get('staffCapability') !== 'staff-removal-v1' && rows.some(row => row.entityType === 'staff_removal')) return send(response, 426, { error: 'Update this device to apply staff access removals.' })
       if(query.get('serviceJobCapability')!=='service-jobs-v1' && rows.some(requiresServiceJobSync)) return send(response,426,{error:'Update this device to synchronize service jobs and invoice payments.'})
       if (query.get('restaurantCapability') !== 'restaurant-v2' && rows.some(row=>['restaurant-layout','restaurant-tab','restaurant-ledger','restaurant-floor'].includes(row.payload?.kind) || row.payload?.paymentDetails?.restaurantBill || row.payload?.id === 'restaurant-menu' || row.payload?.tableService || row.payload?.paymentDetails?.counterOrder?.tableService || row.payload?.shopProfile?.restaurant || row.payload?.shopProfile?.workflows === 'restaurant')) return send(response,426,{error:'Update this device to synchronize Restaurant & bar tables, bills and orders.'})
       if (query.get('capabilities') !== 'counter-v3' && rows.some(row => ['counter-menu', 'counter-order', 'counter-consumption'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })

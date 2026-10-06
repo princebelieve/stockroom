@@ -1,3 +1,5 @@
+import { salesHistory } from './sales-history.mjs'
+import { database } from './db.mjs'
 import { validQuantity } from './quantities.mjs'
 import { retailAction } from './db.mjs'
 import { posAction } from './db.mjs'
@@ -8,10 +10,10 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, exportProductCatalogCsv, updateSettings, storageName } from './repository.mjs'
-import { authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
+import { recordStaffRemovalLocal, authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { cloudRemoveStaff, cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
@@ -36,11 +38,11 @@ const server = createServer(async (request, response) => {
   if (request.url?.startsWith('/api/cloud/')) {
     const user = savedSessionUser(String(request.headers['x-local-session'] || ''))
     const path = request.url.slice('/api/cloud'.length)
-    const accountDeletionRoute = path === '/v1/account-deletion/me'
+    const sessionRefreshRoute = path === '/v1/auth/refresh'
     const notificationRoute = path.startsWith('/v1/notifications/')
     const productFormRoute = ['/v1/product-forms/status', '/v1/product-forms/read'].includes(path)
     const referralWalletRoute = ['/v1/referral-wallet/me', '/v1/referral-wallet/payouts', '/v1/referral-wallet/banks', '/v1/referral-wallet/resolve', '/v1/referral-wallet/profile'].includes(path.split('?')[0])
-    if (!user || (!accountDeletionRoute && !notificationRoute && user.role !== 'owner')) return sendJson(response, 401, { error: accountDeletionRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
+    if (!user || (!sessionRefreshRoute && !notificationRoute && user.role !== 'owner')) return sendJson(response, 401, { error: sessionRefreshRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
     if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
@@ -181,6 +183,15 @@ const server = createServer(async (request, response) => {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
     try { return sendJson(response, 201, await createCustomer(input)) } catch (error) { return sendJson(response, 400, { error: error.message }) }
   })
+  if (request.method === 'GET' && request.url === '/api/sales/history') {
+    const user=sessionUser(request)
+    if (!canOperate(user)) return sendJson(response,403,{error:'Operational access required.'})
+    try {
+      const db={query:async(sql,params=[])=>({values:database.prepare(sql).all(...params)})}
+      const profile=(await getSettings()).shopProfile
+      return sendJson(response,200,await salesHistory(db,{organizationId:user.organizationId,branchId:requestBranch(request),timeZone:profile?.reportingTimeZone || 'UTC',query:decodeURIComponent(String(request.headers['x-history-query']||'')),from:String(request.headers['x-history-from']||''),to:String(request.headers['x-history-to']||''),page:Number(request.headers['x-history-page']||0)}))
+    } catch(error) {return sendJson(response,400,{error:error.message})}
+  }
   if (request.method === 'GET' && request.url === '/api/sales') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
     return sendJson(response, 200, { sales: await listSales(100, requestBranch(request)) })
@@ -319,6 +330,22 @@ const server = createServer(async (request, response) => {
         const cloud = await cloudCreateStaff(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), input)
         return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id, createdAt: cloud.account.createdAt || new Date().toISOString() }))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+  const staffRemovalMatch = request.url?.match(/^\/api\/users\/([^/]+)\/remove$/)
+  if (request.method === 'POST' && staffRemovalMatch) {
+    const user=sessionUser(request)
+    if (!user || user.role !== 'owner') return sendJson(response,403,{error:'Owner access required.'})
+    return readJson(request,response,async input=>{
+      try {
+        if (input.confirmation !== 'REMOVE') throw new Error('Confirm staff removal.')
+        const token=String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || '')
+        const configured=await getCloudConfiguration()
+        await cloudOwnerForBusiness(token,configured.businessId)
+        const result=await cloudRemoveStaff(token,staffRemovalMatch[1],String(input.ownerPassword || ''))
+        recordStaffRemovalLocal(result.id,String(result.removedAt))
+        return sendJson(response,200,result)
+      } catch(error) { return sendJson(response,400,{error:error.message}) }
     })
   }
   const userRoleMatch = request.url?.match(/^\/api\/users\/([^/]+)\/role$/)

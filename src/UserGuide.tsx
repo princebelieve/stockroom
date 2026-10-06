@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { BookOpen, Download, Search } from 'lucide-react'
 import chapters from './user-guide.json'
 
-export function UserGuide() {
+export function UserGuide({ role }: { role: string }) {
+  const visibleChapters = chapters.filter(chapter => role === 'owner' || chapter.id !== 'section-33')
   const [query,setQuery]=useState(''),[topic,setTopic]=useState(chapters[0].id)
-  const matches=chapters.filter(chapter=>[chapter.title,...chapter.steps,chapter.note].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
+  const matches=visibleChapters.filter(chapter=>[chapter.title,...chapter.steps,chapter.note].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
   const current=matches.find(chapter=>chapter.id===topic)||matches[0]
   function download(){
-    const text=chapters.map(chapter=>chapter.title+'\n\n'+chapter.steps.map((step,index)=>(index+1)+'. '+step).join('\n')+'\n\nRemember: '+chapter.note).join('\n\n')
+    const text=visibleChapters.map(chapter=>chapter.title+'\n\n'+chapter.steps.map((step,index)=>(index+1)+'. '+step).join('\n')+'\n\nRemember: '+chapter.note).join('\n\n')
     const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}))
     const link=document.createElement('a');link.href=url;link.download='Stockroom-user-guide.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
   }

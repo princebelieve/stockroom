@@ -36,6 +36,7 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
     const claims = verifyToken(request)
     const who = await identity(claims)
     if (!who) { response.writeHead(401, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'Sign in to manage account closure.' })); return true }
+    if (who.type === 'account') { response.writeHead(403, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'Only the owner can manage staff access. Staff cannot request account deletion.' })); return true }
     response.setHeader('Cache-Control', 'no-store')
     if (request.method === 'GET') {
       const result = await present(claims)
@@ -43,8 +44,9 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
     }
     if (request.method !== 'POST') { response.writeHead(405, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'Method not allowed.' })); return true }
     let input
-    try { input = JSON.parse(await new Promise((resolve, reject) => { let data = ''; request.on('data', chunk => { data += chunk; if (data.length > 4096) reject(new Error('Request too large.')) }); request.on('end', () => { try { resolve(JSON.parse(data || '{}')) } catch { reject(new Error('Invalid JSON.')) } }) })) }
+    try { input = await new Promise((resolve, reject) => { let data = ''; request.on('data', chunk => { data += chunk; if (data.length > 4096) reject(new Error('Request too large.')) }); request.on('end', () => { try { resolve(JSON.parse(data || '{}')) } catch { reject(new Error('Invalid JSON.')) } }) }) }
     catch (error) { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: error.message })); return true }
+    if (!input || typeof input !== 'object' || Array.isArray(input)) { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'Send an account closure action.' })); return true }
     const action = String(input.action || '')
     if (action === 'request') {
       if (input.confirmation !== 'DELETE') { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'Type DELETE to confirm your request.' })); return true }
@@ -76,7 +78,7 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
     const claims = verifyToken(request)
     if (!claims) return null
     const url = new URL(request.url, 'http://localhost')
-    if (url.pathname === '/v1/account-deletion/me') return null
+    if (['/v1/account-deletion/me', '/v1/auth/refresh'].includes(url.pathname)) return null
     if (url.pathname === '/v1/devices/enroll' && claims.kind === 'access' && claims.role === 'owner') return null
     if (claims.kind === 'device' && claims.businessId) {
       const closing = await requests.findOne({ type: 'business', businessId: claims.businessId, status: { $in: ['pending', 'processing'] } })
@@ -84,20 +86,27 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
     }
     const who = await identity(claims)
     if (!who) return null
-    if (who.type === 'business') {
+    if (who.businessId) {
       const closing = await requests.findOne({ type: 'business', businessId: who.businessId, status: { $in: ['pending', 'processing'] } })
-      return closing ? 'This business is inactive while its account deletion request is pending. Open Account deletion to cancel the request before its scheduled date.' : null
+      if (closing) return 'This business is inactive while its account deletion request is pending. The owner can cancel the request before its scheduled date.'
     }
     const pending = await pendingFor(who)
     return pending ? 'This account is inactive while its deletion request is pending. Open Account deletion to cancel before its scheduled date.' : null
+  }
+
+  async function eraseNotifications(recipientKeys) {
+    for (const name of ['app_notifications', 'push_subscriptions', 'fcm_push_subscriptions']) await database.collection(name).deleteMany({ recipientKey: { $in: recipientKeys } })
   }
 
   async function erase(request) {
     if (request.type === 'business') {
       const businessId = request.businessId
       const accountIds = (await accounts.find({ businessId }).project({ _id: 1 }).toArray()).map(row => row._id)
-      const scoped = ['accounts', 'devices', 'business_settings', 'sync_operations', 'sync_entity_heads', 'subscription_payments', 'google_play_purchases', 'enterprise_subscription_requests', 'business_registration_keys', 'auth_refresh_tokens']
+      await eraseNotifications(accountIds.map(id => `account:${id}`))
+      const scoped = ['accounts', 'devices', 'business_settings', 'sync_operations', 'sync_entity_heads', 'subscription_payments', 'google_play_purchases', 'enterprise_subscription_requests', 'business_registration_keys', 'auth_refresh_tokens', 'inventory_alert_state', 'supermarket_resources', 'supermarket_admissions', 'product_form_ocr_usage']
       for (const name of scoped) await database.collection(name).deleteMany({ businessId })
+      const prefix = `^${businessId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`
+      for (const name of ['supermarket_admissions', 'product_form_ocr_usage']) await database.collection(name).deleteMany({ _id: { $regex: prefix } })
       await database.collection('password_resets').deleteMany({ accountId: { $in: accountIds } })
       await database.collection('subscriptions').deleteOne({ _id: businessId })
       await database.collection('subscription_notices').deleteMany({ _id: { $regex: `^${businessId}:` } })
@@ -110,11 +119,13 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
       await database.collection('referral_payouts').updateMany({ referrerId: businessId, referrerType: 'business' }, { $unset: { referrerName: '', referrerEmail: '', recipientCode: '' } })
       await requests.deleteMany({ businessId, _id: { $ne: request._id } })
     } else if (request.type === 'account') {
+      await eraseNotifications([`account:${request.subjectId}`])
       await accounts.deleteOne({ _id: request.subjectId })
       await refreshTokens.deleteMany({ accountId: request.subjectId })
       await database.collection('password_resets').deleteMany({ accountId: request.subjectId })
     } else if (request.type === 'visitor') {
       const id = String(request.subjectId)
+      await eraseNotifications([`visitor:${id}`])
       await visitors.deleteOne({ _id: id })
       await database.collection('subscription_referrals').deleteOne({ _id: `visitor:${id}` })
       await database.collection('referral_commissions').updateMany({ referrerId: id, referrerType: 'visitor' }, { $unset: { referrerName: '', referrerEmail: '' } })
@@ -144,5 +155,5 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
   void processDue().catch(error => console.error('Could not process scheduled account deletions.', error instanceof Error ? error.message : 'Unknown error.'))
   const worker = setInterval(() => { void processDue().catch(error => console.error('Could not process scheduled account deletions.', error instanceof Error ? error.message : 'Unknown error.')) }, 15 * 60_000)
   worker.unref?.()
-  return { handle, blocked }
+  return { handle, blocked, processDue }
 }

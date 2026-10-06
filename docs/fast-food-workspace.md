@@ -7,12 +7,12 @@ Fast food is a separate, optional workspace for counter-service orders. Enabling
 Open **Business settings > Workspaces**:
 
 - Choose **Order counter only** under **Payment screens** for a dedicated workspace.
-- To keep stock checkout or payment entry as well, choose those screens and check **Enable separate Order counter workspace**.
+- To keep stock checkout or payment entry as well, choose those screens and check **Enable separate Order counter**.
 - Click **Save payment screens**. Use **Sync now** to share the setting with other devices.
 
 Open **Business settings > Food menu & recipes > Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.
 
-Choose **Prepared food** for meals made to order. They require no inventory product and do not deduct stock. Choose **Packaged goods** for bottled drinks or other stocked goods and link an existing product. **Packaged stock** lets owners/admins create and restock packaged products within this workspace. Restocking there is a stock adjustment at the product's saved cost; it is not a supplier invoice or payment.
+Choose **Prepared food or drinks** for meals made to order. They require no linked finished-product inventory record. Configured recipes deduct raw ingredients when preparation starts; prepared items without recipes do not consume tracked stock. Choose **Packaged goods** for bottled drinks or other stocked goods and link an existing product. **Packaged stock** lets owners/admins create and restock packaged products within this workspace. Restocking there is a stock adjustment at the product's saved cost; it is not a supplier invoice or payment.
 
 ## Daily operation
 
@@ -101,3 +101,7 @@ Printing uses the same configured 58 mm or 80 mm receipt printer for payment rec
 In **New order > Customer and order details**, choose **Takeaway** (default), **Dine in**, or **Delivery**. This describes how to hand over the order; it does not add table billing or dispatch tracking. The saved order and preparation ticket retain the choice.
 
 Use **Take payment > Payment Method > Split payment** when one order is paid using more than one method. Enter each cash, POS Terminal or Bank Transfer part; the parts must match the order total. If cash handed over exceeds its part, enter it to calculate change. Confirm external payment parts before saving. One receipt lists the parts; stock and ingredients are still charged only once.
+
+## Reporting periods
+
+Financial reports use the saved business reporting timezone, configured under Business settings > Workspaces and shared with Sync now. Existing businesses default to UTC. See [report calculations](report-calculations.md) for period boundaries and preparation-cost treatment.
