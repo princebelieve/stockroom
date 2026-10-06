@@ -1,5 +1,9 @@
 export type Product = {
   baseProductId?: string
+  saleFactor?: number
+  saleUnit?: string
+  baseUnit?: string
+  saleConversionId?: string
   customValues?: Record<string, string> | string
   id: string
   name: string

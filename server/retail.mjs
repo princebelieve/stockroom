@@ -74,7 +74,7 @@ export function validateRetailRecord(record) {
   if (!Number.isFinite(Date.parse(record.createdAt))) throw new Error('Invalid purchasing record date.')
   if (record.kind === 'supplier') text(record.name, 'a supplier name')
   else if (['supplier-opening','supplier-payment','supplier-refund'].includes(record.kind)) { text(record.supplierId,'a supplier'); text(record.reference,'a reference'); if(!Number.isFinite(record.amount) || !Number.isSafeInteger(Math.round(record.amount*100)) || Math.abs(record.amount*100-Math.round(record.amount*100))>0.000001 || (record.kind!=='supplier-opening' && record.amount<=0))throw new Error('Invalid supplier amount.') }
-  else if (record.kind === 'conversion') { text(record.productId, 'a product ID'); text(record.label, 'a pack name'); quantity(record.factor, 0.001) }
+  else if (record.kind === 'conversion') { text(record.productId, 'a product ID'); text(record.label, 'a pack name'); quantity(record.factor, 0.001); if (record.sellInPos === true) cost(record.salePrice) }
   else if (record.kind === 'pricing') { text(record.productId, 'a product ID'); cost(record.price); cost(record.cost); text(record.reason, 'a price-change reason') }
   else if (record.kind === 'batch-update') { text(record.batchId, 'a batch ID'); expiryDate(record.expiry); text(record.reason, 'a batch-change reason') }
   else {
@@ -149,7 +149,7 @@ export async function handleRetail({ db, scope, organizationId, branchId, user, 
   }
   else if (record.kind === 'conversion') {
     if (!(await db.query('SELECT id FROM products WHERE id=?', [input.productId])).values.length) throw new Error('Choose an existing product.')
-    Object.assign(record, { productId: input.productId, label: text(input.label, 'a pack name'), factor: quantity(input.factor, 0.001) })
+    Object.assign(record, { productId: input.productId, label: text(input.label, 'a pack name'), factor: quantity(input.factor, 0.001), sellInPos: input.sellInPos === true, ...(input.sellInPos === true ? { salePrice: cost(input.salePrice) } : {}) })
   } else if (record.kind === 'pricing') {
     const current=(await db.query('SELECT price,cost_price,barcode,updated_at FROM products WHERE id=?',[input.productId])).values[0]
     if(!current)throw new Error('Choose an existing product.')

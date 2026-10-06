@@ -6,8 +6,8 @@ import type { Customer, Product, Sale } from './types'
 import { posSettings, type PosSettings } from '../server/pos-pricing.mjs'
 import { AsyncButton, AsyncForm, SubmitButton } from './AsyncControls'
 
-export type PosData = { settings: PosSettings; loyaltyBalances: Record<string, number>; baskets: any[]; registers: any[]; returns: any[]; products: any[]; customerHistory: any[]; customers: Customer[] }
-export const emptyPosData: PosData = { settings: posSettings(), loyaltyBalances: {}, baskets: [], registers: [], returns: [], products: [], customerHistory: [], customers: [] }
+export type PosData = { settings: PosSettings; loyaltyBalances: Record<string, number>; baskets: any[]; registers: any[]; returns: any[]; products: any[]; saleConversions: any[]; customerHistory: any[]; customers: Customer[] }
+export const emptyPosData: PosData = { settings: posSettings(), loyaltyBalances: {}, baskets: [], registers: [], returns: [], products: [], saleConversions: [], customerHistory: [], customers: [] }
 export async function posRequest(path: string, headers: Record<string, string>, input?: unknown) {
   const response = await fetch(path, { method: input === undefined ? 'GET' : 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, ...(input === undefined ? {} : { body: JSON.stringify(input) }) })
   const result = await response.json()

@@ -6,6 +6,7 @@ import { applyConsumption } from './counter-recipes.mjs'
 import { stockChange } from './stock-ledger.mjs'
 import { handleCounter } from './counter-service.mjs'
 import { posSettings, refundFor, loyaltyBalances } from './pos-pricing.mjs'
+import { normalizeShopProfile } from './shop-profile.mjs'
 export const posSchema = 'CREATE TABLE IF NOT EXISTS pos_records (scope TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,id));'
 export async function ensurePos(db) { await db.run(posSchema) }
 export async function posRecords(db, scope, kind, branch = 'main') {
@@ -76,7 +77,11 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     const loaded = await sales()
     const customerHistory = loaded.filter(sale => sale.paymentDetails?.pos?.customerId)
     const customers = (await db.query(`SELECT id,name,phone,balance FROM customers${organizationId ? ' WHERE organization_id=?' : ''} ORDER BY name`, organizationId ? [organizationId] : [])).values
-    return { settings: posSettings(settings[0]?.value), baskets: baskets.filter(record => !record.deleted), registers, returns, products, customerHistory, customers, loyaltyBalances: loyaltyBalances(loaded, returns) }
+    const hasRetail = (await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='retail_records'")).values.length > 0
+    const profile = organizationId ? (await db.query('SELECT shop_profile AS shopProfile FROM app_settings WHERE organization_id=?', [organizationId])).values[0]?.shopProfile : null
+    const oilBusiness = normalizeShopProfile(profile).industry === 'liquids'
+    const saleConversions = hasRetail && oilBusiness ? (await db.query("SELECT payload FROM retail_records WHERE scope=? AND kind='conversion'", [scope])).values.map(row => JSON.parse(row.payload)).filter(row => row.sellInPos === true) : []
+    return { settings: posSettings(settings[0]?.value), baskets: baskets.filter(record => !record.deleted), registers, returns, products, saleConversions, customerHistory, customers, loyaltyBalances: loyaltyBalances(loaded, returns) }
   }
   if (path === '/api/pos/settings') {
     if (user.role !== 'owner') throw new Error('Only the owner can change POS settings.')
@@ -96,7 +101,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   }
   if (path === '/api/pos/baskets') {
     if (!input.id) throw new Error('Basket ID required.')
-    return write({ ...stamp, id: String(input.id), kind: 'basket', label: String(input.label || 'Saved basket').slice(0, 100), draft: input.draft, deleted: input.deleted === true })
+    return write({ ...stamp, id: String(input.id), kind: 'basket', label: String(input.label || 'Saved basket').slice(0, 100), draft: input.draft, ...(input.workspace === 'oil' ? { workspace: 'oil' } : {}), deleted: input.deleted === true })
   }
   if (path === '/api/pos/registers') {
     const existing = (await records('register')).find(record => record.id === input.id)

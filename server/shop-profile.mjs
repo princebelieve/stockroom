@@ -6,7 +6,7 @@ export const businessModes = {
   grocery: { label: 'Grocery and provisions', unit: 'pack', note: 'New products default to pack; change the unit per product when needed.' },
   supermarket: { label: 'Supermarket and convenience store', unit: 'piece', note: 'For mixed food, household, and everyday retail goods.' },
   wholesale: { label: 'Wholesale and distribution', unit: 'carton', note: 'For case, carton, and bulk distribution; choose the right unit per product.' },
-  liquids: { label: 'Liquids, oils, and fuels', unit: 'litre', note: 'For edible oils, fuels, lubricants, and other measured liquids. Set each product up in one stock and selling unit.' },
+  liquids: { label: 'Wholesale and retail oil shop', unit: 'litre', note: 'For palm oil, groundnut oil, and other edible oils sold by measured quantity or container.' },
   'food-service': { label: 'Restaurant, fast food, and catering', unit: 'portion', note: 'For ingredients, prepared food, and serving portions.' },
   'food-manufacturing': { label: 'Food processing and manufacturing', unit: 'kg', note: 'For ingredients and finished goods; choose the right unit per product.' },
   bakery: { label: 'Bakery and confectionery', unit: 'piece', note: 'For baked goods, ingredients, and confectionery.' },
@@ -39,7 +39,7 @@ const suggestions = {
   grocery: { categories: ['Food', 'Drinks', 'Household goods', 'Fresh produce'] },
   supermarket: { categories: ['Groceries', 'Drinks', 'Household goods', 'Personal care'] },
   wholesale: { categories: ['Packaged goods', 'Beverages', 'Bulk supplies'] },
-  liquids: { itemLabel: 'Liquid product', inventoryLabel: 'Liquid stock', categories: ['Edible oils', 'Petrol and diesel', 'Gas', 'Lubricants', 'Other liquids', 'Supplies'] },
+  liquids: { itemLabel: 'Oil product', inventoryLabel: 'Oil inventory', categories: ['Palm oil', 'Groundnut oil', 'Other oils', 'Containers and supplies'] },
   pharmacy: { categories: ['Medicines', 'Health supplies', 'Personal care'] },
   electronics: { categories: ['Phones', 'Computers', 'Accessories', 'Appliances', 'Parts'] },
   drinks: { categories: ['Water', 'Soft drinks', 'Juices', 'Alcoholic beverages'] },
@@ -62,7 +62,10 @@ export function normalizeShopProfile(input) {
     if (Array.isArray(input.categories)) value.categories = [...new Set(input.categories.filter(item => typeof item === 'string').map(item => item.trim().slice(0, 80)).filter(Boolean))].slice(0, 30)
   }
   value.fields = normalizeFields(input.fields, industry, value.itemLabel)
-  value.features = { services: typeof input.features?.services === 'boolean' ? input.features.services : industry !== 'supermarket' }
+  value.features = {
+    services: typeof input.features?.services === 'boolean' ? input.features.services : industry !== 'supermarket',
+    productSales: typeof input.features?.productSales === 'boolean' ? input.features.productSales : industry !== 'liquids',
+  }
   value.workflows = ['stock', 'payments', 'both', 'fast-food', 'restaurant'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
   value.fastFood = input.fastFood === true || value.workflows === 'fast-food'
   value.restaurant = input.restaurant === true || value.workflows === 'restaurant'
@@ -74,12 +77,17 @@ export function normalizeShopProfile(input) {
 export function businessWorkspace(profile) {
   const value = normalizeShopProfile(profile)
   const supermarket = value.industry === 'supermarket'
+  const liquids = value.industry === 'liquids'
+  const stock = liquids || ['stock', 'both'].includes(value.workflows)
   return {
     checkoutLabel: supermarket ? 'Checkout' : 'Sell (POS)',
     overviewTitle: supermarket ? 'Supermarket at a glance' : 'Business at a glance',
     overviewDescription: supermarket ? 'Review checkout sales, stock levels, and daily operations.' : 'Review business health, stock, and team activity.',
+    liquids,
+    oil: liquids,
+    productSales: stock && (!liquids || value.features.productSales),
     services: value.features.services,
-    stock: ['stock', 'both'].includes(value.workflows),
+    stock,
     payments: ['payments', 'both'].includes(value.workflows),
     fastFood: value.fastFood,
     restaurant: value.restaurant,
@@ -104,7 +112,7 @@ export function validateShopProfile(input) {
 export const businessPresets = {
   retail: { label: 'Retail shop / mini-mart', industry: 'general', workflow: 'stock', screen: 'POS', workspace: 'Product sales' },
   supermarket: { label: 'Supermarket', industry: 'supermarket', workflow: 'stock', screen: 'POS', workspace: 'Product sales' },
-  liquids: { label: 'Liquid goods, oils, and fuels', industry: 'liquids', workflow: 'stock', screen: 'POS', workspace: 'Liquid goods sales', unit: 'litre', itemLabel: 'Liquid product', inventoryLabel: 'Liquid stock', categories: ['Edible oils', 'Petrol and diesel', 'Gas', 'Lubricants', 'Other liquids', 'Supplies'] },
+  liquids: { label: 'Wholesale and retail oil business', industry: 'liquids', workflow: 'stock', screen: 'Oil', workspace: 'Oil sales', unit: 'litre', itemLabel: 'Oil product', inventoryLabel: 'Oil inventory', categories: ['Palm oil', 'Groundnut oil', 'Other oils', 'Containers and supplies'] },
   printing: { label: 'Printing and copy shop', industry: 'printing', workflow: 'payments', screen: 'Payments', workspace: 'Payments & receipts' },
   services: { label: 'Services / church office', industry: 'services', workflow: 'payments', screen: 'Payments', workspace: 'Payments & receipts' },
   takeaway: { label: 'Fast food / takeaway', industry: 'food-service', workflow: 'fast-food', screen: 'Counter', workspace: 'Order counter' },
@@ -118,5 +126,6 @@ export function applyBusinessPreset(profile, key) {
   const defaults = current.mode === 'custom' ? {} : Object.fromEntries(['unit', 'itemLabel', 'inventoryLabel', 'categories'].filter(name => preset[name] !== undefined).map(name => [name, preset[name]]))
   return validateShopProfile({ ...current, ...defaults, industry: preset.industry,
     mode: current.mode === 'custom' ? 'custom' : 'suggested',
+    features: { ...current.features, productSales: preset.industry !== 'liquids' },
     workflows: preset.workflow, fastFood: preset.workflow === 'fast-food', restaurant: preset.workflow === 'restaurant' })
 }
