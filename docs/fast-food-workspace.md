@@ -12,6 +12,14 @@ Open **Business settings > Workspaces**:
 
 Open **Business settings > Food menu & recipes > Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.
 
+## Customer portal orders
+
+Owners/admins can create a customer sign-in from that customer's Wallet account and share the business customer link or its QR code. Customers sign in to view their wallet and, for food/restaurant businesses, browse the published menu, submit an order, and follow its status. The portal uses the same business order queue and preparation status as orders entered by staff. Customer account access follows the customer's role; it does not expose owner or admin screens.
+
+Online checkout currently supports pay-at-pickup, a bank transfer claim, or a wallet payment request. A bank transfer reference is not verified automatically: staff must confirm funds and record payment in the order queue. A wallet request does not reserve or debit funds at submission; staff confirm and record the charge against the customer's wallet from the order's payment screen. This keeps the wallet charge in the business's normal local accounting and sync flow.
+
+The portal caches its last loaded account and menu on the customer device and saves the basket locally, so those can be viewed or edited offline. Submitting an order, signing in on a new session, and getting fresh order status require internet. New customer orders enter the cloud queue and reach business devices when they synchronize; staff can still take local orders and record wallet payments while offline, with their changes syncing later. A bank transfer claim and payment confirmation still need staff review.
+
 Choose **Prepared food or drinks** for meals made to order. They require no linked finished-product inventory record. Configured recipes deduct raw ingredients when preparation starts; prepared items without recipes do not consume tracked stock. Choose **Packaged goods** for bottled drinks or other stocked goods and link an existing product. **Packaged stock** lets owners/admins create and restock packaged products within this workspace. Restocking there is a stock adjustment at the product's saved cost; it is not a supplier invoice or payment.
 
 ## Daily operation

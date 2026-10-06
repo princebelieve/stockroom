@@ -637,3 +637,4 @@ body { background: #dfece5; }
 .closure-actions { display:flex; gap:12px; margin-top:20px; }
 .closure-confirm { background:#b42318; color:white; border:1px solid #b42318; border-radius:6px; padding:10px 16px; font-weight:600; cursor:pointer; }
 .closure-confirm:disabled { opacity:.5; cursor:not-allowed; }
+.customer-qr-sharing{display:flex;align-items:center;gap:16px;margin:14px 0 20px}.customer-qr{width:150px;height:150px;padding:8px;background:#fff;border:1px solid #dce5dc;border-radius:8px;flex:none}.customer-qr-sharing p{max-width:360px;color:#63736a;line-height:1.5}
