@@ -1,4 +1,5 @@
 export function counterSaleId(id: string): string
+export function counterActionTill(order: any): string
 export function requiresCounterSync(operation: any): boolean
 export function counterPaymentFingerprint(sale: any): string
 export function validateCounterRetry(sale: any, previous: any): void

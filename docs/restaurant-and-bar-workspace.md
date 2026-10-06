@@ -39,3 +39,9 @@ Printing uses the same configured 58 mm or 80 mm receipt printer for payment rec
 ## Reporting periods
 
 Financial reports use the saved business reporting timezone, configured under Business settings > Workspaces and shared with Sync now. Existing businesses default to UTC. See [report calculations](report-calculations.md) for period boundaries and stock-cost treatment.
+
+## QR orders and preparation stations
+
+The business customer QR/link supports guest orders using a pickup name, alongside optional customer wallet sign-in. Review these orders in Live orders and select **Accept on this till** while connected, then synchronize. The accepting till handles ingredient consumption and payment; online orders use their own payment screen rather than an unrelated table bill. Packaged restaurant drinks consume linked stock when preparation starts. Transfer references require staff verification.
+
+In Preparation, choose All stations, Kitchen or Bar to focus on the relevant lines. Kitchen/bar readiness is available for both table rounds and accepted restaurant online orders. Printing station tickets remains manual through the configured receipt printer; automatic routing to separate printers is not implemented. See [Fast food](fast-food-workspace.md) for connection, payment and recovery limits.

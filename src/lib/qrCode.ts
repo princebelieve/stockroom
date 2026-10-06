@@ -25,12 +25,12 @@ function rsRemainder(data: number[], degree: number) {
 
 export function qrMatrix(value: string): boolean[][] {
   const bytes = [...new TextEncoder().encode(value)]
-  const version = [1, 2, 3, 4, 5, 6, 7, 8].find(v => { const [, blocks, blockData] = blockSpecs[v]!; return bytes.length <= (blocks * blockData * 8 - 12) / 8 })
+  const version = [1, 2, 3, 4, 5, 6, 7, 8].find(v => { const [blocks, blockData] = blockSpecs[v]!; return bytes.length <= (blocks * blockData * 8 - 12) / 8 })
   if (!version) throw new Error('This link is too long for the customer QR code.')
   const bits: number[] = []
   const append = (number: number, length: number) => { for (let i = length - 1; i >= 0; i--) bits.push((number >>> i) & 1) }
   append(4, 4); append(bytes.length, 8); bytes.forEach(byte => append(byte, 8))
-  const [, blockCount, blockData] = blockSpecs[version]!
+  const [blockCount, blockData] = blockSpecs[version]!
   const totalDataCodewords = blockCount * blockData
   for (let i = 0, n = Math.min(4, totalDataCodewords * 8 - bits.length); i < n; i++) bits.push(0)
   while (bits.length % 8) bits.push(0)
@@ -62,11 +62,11 @@ export function qrMatrix(value: string): boolean[][] {
   for (let i = 0; i < 10; i++) remainder = (remainder << 1) ^ ((remainder >>> 9) * 0x537)
   const format = ((formatData << 10) | remainder) ^ 0x5412
   const formatBit = (i: number) => ((format >>> i) & 1) !== 0
-  for (let i = 0; i <= 5; i++) set(8, i, formatBit(i))
-  set(8, 7, formatBit(6)); set(8, 8, formatBit(7)); set(7, 8, formatBit(8))
-  for (let i = 9; i < 15; i++) set(14 - i, 8, formatBit(i))
-  for (let i = 0; i < 8; i++) set(size - 1 - i, 8, formatBit(i))
-  for (let i = 8; i < 15; i++) set(8, size - 15 + i, formatBit(i))
+  for (let i = 0; i <= 5; i++) set(i, 8, formatBit(i))
+  set(7, 8, formatBit(6)); set(8, 8, formatBit(7)); set(8, 7, formatBit(8))
+  for (let i = 9; i < 15; i++) set(8, 14 - i, formatBit(i))
+  for (let i = 0; i < 8; i++) set(8, size - 1 - i, formatBit(i))
+  for (let i = 8; i < 15; i++) set(size - 15 + i, 8, formatBit(i))
   set(size - 8, 8, true)
   if (version >= 7) {
     let versionRemainder = version

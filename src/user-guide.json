@@ -248,13 +248,13 @@
     "id": "section-20",
     "title": "Order counter > Orders and Preparation",
     "steps": [
-      "Open Preparation to see queued work. Select Start preparing, then Mark ready when the order is ready.",
+      "Open Preparation to see accepted queued work. Filter by All stations, Kitchen or Bar. Select Start preparing, then Mark ready when the order is ready.",
       "Print the preparation ticket when needed. Read the preparation note and selected extras. Preparation tickets omit payment prices and totals.",
       "Open Orders to collect any unpaid amount. Save the payment and print its receipt.",
       "Use Hand over once the order is ready and paid. Collected orders move into their separate history section.",
-      "Use Sync orders to share preparation changes with other configured devices."
+      "For QR/customer orders, review the order in Orders and select Accept on this till while connected. Synchronize before preparing or taking payment. Customers can enter their pickup name as guests; wallet sign-in is optional. Use Sync orders to share updates."
     ],
-    "note": "Preparation consumes configured recipes once. Device synchronization does not replace recording or checking payment."
+    "note": "Preparation consumes configured recipes once. Pay and start recipe preparation on the original till, or the accepting till for online orders. Verify transfer funds before saving payment. Automatic lost-till reassignment and separate kitchen-printer routing are not implemented."
   },
   {
     "id": "section-21",

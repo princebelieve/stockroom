@@ -82,7 +82,7 @@ Priority means recommended order within the relevant scope, not a claim that eve
 
 ## Deliberate differences that do not need automatic fixes
 
-General-ledger accounting, payroll, manufacturing/batch production, reservations, hotel stays, ecommerce, delivery dispatch, customer self-ordering and a public integration marketplace are potential extensions. Their absence is not a defect in a focused offline operations product. Add them only when a target customer needs them and the business value justifies the support burden.
+General-ledger accounting, payroll, manufacturing/batch production, reservations, hotel stays, ecommerce, delivery dispatch and a public integration marketplace are potential extensions. Their absence is not a defect in a focused offline operations product. Add them only when a target customer needs them and the business value justifies the support burden.
 
 Stockroom's practical strengths are local operation across PWA/Windows/Android, supplier/batch stock handling, optional workflows, customer balances and migration tools. These are supported capabilities, not evidence that Stockroom outperforms competitors. Adoption still depends on daily speed, reliability, hardware behavior and understandable recovery.
 
@@ -98,3 +98,5 @@ Stockroom's practical strengths are local operation across PWA/Windows/Android, 
 ## Implementation update: 2026-10-06
 
 The tax/deposit documentation inconsistencies above have been corrected. Reporting now reads the synchronized business reporting timezone on Windows, PWA and Android, defaulting to UTC for businesses without a saved choice. Owners can save the timezone under Business settings > Workspaces. Calendar boundaries and the Reports expired-stock summary use that timezone; date-only expenses retain their business date. Tests cover timezone independence and daylight-saving boundaries. These changes address the documentation and reporting findings; the other recommendations remain proposals.
+
+Implementation follow-up: QR customer ordering now supports guest pickup names, optional wallet sign-in, staff acceptance on one till, tax preview and idempotent submission retries. Preparation can be filtered by Kitchen or Bar. Automatic kitchen-printer routing and lost-till reassignment remain outstanding; see [Fast food](fast-food-workspace.md) for current behavior.

@@ -247,13 +247,13 @@ This guide follows the current app screens. Availability depends on your workspa
 
 ## Order counter > Orders and Preparation
 
-1. Open Preparation to see queued work. Select Start preparing, then Mark ready when the order is ready.
+1. Open Preparation to see accepted queued work. Filter by All stations, Kitchen or Bar. Select Start preparing, then Mark ready when the order is ready.
 2. Print the preparation ticket when needed. Read the preparation note and selected extras. Preparation tickets omit payment prices and totals.
 3. Open Orders to collect any unpaid amount. Save the payment and print its receipt.
 4. Use Hand over once the order is ready and paid. Collected orders move into their separate history section.
-5. Use Sync orders to share preparation changes with other configured devices.
+5. For QR/customer orders, review the order in Orders and select Accept on this till while connected. Synchronize before preparing or taking payment. Customers can enter their pickup name as guests; wallet sign-in is optional. Use Sync orders to share updates.
 
-**Remember:** Preparation consumes configured recipes once. Device synchronization does not replace recording or checking payment.
+**Remember:** Preparation consumes configured recipes once. Pay and start recipe preparation on the original till, or the accepting till for online orders. Verify transfer funds before saving payment. Automatic lost-till reassignment and separate kitchen-printer routing are not implemented.
 
 ## Order counter > Order actions
 

@@ -1,3 +1,4 @@
+import { authorizeCustomerOrder, customerOrderLines, publishCustomerOrder, acceptCustomerOrder } from './customer-orders.mjs'
 import { createStaffRemoval } from './staff-removal.mjs'
 import { validateServiceJob, requiresServiceJobSync } from '../server/service-jobs.mjs'
 import { floorId,restaurantTabs,billContains,validateRestaurantFloor } from '../server/restaurant-floor.mjs'
@@ -216,6 +217,7 @@ const staffRemoval = createStaffRemoval({ accounts, refreshTokens, operations, v
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
   if (request.url?.startsWith('/v1/customer-portal/')) {
+    response.setHeader('Cache-Control', 'no-store')
     corsHeaders['Access-Control-Allow-Origin'] = '*'
     corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
   }
@@ -229,6 +231,11 @@ const server = createServer(async (request, response) => {
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   try {
+    if (await staffRemoval.blocked(request)) return send(response, 403, { error: 'Your staff access has been removed by the owner.' })
+    if (await staffRemoval.handle(request, response)) return
+    if (await accountDeletion.handle(request, response)) return
+    const deletionBlock = await accountDeletion.blocked(request)
+    if (deletionBlock) return send(response, 403, { error: deletionBlock })
     if (request.method === 'GET' && request.url === '/v1/public/landing') {
       const plan = await database.collection('subscription_settings').findOne({ _id: 'plan' })
       return send(response, 200, {
@@ -254,12 +261,14 @@ const server = createServer(async (request, response) => {
         customerPortalLoginLimits.set(attemptKey, { count: current.count + 1, until: current.until })
         return send(response, 401, { error: 'Username or password is incorrect.' })
       }
+      if (await database.collection('account_deletion_requests').findOne({ type: 'business', businessId, status: { $in: ['pending', 'processing'] } })) return send(response, 403, { error: 'This business is currently closed for ordering.' })
       customerPortalLoginLimits.delete(attemptKey)
-      return send(response, 200, { accessToken: signToken({ kind: 'customer', sub: account._id.toString(), businessId, customerId: account.customerId, role: 'customer', exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) })
+      return send(response, 200, { accessToken: signToken({ kind: 'customer', sub: account._id.toString(), businessId, customerId: account.customerId, authVersion: new Date(account.updatedAt || account.createdAt).getTime(), role: 'customer', exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) })
     }
     if (request.method === 'GET' && request.url.startsWith('/v1/customer-portal/catalog?')) {
       const query = new URL(request.url, 'http://localhost').searchParams
       const businessId = String(query.get('businessId') || '')
+      if (await database.collection('account_deletion_requests').findOne({ type: 'business', businessId, status: { $in: ['pending', 'processing'] } })) return send(response, 403, { error: 'This business is currently closed for ordering.' })
       const saved = await businessSettings.findOne({ businessId })
       if (!saved) return send(response, 404, { error: 'Business customer ordering is not available.' })
       const settings = saved.settings || {}
@@ -267,44 +276,71 @@ const server = createServer(async (request, response) => {
       const menuId = profile.restaurant ? 'restaurant-menu' : profile.fastFood ? 'counter-menu' : ''
       if (!menuId) return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: 'account', menu: null })
       const head = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: menuId })
+      const taxHead = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: 'pos-settings' })
+      const pricing = posSettings(taxHead?.payload?.value)
+      const publicTax = { taxEnabled: pricing.taxEnabled, taxRate: pricing.taxRate, taxLabel: pricing.taxLabel, taxIncluded: pricing.taxIncluded, taxRates: {} }
       const menu = head?.payload?.kind === 'counter-menu' ? head.payload : null
-      return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: profile.restaurant ? 'restaurant' : 'fast-food', menu: menu ? { id: menu.id, updatedAt: menu.updatedAt, items: menu.items.filter(item => item.available).map(item => ({ id: item.id, name: item.name, description: item.description || '', price: item.price, options: item.options.filter(option => option.available !== false).map(option => ({ id: option.id, name: option.name, price: option.price })) })) } : { id: menuId, updatedAt: '', items: [] } })
+      publicTax.taxRates = Object.fromEntries((menu?.items || []).filter(item => item.available && item.type === 'stock' && !profile.restaurant).map(item => [item.id, pricing.taxRates[item.productId] ?? pricing.taxRate]))
+      return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: profile.restaurant ? 'restaurant' : 'fast-food', tax: publicTax, walletAllowed: settings.paymentPolicy?.allowWallet === true, menu: menu ? { id: menu.id, updatedAt: menu.updatedAt, items: menu.items.filter(item => item.available).map(item => ({ id: item.id, name: item.name, description: item.description || '', price: item.price, options: item.options.filter(option => option.available !== false).map(option => ({ id: option.id, name: option.name, price: option.price })) })) } : { id: menuId, updatedAt: '', items: [] } })
+    }
+    if (request.method === 'POST' && request.url === '/v1/customer-portal/guest') {
+      const input = await readJson(request, 4096)
+      const businessId = String(input.businessId || '').trim()
+      const name = String(input.name || '').trim().slice(0, 100)
+      if (!name) return send(response, 400, { error: 'Enter your name for pickup.' })
+      const closing = await database.collection('account_deletion_requests').findOne({ type: 'business', businessId, status: { $in: ['pending', 'processing'] } })
+      const saved = await businessSettings.findOne({ businessId })
+      const profile = normalizeShopProfile(saved?.settings?.shopProfile)
+      if (closing || !saved || (!profile.fastFood && !profile.restaurant)) return send(response, 403, { error: 'Guest ordering is not available for this business.' })
+      const rateKey = `guest-entry:${String(request.socket.remoteAddress || '')}:${businessId}`
+      const rateNow = Date.now(), rate = customerPortalLoginLimits.get(rateKey)
+      const window = rate?.until > rateNow ? rate : { count: 0, until: rateNow + 15 * 60 * 1000 }
+      if (window.count >= 60) return send(response, 429, { error: 'Too many ordering requests. Wait fifteen minutes before trying again.' })
+      customerPortalLoginLimits.set(rateKey, { ...window, count: window.count + 1 })
+      const customerId = `guest-${randomBytes(24).toString('hex')}`
+      return send(response, 201, { accessToken: signToken({ kind: 'customer', guest: true, customerId, name, businessId, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 }) })
+    }
+    if (request.method === 'POST' && request.url === '/v1/customer-portal/accept') {
+      const claims = verifyToken(request)
+      if (!isAccess(claims) || !['owner', 'admin', 'cashier'].includes(claims.role) || !ObjectId.isValid(claims.sub)) return send(response, 403, { error: 'Staff sign-in required.' })
+      const staff = await accounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, removedAt: { $exists: false } })
+      if (!staff) return send(response, 403, { error: 'Staff access is no longer available.' })
+      const input = await readJson(request, 4096)
+      try {
+        const order = await acceptCustomerOrder({ entityHeads, operations, serialize: serializeBusinessSync, businessId: claims.businessId, orderId: String(input.orderId || ''), tillId: String(input.tillId || ''), staffId: claims.sub })
+        return send(response, 200, { order })
+      } catch (error) { return send(response, 409, { error: error.message }) }
     }
     if (request.method === 'POST' && request.url === '/v1/customer-portal/orders') {
       const claims = verifyToken(request)
       if (claims?.kind !== 'customer') return send(response, 401, { error: 'Customer sign-in required.' })
+      if (!claims.guest) {
+        const account = ObjectId.isValid(claims.sub) && await customerPortalAccounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, customerId: claims.customerId, active: true })
+        if (!account || claims.authVersion !== new Date(account.updatedAt || account.createdAt).getTime()) return send(response, 401, { error: 'Customer account is no longer available. Sign in again.' })
+      }
       const input = await readJson(request, 32768)
       const clientOrderId = String(input.clientOrderId || '')
       if (!/^[a-zA-Z0-9_-]{12,100}$/.test(clientOrderId)) return send(response, 400, { error: 'Invalid order request ID.' })
+      const rateKey = `customer-order:${String(request.socket.remoteAddress || '')}:${claims.businessId}:${claims.customerId}`
+      const rateNow = Date.now(), rate = customerPortalLoginLimits.get(rateKey)
+      const window = rate?.until > rateNow ? rate : { count: 0, until: rateNow + 15 * 60 * 1000 }
+      if (window.count >= 120) return send(response, 429, { error: 'Too many ordering requests. Wait fifteen minutes before trying again.' })
+      customerPortalLoginLimits.set(rateKey, { ...window, count: window.count + 1 })
       const orderId = `online-${clientOrderId}`
       const prior = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: orderId })
-      if (prior) return send(response, 200, { order: prior.payload })
+      if (prior) { authorizeCustomerOrder(prior.payload, claims.customerId); await publishCustomerOrder(operations, prior); return send(response, 200, { order: prior.payload }) }
       const saved = await businessSettings.findOne({ businessId: claims.businessId })
       const profile = normalizeShopProfile(saved?.settings?.shopProfile)
       if (!profile.fastFood && !profile.restaurant) return send(response, 403, { error: 'Online ordering is available for food and restaurant workspaces.' })
       const menuId = profile.restaurant ? 'restaurant-menu' : 'counter-menu'
       const menu = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: menuId })
       if (!menu?.payload || input.menuUpdatedAt !== menu.payload.updatedAt) return send(response, 409, { error: 'The menu changed. Refresh it and review your basket.' })
-      const customerHead = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'customer', entityId: claims.customerId })
+      const customerHead = claims.guest ? { payload: { name: claims.name } } : await entityHeads.findOne({ businessId: claims.businessId, entityType: 'customer', entityId: claims.customerId })
       if (!customerHead) return send(response, 403, { error: 'Customer account is no longer available.' })
-      if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > 50) return send(response, 400, { error: 'Choose at least one menu item.' })
-      const lines = []
-      for (const requested of input.lines) {
-        const item = menu.payload.items.find(row => row.id === requested.menuItemId && row.available)
-        const quantity = Number(requested.quantity)
-        const optionIds = Array.isArray(requested.optionIds) ? requested.optionIds.map(String) : []
-        if (!item || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99 || new Set(optionIds).size !== optionIds.length) return send(response, 400, { error: 'A menu item or quantity is no longer available.' })
-        const options = optionIds.map(id => { const option = item.options.find(row => row.id === id); if (!option || option.available === false) throw new Error('A selected option is no longer available. Refresh the menu.'); return { ...option } })
-        const recipe = [...(item.recipe || []), ...options.flatMap(option => option.recipe || [])]
-        const ingredients = []
-        for (const entry of recipe) {
-          const product = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'product', entityId: String(entry.productId) })
-          if (!product?.payload) throw new Error('The business needs to update this menu item before it can be ordered online.')
-          ingredients.push({ productId: String(entry.productId), name: product.payload.name, unit: product.payload.unit || '', quantity: Number(entry.quantity) })
-        }
-        lines.push({ id: randomBytes(12).toString('hex'), menuItemId: item.id, name: item.name, ...(profile.restaurant ? { station: item.station || 'kitchen' } : {}), productId: item.type === 'stock' && !profile.restaurant ? item.productId : '', ingredients, options, quantity, price: Math.round((Number(item.price) + options.reduce((sum, option) => sum + Number(option.price), 0)) * 100) / 100 })
-      }
+      let lines
+      try { lines = await customerOrderLines(menu.payload, input.lines, Boolean(profile.restaurant), async id => (await entityHeads.findOne({ businessId: claims.businessId, entityType: 'product', entityId: id }))?.payload) } catch (error) { return send(response, 400, { error: error.message }) }
       const requestedPayment = ['wallet', 'bank-transfer', 'cash'].includes(input.paymentMethod) ? input.paymentMethod : 'cash'
+      if (requestedPayment === 'wallet' && (claims.guest || saved?.settings?.paymentPolicy?.allowWallet !== true)) return send(response, 400, { error: 'Wallet payment requires an enabled customer wallet account.' })
       const bankReference = String(input.paymentReference || '').trim().slice(0, 120)
       const bankProvider = String(input.paymentProvider || '').trim().slice(0, 100)
       if (requestedPayment === 'bank-transfer' && (!bankProvider || !bankReference)) return send(response, 400, { error: 'Enter the bank and transfer reference after making the transfer.' })
@@ -312,33 +348,42 @@ const server = createServer(async (request, response) => {
       const settingsRecord = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: 'pos-settings' })
       const tax = posSettings(settingsRecord?.payload?.value)
       const customer = customerHead.payload
-      const pos = { tillId, customerId: claims.customerId, customerName: customer.name, discountType: 'amount', discountValue: 0, loyaltyRedeemed: 0, tax, note: String(input.note || '').trim().slice(0, 300) }
+      const pos = { tillId, customerId: claims.guest ? '' : claims.customerId, customerName: customer.name, discountType: 'amount', discountValue: 0, loyaltyRedeemed: 0, tax, note: String(input.note || '').trim().slice(0, 300) }
       pos.pricing = priceOrder(counterItems({ lines }), pos)
+      if (input.expectedTotal !== undefined && Math.round(Number(input.expectedTotal) * 100) !== Math.round(pos.pricing.total * 100)) return send(response, 409, { error: 'The total changed. Refresh the menu and review tax and prices before submitting.' })
       const paymentNote = requestedPayment === 'bank-transfer' ? `Bank transfer claimed: ${bankProvider} / ${bankReference}. Verify before handing over.` : ''
       const customerNote = String(input.note || '').trim().slice(0, 200)
-      const record = { id, kind: 'counter-order', source: 'customer-portal', restaurantOrder: Boolean(profile.restaurant), customerPaymentMethod: requestedPayment, ...(requestedPayment === 'bank-transfer' ? { customerPaymentProvider: bankProvider, customerPaymentReference: bankReference } : {}), branchId: 'main', status: 'queued', tillId, currency: saved.settings.currency || 'USD', businessName: saved.settings.appName || 'Business', createdAt: now, updatedAt: now, expectedUpdatedAt: '', customerName: customer.name, note: [customerNote, paymentNote].filter(Boolean).join(' · ').slice(0, 300), ...(profile.restaurant ? {} : { diningOption: ['Takeaway', 'Dine in', 'Delivery'].includes(input.diningOption) ? input.diningOption : 'Takeaway' }), lines, pos, total: pos.pricing.total, events: [{ status: 'queued', action: 'create', reason: '', staffId: `customer:${claims.customerId}`, at: now }] }
+      const record = { id, kind: 'counter-order', source: 'customer-portal', customerPortalId: claims.customerId, acceptedTillId: '', restaurantOrder: Boolean(profile.restaurant), customerPaymentMethod: requestedPayment, ...(requestedPayment === 'bank-transfer' ? { customerPaymentProvider: bankProvider, customerPaymentReference: bankReference } : {}), branchId: 'main', status: 'queued', tillId, currency: saved.settings.currency || 'USD', businessName: saved.settings.appName || 'Business', createdAt: now, updatedAt: now, expectedUpdatedAt: '', customerName: customer.name, note: [customerNote, paymentNote].filter(Boolean).join(' · ').slice(0, 300), ...(profile.restaurant ? {} : { diningOption: ['Takeaway', 'Dine in', 'Delivery'].includes(input.diningOption) ? input.diningOption : 'Takeaway' }), lines, pos, total: pos.pricing.total, events: [{ status: 'queued', action: 'create', reason: '', staffId: `customer:${claims.customerId}`, at: now }] }
       validateCounterRecord(record)
-      const operationId = `customer-order:${clientOrderId}`
-      const operation = { businessId: claims.businessId, deviceId: tillId, operationId, entityType: 'pos_record', entityId: id, action: 'upsert', payload: record, createdAt: now, receivedAt: new Date() }
-      let orderConflict = ''
+      let result, conflict = ''
       await serializeBusinessSync(claims.businessId, async () => {
-        const existing = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: id })
-        if (existing) return
-        const currentMenu = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: menuId })
-        if (currentMenu?.payload?.updatedAt !== input.menuUpdatedAt) { orderConflict = 'The menu changed. Refresh it and review your basket.'; return }
-        validateCounterRecord(record)
-        await entityHeads.insertOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: id, operationId, updatedAt: now, payload: record, deviceId: tillId, receivedAt: new Date() })
-        await operations.insertOne(operation)
+        const filter = { businessId: claims.businessId, entityType: 'pos_record', entityId: id }
+        let head = await entityHeads.findOne(filter)
+        if (head) authorizeCustomerOrder(head.payload, claims.customerId)
+        else {
+          const currentMenu = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: menuId })
+          if (currentMenu?.payload?.updatedAt !== input.menuUpdatedAt) { conflict = 'The menu changed. Refresh it and review your basket.'; return }
+          head = { ...filter, operationId: `customer-order:${clientOrderId}`, updatedAt: now, payload: record, deviceId: tillId, receivedAt: new Date() }
+          await entityHeads.insertOne(head)
+        }
+        await publishCustomerOrder(operations, head)
+        result = head.payload
       })
-      if (orderConflict) return send(response, 409, { error: orderConflict })
-      return send(response, 201, { order: record })
+      if (conflict) return send(response, 409, { error: conflict })
+      return send(response, 201, { order: result })
     }
     if (request.method === 'GET' && request.url === '/v1/customer-portal/me') {
       const claims = verifyToken(request)
       if (claims?.kind !== 'customer') return send(response, 401, { error: 'Customer sign-in required.' })
+      if (claims.guest) {
+        const heads = await entityHeads.find({ businessId: claims.businessId, entityType: 'pos_record', 'payload.kind': 'counter-order', 'payload.customerPortalId': claims.customerId }).sort({ updatedAt: -1 }).limit(100).toArray()
+        const orders = await Promise.all(heads.map(async head => { const payment = await operations.findOne({ businessId: claims.businessId, entityType: 'sale', entityId: counterSaleId(head.entityId) }); return { id: head.entityId, total: head.payload.total, currency: head.payload.currency, createdAt: head.payload.createdAt, updatedAt: head.payload.updatedAt, paymentReference: payment?.payload?.paymentReference || head.payload.customerPaymentReference || '', status: !head.payload.acceptedTillId && head.payload.status === 'queued' ? 'pending' : head.payload.status, paymentMethod: payment?.payload?.paymentMethod || head.payload.customerPaymentMethod, paymentPending: !payment, lines: head.payload.lines.map(line => ({ name: line.name, quantity: line.quantity, options: line.options.map(option => option.name) })) } }))
+        return send(response, 200, { guest: true, customer: { id: claims.customerId, name: claims.name, phone: '', balance: 0 }, transactions: [], orders })
+      }
+      if (!ObjectId.isValid(claims.sub)) return send(response, 401, { error: 'Customer sign-in required.' })
       const account = await customerPortalAccounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, customerId: claims.customerId, active: true })
       const customer = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'customer', entityId: claims.customerId })
-      if (!account || !customer) return send(response, 401, { error: 'Customer account is no longer available.' })
+      if (!account || !customer || claims.authVersion !== new Date(account.updatedAt || account.createdAt).getTime()) return send(response, 401, { error: 'Customer account is no longer available.' })
       const events = await operations.find({ businessId: claims.businessId, entityType: 'wallet', entityId: claims.customerId }).sort({ createdAt: -1 }).toArray()
       const allTransactions = events.map(row => ({ id: row.operationId, amount: Number(row.payload?.amount || 0), reason: String(row.payload?.reason || 'Wallet activity'), createdAt: row.payload?.createdAt || row.createdAt }))
       const walletSales = await operations.find({ businessId: claims.businessId, entityType: 'sale', $or: [{ 'payload.paymentDetails.customerId': claims.customerId }, { 'payload.paymentDetails.pos.customerId': claims.customerId }] }).toArray()
@@ -349,7 +394,7 @@ const server = createServer(async (request, response) => {
       const orderHeads = await entityHeads.find({ businessId: claims.businessId, entityType: 'pos_record', 'payload.kind': 'counter-order', 'payload.pos.customerId': claims.customerId }).sort({ updatedAt: -1 }).limit(100).toArray()
       const orders = await Promise.all(orderHeads.map(async head => {
         const payment = await operations.findOne({ businessId: claims.businessId, entityType: 'sale', entityId: counterSaleId(head.entityId) })
-        return { id: head.entityId, status: head.payload.status, total: head.payload.total, currency: head.payload.currency, createdAt: head.payload.createdAt, updatedAt: head.payload.updatedAt, lines: head.payload.lines.map(line => ({ name: line.name, quantity: line.quantity, options: line.options.map(option => option.name) })), paymentMethod: payment?.payload?.paymentMethod || head.payload.customerPaymentMethod || '', paymentReference: payment?.payload?.paymentReference || head.payload.customerPaymentReference || '', paymentPending: Boolean(['bank-transfer', 'wallet'].includes(head.payload.customerPaymentMethod) && !payment) }
+        return { id: head.entityId, status: head.payload.source === 'customer-portal' && !head.payload.acceptedTillId && head.payload.status === 'queued' ? 'pending' : head.payload.status, total: head.payload.total, currency: head.payload.currency, createdAt: head.payload.createdAt, updatedAt: head.payload.updatedAt, lines: head.payload.lines.map(line => ({ name: line.name, quantity: line.quantity, options: line.options.map(option => option.name) })), paymentMethod: payment?.payload?.paymentMethod || head.payload.customerPaymentMethod || '', paymentReference: payment?.payload?.paymentReference || head.payload.customerPaymentReference || '', paymentPending: Boolean(['bank-transfer', 'wallet'].includes(head.payload.customerPaymentMethod) && !payment) }
       }))
       return send(response, 200, { customer: { id: claims.customerId, name: customer.payload.name, phone: customer.payload.phone || '', balance: allTransactions.reduce((sum, row) => sum + row.amount, 0) }, transactions: allTransactions.slice(0, 50), orders, businessId: claims.businessId })
     }
@@ -370,11 +415,6 @@ const server = createServer(async (request, response) => {
       await customerPortalAccounts.updateOne({ businessId: claims.businessId, customerId }, { $set: { username: login, passwordHash: hashPassword(password), active: true, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true })
       return send(response, 200, { customerId, username: login })
     }
-    if (await staffRemoval.blocked(request)) return send(response, 403, { error: 'Your staff access has been removed by the owner.' })
-    if (await staffRemoval.handle(request, response)) return
-    if (await accountDeletion.handle(request, response)) return
-    const deletionBlock = await accountDeletion.blocked(request)
-    if (deletionBlock) return send(response, 403, { error: deletionBlock })
     if (await productFormReader(request, response)) return
     if (await notifications.handle(request, response)) return
     if (await visitorAccounts(request, response, verifyToken, readJson)) return
@@ -611,7 +651,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1', 'customer-orders-v1'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -778,6 +818,8 @@ const server = createServer(async (request, response) => {
           if (document.entityType === 'pos_record' && ['counter-menu', 'counter-order'].includes(document.payload.kind)) {
             try {
               if (document.entityId !== document.payload.id || document.action !== 'upsert') throw new Error('Invalid counter-service operation.')
+              if (!current && (document.payload.source === 'customer-portal' || document.payload.acceptedTillId || document.payload.customerPortalId)) throw new Error('Online orders must be submitted through the customer portal.')
+              if (current?.payload?.source === 'customer-portal' && document.payload.status !== 'cancelled' && !current.payload.acceptedTillId) throw new Error('Accept this online order on a till before processing it.')
               validateCounterRecord(document.payload, current?.payload)
               if(document.payload.tableService && (!current || document.payload.action === 'edit' || document.payload.status === 'cancelled')) {
                 const tabHead=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.tableService.tabId})
@@ -861,6 +903,7 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
+      if (query.get('customerOrderCapability') !== 'customer-orders-v1' && rows.some(row => row.payload?.source === 'customer-portal')) return send(response, 426, { error: 'Update this device to safely accept and process online customer orders.' })
       if (query.get('staffCapability') !== 'staff-removal-v1' && rows.some(row => row.entityType === 'staff_removal')) return send(response, 426, { error: 'Update this device to apply staff access removals.' })
       if(query.get('serviceJobCapability')!=='service-jobs-v1' && rows.some(requiresServiceJobSync)) return send(response,426,{error:'Update this device to synchronize service jobs and invoice payments.'})
       if (query.get('restaurantCapability') !== 'restaurant-v2' && rows.some(row=>['restaurant-layout','restaurant-tab','restaurant-ledger','restaurant-floor'].includes(row.payload?.kind) || row.payload?.restaurantOrder || row.payload?.paymentDetails?.restaurantBill || row.payload?.id === 'restaurant-menu' || row.payload?.tableService || row.payload?.paymentDetails?.counterOrder?.tableService || row.payload?.shopProfile?.restaurant || row.payload?.shopProfile?.workflows === 'restaurant')) return send(response,426,{error:'Update this device to synchronize Restaurant & bar tables, bills and orders.'})
@@ -871,7 +914,7 @@ const server = createServer(async (request, response) => {
     return send(response, 404, { error: 'Not found.' })
   } catch (error) {
     console.error(error)
-    return send(response, 500, { error: 'Sync service error.' })
+    return send(response, error.statusCode || 500, { error: error.statusCode ? error.message : 'Sync service error.' })
   }
 })
 

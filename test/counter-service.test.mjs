@@ -11,6 +11,20 @@ import { normalizeShopProfile, businessWorkspace } from '../server/shop-profile.
 
 const owner = { id: 'owner', name: 'Owner', role: 'owner' }
 const items = [{ id: 'burger', name: 'Burger', type: 'prepared', price: 10, available: true, productId: '', options: [{ id: 'cheese', name: 'Cheese', price: 2 }] }, { id: 'drink', name: 'Drink', type: 'stock', productId: 'bottle', price: 3, available: true, options: [] }]
+test('synced online orders await acceptance before local preparation', async () => {
+  const f = fixture()
+  try {
+    const menu = await f.call('/menu', { id: 'counter-menu', commandId: 'online-menu', expectedUpdatedAt: '', items })
+    const order = await f.call('/orders', { id: 'online-local-test', commandId: 'online-create', expectedUpdatedAt: '', menuUpdatedAt: menu.updatedAt, customerName: 'Guest', lines: [{ id: 'line', menuItemId: 'burger', quantity: 1, optionIds: [] }] })
+    const online = { ...order, source: 'customer-portal', customerPortalId: 'guest', acceptedTillId: '', tillId: 'customer-portal' }
+    f.sqlite.prepare('UPDATE pos_records SET payload=? WHERE id=?').run(JSON.stringify(online), order.id)
+    await assert.rejects(f.call('/status', { id: order.id, commandId: 'before-accept', expectedUpdatedAt: order.updatedAt, status: 'preparing' }), /Accept this online order/)
+    const accepted = { ...online, tillId: 'till', acceptedTillId: 'till', pos: { ...order.pos, tillId: 'till' } }
+    f.sqlite.prepare('UPDATE pos_records SET payload=? WHERE id=?').run(JSON.stringify(accepted), order.id)
+    const prepared = await f.call('/status', { id: order.id, commandId: 'after-accept', expectedUpdatedAt: order.updatedAt, status: 'preparing' })
+    assert.equal(prepared.status, 'preparing'); assert.equal(prepared.acceptedTillId, 'till')
+  } finally { f.sqlite.close() }
+})
 function fixture() {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(`CREATE TABLE app_settings(id INTEGER PRIMARY KEY,shop_profile TEXT,app_name TEXT DEFAULT 'Shop',currency TEXT DEFAULT 'USD'); INSERT INTO app_settings(id,shop_profile) VALUES(1,'{"fastFood":true}'); CREATE TABLE customers(id TEXT PRIMARY KEY,name TEXT,phone TEXT,balance REAL); CREATE TABLE products(id TEXT PRIMARY KEY); INSERT INTO products VALUES('bottle'); CREATE TABLE sync_outbox(id TEXT PRIMARY KEY,payload TEXT);`)

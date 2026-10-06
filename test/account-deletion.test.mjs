@@ -75,6 +75,8 @@ test('business closure blocks staff and devices but preserves cancellation acces
  assert.ok(await f.api.blocked({url:'/v1/notifications/me'}))
  f.setClaims({kind:'device',businessId:'shop'})
  assert.ok(await f.api.blocked({url:'/v1/sync/pull'}))
+ f.setClaims({kind:'customer',businessId:'shop',customerId:'guest-session',guest:true})
+ assert.ok(await f.api.blocked({url:'/v1/customer-portal/orders'}))
 })
 
 for(const role of ['owner','visitor'])test(`${role} scheduled cleanup preserves unrelated records`,async()=>{
@@ -83,6 +85,7 @@ for(const role of ['owner','visitor'])test(`${role} scheduled cleanup preserves 
  const key=role==='visitor'?'visitor:visitor':`account:${f.account._id}`
  for(const name of ['app_notifications','push_subscriptions','fcm_push_subscriptions'])f.collection(name).rows.push({recipientKey:key},{recipientKey:'account:other'})
  f.collection('business_settings').rows.push({businessId:'shop'},{businessId:'other'})
+ f.collection('customer_portal_accounts').rows.push({businessId:'shop'},{businessId:'other'})
  f.collection('supermarket_admissions').rows.push({_id:'shop:operation'},{_id:'other:operation'})
  f.collection('account_deletion_requests').rows[0].scheduledFor=new Date(0)
  await f.api.processDue()
@@ -90,6 +93,8 @@ for(const role of ['owner','visitor'])test(`${role} scheduled cleanup preserves 
  assert.equal(f.collection('app_notifications').rows.length,1)
  assert.ok(f.collection('accounts').rows.some(r=>r.businessId==='other'))
  assert.equal(f.collection('business_settings').rows.some(r=>r.businessId==='shop'),role!=='owner')
+ assert.equal(f.collection('customer_portal_accounts').rows.some(r=>r.businessId==='shop'),role!=='owner')
+ assert.ok(f.collection('customer_portal_accounts').rows.some(r=>r.businessId==='other'))
  assert.equal(f.collection('supermarket_admissions').rows.some(r=>r._id==='shop:operation'),role!=='owner')
 })
 
