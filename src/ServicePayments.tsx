@@ -1,3 +1,4 @@
+import { PosProviderSelect } from './PosProviderSelect'
 import { WorkspaceHelp } from './WorkspaceHelp'
 import { useEffect, useState } from 'react'
 import { AsyncButton, AsyncForm, SubmitButton } from './AsyncControls'
@@ -13,8 +14,8 @@ const fresh = (): Draft => ({ id: crypto.randomUUID(), lines: [newLine()], name:
 function restore(key: string): Draft {
   try { const previous = JSON.parse(localStorage.getItem(key) || '{}'); return { ...fresh(), ...previous, lines: previous.lines?.length ? previous.lines : [{ ...newLine(), description: previous.purpose || '', price: previous.amount || '' }] } } catch { return fresh() }
 }
-export function ServicePayments({ storageKey, hidden, enabled, manager, customers, receipts, headers, save, print, beforeSend, money, configuration = false }: {
-  configuration?:boolean;storageKey: string; hidden: boolean; enabled: boolean; manager: boolean; customers: Customer[]; receipts: Sale[]; headers: Record<string, string>;
+export function ServicePayments({ providers = [], storageKey, hidden, enabled, manager, customers, receipts, headers, save, print, beforeSend, money, configuration = false }: {
+  providers?: string[];configuration?:boolean;storageKey: string; hidden: boolean; enabled: boolean; manager: boolean; customers: Customer[]; receipts: Sale[]; headers: Record<string, string>;
   save: (draft: Draft & { profile: ReceiptSettings }) => Promise<Sale>; print: (sale: Sale) => Promise<void>; beforeSend: () => Promise<void>; money: (amount: number) => string
 }) {
   const [tab,setTab]=useState(configuration?'Receipt settings':'New payment')
@@ -28,6 +29,12 @@ export function ServicePayments({ storageKey, hidden, enabled, manager, customer
   const [query, setQuery] = useState('')
   const [storageError, setStorageError] = useState('')
   const token = headers.Authorization
+  useEffect(() => {
+    const refresh = () => { if (!hidden) void posRequest('/api/pos/receipt-settings', headers).then(setProfile).catch(error => setSetupError(error.message)) }
+    window.addEventListener('stockroom-data-refreshed', refresh)
+    return () => window.removeEventListener('stockroom-data-refreshed', refresh)
+  }, [token, hidden])
+
   useEffect(() => { let live = true; if (hidden) return; setLoaded(false); void posRequest('/api/pos/receipt-settings', headers).then(value => { if (live) { setProfile(value); setLoaded(true); setSetupError('') } }).catch(error => { if (live) setSetupError(error.message) }); return () => { live = false } }, [token, hidden])
   useEffect(() => { try { localStorage.setItem(storageKey, JSON.stringify(draft)); setStorageError('') } catch { setStorageError('This draft could not be saved on this device. Keep this screen open until payment is saved.') } }, [storageKey, draft])
   const change = (patch: Partial<Draft>) => { setDraft(current => ({ ...current, ...patch })); setSaved(null) }
@@ -61,8 +68,8 @@ export function ServicePayments({ storageKey, hidden, enabled, manager, customer
       <label htmlFor="service-transaction-type">Transaction type</label><select id="service-transaction-type" value={draft.transactionType} onChange={event => change({ transactionType: event.target.value })}><option>Walk-in</option><option>In-store shopping</option><option>Service payment</option><option>Collection / donation</option><option>Other payment</option></select>
 </details>
       <div className="payment-summary"><p><span>Subtotal</span><strong>{money(pricing?.subtotal || 0)}</strong></p>{profile.taxEnabled && <p><span>{profile.taxLabel} ({profile.taxRate}%{profile.taxIncluded ? ', included' : ''})</span><strong>{money(pricing?.tax || 0)}</strong></p>}<p className="payment-grand-total"><span>Grand total</span><strong>{money(amount)}</strong></p></div>
-      <label htmlFor="service-payment-method">Payment method</label><select id="service-payment-method" value={draft.method} onChange={event => change({ method: event.target.value as Draft['method'], cash: '', cardType: '' })}><option value="cash">Cash</option><option value="bank-transfer">Bank transfer</option><option value="external-pos">Card / POS</option></select>
-      {draft.method === 'cash' ? <><label>Cash received (optional)<input type="number" min={amount || 0} step="0.01" value={draft.cash} placeholder={String(amount) || 'Same as grand total'} onChange={event => change({ cash: event.target.value })} /></label>{draft.cash && <p>Change: {money(Math.max(0, Number(draft.cash) - amount))}</p>}</> : <><label>{draft.method === 'bank-transfer' ? 'Bank / provider' : 'POS provider'}<input required maxLength={200} value={draft.provider} onChange={event => change({ provider: event.target.value })} /></label><label>Payment reference<input required maxLength={200} value={draft.reference} onChange={event => change({ reference: event.target.value })} /></label>{draft.method === 'external-pos' && <><label htmlFor="service-card-type">Card type (optional)</label><select id="service-card-type" value={draft.cardType} onChange={event => change({ cardType: event.target.value })}><option value="">POS</option><option>Visa</option><option>Mastercard</option><option>Amex</option><option>Other card</option></select></>}<p>Confirm the payment succeeded before saving.</p></>}
+      <label htmlFor="service-payment-method">Payment Method</label><select id="service-payment-method" value={draft.method} onChange={event => change({ method: event.target.value as Draft['method'], cash: '', cardType: '' })}><option value="cash">Cash</option><option value="bank-transfer">Bank Transfer</option><option value="external-pos">Card / POS</option></select>
+      {draft.method === 'cash' ? <><label>Cash received (optional)<input type="number" min={amount || 0} step="0.01" value={draft.cash} placeholder={String(amount) || 'Same as grand total'} onChange={event => change({ cash: event.target.value })} /></label>{draft.cash && <p>Change: {money(Math.max(0, Number(draft.cash) - amount))}</p>}</> : <>{draft.method === 'external-pos' ? <PosProviderSelect providers={providers} value={draft.provider} onChange={provider => change({ provider })} /> : <label>Bank Transfer provider<input required maxLength={200} value={draft.provider} onChange={event => change({ provider: event.target.value })} /></label>}<label>Payment reference<input required maxLength={200} value={draft.reference} onChange={event => change({ reference: event.target.value })} /></label>{draft.method === 'external-pos' && <><label htmlFor="service-card-type">Card type (optional)</label><select id="service-card-type" value={draft.cardType} onChange={event => change({ cardType: event.target.value })}><option value="">POS Terminal</option><option>Visa</option><option>Mastercard</option><option>Amex</option><option>Other card</option></select></>}<p>Confirm the payment succeeded before saving.</p></>}
       {storageError && <p role="alert">{storageError}</p>}
       <SubmitButton className="primary-button" disabled={!enabled || !valid}>Save payment</SubmitButton>
     </AsyncForm>}

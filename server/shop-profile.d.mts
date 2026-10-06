@@ -5,3 +5,6 @@ export const businessModes: Record<BusinessMode, { label: string; unit: string; 
 export function normalizeShopProfile(value?: unknown): ShopProfile
 export function validateShopProfile(value: unknown): ShopProfile
 export function businessWorkspace(profile: unknown): { checkoutLabel: string; overviewTitle: string; overviewDescription: string; services: boolean; stock: boolean; payments: boolean; fastFood: boolean; restaurant: boolean }
+
+export const businessPresets: Record<string, { label: string; industry: BusinessMode; workflow: ShopProfile['workflows']; screen: 'POS' | 'Payments' | 'Counter' | 'Restaurant'; workspace: string }>
+export function applyBusinessPreset(profile: unknown, key: string): ShopProfile

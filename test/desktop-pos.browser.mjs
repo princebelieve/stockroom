@@ -15,6 +15,9 @@ try {
  const account=await (await fetch(base+'/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appName:'Corner Shop',ownerName:'Test Cashier',email:'desktop@test.local',password:'long-test-password'})})).json()
  assert.ok(account.token)
  const headers={'Content-Type':'application/json',Authorization:`Bearer ${account.token}`}
+ const settings = await (await fetch(base+'/api/settings',{headers})).json()
+ await fetch(base+'/api/settings',{method:'PUT',headers,body:JSON.stringify({...settings,paymentPolicy:{...settings.paymentPolicy,providers:['Moniepoint','OPay']}})})
+
  for(const [name,price,category] of [['Orange juice',15,'Drinks'],['Wholemeal bread',10,'Bakery'],['Coffee',20,'Drinks']]) await fetch(base+'/api/products',{method:'POST',headers,body:JSON.stringify({name,price,category,sku:name,stock:20,reorder:2,cost:3,unit:'piece'})})
  browser=await chromium.launch({channel:'msedge',headless:true})
  const page=await browser.newPage({viewport:{width:1366,height:900}})
@@ -35,7 +38,7 @@ try {
  const pay=page.locator('#pos-payment')
  assert.ok((await pay.boundingBox()).width>450)
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true, 'Terminal controls must not cause horizontal overflow')
- await pay.getByLabel('Payment method',{exact:true}).selectOption('cash')
+ await pay.getByLabel('Payment Method',{exact:true}).selectOption('cash')
  await pay.getByLabel('Cash received',{exact:true}).fill('20')
  await pay.getByText('Change to give: $5.00',{exact:true}).waitFor()
  for(const width of [1280,1366,1920]) {
@@ -49,9 +52,9 @@ try {
  assert.match(await basket.innerText(),/Orange juice/)
  await page.getByRole('button',{name:/Take payment/}).click()
  assert.equal(await pay.getByLabel('Cash received',{exact:true}).inputValue(),'20')
- await pay.getByLabel('Payment method',{exact:true}).selectOption('bank-transfer')
+ await pay.getByLabel('Payment Method',{exact:true}).selectOption('bank-transfer')
  await pay.getByLabel('Transfer reference (required)',{exact:true}).waitFor()
- await pay.getByLabel('Payment method',{exact:true}).selectOption('multiple')
+ await pay.getByLabel('Payment Method',{exact:true}).selectOption('multiple')
  await pay.getByLabel('Cash portion',{exact:true}).waitFor()
  assert.equal(await page.locator('.sidebar').getByRole('button',{name:'Customer accounts',exact:true}).count(),1)
  assert.equal(await page.locator('.sidebar').getByRole('button',{name:'Printers & devices',exact:true}).count(),0)
@@ -67,13 +70,17 @@ try {
    const input = route.request().postDataJSON()
    return route.fulfill({ json: terminalOrder ? { ...terminalOrder, paid: terminalPaid, status: terminalPaid ? 'paid' : 'pending' } : { orderId: input.orderId, paid: false, status: 'not-started' } })
  })
- await pay.getByLabel('Payment method',{exact:true}).selectOption('external-pos')
+ await pay.getByLabel('Payment Method',{exact:true}).selectOption('external-pos')
+ await pay.getByLabel('Use connected Paystack POS').uncheck()
+ assert.equal(await pay.getByLabel('POS provider',{exact:true}).inputValue(),'Moniepoint')
+ assert.deepEqual(await pay.getByLabel('POS provider',{exact:true}).locator('option').allTextContents(),['Choose POS provider','Moniepoint','OPay'])
+
  assert.equal(await pay.getByRole('button',{name:'Scan payment reference',exact:true}).count(),1)
  await pay.getByLabel('Use connected Paystack POS').check()
  await pay.getByRole('button', { name: 'Send amount to Paystack POS' }).click()
  assert.equal(terminalOrder.amount, 15)
  assert.equal(await pay.getByRole('button', { name: 'Complete sale', exact: true }).isEnabled(), false)
- assert.equal(await pay.getByLabel('Payment method',{exact:true}).isEnabled(), false)
+ assert.equal(await pay.getByLabel('Payment Method',{exact:true}).isEnabled(), false)
  terminalPaid = true
  await pay.getByRole('button', { name: 'Check payment status' }).click()
  assert.equal(await pay.getByRole('button', { name: 'Complete sale', exact: true }).isEnabled(), true)
@@ -119,6 +126,28 @@ try {
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
  await page.getByLabel('Search guide',{exact:true}).fill('xyz-topic-not-found')
  await page.getByText('No matching topics. Try a shorter search.',{exact:true}).waitFor()
+
+ await page.setViewportSize({width:1366,height:900})
+ await page.locator('.sidebar').getByRole('button',{name:/^Inventory/}).click()
+ const remoteProducts = (await (await fetch(base+'/api/products',{headers})).json()).products
+ remoteProducts[0].stock = 80
+ await page.route('**/api/products', route => route.request().method()==='GET' ? route.fulfill({json:{products:remoteProducts}}) : route.continue())
+ await page.route('**/api/sync/pull', route => route.fulfill({json:{configured:true,pending:1,conflicts:0,lastError:''}}))
+ let uploads = 0
+ await page.route('**/api/products/*/stock', route => { uploads++; return route.abort() })
+ await page.evaluate(async productId => {
+   const db = await new Promise((resolve,reject) => { const request=indexedDB.open('stockroom-offline',2);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error) })
+   await new Promise((resolve,reject)=>{const tx=db.transaction('operations','readwrite');tx.objectStore('operations').add({type:'stock',payload:{productId,amount:3},createdAt:new Date().toISOString()});tx.oncomplete=resolve;tx.onerror=reject})
+   db.close()
+ },remoteProducts[0].id)
+ await page.getByLabel('Page options',{exact:true}).click()
+ await page.getByRole('button',{name:'Refresh',exact:true}).click()
+ await page.getByRole('status').filter({hasText:'No local changes uploaded.'}).waitFor()
+ const refreshedRow=page.locator('tbody tr').filter({hasText:remoteProducts[0].name}).first()
+ assert.match(await refreshedRow.innerText(),/83/,'Downloaded stock plus the pending local adjustment must appear')
+ const queued = await page.evaluate(async()=>{const db=await new Promise(resolve=>{const r=indexedDB.open('stockroom-offline',2);r.onsuccess=()=>resolve(r.result)});const result=await new Promise(resolve=>{const r=db.transaction('operations','readonly').objectStore('operations').getAll();r.onsuccess=()=>resolve(r.result)});db.close();return result})
+ assert.equal(queued.filter(operation=>operation.type==='stock').length,1,'Refresh preserves the pending outbox')
+ assert.equal(uploads,0,'Refresh does not upload local work')
  console.log('PASS: real desktop app, basket-dominant layout, payment step, preserved entries, cash/transfer/split fields and 1280/1366/1920 widths')
  console.log(join(tmpdir(),'stockroom-desktop-payment-1366.png'))
 } finally {if(browser)await browser.close();child.kill();await once(child,'exit').catch(()=>{});await rm(data,{recursive:true,force:true})}

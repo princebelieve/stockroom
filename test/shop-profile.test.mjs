@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { businessModes, businessWorkspace, normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
+import { businessModes, businessPresets, applyBusinessPreset, businessWorkspace, normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
 import { validateCustomValues, readCustomValues } from '../server/shop-fields.mjs'
 
 test('supermarket workspace defaults and owner feature overrides survive normalization', () => {
@@ -50,4 +50,23 @@ test('custom setup preserves user labels, deduplicates categories and rejects in
   assert.throws(() => validateShopProfile({ ...profile, categories: ['x'.repeat(81)] }))
   assert.throws(() => validateShopProfile({ mode: 'unknown', industry: 'general' }))
   assert.equal(normalizeShopProfile({ ...profile, mode: 'general' }).unit, 'item')
+})
+
+test('explicit business presets activate only their operational workspace and preserve custom configuration', () => {
+  const current = normalizeShopProfile({ mode: 'custom', industry: 'printing', itemLabel: 'Our item', inventoryLabel: 'Our list', unit: 'sheet', categories: ['Special'], restaurant: true, fastFood: true })
+  for (const [key, preset] of Object.entries(businessPresets)) {
+    const result = applyBusinessPreset(current, key)
+    const workspace = businessWorkspace(result)
+    assert.equal(result.workflows, preset.workflow)
+    assert.equal(workspace.stock, preset.screen === 'POS')
+    assert.equal(workspace.payments, preset.screen === 'Payments')
+    assert.equal(workspace.fastFood, preset.screen === 'Counter')
+    assert.equal(workspace.restaurant, preset.screen === 'Restaurant')
+    assert.deepEqual(result.fields, current.fields)
+    assert.deepEqual(result.categories, current.categories)
+    assert.equal(result.unit, 'sheet')
+    assert.equal(result.itemLabel, 'Our item')
+  }
+  assert.equal(current.restaurant, true)
+  assert.throws(() => applyBusinessPreset(current, '__proto__'), /Choose/)
 })

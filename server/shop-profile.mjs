@@ -94,3 +94,22 @@ export function validateShopProfile(input) {
   }
   return normalizeShopProfile(input)
 }
+
+// Explicit presets do not change legacy normalization or existing business settings.
+export const businessPresets = {
+  retail: { label: 'Retail shop / mini-mart', industry: 'general', workflow: 'stock', screen: 'POS', workspace: 'Product sales' },
+  supermarket: { label: 'Supermarket', industry: 'supermarket', workflow: 'stock', screen: 'POS', workspace: 'Product sales' },
+  printing: { label: 'Printing and copy shop', industry: 'printing', workflow: 'payments', screen: 'Payments', workspace: 'Payments & receipts' },
+  services: { label: 'Services / church office', industry: 'services', workflow: 'payments', screen: 'Payments', workspace: 'Payments & receipts' },
+  takeaway: { label: 'Fast food / takeaway', industry: 'food-service', workflow: 'fast-food', screen: 'Counter', workspace: 'Order counter' },
+  restaurant: { label: 'Restaurant', industry: 'food-service', workflow: 'restaurant', screen: 'Restaurant', workspace: 'Tables & tabs' },
+  bar: { label: 'Bar / lounge', industry: 'drinks', workflow: 'restaurant', screen: 'Restaurant', workspace: 'Tables & tabs' },
+}
+export function applyBusinessPreset(profile, key) {
+  if (!Object.hasOwn(businessPresets, key)) throw new Error('Choose a business preset.')
+  const preset = businessPresets[key]
+  const current = normalizeShopProfile(profile)
+  return validateShopProfile({ ...current, industry: preset.industry,
+    mode: current.mode === 'custom' ? 'custom' : 'suggested',
+    workflows: preset.workflow, fastFood: preset.workflow === 'fast-food', restaurant: preset.workflow === 'restaurant' })
+}

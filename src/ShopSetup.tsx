@@ -1,14 +1,16 @@
 import { WorkspaceHelp } from './WorkspaceHelp'
 ﻿import { useEffect, useRef, useState } from 'react'
 import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
-import { businessModes, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
+import { businessModes, businessPresets, applyBusinessPreset, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
 import { coreFields, validateFields, type ShopField } from '../server/shop-fields.mjs'
 import { ShopProductFields } from './ShopProductFields'
 import { readReceiptPhoto } from './lib/receiptOcr'
 import { suggestTemplateFields } from './lib/shopTemplate'
 import { BlankProductForm } from './BlankProductForm'
 
-export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD' }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string }) {
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', openWorkspace }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; openWorkspace?: (screen: 'POS' | 'Payments' | 'Counter' | 'Restaurant') => void }) {
+  const [presetKey, setPresetKey] = useState('')
+  const [previewPreset, setPreviewPreset] = useState('')
   const [draft, setDraft] = useState(value)
   const [step, setStep] = useState(0)
   const [dirty, setDirty] = useState(false)
@@ -57,14 +59,21 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     catch (error) { setProblem(error instanceof Error ? error.message : 'Check your fields.') }
   }
   return <section id="shop-setup" className="panel full-panel shop-wizard">
+    <h2>Start with your business</h2>
+    <label htmlFor="business-preset">Business preset</label>
+    <select id="business-preset" value={presetKey} onChange={event => { setPresetKey(event.target.value); setPreviewPreset('') }}><option value="">Choose your business</option>{Object.entries(businessPresets).map(([key, preset]) => <option key={key} value={key}>{preset.label}</option>)}</select>
+    <button type="button" className="filter-button" disabled={!presetKey || dirty} onClick={() => setPreviewPreset(presetKey)}>Preview preset</button>
+    {dirty && <p>Save your current changes before applying a business preset.</p>}
+    {previewPreset && <div className="panel" aria-label="Business preset preview"><h3>{businessPresets[previewPreset].workspace}</h3><p>This will become your selling workspace. Other selling screens will be hidden; you can enable them again below.</p><p>Your products, menu, tables, receipts and saved configuration are kept. Add your items and prices in Business settings when needed.</p><AsyncButton className="primary-button" busyLabel="Applying preset..." disabled={dirty} onClick={async () => { await save(applyBusinessPreset(value, previewPreset)); setDirty(false); setPreviewPreset(''); openWorkspace?.(businessPresets[previewPreset].screen) }}>Apply preset and start selling</AsyncButton><button type="button" className="filter-button" onClick={() => setPreviewPreset('')}>Cancel</button></div>}
+    <h3>Customise workspaces (optional)</h3>
     <label htmlFor="payment-screens">Payment screens</label><select id="payment-screens" value={draft.workflows || 'both'} onChange={event => change({ ...draft, workflows: event.target.value as ShopProfile['workflows'] })}><option value="payments">Payments &amp; receipts (printing presses, church offices, services)</option><option value="stock">Product sales (supermarkets, mini-marts, retail shops)</option><option value="both">Product sales + Payments &amp; receipts</option><option value="fast-food">Order counter only (fast food, cafes, takeaways)</option><option value="restaurant">Tables &amp; tabs only (restaurants, bars, lounges)</option></select><p>These business examples are a guide. Choose the workflow that fits how you sell.</p><WorkspaceHelp><p>Payments &amp; receipts records a payment without changing stock. Both gives staff two separate screens.</p></WorkspaceHelp>
     <label><input type="checkbox" checked={draft.fastFood === true || draft.workflows === 'fast-food'} disabled={draft.workflows === 'fast-food'} onChange={event => change({ ...draft, fastFood: event.target.checked })} />Enable separate Order counter (fast food, cafes, takeaways)</label><WorkspaceHelp><p>Use Order counter only for menu orders and preparation. Enable the checkbox with another screen choice for a mixed business.</p></WorkspaceHelp>
     <label><input type="checkbox" checked={draft.restaurant === true || draft.workflows === 'restaurant'} disabled={draft.workflows === 'restaurant'} onChange={event => change({ ...draft, restaurant: event.target.checked })} />Enable separate Tables &amp; tabs workspace (restaurants, bars, lounges)</label><p>Tables, seats, open bills and food or drink orders.</p>
     <AsyncButton className="primary-button" busyLabel="Saving screens..." onClick={async () => { const otherChanges = JSON.stringify({ ...draft, workflows: value.workflows, fastFood: value.fastFood, restaurant: value.restaurant }) !== JSON.stringify(value); await save(validateShopProfile({ ...value, workflows: draft.workflows, fastFood: draft.fastFood || draft.workflows === 'fast-food', restaurant: draft.restaurant || draft.workflows === 'restaurant' })); setDirty(otherChanges); setMessage('Payment screens saved. Use Sync now to share this choice with your other devices.') }}>Save payment screens</AsyncButton>
-    {!['fast-food','restaurant'].includes(draft.workflows || '') && <><h2>Business type and product form</h2><WorkspaceHelp><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p></WorkspaceHelp>
+    {!['fast-food','restaurant'].includes(draft.workflows || '') && <><h2>Product form (optional)</h2><WorkspaceHelp><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p></WorkspaceHelp>
     <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
     {step === 0 && <div className="shop-step">
-      <h3>Start with a familiar template</h3><label>Business type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
+      <h3>Product catalogue template</h3><label>Catalogue type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
       <p>{businessModes[industry].note}</p><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
       <WorkspaceHelp><p>Loading a template replaces this draft's visible fields. Previous custom fields stay in Removed fields so their saved values can be restored.</p></WorkspaceHelp>
       <details><summary>Start from a printed form or screenshot</summary><WorkspaceHelp><p>Upload a JPG, PNG or WebP image, or paste headings from your old app. Text is read on this device without a paid recognition service. Clear printed text works best; write in BLOCK / CAPITAL LETTERS for handwritten labels.</p></WorkspaceHelp>

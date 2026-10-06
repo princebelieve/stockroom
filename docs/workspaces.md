@@ -34,3 +34,15 @@ These names describe workflows, not full industry packages. Order counter still 
 ## Visual guidance
 
 Product sales uses green, Payments & receipts blue, Order counter orange and Tables & tabs purple. Overview pairs icons and business examples with compact totals and a single start action. Routine instructions are available under Help. Order statuses retain text labels beside colour; table tiles display Free or Open bill. Errors, payment confirmations and empty-screen guidance remain visible. Detailed cost information is available under Cost details rather than competing with payment actions.
+
+## Business presets
+
+Owners can open Business settings ? Workspaces ? Start with your business, choose a preset and preview it. Apply preset and start selling saves the workspace choice and opens its selling screen. Retail/supermarket uses Product sales; printing/services uses Payments & receipts; takeaway uses Order counter; restaurant/bar uses Tables & tabs.
+
+Applying a preset hides other selling screens without deleting their records. Existing product fields and custom catalogue configuration are retained. Menu items, recipes, tables, receipts, payment settings, devices and branding are not replaced. Add actual menu items/prices or tables in the relevant settings tab. Extra workspaces can be enabled below the preset chooser. Sharing settings with other devices still uses Sync now. Presets do not implement hotel bookings or other sector-specific operations.
+
+## Payments and data updates
+
+Payment Method offers Cash, POS Terminal and Bank Transfer where supported. POS provider choices come from the ordered selections in Business settings. The first selected provider is the default; removing it promotes the next selected provider. Cashiers can choose another selected provider. Device configuration does not override this list.
+
+Refresh downloads business updates and reloads selling data without uploading queued local work. Desktop offline product creations, stock adjustments and sales are overlaid on the downloaded catalogue; pending settings remain local. Refresh leaves baskets and order/payment drafts open. Sync now uploads pending changes and downloads updates; it has not been changed to upload-only. Cloud changes made offline on another device cannot be downloaded until that device uploads them.
