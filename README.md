@@ -120,3 +120,5 @@ Deployment guides:
 - [Documentation alignment review](docs/documentation-alignment.md)
 
 Oil sales supports owner/admin-configured bulk thresholds and customer-specific prices under **Inventory > Oil price tiers**. Thresholds use combined base-unit quantities across loose oil and configured containers. Customer rates override qualifying bulk rates; retail/container prices are the fallback. See the oil chapter in the [user guide](docs/user-guide.md#oil-sales-retail-bulk-and-customer-prices).
+
+Weighed-goods checkout supports reviewed keyboard-output readings and configurable EAN-13 gram-weight labels for kg stock products. Set up each checkout under **Business settings > Devices > Weighed goods hardware**. See [supported output formats and physical acceptance checks](docs/hardware-setup.md#weighed-goods); model-specific serial/live scale integrations require separate work.

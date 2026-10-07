@@ -15,32 +15,33 @@ This guide follows the current app screens. Availability depends on your workspa
 9. Business settings > Receipts
 10. Business settings > Devices
 11. Devices > POS and receipt scanning
-12. Business settings > Food menu & recipes / Restaurant menu & tables
-13. Menu settings > Recipes
-14. Menu settings > Packaged stock
-15. Product management: catalogue and opening stock
-16. Product management: purchasing, receiving, batches and wastage
-17. Product sales: basket to receipt
-18. Oil sales: retail, bulk and customer prices
-19. Payments & receipts: manually entered payment
-20. Payments & receipts > Jobs & invoices
-21. Payments & receipts > Church collections
-22. Order counter > New order
-23. Order counter > Orders and Preparation
-24. Order counter > Order actions
-25. Tables & tabs > Tables and tabs
-26. Tables & tabs > Take payment and close a bill
-27. Tables & tabs > Bill actions, History and refunds
-28. Cash register
-29. Sales history: receipts, voids and customer history
-30. Stock count and Stock movements
-31. Customer display
-32. Customer accounts
-33. Business performance and Reports
-34. Staff & access and Staff activity
-35. Sync now and Sync issues
-36. Close your account, exports and referrals
-37. End-of-day checklist and when help is needed
+12. Devices and Product sales > Weighed goods
+13. Business settings > Food menu & recipes / Restaurant menu & tables
+14. Menu settings > Recipes
+15. Menu settings > Packaged stock
+16. Product management: catalogue and opening stock
+17. Product management: purchasing, receiving, batches and wastage
+18. Product sales: basket to receipt
+19. Oil sales: retail, bulk and customer prices
+20. Payments & receipts: manually entered payment
+21. Payments & receipts > Jobs & invoices
+22. Payments & receipts > Church collections
+23. Order counter > New order
+24. Order counter > Orders and Preparation
+25. Order counter > Order actions
+26. Tables & tabs > Tables and tabs
+27. Tables & tabs > Take payment and close a bill
+28. Tables & tabs > Bill actions, History and refunds
+29. Cash register
+30. Sales history: receipts, voids and customer history
+31. Stock count and Stock movements
+32. Customer display
+33. Customer accounts
+34. Business performance and Reports
+35. Staff & access and Staff activity
+36. Sync now and Sync issues
+37. Close your account, exports and referrals
+38. End-of-day checklist and when help is needed
 
 ## Start here: install, register and sign in
 
@@ -155,6 +156,17 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 5. Check amount, currency and approval before completing the sale. Use the connected Paystack POS control only if that business integration is already configured.
 
 **Remember:** A scan or photo extracts a reference; it does not verify that money arrived. Manually recording POS payment does not charge the customer again.
+
+## Devices and Product sales > Weighed goods
+
+1. Owners/admins open Business settings > Devices > Weighed goods hardware. Enable keyboard-output readings or weight labels on this checkout device. Products must use kg stock and a price per kg.
+2. For a paired keyboard-output scale, set the bare reading unit. Select Weighed product in Product sales, focus Scale reading and send a stable reading such as 1.250 kg or 1250 g. Select Review measured weight.
+3. For labels, configure the scale with a two-digit prefix from 20 to 29, five-digit product code, five-digit weight in grams and EAN check digit. Map product codes in Devices. Scan the label using the existing product scanner or camera.
+4. Review the product and net kg, confirm that you checked the stable reading or printed label, then Add measured quantity. Cancel measured item changes neither basket nor stock. The app rejects invalid checksums, unmapped codes, zero/negative/unsupported precision and stock shortages.
+5. Take payment through normal checkout. Receipt quantity and stock deduction use the measured kg. Multiple confirmed parcels accumulate; refunds use the saved receipt quantities and prices.
+6. Test a real scale with reference weights, tare, stability, disconnects, barcode errors, a receipt and a return. This implementation supports keyboard output and the specified label format; serial protocols and live polling need model-specific adapters.
+
+**Remember:** No scale model has been physically verified here. Device settings are local. The app does not control tare or stability. A price-encoded label cannot be treated as a weight label; configure the exact supported layout.
 
 ## Business settings > Food menu & recipes / Restaurant menu & tables
 
