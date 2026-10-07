@@ -1,3 +1,4 @@
+import { requiresStockWorkSync } from '../../server/stock-work.mjs'
 import { registerCheckoutTill } from '../../server/till-binding.mjs'
 import { salesHistory } from '../../server/sales-history.mjs'
 import { ensureStaffRemovals, recordStaffRemoval } from '../../server/staff-removal.mjs'
@@ -194,6 +195,10 @@ async function syncNowImpl() {
     const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
     if (!operations.length) break
+    if(operations.some(requiresStockWorkSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('stock-work-v1'))throw new Error('Update the existing sync server before sharing material use or production. Records remain on this device.')
+    }
     if(operations.some(requiresServiceJobSync)) {
       const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
       if(!support.ok || !(await support.json()).capabilities?.includes('service-jobs-v1'))throw new Error('Update the existing sync server before sharing service jobs. Records remain on this device.')
@@ -244,7 +249,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {
@@ -726,7 +731,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const returns = ((await db.query("SELECT payload FROM pos_records WHERE scope = 'business' AND branch_id = ? AND kind = 'return'", [branchId])).values || []).map(row => JSON.parse(String(row.payload)))
     const retail=((await db.query("SELECT payload FROM retail_records WHERE scope=? AND (branch_id=? OR kind='supplier')",['business',branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
     const batchData=await batchReport(db,branchId)
-    const adjustments=(await db.query('SELECT payload FROM stock_events')).values.map(row=>JSON.parse(String(row.payload))).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption'].includes(row.category))
+    const adjustments=(await db.query('SELECT payload FROM stock_events')).values.map(row=>JSON.parse(String(row.payload))).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption','service-materials'].includes(row.category))
     const registers=(await db.query("SELECT payload FROM pos_records WHERE scope='business' AND branch_id=? AND kind='register'",[branchId])).values.map(row=>JSON.parse(String(row.payload)))
     const reportingTimeZone = normalizeShopProfile((await db.query('SELECT shop_profile FROM app_settings WHERE id = 1')).values?.[0]?.shop_profile).reportingTimeZone
     const orders=((await db.query("SELECT payload FROM pos_records WHERE branch_id=? AND kind='counter-order'",[branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))

@@ -10,7 +10,7 @@ Open **Business settings > Workspaces**:
 
 - Choose **Order counter only** under **Payment screens** for a dedicated workspace.
 - To keep stock checkout or payment entry as well, choose those screens and check **Enable separate Order counter**.
-- Click **Save payment screens**. Use **Sync now** to share the setting with other devices.
+- Click **Save workspaces**. Use **Sync now** to share the setting with other devices.
 
 Open **Business settings > Food menu & recipes > Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.
 
@@ -22,7 +22,7 @@ Online checkout currently supports pay-at-pickup, a bank transfer claim, or a wa
 
 The portal caches its last loaded account and menu on the customer device and saves the basket locally, so those can be viewed or edited offline. Submitting an order, signing in on a new session, and getting fresh order status require internet. Checkout shows applicable tax; changed prices/tax require a refresh. If the submission reply is lost, Retry saved order resends the same request ID and contents. New customer orders enter the cloud queue and reach business devices when they synchronize; staff can still take local orders and record wallet payments while offline, with their changes syncing later. A bank transfer claim and payment confirmation still need staff review.
 
-Choose **Prepared food or drinks** for meals made to order. They require no linked finished-product inventory record. Configured recipes deduct raw ingredients when preparation starts; prepared items without recipes do not consume tracked stock. Choose **Packaged goods** for bottled drinks or other stocked goods and link an existing product. **Packaged stock** lets owners/admins create and restock packaged products within this workspace. Restocking there is a stock adjustment at the product's saved cost; it is not a supplier invoice or payment.
+Choose **Prepared food or drinks** for meals made to order. They require no linked finished-product inventory record. Configured recipes deduct raw ingredients when preparation starts; prepared items without recipes do not consume tracked stock. Choose **Stocked goods - deduct stock** for bottled drinks, produced portions or other stocked goods and link an existing product. **Packaged stock** lets owners/admins create and restock packaged products within this workspace. Restocking there is a stock adjustment at the product's saved cost; it is not a supplier invoice or payment.
 
 ## Daily operation
 
@@ -123,3 +123,13 @@ Financial reports use the saved business reporting timezone, configured under Bu
 Under Business settings > Business, enter the public bank name, account name, account number and transfer instructions. Save and synchronize. The QR menu offers bank transfer only when all bank details are present; staff must still verify money received.
 
 Delivery is hidden until the owner enables it. Set a fixed delivery charge before tax, including zero for free delivery. QR customers must enter a phone number and complete address. The charge is included in the order total and receipt. Staff see the complete delivery details on the order and preparation ticket. This collects delivery information; it does not provide driver dispatch or location tracking. Local counter orders retain their existing handoff choices.
+
+## Food batch production
+
+Owners/admins open **Order counter > Batch production** for food prepared before customers order. Add or choose a separate finished stock product and the raw ingredients actually used. Enter expected yield, actual usable finished quantity, a work reference and optional finished-batch expiry. **Review stock changes** shows ingredient deductions and output. **Cancel** changes nothing; the red **Confirm stock changes** records the batch. Failed saves retain the draft ID for safe retry.
+
+The batch deducts ingredients and adds the usable output to stock. All captured ingredient cost is allocated across the actual usable output: inputs costing 8 and eight finished portions create stock costing 1 per portion. Expected yield is recorded for comparison; it does not add stock. **Use for new batch** copies an earlier batch into a new draft; review actual quantities and enter its new expiry. If nothing usable was produced, record the ingredients through wastage instead.
+
+Link the finished product in Menu as **Stocked goods - deduct stock**, or use it as an ingredient in a recipe assembled to order. Do not consume both the raw recipe and the finished stock for the same portion. Counter stocked offerings consume finished stock at payment; restaurant stocked offerings consume it when preparation starts. Produced stock retains its batch cost and expiry. Unsold output remains inventory; input cost is not also deducted as a running expense. Labour and overheads belong in Expenses.
+
+**Purchasing and wastage** is available within Batch production. Record spoiled finished units through wastage so their captured cost is recognized once. Material-use and batch-production synchronization require app/server support for `stock-work-v1`; older servers keep the new records queued. This is a single-output food batch workflow, not production scheduling or a manufacturing system.

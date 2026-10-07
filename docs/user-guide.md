@@ -106,7 +106,7 @@ Owners can publish QR bank details and enable takeaway delivery with a fixed cha
 1. Open Workspaces and choose the Payment screens selection.
 2. Choose Product sales for stocked goods, Payments & receipts for manually described non-stock payments, or the combined option for both.
 3. Choose Order counter only or Tables & tabs only when that is your main workflow. The separate enable checkboxes can add these workflows to another screen selection.
-4. Select Save payment screens. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.
+4. Select Save workspaces. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.
 5. For stock/product forms, use Choose template, Customize fields, then Preview and save. Review categories, unit, labels and custom fields before saving.
 6. Set Reporting timezone to the business timezone, such as Africa/Lagos. Select Save reporting timezone, then Sync now. Businesses without a saved timezone default to UTC.
 
@@ -239,6 +239,8 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 8. Reopen the same job for later payments or receipt reprints. Jobs and payment drafts survive offline reload. Use its original till; Sync now shares saved work with other devices.
 9. Search jobs and filter unpaid invoices or overdue unfinished work using the business reporting timezone. Choose an existing customer account on a new job for reliable invoice linking.
 10. Owners/admins can print invoice customer statements for this branch. Currencies remain separate; net paid includes refunds. Statements exclude estimates, cancelled jobs, separate walk-in receipts and wallet balances.
+11. Owners/admins use Job materials and costs on the original till to record paper, ink or other stock actually used. Review stock changes, then Cancel or use the red Confirm stock changes button. Saved costs and quantities remain after refunds or cancellation.
+12. Use Purchasing and wastage inside the material screen for supply deliveries, batch costs and spoilage, even without Product sales. Material use reduces profit when recorded; do not expense the same purchases again. Labour and overheads belong in Expenses.
 
 **Remember:** Saved job details and prices are snapshots. Correct an issued job by refunding retained payments, cancelling and creating its replacement. Reports count payments and refunds; creating an estimate or invoice does not record revenue.
 
@@ -259,6 +261,8 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 3. Open Orders to collect any unpaid amount. Save the payment and print its receipt.
 4. Use Hand over once the order is ready and paid. Collected orders move into their separate history section.
 5. For QR/customer orders, review the order in Orders and select Accept on this till while connected. Synchronize before preparing or taking payment. Customers can enter their pickup name as guests; wallet sign-in is optional. Use Sync orders to share updates.
+6. Owners/admins open Batch production to record ingredients actually used, expected yield, actual usable finished stock and optional expiry. Review stock changes, then Cancel or confirm. Use for new batch copies an earlier batch into a new draft.
+7. Link produced stock in Menu as Stocked goods - deduct stock, or use it as a recipe ingredient. Input cost becomes finished-stock cost; do not also consume its raw recipe for the same portion. Use Purchasing and wastage for spoilage or a completely failed batch. Sharing these records requires updated app/server support for stock-work-v1.
 
 **Remember:** Preparation consumes configured recipes once. Pay and start recipe preparation on the original till, or the accepting till for online orders. Verify transfer funds before saving payment. Windows supports automatic kitchen/bar ticket routing with visible retry failures. The owner can recover the original checkout identity on a synchronized replacement under Device settings after stopping the source and reconciling unsynchronized activity.
 
@@ -279,6 +283,7 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 3. Choose a seat or shared items, add menu items and send the order. Add more rounds to the same bill as required.
 4. Review the itemized bill and outstanding total. Use Print itemized bill for a customer review before payment.
 5. Open Orders/Preparation to progress service. Kitchen/bar tickets contain the relevant station lines. Mark served when delivered.
+6. Owners/admins can open Orders / Preparation > Batch production for food made in advance. Record actual ingredients and usable yield, then confirm. Link finished stock in Menu or recipes; preparation consumes it at its captured batch cost.
 
 **Remember:** A printed unpaid bill is not a payment receipt. Synchronize devices before sharing table occupancy; use one till to manage each open bill.
 

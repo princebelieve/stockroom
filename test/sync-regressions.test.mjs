@@ -5,6 +5,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 import vm from 'node:vm'
 import { requiresServiceJobSync } from '../server/service-jobs.mjs'
+import { requiresStockWorkSync } from '../server/stock-work.mjs'
 import { requiresCounterSync, requiresRestaurantSync, counterConflictRecord } from '../server/counter-service.mjs'
 import { registerCheckoutTill } from '../server/till-binding.mjs'
 
@@ -38,7 +39,7 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
     }
     const code = source.slice(source.indexOf('async function syncNowImpl('), source.indexOf('\n// Pull-to-refresh'))
     const sync = vm.runInNewContext(stripTypeScriptTypes(`(${code})`), {
-      requiresCounterSync, requiresRestaurantSync, requiresServiceJobSync, counterConflictRecord,
+      requiresCounterSync, requiresRestaurantSync, requiresServiceJobSync, requiresStockWorkSync, counterConflictRecord,
       registerCheckoutTill, localStorage: { getItem: () => '' },
       getMobileSyncConfiguration: async () => ({ syncApiUrl: 'https://test', businessId: 'shop', deviceId: 'device', deviceToken: 'token' }),
       openMobileDatabase: async () => db, now: () => '2026-01-01',
@@ -53,5 +54,22 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
     assert.deepEqual(batches, acknowledge ? [500, 1] : [500])
     assert.equal(result.pending, acknowledge ? 0 : 501)
     if (!acknowledge) assert.match(result.lastError, /acknowledge/)
+  })
+
+  test(`${path}: an older server keeps physical stock work queued`,async()=>{
+    const pending={operationId:'batch',entityType:'pos_record',payload:JSON.stringify({kind:'food-production'})}
+    let uploaded=false,acknowledged=false
+    const code=source.slice(source.indexOf('async function syncNowImpl('),source.indexOf('\n// Pull-to-refresh'))
+    const sync=vm.runInNewContext(stripTypeScriptTypes(`(${code})`),{
+      requiresCounterSync,requiresRestaurantSync,requiresServiceJobSync,requiresStockWorkSync,counterConflictRecord,
+      registerCheckoutTill,localStorage:{getItem:()=>''},
+      getMobileSyncConfiguration:async()=>({syncApiUrl:'https://test',businessId:'shop',deviceId:'device',deviceToken:'token'}),
+      openMobileDatabase:async()=>({query:async sql=>({values:sql.includes('COUNT(*)')?[{count:1}]:[pending]}),run:async()=>{acknowledged=true}}),
+      now:()=> '2026-01-01',pullLatestImpl:async()=>({pending:1,lastError:''}),
+      originalFetch:async url=>{if(url.endsWith('/v1/sync/push'))uploaded=true;return {ok:true,json:async()=>({capabilities:['service-jobs-v1','counter-v3']})}}
+    })
+    const result=await sync()
+    assert.equal(uploaded,false);assert.equal(acknowledged,false);assert.equal(result.pending,1)
+    assert.match(result.lastError,/Update the existing sync server/)
   })
 }

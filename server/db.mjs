@@ -1,3 +1,4 @@
+import { isStockWork, validateStockWork, applyStockWorkSync } from './stock-work.mjs'
 import { businessDate } from './report-timezone.mjs'
 import { validateServiceJob } from './service-jobs.mjs'
 import { restaurantSaleStatements, restaurantPaymentFingerprint } from './restaurant-payments.mjs'
@@ -461,7 +462,7 @@ export function getReports(branchId = 'main') {
   for(const product of listProducts(branchId))stockChangeSync(retailDb,{id:`report:${branchId}:${product.id}`,branchId,productId:product.id,delta:0,createdAt:now()})
   const retail=database.prepare("SELECT payload FROM retail_records WHERE scope=? AND (branch_id=? OR kind='supplier')").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
   const batches=database.prepare('SELECT * FROM stock_batches WHERE branch_id=? AND quantity>0').all(branchId)
-  const adjustments=database.prepare('SELECT payload FROM stock_events').all().map(row=>JSON.parse(row.payload)).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption'].includes(row.category))
+  const adjustments=database.prepare('SELECT payload FROM stock_events').all().map(row=>JSON.parse(row.payload)).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption','service-materials'].includes(row.category))
   const registers=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='register'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
   const orders=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='counter-order'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
   return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers,orders,reportingTimeZone: normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile).reportingTimeZone })
@@ -728,6 +729,7 @@ export function applyRemoteOperations(operations) {
             for(const [sql,args] of restaurantSaleStatements(sale,organizationId)) database.prepare(sql).run(...args)
             for(const [index,item] of sale.items.entries()) if(item.batchAllocations) database.prepare('UPDATE sale_items SET batch_allocations=? WHERE id=?').run(JSON.stringify(item.batchAllocations),`${sale.id}:${index}`)
           }
+          if(isStockWork(payload)){validateStockWork(payload,existing?JSON.parse(existing.payload):undefined);applyStockWorkSync(retailDb,payload,organizationId)}
           if (payload.kind === 'counter-consumption') applyConsumptionSync(retailDb, payload, organizationId)
           if (payload.kind === 'return' && !existing) {
             for (const item of payload.items) if (item.restock) {

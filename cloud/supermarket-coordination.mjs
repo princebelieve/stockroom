@@ -5,6 +5,10 @@ export function coordinationChanges(document, original) {
   const p=document.payload||{},changes=[]
   const stock=(branch,product,delta,before)=>{if(!String(product).startsWith('service:'))changes.push({key:`stock:${branch||'main'}:${product}`,delta,initial:Number(before)||0,label:'Stock oversold across tills'})}
   if(document.entityType==='stock' && document.action==='adjust')stock(p.branchId,p.productId||document.entityId,Number(p.amount),p.beforeStock)
+  if(document.entityType==='pos_record' && ['service-materials','food-production'].includes(p.kind)) {
+    for(const row of p.ingredients||[])stock(p.branchId,row.productId,-Number(row.quantity),row.beforeStock)
+    if(p.output)stock(p.branchId,p.output.productId,Number(p.output.quantity),p.output.beforeStock)
+  }
   if(document.entityType==='sale' && document.action==='create')for(const [index,line] of (p.items||[]).entries()){
     stock(p.branchId,line.productId,-Number(line.quantity),line.beforeStock)
     changes.push({key:`return:${p.id}:${index}`,delta:Number(line.quantity),initial:0,label:'Receipt return quantity exceeded'})

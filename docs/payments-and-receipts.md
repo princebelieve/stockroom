@@ -1,6 +1,6 @@
 # Payments & receipts
 
-Use this workspace for payments described by the cashier, without product stock or ingredient deduction. It has three tabs: **New payment**, **Jobs & invoices**, and **Payment history**.
+Use this workspace for payments described by the cashier, without automatic product stock or ingredient deduction on payment. Issued jobs can separately record materials actually used. It has three tabs: **New payment**, **Jobs & invoices**, and **Payment history**.
 
 ## Start using it
 
@@ -33,6 +33,16 @@ Draft form entries remain editable before saving. Saved job descriptions, prices
 Owners/admins can save reusable service names and prices in **Business settings > Receipts > Saved services and prices**. Use **Add saved service** on a payment or job; saved receipts and invoices retain their original prices.
 
 Search jobs by customer, phone, description or invoice ID. Filter unpaid invoices or overdue unfinished work using the business reporting timezone. Owners/admins can print invoice customer statements for this branch. Statements keep currencies separate and include refunds in net paid; they exclude estimates, cancelled jobs, separate walk-in receipts and wallet balances. Choose an existing customer account when creating a job to link its invoices reliably. Unlinked customers without a phone remain separate. Invoice payments support cash, terminal, bank transfer and split payments.
+
+## Job materials and costs
+
+Owners/admins can open an issued job and use **Job materials and costs** on its original till. Add paper, ink or other supplies as stock, choose each material and its actual quantity used, and enter a work reference. **Review stock changes** shows the physical deductions. **Cancel** changes nothing; the red **Confirm stock changes** saves the material use and captured batch costs once. Retrying a failed response uses the same draft ID.
+
+Use **Purchasing and wastage** inside this screen for suppliers, deliveries, changing batch purchase costs, supplier payments and spoiled stock. This works without enabling Product sales. Use one stock unit consistently: sheets, kg or litres, for example. Opening stock uses the purchase cost entered when adding the stock product.
+
+Materials are expensed when used, separately from deposits or invoice payments. The job shows the total recorded material cost, excluding labour and overheads. Refunds and cancellation retain consumed stock and cost. Saved material records cannot be edited or deleted; correct physical stock with a reason through the stock tools. Do not record the same supplies again as running expenses. This records job materials; it does not schedule printing machines or manage automated press production.
+
+Material-use synchronization requires the updated app and sync server capability `stock-work-v1`. An older server leaves these records queued rather than sharing unsupported stock changes.
 
 ## Refunds
 

@@ -4,7 +4,7 @@ In **Business settings > Workspaces > Payment screens**, choose **Tables & tabs 
 
 Inventory, Purchasing, Stock count, Stock movements and stock reports are available for ingredients and drinks. Owners and administrators can receive supplier deliveries, track batch costs and expiry dates, and record wastage without enabling Product sales.
 
-This adds its own navigation screen, menu, table setup, bill sessions and orders. Fast food and supermarket screens keep their existing operations. Existing products can be linked explicitly to packaged menu offerings or recipes; payment-only receipt descriptions remain independent of stock.
+This adds its own navigation screen, menu, table setup, bill sessions and orders. Fast food and supermarket screens keep their existing operations. Existing products can be linked explicitly to packaged menu offerings or recipes; payment-only receipt descriptions do not automatically deduct stock; issued service jobs can separately record material use.
 
 ## Everyday use
 
@@ -49,3 +49,9 @@ The business customer QR/link supports guest orders using a pickup name, alongsi
 In Preparation, choose All stations, Kitchen or Bar to focus on the relevant lines. Kitchen/bar readiness is available for both table rounds and accepted restaurant online orders. Windows can route station tickets automatically to selected kitchen/bar printer queues after order submission or acceptance. Failed and interrupted jobs remain visible for explicit retry. Browser/Android station printing uses the system dialog. The owner can recover an original checkout identity on a different enrolled device from Business settings > Devices, preserving open bills and prior payments. See [Fast food](fast-food-workspace.md) for connection, payment and recovery limits.
 
 For orders from other devices, use owner-configured Shared kitchen and bar printing on a Windows checkout. Keep it open, connected and on the selected branch. The synchronized cloud queue claims tickets once; interrupted printing or acknowledgement requires explicit review and retry. See [hardware setup](hardware-setup.md#shared-preparation-printing). Configure public QR bank details in Business settings > Business. Takeaway delivery configuration applies to the fast-food QR menu, not restaurant table orders.
+
+## Food prepared in batches
+
+Owners/admins can open **Orders / Preparation > Batch production** and record raw ingredients, expected yield, actual usable finished output and optional expiry before taking orders. The red confirmation records ingredient deductions and finished stock together; Cancel leaves stock unchanged. A previous batch can be copied into a new draft.
+
+Link the finished stock in Menu using **Stocked goods - deduct stock**, or use it as a recipe ingredient. Restaurant preparation consumes that finished batch at its captured cost. Do not also consume its raw ingredients for the same portion. Unsold finished stock remains inventory; spoiled output uses wastage. See [Food batch production](fast-food-workspace.md#food-batch-production) for costs, retry behavior and the required `stock-work-v1` synchronization support.
