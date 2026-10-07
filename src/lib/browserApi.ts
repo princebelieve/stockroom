@@ -1,3 +1,4 @@
+import { requiresChurchSync } from '../../server/church-ledger.mjs'
 import { requiresReservationSync } from '../../server/restaurant-reservations.mjs'
 import { requiresStockWorkSync } from '../../server/stock-work.mjs'
 import { registerCheckoutTill } from '../../server/till-binding.mjs'
@@ -107,7 +108,7 @@ async function applyOperation(operation: Operation) {
     await db.beginTransaction()
     try { await applyRetailRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
   } else if (operation.entityType === 'pos_record') {
-    if(['service-job','restaurant-reservations'].includes(String(payload.kind)) && (await db.query("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1",[payload.id])).values?.length) throw new Error('This record has pending local work. Refresh kept it; use Sync now to reconcile it.')
+    if(['service-job','restaurant-reservations','church-fund','church-donor'].includes(String(payload.kind)) && (await db.query("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1",[payload.id])).values?.length) throw new Error('This record has pending local work. Refresh kept it; use Sync now to reconcile it.')
     await ensurePos(db)
     await db.beginTransaction()
     try { await applyPosRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
@@ -196,6 +197,10 @@ async function syncNowImpl() {
     const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
     if (!operations.length) break
+    if(operations.some(requiresChurchSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('church-collections-v1'))throw new Error('Update the existing sync server before sharing church collections. Records remain on this device.')
+    }
     if(operations.some(requiresReservationSync)) {
       const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
       if(!support.ok || !(await support.json()).capabilities?.includes('restaurant-reservations-v1'))throw new Error('Update the existing sync server before sharing reservations. Records remain on this device.')
@@ -254,7 +259,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&churchCapability=church-collections-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {

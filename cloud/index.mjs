@@ -1,3 +1,4 @@
+import { validateChurchRecord, requiresChurchSync } from '../server/church-ledger.mjs'
 import { reservationBookId, validateReservationBook, validateReservationArchive, checkReservationOpening, requiresReservationSync } from '../server/restaurant-reservations.mjs'
 import { isStockWork, validateStockWork } from '../server/stock-work.mjs'
 import { createPreparationPrint } from './preparation-print.mjs'
@@ -670,7 +671,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1', 'customer-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1', 'customer-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1', 'church-collections-v1'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -765,7 +766,7 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
-          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
+          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
             if(JSON.stringify(current.payload)!==JSON.stringify(document.payload)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This operation ID already has different details.'});continue}
             // Recover a response/database interruption between storing the
             // accepted head and appending its downloadable operation.
@@ -790,8 +791,11 @@ const server = createServer(async (request, response) => {
               validateReservationBook(document.payload,current?.payload,false,layout?.payload||{tables:[]},restaurantTabs(tabs.map(row=>row.payload),floor?.payload),archives.map(row=>row.payload))
             }catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
           }
+          if(document.entityType==='pos_record' && document.payload.kind?.startsWith('church-')) {
+            try{if(document.entityId!==document.payload.id||document.action!=='upsert')throw new Error('Invalid church record operation.');validateChurchRecord(document.payload,current?.payload)}catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
+          }
           if(document.entityType==='pos_record' && document.payload.kind==='service-job') {
-            try { if(document.entityId!==document.payload.id || document.action!=='upsert')throw new Error('Invalid service job operation.');const refunds=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:(current?.payload?.payments||[]).map(entry=>entry.sale.id)}}).toArray();validateServiceJob(document.payload,current?.payload,false,refunds.map(row=>row.payload));for(const entry of document.payload.payments){recordPayment(entry.sale);if(await entityHeads.findOne({businessId,entityType:'pos_record',entityId:{$ne:document.entityId},'payload.kind':'service-job','payload.payments.sale.id':entry.sale.id}))throw new Error('This payment ID is already used by another job.')} }
+            try { if(document.entityId!==document.payload.id || document.action!=='upsert')throw new Error('Invalid service job operation.');if(document.payload.church&&!current){const link=document.payload.church;for(const [id,kind,name,phone] of [[link.fundId,'church-fund',link.fundName,''],...(link.donorId?[[link.donorId,'church-donor',link.donorName,link.donorPhone]]:[])]){const identity=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:id});if(!identity||identity.payload.kind!==kind||identity.payload.branchId!==document.payload.branchId||identity.payload.name!==name||identity.payload.phone!==phone||identity.payload.status==='archived'&&Date.parse(identity.payload.updatedAt)<=Date.parse(document.payload.createdAt))throw new Error('Synchronize matching active funds and donors before new contributions.')}}const refunds=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:(current?.payload?.payments||[]).map(entry=>entry.sale.id)}}).toArray();validateServiceJob(document.payload,current?.payload,false,refunds.map(row=>row.payload));for(const entry of document.payload.payments){recordPayment(entry.sale);if(await entityHeads.findOne({businessId,entityType:'pos_record',entityId:{$ne:document.entityId},'payload.kind':'service-job','payload.payments.sale.id':entry.sale.id}))throw new Error('This payment ID is already used by another job.')} }
             catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
           }
           const restaurantFloor=document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-')||document.payload.tableService) ? await entityHeads.findOne({businessId,entityType:'pos_record',entityId:floorId(document.payload.branchId)}) : null
@@ -959,6 +963,7 @@ const server = createServer(async (request, response) => {
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
       if (query.get('customerOrderCapability') !== 'customer-orders-v1' && rows.some(row => row.payload?.source === 'customer-portal')) return send(response, 426, { error: 'Update this device to safely accept and process online customer orders.' })
       if (query.get('staffCapability') !== 'staff-removal-v1' && rows.some(row => row.entityType === 'staff_removal')) return send(response, 426, { error: 'Update this device to apply staff access removals.' })
+      if(query.get('churchCapability')!=='church-collections-v1' && rows.some(requiresChurchSync))return send(response,426,{error:'Update this device to synchronize funds, donors and contributions.'})
       if(query.get('reservationCapability')!=='restaurant-reservations-v1' && rows.some(requiresReservationSync))return send(response,426,{error:'Update this device to synchronize restaurant reservations and their bills.'})
       if(query.get('stockWorkCapability')!=='stock-work-v1' && rows.some(row=>row.entityType==='pos_record' && isStockWork(row.payload)))return send(response,426,{error:'Update this device to synchronize material use and food production batches.'})
       if(query.get('serviceJobCapability')!=='service-jobs-v1' && rows.some(requiresServiceJobSync)) return send(response,426,{error:'Update this device to synchronize service jobs and invoice payments.'})

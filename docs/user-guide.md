@@ -23,22 +23,23 @@ This guide follows the current app screens. Availability depends on your workspa
 17. Product sales: basket to receipt
 18. Payments & receipts: manually entered payment
 19. Payments & receipts > Jobs & invoices
-20. Order counter > New order
-21. Order counter > Orders and Preparation
-22. Order counter > Order actions
-23. Tables & tabs > Tables and tabs
-24. Tables & tabs > Take payment and close a bill
-25. Tables & tabs > Bill actions, History and refunds
-26. Cash register
-27. Sales history: receipts, voids and customer history
-28. Stock count and Stock movements
-29. Customer display
-30. Customer accounts
-31. Business performance and Reports
-32. Staff & access and Staff activity
-33. Sync now and Sync issues
-34. Close your account, exports and referrals
-35. End-of-day checklist and when help is needed
+20. Payments & receipts > Church collections
+21. Order counter > New order
+22. Order counter > Orders and Preparation
+23. Order counter > Order actions
+24. Tables & tabs > Tables and tabs
+25. Tables & tabs > Take payment and close a bill
+26. Tables & tabs > Bill actions, History and refunds
+27. Cash register
+28. Sales history: receipts, voids and customer history
+29. Stock count and Stock movements
+30. Customer display
+31. Customer accounts
+32. Business performance and Reports
+33. Staff & access and Staff activity
+34. Sync now and Sync issues
+35. Close your account, exports and referrals
+36. End-of-day checklist and when help is needed
 
 ## Start here: install, register and sign in
 
@@ -243,6 +244,17 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 12. Use Purchasing and wastage inside the material screen for supply deliveries, batch costs and spoilage, even without Product sales. Material use reduces profit when recorded; do not expense the same purchases again. Labour and overheads belong in Expenses.
 
 **Remember:** Saved job details and prices are snapshots. Correct an issued job by refunding retained payments, cancelling and creating its replacement. Reports count payments and refunds; creating an estimate or invoice does not record revenue.
+
+## Payments & receipts > Church collections
+
+1. Owners/admins use Add fund and Add donor to create branch records. Donor identities remain separate even when names match. Archive records with confirmation to prevent new commitments without deleting history.
+2. Choose New pledge / donation, select the fund and donor, enter the purpose and amount, then Save commitment. Pledges require a registered donor and can have a due date. One-off donations may be anonymous. Saving a commitment does not record received money.
+3. Open the commitment, choose Receive contribution and save a partial or full amount using cash, externally confirmed transfer/terminal payment or split payments. One payment creates one receipt, with no stock deduction or sales tax.
+4. Owners/admins use Refund contribution for a monetary refund. Refunds reduce fund and donor totals and reopen the pledge balance. Refund retained payments before cancelling a commitment; history remains.
+5. Owners/admins filter Fund contribution totals and donor statements by donor, fund and business-timezone date range. Print the statement or export received contributions/refunds as CSV. Current outstanding pledges are shown separately; currencies remain separate.
+6. Keep payment management on the original till. Reload preserves draft/payment identifiers. Retry an interrupted payment using the same entry; review current balances before starting a new payment. Sync now shares records with compatible updated devices.
+
+**Remember:** Fund totals show net contributions, not bank balances or fund spending. Statements cover structured church records in this branch, exclude legacy unassigned receipts, and are not tax certificates. Sharing requires church-collections-v1 and service-jobs-v1 support in the existing sync backend.
 
 ## Order counter > New order
 

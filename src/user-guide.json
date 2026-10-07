@@ -238,6 +238,19 @@
     "note": "Saved job details and prices are snapshots. Correct an issued job by refunding retained payments, cancelling and creating its replacement. Reports count payments and refunds; creating an estimate or invoice does not record revenue."
   },
   {
+    "id": "section-church-collections",
+    "title": "Payments & receipts > Church collections",
+    "steps": [
+      "Owners/admins use Add fund and Add donor to create branch records. Donor identities remain separate even when names match. Archive records with confirmation to prevent new commitments without deleting history.",
+      "Choose New pledge / donation, select the fund and donor, enter the purpose and amount, then Save commitment. Pledges require a registered donor and can have a due date. One-off donations may be anonymous. Saving a commitment does not record received money.",
+      "Open the commitment, choose Receive contribution and save a partial or full amount using cash, externally confirmed transfer/terminal payment or split payments. One payment creates one receipt, with no stock deduction or sales tax.",
+      "Owners/admins use Refund contribution for a monetary refund. Refunds reduce fund and donor totals and reopen the pledge balance. Refund retained payments before cancelling a commitment; history remains.",
+      "Owners/admins filter Fund contribution totals and donor statements by donor, fund and business-timezone date range. Print the statement or export received contributions/refunds as CSV. Current outstanding pledges are shown separately; currencies remain separate.",
+      "Keep payment management on the original till. Reload preserves draft/payment identifiers. Retry an interrupted payment using the same entry; review current balances before starting a new payment. Sync now shares records with compatible updated devices."
+    ],
+    "note": "Fund totals show net contributions, not bank balances or fund spending. Statements cover structured church records in this branch, exclude legacy unassigned receipts, and are not tax certificates. Sharing requires church-collections-v1 and service-jobs-v1 support in the existing sync backend."
+  },
+  {
     "id": "section-19",
     "title": "Order counter > New order",
     "steps": [

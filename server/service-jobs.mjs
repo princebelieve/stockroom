@@ -1,3 +1,4 @@
+import { validateChurchLink } from './church-ledger.mjs'
 import { validQuantity } from './quantities.mjs'
 import { priceOrder, posSettings } from './pos-pricing.mjs'
 import { recordPayment, paymentResult } from './payment.mjs'
@@ -14,6 +15,7 @@ export function serviceJobBalance(job, returns = []) {
 export function validateServiceJob(job, previous, snapshot = false, refunds = []) {
   if (job.kind !== 'service-job' || !String(job.id).startsWith('service-job:') || !['estimate','new','in-progress','ready','completed','cancelled'].includes(job.status) || !job.branchId || !job.tillId || !Number.isFinite(Date.parse(job.updatedAt)) || !Number.isFinite(Date.parse(job.createdAt))) throw new Error('Invalid service job.')
   if (!job.customerName?.trim() || !job.title?.trim()) throw new Error('Enter a customer and job description.')
+  if(job.church){validateChurchLink(job.church);if(!['new','cancelled'].includes(job.status)||job.profile.taxEnabled||job.pricing.tax!==0||job.customerName!==job.church.donorName||job.customerPhone!==job.church.donorPhone)throw new Error('Church contributions must preserve donor identity and have no sales tax.')}
   if (job.customerId !== undefined) text(job.customerId,150)
   text(job.id,150);text(job.tillId,100);text(job.branchId,100);text(job.customerName); text(job.customerPhone, 80); text(job.title); text(job.note, 1000); text(job.businessName, 100)
   if (!/^[A-Z]{3}$/.test(job.currency) || (job.dueDate && (!/^\d{4}-\d{2}-\d{2}$/.test(job.dueDate) || new Date(job.dueDate).toISOString().slice(0,10) !== job.dueDate))) throw new Error('Enter a valid currency and due date.')
@@ -26,13 +28,14 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
     const sale = entry.sale
     validateServiceJobPayment(sale)
     if (seen.has(sale.id) || sale.paymentDetails.serviceJob.id!==job.id || sale.branchId!==job.branchId || sale.currency!==job.currency || sale.businessName!==job.businessName) throw new Error('Invalid invoice payment link.')
+    if(!same(sale.paymentDetails.serviceJob.church,job.church))throw new Error('Preserve the contribution fund and donor.');
     seen.add(sale.id)
     if(sale.paymentDetails.pos?.tillId!==job.tillId || sale.paymentDetails.servicePayment?.customerName!==job.customerName || sale.paymentDetails.servicePayment?.customerPhone!==job.customerPhone || sale.paymentDetails.serviceJob.title!==job.title)throw new Error('Payment must match the saved customer and till.')
     if (cents(sale.paymentDetails.serviceJob.invoiceTotal)!==cents(job.pricing.total)) throw new Error('Invalid invoice total.')
   }
   if (!snapshot && previous) {
     if (job.expectedUpdatedAt!==previous.updatedAt) throw new Error('This job changed. Refresh before continuing.')
-    for (const key of ['id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','customerId','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
+    for (const key of ['church','id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','customerId','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
     if (!same(job.payments.slice(0,previous.payments.length),previous.payments) || job.payments.length<previous.payments.length || job.payments.length>previous.payments.length+1) throw new Error('Preserve saved invoice payments.')
     if (job.payments.length>previous.payments.length && (job.status!==previous.status || ['estimate','cancelled'].includes(job.status))) throw new Error('Issue the invoice before taking payment.')
     const balance = serviceJobBalance(previous, refunds)
@@ -56,6 +59,7 @@ export function validateServiceJobPayment(sale) {
   if (sale.paymentMethod === 'multiple') paymentResult(sale, sale.paymentDetails?.policy)
   const link=sale.paymentDetails?.serviceJob
   if (!link || !String(sale.id).startsWith('service-payment:') || !String(link.id).startsWith('service-job:') || !Number.isFinite(link.invoiceTotal) || link.invoiceTotal<=0 || !Number.isFinite(link.balanceDue) || link.balanceDue<0 || sale.items?.length!==1 || !sale.items[0].productId.startsWith('service:') || sale.items[0].quantity!==1 || cents(sale.items[0].price)!==cents(sale.total) || !Number.isFinite(sale.total) || sale.total<=0) throw new Error('Invalid job payment.')
+  if(link.church)validateChurchLink(link.church)
   text(sale.id,150);text(link.number,30);text(link.title);text(sale.staffId,150);text(sale.staffName,200)
   if(!Number.isFinite(Date.parse(sale.createdAt)) || !Number.isSafeInteger(cents(sale.total)) || Math.abs(sale.total*100-cents(sale.total))>0.000001)throw new Error('Invalid payment date or amount.')
   const pricing=sale.paymentDetails.pos?.pricing
@@ -70,7 +74,7 @@ export const requiresServiceJobSync = operation => operation.payload?.kind==='se
 export async function handleServiceJobs({db,scope,organizationId,branchId,user,path,method,input,tillId,sales,publish,saveRecord}) {
   const rows=()=>db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='service-job' AND branch_id=? ORDER BY updated_at DESC",[scope,branchId])
   const returns=async()=> (await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='return' AND branch_id=?",[scope,branchId])).values.map(row=>JSON.parse(row.payload))
-  if (method==='GET') { const jobs=(await rows()).values.map(row=>JSON.parse(row.payload)); const refunds=await returns(); return {jobs:jobs.map(job=>({...job,balance:serviceJobBalance(job,refunds)})),customers:(await db.query(`SELECT id,name,phone FROM customers ${organizationId?'WHERE organization_id=?':''}`,organizationId?[organizationId]:[])).values} }
+  if (method==='GET') { const jobs=(await rows()).values.map(row=>JSON.parse(row.payload)); const refunds=await returns(); return {jobs:jobs.filter(job=>!job.church).map(job=>({...job,balance:serviceJobBalance(job,refunds)})),customers:(await db.query(`SELECT id,name,phone FROM customers ${organizationId?'WHERE organization_id=?':''}`,organizationId?[organizationId]:[])).values} }
   if (!tillId || !String(input.id).startsWith('service-job:') || typeof input.commandId!=='string' || !input.commandId) throw new Error('A registered till and job command are required.')
   const previousRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,input.id])).values[0]
   const previous=previousRow ? JSON.parse(previousRow.payload) : null
@@ -87,13 +91,25 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
     if (path!=='/api/pos/service-jobs') throw new Error('Create the job first.')
     const settings=(await db.query(`SELECT app_name AS businessName,currency FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`,organizationId?[organizationId]:[])).values[0]
     const profileRow=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND id='receipt-settings'",[scope])).values[0]
-    const profile=receiptSettings(profileRow?JSON.parse(profileRow.payload).value:{})
+    let profile=receiptSettings(profileRow?JSON.parse(profileRow.payload).value:{})
+    let church
+    if(input.church){
+      const fundRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,input.church.fundId])).values[0]
+      const donorRow=input.church.donorId?(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,input.church.donorId])).values[0]:null
+      const fund=fundRow?JSON.parse(fundRow.payload):null,donor=donorRow?JSON.parse(donorRow.payload):null
+      if(!fund||fund.kind!=='church-fund'||fund.branchId!==branchId||fund.status!=='active'||input.church.donorId&&(!donor||donor.kind!=='church-donor'||donor.branchId!==branchId||donor.status!=='active'))throw new Error('Choose an active fund and donor in this branch.')
+      church={type:input.church.type,fundId:fund.id,fundName:fund.name,donorId:donor?.id||'',donorName:donor?.name||'Anonymous donor',donorPhone:donor?.phone||''}
+      validateChurchLink(church)
+      input={...input,customerName:church.donorName,customerPhone:church.donorPhone}
+      profile={...profile,taxEnabled:false,taxRate:0,taxIncluded:false}
+      if(input.estimate)throw new Error('Pledges are commitments, not estimates.')
+    }
     const lines=input.lines.map(line=>({id:text(line.id,100),description:text(line.description,150),quantity:Number(line.quantity),price:Number(line.price)}))
     if(input.customerId) {
       const customer=(await db.query(`SELECT id,name,phone FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[input.customerId,...(organizationId?[organizationId]:[])])).values[0]
       if(!customer || customer.name.trim()!==String(input.customerName||'').trim() || String(customer.phone||'').trim()!==String(input.customerPhone||'').trim())throw new Error('Choose the matching customer account or enter this customer manually.')
     }
-    job={...stamp,...(input.customerId?{customerId:text(input.customerId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
+    job={...stamp,...(church?{church}:{}),...(input.customerId?{customerId:text(input.customerId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
   } else {
     job={...previous,...stamp}
     const balance=serviceJobBalance(previous,await returns())
@@ -108,7 +124,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       if(!['cash','external-pos','bank-transfer','multiple'].includes(input.method))throw new Error('Choose a supported Payment Method.')
       const id='service-payment:'+input.commandId
       if((await db.query('SELECT id FROM sales WHERE id=?',[id])).values[0])throw new Error('This payment ID is already used by another job.')
-      const link={id:job.id,number:job.id.slice(-8).toUpperCase(),title:job.title,invoiceTotal:job.pricing.total,balanceDue:(cents(balance.due)-cents(amount))/100}
+      const link={...(job.church?{church:job.church}:{}),id:job.id,number:job.id.slice(-8).toUpperCase(),title:job.title,invoiceTotal:job.pricing.total,balanceDue:(cents(balance.due)-cents(amount))/100}
       const policyRow=(await db.query(`SELECT payment_policy FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`,organizationId?[organizationId]:[])).values[0]
       sale=recordPayment({id,branchId,organizationId,businessName:job.businessName,currency:job.currency,createdAt:updatedAt,staffId:user.id,staffName:user.name,items:[{productId:'service:'+job.id,productName:`${balance.netPaid===0 && amount<balance.due?'Deposit':'Payment'} - ${job.title}`.slice(0,200),quantity:1,price:amount}],total:amount,paymentMethod:input.method,paymentReference:text(input.reference||''),terminalProvider:text(input.provider||''),paymentDetails:{...(input.method==='multiple'?{allocations:input.parts?.map(part=>({...part,amount:Number(part.amount)})),cashReceived:input.cash||undefined}:{}),amountReceived:input.method==='cash'?(input.cash||amount):amount,serviceJob:link,servicePayment:{customerName:job.customerName,customerPhone:job.customerPhone}}},policyRow?.payment_policy)
       const tax=cents(job.pricing.tax)*(cents(balance.netPaid)+cents(amount))/cents(job.pricing.total)
@@ -116,7 +132,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       const subtotal=(cents(amount)-cents(allocatedTax))/100
       const register=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='register' AND branch_id=?",[scope,branchId])).values.map(row=>JSON.parse(row.payload)).find(session=>!session.closedAt && session.staffId===user.id)
       sale.paymentDetails.pos={tillId,registerId:register?.id,pricing:{subtotal,discount:0,tax:allocatedTax,total:amount,taxSettings:posSettings({...job.profile,taxIncluded:false}),lines:[{productId:'service:'+job.id,quantity:1,subtotal,discount:0,tax:allocatedTax,total:amount}]}}
-      sale.paymentDetails.receipt={address:job.profile.address,phone:job.profile.phone,email:job.profile.email,footer:job.profile.footer,number:'REC-'+id.slice(-8).toUpperCase(),transactionType:'Invoice payment',cardType:''}
+      sale.paymentDetails.receipt={address:job.profile.address,phone:job.profile.phone,email:job.profile.email,footer:job.profile.footer,number:'REC-'+id.slice(-8).toUpperCase(),transactionType:job.church?'Collection / donation':'Invoice payment',cardType:''}
       job.payments=[...job.payments,{sale,request}]
     } else throw new Error('Unknown service job action.')
   }

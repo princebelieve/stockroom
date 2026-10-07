@@ -75,3 +75,9 @@ Implementation update: preparation tickets now omit prices and payment totals; o
 Automated verification covers transaction rollback, payment retry/stale revisions, saved invoice prices, invoice tax allocation, refund/balance reconciliation, cancellation permissions, non-stock accounting and receipt replay on another local database. Browser journeys cover the four selling screens and offline browser persistence/sync. The shared local operation handler is used by desktop, PWA and Android; actual Android devices, physical printers/scanners and production Mongo synchronization have not been exercised by these checks.
 
 The existing sync service adds the service-jobs-v1 capability. Code is implemented locally, but no external deployment is performed here. Update that existing service before shared-device job use; older services keep uploads queued. No additional paid service is introduced. Course/reservation/dispatch systems, online marketplace integrations and specialized hotel workflows remain outside these four workspaces.
+
+## Agreed adoption batches
+
+The agreed backlog includes completed payment/service improvements (batch 1), job material use and food production/yields (batch 2), and reservations with browser checks and aligned guides (batch 3). Batch 4 adds structured church funds, donor identities, pledges, received contributions and refund-adjusted statements through the existing payment engine. It does not provide fund spending or full charity accounts. Compatible sync deployment and real-business acceptance remain required.
+
+Remaining batches are oil retail/bulk/customer pricing verification and missing price tiers; weighed-goods hardware support; a real retail checkout/returns/staff-handover pilot; and a review of sector claims against implemented capabilities. Specialist hotel, pharmacy, warranty and rental systems require separate scope decisions.
