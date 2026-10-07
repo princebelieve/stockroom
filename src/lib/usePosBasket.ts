@@ -1,3 +1,4 @@
+import { oilPrice } from '../../server/oil-pricing.mjs'
 import { checkoutTillId } from './checkoutTill'
 import { useEffect, useState } from 'react'
 import type { Product } from '../types'
@@ -45,7 +46,14 @@ export function usePosBasket({ user, branchId, headers, cart, setCart, orderId, 
     await posRequest('/api/pos/baskets', headers, { ...basket, deleted: true }); await reload()
   }
   const saleProducts = products.flatMap(product => [product, ...(workspaceId === 'oil' ? data.saleConversions.filter(row => row.productId === product.id).map(row => ({ ...product, id: `${product.id}:sale-unit:${row.id}`, baseProductId: product.id, name: `${product.name} · ${row.label}`, unit: row.label, baseUnit: product.unit, saleUnit: row.label, saleFactor: Number(row.factor), saleConversionId: row.id, price: Number(row.salePrice) })) : [])])
-  const catalogue = [...saleProducts, ...lines.map(line => ({ ...line, stock: products.find(product => product.id === line.baseProductId)?.stock || 0 }))].map(product => ({ ...product, price: overrides[product.id] ?? product.price }))
+  const catalogue = [...saleProducts, ...lines.map(line => ({ ...line, stock: products.find(product => product.id === line.baseProductId)?.stock || 0 }))].map(product => {
+    const baseId=product.baseProductId||product.id
+    const baseQuantity=[...saleProducts,...lines].filter(row=>(row.baseProductId||row.id)===baseId).reduce((sum,row)=>sum+(Number(cart[row.id])||0)*(row.saleFactor||1),0)
+    const rule=data.products.find(row=>row.productId===baseId)?.oilPricing
+    const rate=lines.some(row=>row.id===product.id)?{price:product.price,label:'Custom line price'}:workspaceId==='oil'?oilPrice(product,rule,baseQuantity,customerId):{price:product.price,label:''}
+    const label=overrides[product.id]!==undefined?'Manual price':rate.label
+    return {...product,price:overrides[product.id]??rate.price,...(workspaceId==='oil'?{name:product.name.replace(/ \/ (Retail price|Bulk rate|Customer rate|Manual price|Custom line price)$/,'')+' / '+label}:{})}
+  })
   const selected = catalogue.filter(product => Number(cart[product.id]) > 0)
   const items = selected.map(product => { const factor = product.saleFactor || 1; return { productId: product.baseProductId || product.id, productName: factor > 1 ? `${product.name} (${factor} ${products.find(row => row.id === product.baseProductId)?.unit || 'units'} per pack)` : product.name, quantity: Math.round(cart[product.id] * factor * 1000) / 1000, price: Math.round(product.price / factor * 1000000) / 1000000 } })
   let pricingError = '', pricing = priceOrder([])

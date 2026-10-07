@@ -83,6 +83,7 @@ try {
  assert.equal(await pay.getByLabel('Payment Method',{exact:true}).isEnabled(), false)
  terminalPaid = true
  await pay.getByRole('button', { name: 'Check payment status' }).click()
+ await pay.getByText('Payment verified. You can complete the sale.').waitFor()
  assert.equal(await pay.getByRole('button', { name: 'Complete sale', exact: true }).isEnabled(), true)
  await page.reload()
  await page.getByRole('button',{name:/Take payment/}).click()

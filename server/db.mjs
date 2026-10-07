@@ -1,3 +1,4 @@
+import { oilPricing } from './oil-pricing.mjs'
 import { validateChurchRecord } from './church-ledger.mjs'
 import { validateReservationBook, validateReservationArchive } from './restaurant-reservations.mjs'
 import { isStockWork, validateStockWork, applyStockWorkSync } from './stock-work.mjs'
@@ -720,6 +721,7 @@ export function applyRemoteOperations(operations) {
         database.exec('BEGIN')
         try {
           if(payload.kind==='restaurant-reservation-archive')validateReservationArchive(payload,undefined,existing?JSON.parse(existing.payload):undefined)
+          if(payload.kind==='product'&&payload.oilPricing)oilPricing(payload.oilPricing)
           if(payload.kind?.startsWith('church-'))validateChurchRecord(payload,undefined,true)
           if(payload.kind==='restaurant-reservations')validateReservationBook(payload,undefined,true)
           if(payload.kind==='service-job') validateServiceJob(payload,undefined,true)

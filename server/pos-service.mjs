@@ -1,3 +1,4 @@
+import { oilPricing } from './oil-pricing.mjs'
 import { handleChurch } from './church-service.mjs'
 import { validateChurchRecord } from './church-ledger.mjs'
 import { handleServiceJobs, applyServiceJob } from './service-jobs.mjs'
@@ -24,6 +25,7 @@ export async function savePosRecord(db, scope, record) {
 export async function applyPosRecord(db, scope, record, organizationId) {
   const connection = db
   db = { query: (sql, params = []) => connection.query(sql, params), run: (sql, params = []) => connection.run(sql, params, false) }
+  if(record.kind==='product'&&record.oilPricing)oilPricing(record.oilPricing)
   if(record.kind==='service-job') await applyServiceJob(db,scope,record,organizationId)
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
   if(record.kind?.startsWith('church-'))validateChurchRecord(record,undefined,true)
@@ -89,7 +91,8 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     const customerHistory = loaded.filter(sale => sale.paymentDetails?.pos?.customerId)
     const customers = (await db.query(`SELECT id,name,phone,balance FROM customers${organizationId ? ' WHERE organization_id=?' : ''} ORDER BY name`, organizationId ? [organizationId] : [])).values
     const hasRetail = (await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='retail_records'")).values.length > 0
-    const profile = organizationId ? (await db.query('SELECT shop_profile AS shopProfile FROM app_settings WHERE organization_id=?', [organizationId])).values[0]?.shopProfile : null
+    const hasProfile=(await db.query('PRAGMA table_info(app_settings)')).values.some(row=>row.name==='shop_profile')
+    const profile = hasProfile ? (await db.query(`SELECT shop_profile AS shopProfile FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`, organizationId?[organizationId]:[])).values[0]?.shopProfile : null
     const oilBusiness = normalizeShopProfile(profile).industry === 'liquids'
     const saleConversions = hasRetail && oilBusiness ? (await db.query("SELECT payload FROM retail_records WHERE scope=? AND kind='conversion'", [scope])).values.map(row => JSON.parse(row.payload)).filter(row => row.sellInPos === true) : []
     return { settings: posSettings(settings[0]?.value), baskets: baskets.filter(record => !record.deleted), registers, returns, products, saleConversions, customerHistory, customers, loyaltyBalances: loyaltyBalances(loaded, returns) }
@@ -103,12 +106,28 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     }
     return write({ ...stamp, branchId: 'main', id: 'pos-settings', kind: 'settings', value })
   }
+  if(path==='/api/pos/oil-pricing') {
+    if(!manager)throw new Error('Owner or admin access required to set oil prices.')
+    if(!input.productId||!input.commandId)throw new Error('Choose an oil product and pricing command.')
+    const product=(await db.query(`SELECT id FROM products WHERE id=?${organizationId?' AND organization_id=?':''}`,[input.productId,...(organizationId?[organizationId]:[])])).values[0]
+    if(!product)throw new Error('Choose an existing product.')
+    const id='product:'+input.productId,found=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,id])).values[0],previous=found?JSON.parse(found.payload):null
+    const value=oilPricing(input.value),request=JSON.stringify(input)
+    if(previous?.oilCommandId===input.commandId){if(previous.oilRequest!==request)throw new Error('This pricing command has different details.');return previous}
+    if((previous?.updatedAt||'')!==input.expectedUpdatedAt)throw new Error('Product options changed. Reload and review these prices.')
+    for(const row of value.customers)if(!(await db.query(`SELECT id FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[row.customerId,...(organizationId?[organizationId]:[])])).values.length)throw new Error('Choose an existing customer account.')
+    const record={...(previous||{id,kind:'product',productId:input.productId,variantGroup:'',variantLabel:'',modifiers:[]}),...stamp,branchId:'main',updatedAt:new Date(Math.max(Date.now(),Date.parse(previous?.updatedAt||'')+1||0)).toISOString(),expectedUpdatedAt:previous?.updatedAt||'',oilPricing:value,oilCommandId:input.commandId,oilRequest:request}
+    await db.beginTransaction()
+    try{const current=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,id])).values[0];if((current?JSON.parse(current.payload).updatedAt:'')!==record.expectedUpdatedAt)throw new Error('Product options changed. Reload and review these prices.');await savePosRecord(db,scope,record);await publish(record);await db.commitTransaction()}catch(error){await db.rollbackTransaction();throw error}
+    return record
+  }
   if (path === '/api/pos/products') {
     if (!manager) throw new Error('Owner or admin access required.')
     if (!input.productId) throw new Error('Choose a product.')
     const modifiers = Array.isArray(input.modifiers) ? input.modifiers.map(modifier => ({ name: String(modifier.name).trim().slice(0, 80), price: amount(modifier.price) })) : []
     if (modifiers.some(modifier => !modifier.name) || modifiers.length > 30) throw new Error('Enter up to 30 named modifiers.')
-    return write({ ...stamp, branchId: 'main', id: `product:${input.productId}`, productId: input.productId, kind: 'product', variantGroup: String(input.variantGroup || '').slice(0, 100), variantLabel: String(input.variantLabel || '').slice(0, 100), modifiers })
+    const previous=(await records('product')).find(row=>row.productId===input.productId)
+    return write({ ...previous, ...stamp, expectedUpdatedAt:previous?.updatedAt||'', updatedAt:new Date(Math.max(Date.now(),Date.parse(previous?.updatedAt||'')+1||0)).toISOString(), branchId: 'main', id: `product:${input.productId}`, productId: input.productId, kind: 'product', variantGroup: String(input.variantGroup || '').slice(0, 100), variantLabel: String(input.variantLabel || '').slice(0, 100), modifiers })
   }
   if (path === '/api/pos/baskets') {
     if (!input.id) throw new Error('Basket ID required.')

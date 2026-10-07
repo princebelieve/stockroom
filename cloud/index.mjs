@@ -1,3 +1,4 @@
+import { oilPricing } from '../server/oil-pricing.mjs'
 import { validateChurchRecord, requiresChurchSync } from '../server/church-ledger.mjs'
 import { reservationBookId, validateReservationBook, validateReservationArchive, checkReservationOpening, requiresReservationSync } from '../server/restaurant-reservations.mjs'
 import { isStockWork, validateStockWork } from '../server/stock-work.mjs'
@@ -766,7 +767,7 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
-          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
+          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || document.payload.kind==='product' && Boolean(document.payload.oilPricing) || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
             if(JSON.stringify(current.payload)!==JSON.stringify(document.payload)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This operation ID already has different details.'});continue}
             // Recover a response/database interruption between storing the
             // accepted head and appending its downloadable operation.
@@ -791,6 +792,7 @@ const server = createServer(async (request, response) => {
               validateReservationBook(document.payload,current?.payload,false,layout?.payload||{tables:[]},restaurantTabs(tabs.map(row=>row.payload),floor?.payload),archives.map(row=>row.payload))
             }catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
           }
+          if(document.entityType==='pos_record' && document.payload.kind==='product' && document.payload.oilPricing){try{oilPricing(document.payload.oilPricing)}catch(error){conflicts.push({operationId:document.operationId,reason:error.message});continue}}
           if(document.entityType==='pos_record' && document.payload.kind?.startsWith('church-')) {
             try{if(document.entityId!==document.payload.id||document.action!=='upsert')throw new Error('Invalid church record operation.');validateChurchRecord(document.payload,current?.payload)}catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
           }

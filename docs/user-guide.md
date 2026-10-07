@@ -21,25 +21,26 @@ This guide follows the current app screens. Availability depends on your workspa
 15. Product management: catalogue and opening stock
 16. Product management: purchasing, receiving, batches and wastage
 17. Product sales: basket to receipt
-18. Payments & receipts: manually entered payment
-19. Payments & receipts > Jobs & invoices
-20. Payments & receipts > Church collections
-21. Order counter > New order
-22. Order counter > Orders and Preparation
-23. Order counter > Order actions
-24. Tables & tabs > Tables and tabs
-25. Tables & tabs > Take payment and close a bill
-26. Tables & tabs > Bill actions, History and refunds
-27. Cash register
-28. Sales history: receipts, voids and customer history
-29. Stock count and Stock movements
-30. Customer display
-31. Customer accounts
-32. Business performance and Reports
-33. Staff & access and Staff activity
-34. Sync now and Sync issues
-35. Close your account, exports and referrals
-36. End-of-day checklist and when help is needed
+18. Oil sales: retail, bulk and customer prices
+19. Payments & receipts: manually entered payment
+20. Payments & receipts > Jobs & invoices
+21. Payments & receipts > Church collections
+22. Order counter > New order
+23. Order counter > Orders and Preparation
+24. Order counter > Order actions
+25. Tables & tabs > Tables and tabs
+26. Tables & tabs > Take payment and close a bill
+27. Tables & tabs > Bill actions, History and refunds
+28. Cash register
+29. Sales history: receipts, voids and customer history
+30. Stock count and Stock movements
+31. Customer display
+32. Customer accounts
+33. Business performance and Reports
+34. Staff & access and Staff activity
+35. Sync now and Sync issues
+36. Close your account, exports and referrals
+37. End-of-day checklist and when help is needed
 
 ## Start here: install, register and sign in
 
@@ -214,6 +215,18 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 6. Select Complete sale once payment is confirmed. Print the receipt or use Print last receipt.
 
 **Remember:** Use Back to products to change the unpaid basket. Hold sale saves a basket for later; Resume sale restores it. Clear basket clears an unpaid draft. A connected POS request must be resolved before altering its locked basket.
+
+## Oil sales: retail, bulk and customer prices
+
+1. Choose the wholesale/retail oil business setup. Add oil stock in a consistent base unit, such as litres, with its retail selling price and purchase cost.
+2. In Purchasing and receiving > Pack / receiving conversions, add a named container and its base-unit factor. Enable Offer this container in oil sales and enter its retail container price.
+3. Owners/admins open Inventory > Oil price tiers, choose an oil, and add bulk minimum quantities and prices per base stock unit. The highest qualifying threshold applies to the combined quantity of that oil across loose units and configured containers in the basket.
+4. Add customer rates by selecting existing customer accounts. Select that customer in the oil basket to apply its rate. Customer rate takes priority over bulk; otherwise retail/product or retail/container prices apply. Explicit manual prices and custom extra lines retain their separate prices.
+5. Review rate labels, quantities and total before taking payment. Quantity or customer changes can change the applicable price. Saved receipts retain the selected price and label; refunds use those saved amounts.
+6. Example: retail 10 per litre, bulk 8 from 20 litres and 7 from 100 litres, customer rate 6. One 25-litre can costs 200 under bulk pricing; one can plus 75 loose litres costs 700, or 600 with that customer selected. Stock consumption is 100 litres.
+7. Save tiers with the existing sync workflow and update participating apps. Refresh before shared checkout to load changed rates. A stale settings save requires review; drafts preserve command IDs for retrying interrupted saves. Old app versions do not calculate these rates.
+
+**Remember:** Rates are per base stock unit, not per container. Bulk rates apply to the entire qualifying quantity, not only units above the threshold. Different oils do not combine. Product sales continues to use its existing pricing; these automatic rates apply in Oil sales.
 
 ## Payments & receipts: manually entered payment
 

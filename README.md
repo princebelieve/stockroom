@@ -118,3 +118,5 @@ Deployment guides:
 - [Owner and cashier guide](docs/user-guide.md)
 - [Workspace selection](docs/workspaces.md)
 - [Documentation alignment review](docs/documentation-alignment.md)
+
+Oil sales supports owner/admin-configured bulk thresholds and customer-specific prices under **Inventory > Oil price tiers**. Thresholds use combined base-unit quantities across loose oil and configured containers. Customer rates override qualifying bulk rates; retail/container prices are the fallback. See the oil chapter in the [user guide](docs/user-guide.md#oil-sales-retail-bulk-and-customer-prices).

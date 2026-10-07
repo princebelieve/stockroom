@@ -55,7 +55,7 @@ try {
   if(redeem)await page.getByLabel(/Spend rewards/).fill(String(redeem))
   await page.getByRole('button',{name:/Take payment/}).click()
   const pay=page.locator('#pos-payment')
-  await pay.getByLabel('Payment method',{exact:true}).selectOption('cash')
+  await pay.getByLabel('Payment Method',{exact:true}).selectOption('cash')
   await pay.getByLabel('Cash received',{exact:true}).fill('30')
   await pay.getByRole('button',{name:'Complete sale',exact:true}).click()
   await page.waitForFunction(async(count)=>{const r=await fetch('/api/sales',{headers:{Authorization:`Bearer ${localStorage.getItem('stockroom-token')}`}});return (await r.json()).sales.length===count},redeem?2:1)

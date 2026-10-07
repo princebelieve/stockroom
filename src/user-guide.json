@@ -204,6 +204,20 @@
     "note": "Use Back to products to change the unpaid basket. Hold sale saves a basket for later; Resume sale restores it. Clear basket clears an unpaid draft. A connected POS request must be resolved before altering its locked basket."
   },
   {
+    "id": "section-oil-pricing",
+    "title": "Oil sales: retail, bulk and customer prices",
+    "steps": [
+      "Choose the wholesale/retail oil business setup. Add oil stock in a consistent base unit, such as litres, with its retail selling price and purchase cost.",
+      "In Purchasing and receiving > Pack / receiving conversions, add a named container and its base-unit factor. Enable Offer this container in oil sales and enter its retail container price.",
+      "Owners/admins open Inventory > Oil price tiers, choose an oil, and add bulk minimum quantities and prices per base stock unit. The highest qualifying threshold applies to the combined quantity of that oil across loose units and configured containers in the basket.",
+      "Add customer rates by selecting existing customer accounts. Select that customer in the oil basket to apply its rate. Customer rate takes priority over bulk; otherwise retail/product or retail/container prices apply. Explicit manual prices and custom extra lines retain their separate prices.",
+      "Review rate labels, quantities and total before taking payment. Quantity or customer changes can change the applicable price. Saved receipts retain the selected price and label; refunds use those saved amounts.",
+      "Example: retail 10 per litre, bulk 8 from 20 litres and 7 from 100 litres, customer rate 6. One 25-litre can costs 200 under bulk pricing; one can plus 75 loose litres costs 700, or 600 with that customer selected. Stock consumption is 100 litres.",
+      "Save tiers with the existing sync workflow and update participating apps. Refresh before shared checkout to load changed rates. A stale settings save requires review; drafts preserve command IDs for retrying interrupted saves. Old app versions do not calculate these rates."
+    ],
+    "note": "Rates are per base stock unit, not per container. Bulk rates apply to the entire qualifying quantity, not only units above the threshold. Different oils do not combine. Product sales continues to use its existing pricing; these automatic rates apply in Oil sales."
+  },
+  {
     "id": "section-18",
     "title": "Payments & receipts: manually entered payment",
     "steps": [
