@@ -134,27 +134,43 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     return write({ ...stamp, id: String(input.id), kind: 'basket', label: String(input.label || 'Saved basket').slice(0, 100), draft: input.draft, ...(input.workspace === 'oil' ? { workspace: 'oil' } : {}), deleted: input.deleted === true })
   }
   if (path === '/api/pos/registers') {
-    const existing = (await records('register')).find(record => record.id === input.id)
+    const request=JSON.stringify(input),commandId=input.commandId||crypto.randomUUID()
+    if(typeof commandId!=='string'||commandId.length>100)throw new Error('Enter a valid register command.')
+    const registerId=input.id||crypto.randomUUID()
+    const existing = (await records('register')).find(record => record.id === registerId)
+    if(existing && (!manager&&existing.staffId!==user.id || existing.tillId&&tillId&&existing.tillId!==tillId))throw new Error('Manage this shift on its original till; owner/admin access is required for another staff member.')
+    const retry=existing?.commands?.find(command=>command.id===commandId)
+    if(retry){if(retry.request!==request)throw new Error('This register command already has different details.');return existing}
+    if(input.expectedUpdatedAt!==undefined&&input.expectedUpdatedAt!==(existing?.updatedAt||''))throw new Error('This cash session changed. Refresh and review before continuing.')
+    const saveShift=async record=>{
+      const updatedAt=new Date(Math.max(Date.now(),Date.parse(existing?.updatedAt||'')+1||0)).toISOString()
+      record={...record,updatedAt,expectedUpdatedAt:existing?.updatedAt||'',commands:[...(existing?.commands||[]),{id:commandId,request,at:updatedAt,staffId:user.id,staffName:user.name}]}
+      if(record.commands.length>2000)throw new Error('Close this shift before recording more movements.')
+      await db.beginTransaction()
+      try{const head=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.id])).values[0];if((head?JSON.parse(head.payload).updatedAt:'')!==record.expectedUpdatedAt)throw new Error('This cash session changed. Refresh and review before continuing.');if(head&&JSON.parse(head.payload).kind!=='register')throw new Error('This record ID is already in use.');if(input.action==='open'&&(await records('register')).some(row=>!row.closedAt&&(row.staffId===user.id||tillId&&row.tillId===tillId)))throw new Error('Close the existing staff shift on this till before opening another.');await savePosRecord(db,scope,record);await publish(record);await db.commitTransaction()}catch(error){await db.rollbackTransaction();throw error}
+      return record
+    }
     if (input.action === 'open') {
-      if ((await records('register')).some(record => !record.closedAt && record.staffId === user.id)) throw new Error('Close your current register session first.')
-      return write({ ...stamp, id: crypto.randomUUID(), kind: 'register', openedAt: stamp.updatedAt, openingCash: amount(input.amount), movements: [] })
+      if ((await records('register')).some(record => !record.closedAt && (record.staffId === user.id || tillId && record.tillId===tillId))) throw new Error('Close the existing staff shift on this till before opening another.')
+      return saveShift({ ...stamp, id: String(registerId), ...(tillId?{tillId}:{}), kind: 'register', openedAt: stamp.updatedAt, openingCash: amount(input.amount), movements: [] })
     }
     if (!existing || existing.closedAt || (!manager && existing.staffId !== user.id)) throw new Error('Open register session not found.')
     if (input.action === 'movement') {
       const reason = String(input.reason || '').trim()
       if (reason.length < 3 || !['in', 'out'].includes(input.direction)) throw new Error('Choose cash in/out and enter a reason.')
-      return write({ ...existing, updatedAt: stamp.updatedAt, movements: [...existing.movements, { id: crypto.randomUUID(), amount: amount(input.amount), direction: input.direction, reason, staffId: user.id, createdAt: stamp.updatedAt }] })
+      if(amount(input.amount)<=0)throw new Error('Enter a positive cash movement.');
+      return saveShift({ ...existing, updatedAt: stamp.updatedAt, movements: [...existing.movements, { id: crypto.randomUUID(), amount: amount(input.amount), direction: input.direction, reason, staffId: user.id, createdAt: stamp.updatedAt }] })
     }
     if (input.action !== 'close') throw new Error('Unknown register action.')
     const loaded = (await sales()).filter(sale => sale.paymentDetails?.pos?.registerId === existing.id)
-    const cashSales = loaded.reduce((sum, sale) => sum + (sale.paymentMethod === 'cash' ? sale.total : (sale.paymentDetails?.allocations || []).filter(part => part.method === 'cash').reduce((total, part) => total + part.amount, 0)), 0)
+    const cashSales = loaded.reduce((sum, sale) => sum + (sale.paymentMethod === 'cash' ? sale.total+Number(sale.paymentDetails?.extraKept||0) : (sale.paymentDetails?.allocations || []).filter(part => part.method === 'cash').reduce((total, part) => total + part.amount, 0)), 0)
     const cashReturns = (await records('return')).filter(record => record.registerId === existing.id && record.method === 'cash').reduce((sum, record) => sum + record.total, 0)
     const hasRetail=(await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='retail_records'")).values.length
     const supplierCash=hasRetail?(await db.query('SELECT payload FROM retail_records WHERE scope=? AND branch_id=?',[scope,branchId])).values.map(row=>JSON.parse(row.payload)).filter(row=>row.registerId===existing.id).reduce((sum,row)=>sum+Number(row.cashAmount||0),0):0
     const expectedCash = Math.round((existing.openingCash + cashSales - cashReturns + supplierCash + existing.movements.reduce((sum, movement) => sum + movement.amount * (movement.direction === 'in' ? 1 : -1), 0)) * 100) / 100
     const countedCash = amount(input.amount), difference = Math.round((countedCash - expectedCash) * 100) / 100
     if (difference && String(input.reason || '').trim().length < 3) throw new Error('Explain the cash difference before closing.')
-    return write({ ...existing, updatedAt: stamp.updatedAt, closedAt: stamp.updatedAt, cashSales, cashReturns, supplierCash, expectedCash, countedCash, difference, closingReason: String(input.reason || '') })
+    return saveShift({ ...existing, updatedAt: stamp.updatedAt, closedAt: stamp.updatedAt, cashSales, cashReturns, supplierCash, expectedCash, countedCash, difference, closingReason: String(input.reason || '') })
   }
   if (path === '/api/pos/returns') {
     if (!manager) throw new Error('Owner or admin access required for returns.')
@@ -169,7 +185,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     const walletCustomerId = input.method === 'wallet' ? sale.paymentDetails?.pos?.customerId || sale.paymentDetails?.customerId : undefined
     if (input.method === 'wallet' && !walletCustomerId) throw new Error('This receipt has no customer account.')
     const computed = refundFor(sale, previous.filter(record => record.saleId === sale.id), input.items || [])
-    const record = { ...stamp, id: input.id, kind: 'return', saleId: sale.id, ...computed, reason: input.reason, method: input.method, reference: input.reference || '', walletCustomerId, registerId: (await records('register')).find(session => !session.closedAt && session.staffId === user.id)?.id }
+    const record = { ...stamp, id: input.id, kind: 'return', saleId: sale.id, ...computed, reason: input.reason, method: input.method, reference: input.reference || '', walletCustomerId, registerId: (await records('register')).find(session => !session.closedAt && (tillId&&session.tillId===tillId||!session.tillId&&session.staffId===user.id))?.id }
     await db.beginTransaction()
     try { await applyPosRecord(db, scope, record, organizationId); await publish(record); await db.commitTransaction() } catch (error) { await db.rollbackTransaction(); throw error }
     return record

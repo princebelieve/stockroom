@@ -716,7 +716,7 @@ export function applyRemoteOperations(operations) {
           } catch (error) { database.exec('ROLLBACK'); throw error }
         }
       } else if (operation.entityType === 'pos_record') {
-        if(['service-job','restaurant-reservations','church-fund','church-donor'].includes(payload.kind) && database.prepare("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1").get(payload.id)) throw new Error('This record has pending local work. Refresh kept it; use Sync now to reconcile it.')
+        if(['service-job','restaurant-reservations','church-fund','church-donor','register'].includes(payload.kind) && database.prepare("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1").get(payload.id)) throw new Error('This record has pending local work. Refresh kept it; use Sync now to reconcile it.')
         const existing = database.prepare('SELECT payload FROM pos_records WHERE scope=? AND id=?').get(organizationId, payload.id)
         database.exec('BEGIN')
         try {

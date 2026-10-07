@@ -356,6 +356,8 @@ Shared reservations require updated apps and a sync backend supporting `restaura
 3. Cash sales, cash refunds and supported supplier cash transactions recorded during the session are counted automatically.
 4. At shift end, count physical cash, enter Cash counted at closing and explain a difference when required.
 5. Select Close register and review expected cash, counted cash and the difference.
+6. If an entry is interrupted, retry with its original values. After reloading, use Refresh and recover register entries to check whether it was saved.
+7. For staff handover, close and count the outgoing shift on its original till before the next staff member opens a shift. Owners/admins can use Review staff shift on this till to close an outgoing staff shift.
 
 **Remember:** Do not record a cash sale again as a manual cash movement. The cash register is daily work, not configuration.
 

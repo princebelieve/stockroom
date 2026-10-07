@@ -108,7 +108,7 @@ async function applyOperation(operation: Operation) {
     await db.beginTransaction()
     try { await applyRetailRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }
   } else if (operation.entityType === 'pos_record') {
-    if(['service-job','restaurant-reservations','church-fund','church-donor'].includes(String(payload.kind)) && (await db.query("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1",[payload.id])).values?.length) throw new Error('This record has pending local work. Refresh kept it; use Sync now to reconcile it.')
+    if(['service-job','restaurant-reservations','church-fund','church-donor','register'].includes(String(payload.kind)) && (await db.query("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1",[payload.id])).values?.length) throw new Error('This record has pending local work. Refresh kept it; use Sync now to reconcile it.')
     await ensurePos(db)
     await db.beginTransaction()
     try { await applyPosRecord(db, 'business', payload); await db.commitTransaction() } catch (caught) { await db.rollbackTransaction(); throw caught }

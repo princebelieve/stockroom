@@ -11,7 +11,7 @@ export const emptyPosData: PosData = { settings: posSettings(), loyaltyBalances:
 export async function posRequest(path: string, headers: Record<string, string>, input?: unknown) {
   const response = await fetch(path, { method: input === undefined ? 'GET' : 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, ...(input === undefined ? {} : { body: JSON.stringify(input) }) })
   const result = await response.json()
-  if (!response.ok) throw new Error(result.error || 'Could not save POS changes.')
+  if (!response.ok) throw Object.assign(new Error(result.error || 'Could not save POS changes.'), { rejected: response.status >= 400 && response.status < 500 })
   return result
 }
 export function PosTools({ data, headers, reload, user, branches, products, customers, sales, money, restored, stockEnabled = true, mode = 'operations' }: {
@@ -28,21 +28,36 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
   const [poolBranch, setPoolBranch] = useState('')
   const [productId, setProductId] = useState('')
   useEffect(() => setSettings(data.settings), [data.settings])
-  const session = data.registers.find(record => record.staffId === user.id && !record.closedAt)
+  const [managedRegisterId,setManagedRegisterId]=useState('')
+  const registerCommand=(action:string)=>{try{return JSON.parse(localStorage.getItem('stockroom-register-command:'+user.id+':'+(headers['X-Stockroom-Branch']||'main')+':'+checkoutTillId()+':'+action)||'null')?.request||{}}catch{return {}}}
+  const session = (['owner','admin'].includes(user.role)?data.registers.find(record=>record.id===managedRegisterId&&!record.closedAt&&(!record.tillId||record.tillId===checkoutTillId())):undefined)||data.registers.find(record => record.staffId === user.id && !record.closedAt && (!record.tillId||record.tillId===checkoutTillId()))
   const sale = sales.find(record => record.id === selectedSale)
+  async function registerAction(input:any) {
+    const key='stockroom-register-command:'+user.id+':'+(headers['X-Stockroom-Branch']||'main')+':'+checkoutTillId()+':'+input.action
+    const details=JSON.stringify(input)
+    let saved:any=null;try{saved=JSON.parse(localStorage.getItem(key)||'null')}catch{}
+    if(saved&&saved.details!==details)throw new Error('An interrupted register entry has different details. Restore its original values and retry, or refresh to review whether it was saved.')
+    const request=saved?.request||{...input,id:input.id||crypto.randomUUID(),commandId:crypto.randomUUID(),expectedUpdatedAt:input.action==='open'?'':session?.updatedAt||''}
+    localStorage.setItem(key,JSON.stringify({details,request}))
+    try { await act('/api/pos/registers',request) } catch (error) { if ((error as { rejected?: boolean }).rejected) localStorage.removeItem(key); throw error }
+    localStorage.removeItem(key)
+  }
   async function act(path: string, input: unknown) {
     setError('')
     try { await posRequest(path, headers, input); await reload(); await restored() } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save changes.'); throw caught }
   }
   return <details open={mode!=='operations'} className="panel full-panel pos-tools"><summary>{mode==='settings'?'Sales settings':mode==='products'?'Product options':mode==='register'?'Cash register':'Returns and customer history'}</summary>{error && <p role="alert">{error}</p>}
     {['operations','register'].includes(mode) && <details open={mode==='register'}><summary>Cash register</summary>
+      {['owner','admin'].includes(user.role)&&<label>Review staff shift on this till<select aria-label="Review staff shift on this till" value={managedRegisterId} onChange={event=>setManagedRegisterId(event.target.value)}><option value="">My shift</option>{data.registers.filter(record=>!record.closedAt&&record.staffId!==user.id&&(!record.tillId||record.tillId===checkoutTillId())).map(record=><option key={record.id} value={record.id}>{record.staffName} / {record.id.slice(-8)}</option>)}</select></label>}
+      <p>Close and count the outgoing shift before handing over this till. If a request is interrupted, restore the original entry or use Refresh and recover register entries to check whether it saved.</p>
+      <AsyncButton className="filter-button" onClick={async()=>{await reload();for(const action of ['open','movement','close']){const key='stockroom-register-command:'+user.id+':'+(headers['X-Stockroom-Branch']||'main')+':'+checkoutTillId()+':'+action;let saved:any=null;try{saved=JSON.parse(localStorage.getItem(key)||'null')}catch{};if(saved){const result=await posRequest('/api/pos',headers);const found=result.registers.find((row:any)=>row.commands?.some((command:any)=>command.id===saved.request.commandId));if(found)localStorage.removeItem(key)}}}}>Refresh and recover register entries</AsyncButton>
       <WorkspaceHelp><p>Track the cash held during your session. Cash sales, cash returns and supplier cash payments/refunds made during this session are included automatically. Do not enter those supplier payments again as cash-out. Closing shortages reduce reported profit; surplus increases it.</p></WorkspaceHelp>
-      {!session ? <AsyncForm onSubmit={async event => { const form = new FormData(event.currentTarget); await act('/api/pos/registers', { action: 'open', amount: form.get('amount') }) }} busyLabel="Opening register..."><label>Starting cash<input name="amount" type="number" min="0" step="0.01" required /></label><SubmitButton className="filter-button">Open register</SubmitButton></AsyncForm> : <>
+      {!session ? <AsyncForm onSubmit={async event => { const form = new FormData(event.currentTarget); await registerAction({ action: 'open', amount: form.get('amount') }) }} busyLabel="Opening register..."><label>Starting cash<input name="amount" defaultValue={registerCommand('open').amount||''} type="number" min="0" step="0.01" required /></label><SubmitButton className="filter-button">Open register</SubmitButton></AsyncForm> : <>
         <p>Opened {new Date(session.openedAt).toLocaleString()} · starting cash {money(session.openingCash)}</p>
-        <AsyncForm busyLabel="Recording cash movement..." onSubmit={async event => { const form = new FormData(event.currentTarget); await act('/api/pos/registers', { id: session.id, action: 'movement', direction: form.get('direction'), amount: form.get('amount'), reason: form.get('reason') }) }}>
-          <label>Movement<select name="direction"><option value="in">Cash in</option><option value="out">Cash out</option></select></label><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Reason<input name="reason" minLength={3} required /></label><SubmitButton className="filter-button">Record cash movement</SubmitButton>
+        <AsyncForm busyLabel="Recording cash movement..." onSubmit={async event => { const form = new FormData(event.currentTarget); await registerAction({ id: session.id, action: 'movement', direction: form.get('direction'), amount: form.get('amount'), reason: form.get('reason') }) }}>
+          <label>Movement<select name="direction" defaultValue={registerCommand('movement').direction||'in'}><option value="in">Cash in</option><option value="out">Cash out</option></select></label><label>Amount<input name="amount" defaultValue={registerCommand('movement').amount||''} type="number" min="0.01" step="0.01" required /></label><label>Reason<input name="reason" defaultValue={registerCommand('movement').reason||''} minLength={3} required /></label><SubmitButton className="filter-button">Record cash movement</SubmitButton>
         </AsyncForm>
-        <AsyncForm busyLabel="Closing register..." onSubmit={async event => { const form = new FormData(event.currentTarget); await act('/api/pos/registers', { id: session.id, action: 'close', amount: form.get('amount'), reason: form.get('reason') }) }}><label>Cash counted at closing<input name="amount" type="number" min="0" step="0.01" required /></label><label>Explanation if the count differs<input name="reason" /></label><SubmitButton className="filter-button">Close register</SubmitButton></AsyncForm>
+        <AsyncForm busyLabel="Closing register..." onSubmit={async event => { const form = new FormData(event.currentTarget); await registerAction({ id: session.id, action: 'close', amount: form.get('amount'), reason: form.get('reason') }) }}><label>Cash counted at closing<input defaultValue={registerCommand('close').amount||''} name="amount" type="number" min="0" step="0.01" required /></label><label>Explanation if the count differs<input defaultValue={registerCommand('close').reason||''} name="reason" /></label><SubmitButton className="filter-button">Close register</SubmitButton></AsyncForm>
       </>}
       {data.registers.filter(record => record.closedAt && (user.role !== 'cashier' || record.staffId === user.id)).map(record => <p key={record.id}>{record.staffName} · {new Date(record.closedAt).toLocaleString()} · expected {money(record.expectedCash)} · counted {money(record.countedCash)} · difference {money(record.difference)}{record.closingReason && ` · ${record.closingReason}`}</p>)}
     </details>
