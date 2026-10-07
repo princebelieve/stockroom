@@ -1,3 +1,4 @@
+import { registerCheckoutTill } from './till-binding.mjs'
 import { requiresServiceJobSync } from './service-jobs.mjs'
 import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markKnownLocalOperationsApplied, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
@@ -39,6 +40,8 @@ export async function saveCloudConfiguration(input) {
   await rename(temporaryPath, filePath)
   return { syncApiUrl, businessId, deviceId, existingBusiness }
 }
+
+export async function registerLocalCheckout(tillId) { const config = await configuration(); const bound = await registerCheckoutTill(config, tillId); if (!bound) throw new Error('Update the cloud server to enable till recovery.'); return { ...bound, businessId: config.businessId } }
 
 export async function getCloudConfiguration() {
   const { url, businessId } = await configuration()
@@ -100,12 +103,13 @@ export async function pullLatest() {
   return syncConfigurationStatus()
 }
 
-export async function syncNow() {
+export async function syncNow(tillId) {
   if (running) return getSyncStatus()
   const { url, token, businessId, deviceId, existingBusiness } = await configuration()
   if (!url || !token || !businessId || !deviceId) return syncConfigurationStatus()
   running = true
   try {
+    await registerCheckoutTill({ url, token }, tillId)
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
     if (!existingBusiness && !(await cloudHasBusinessSettings({ url, token, businessId }))) await queueInitialSettingsSnapshot()
     while (true) {

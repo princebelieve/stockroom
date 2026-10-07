@@ -253,7 +253,7 @@ This guide follows the current app screens. Availability depends on your workspa
 4. Use Hand over once the order is ready and paid. Collected orders move into their separate history section.
 5. For QR/customer orders, review the order in Orders and select Accept on this till while connected. Synchronize before preparing or taking payment. Customers can enter their pickup name as guests; wallet sign-in is optional. Use Sync orders to share updates.
 
-**Remember:** Preparation consumes configured recipes once. Pay and start recipe preparation on the original till, or the accepting till for online orders. Verify transfer funds before saving payment. Automatic lost-till reassignment and separate kitchen-printer routing are not implemented.
+**Remember:** Preparation consumes configured recipes once. Pay and start recipe preparation on the original till, or the accepting till for online orders. Verify transfer funds before saving payment. Windows supports automatic kitchen/bar ticket routing with visible retry failures. The owner can recover the original checkout identity on a synchronized replacement under Device settings after stopping the source and reconciling unsynchronized activity.
 
 ## Order counter > Order actions
 

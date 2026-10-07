@@ -104,3 +104,9 @@ These checks apply when installing a new client or changing equipment. Repositor
 - Epson cutter command: https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_cv.html
 
 These references describe the mechanisms, not compatibility with every printer.
+
+## Preparation printer routing
+
+In Windows Device settings, select Kitchen ticket printer and Bar ticket printer from installed queues, then enable automatic preparation routing. One queue can serve both stations if needed. Sending, correcting, cancelling or accepting an order creates station tickets locally. Failed or interrupted tickets remain visible for explicit retry; check physical output first to avoid duplicate paper. Driver acceptance is not proof that paper printed. Browser and Android printing continue through the system dialog and do not silently select station queues.
+
+Lost or broken till recovery is owner-only under Device settings. It requires a separately enrolled replacement, cloud connectivity, no active replacement work, owner password and confirmation that the original device has stopped and unsynchronized activity has been reconciled. The source enrollment is permanently retired and its checkout identity is restored on the replacement; historical documents are retained. See [Fast food recovery](fast-food-workspace.md#devices-and-recovery).

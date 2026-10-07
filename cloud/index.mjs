@@ -1,3 +1,4 @@
+import { createTillRecovery } from './till-recovery.mjs'
 import { authorizeCustomerOrder, customerOrderLines, publishCustomerOrder, acceptCustomerOrder } from './customer-orders.mjs'
 import { createStaffRemoval } from './staff-removal.mjs'
 import { validateServiceJob, requiresServiceJobSync } from '../server/service-jobs.mjs'
@@ -71,6 +72,8 @@ await accounts.createIndex({ businessId: 1 })
 await accounts.createIndex({ businessId: 1, role: 1 }, { unique: true, partialFilterExpression: { role: 'owner' }, name: 'one_owner_per_business' })
 await accounts.createIndex({ businessId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } })
 await devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true })
+await database.collection('checkout_tills').createIndex({ businessId: 1, tillId: 1 }, { unique: true })
+await database.collection('till_recoveries').createIndex({ businessId: 1, requestId: 1 }, { unique: true })
 await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 await refreshTokens.createIndex({ tokenHash: 1 }, { unique: true })
 await refreshTokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
@@ -213,6 +216,8 @@ async function serializeBusinessSync(businessId,job) {
   try{return await next}finally{if(businessSyncJobs.get(businessId)===next)businessSyncJobs.delete(businessId)}
 }
 const staffRemoval = createStaffRemoval({ accounts, refreshTokens, operations, verifyToken, ownerPasswordIsValid, readJson, send })
+
+const tillRecovery = createTillRecovery({ database, devices, entityHeads, operations, serialize: serializeBusinessSync, verifyToken, ownerIsActive: async claims => ObjectId.isValid(claims.sub) && Boolean(await accounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, role: 'owner' })), ownerPasswordIsValid, readJson, send })
 
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
@@ -415,6 +420,7 @@ const server = createServer(async (request, response) => {
       await customerPortalAccounts.updateOne({ businessId: claims.businessId, customerId }, { $set: { username: login, passwordHash: hashPassword(password), active: true, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true })
       return send(response, 200, { customerId, username: login })
     }
+    if (await tillRecovery.handle(request, response)) return
     if (await productFormReader(request, response)) return
     if (await notifications.handle(request, response)) return
     if (await visitorAccounts(request, response, verifyToken, readJson)) return
@@ -540,6 +546,7 @@ const server = createServer(async (request, response) => {
       const businessId = String(input.businessId || '')
       const deviceId = String(input.deviceId || '')
       if (!businessId || !deviceId) return send(response, 400, { error: 'businessId and deviceId are required.' })
+      if (await devices.findOne({ businessId, deviceId, recoveryRetiredAt: { $exists: true } })) return send(response, 409, { error: 'This enrollment was permanently retired by till recovery. Use a new device ID.' })
       const expiresInDays = Math.min(Math.max(Number(input.expiresInDays) || 365, 1), 730)
       await devices.updateOne({ businessId, deviceId }, { $set: { businessId, deviceId, label: String(input.label || deviceId), enrolledAt: new Date(), revokedAt: null } }, { upsert: true })
       const token = deviceToken(businessId, deviceId)
@@ -547,6 +554,8 @@ const server = createServer(async (request, response) => {
     }
     const claims = verifyToken(request)
     if (!claims) return send(response, 401, { error: 'Unauthorized.' })
+    const device = isDevice(claims) ? await devices.findOne({ businessId: claims.businessId, deviceId: claims.deviceId }) : null
+    if (isDevice(claims) && (!device || device.revokedAt || device.recoveryRetiredAt)) return send(response, 401, { error: 'This device has been revoked.' })
     if (request.method === 'GET' && request.url?.startsWith('/v1/business/settings')) {
       if (!isDevice(claims)) return send(response, 403, { error: 'Device token required.' })
       const query = new URL(request.url, `http://${request.headers.host}`).searchParams
@@ -562,6 +571,7 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request)
       const deviceId = String(input.deviceId || '').trim()
       if (!/^[a-z0-9][a-z0-9-]{2,100}$/i.test(deviceId)) return send(response, 400, { error: 'A valid device ID is required.' })
+      if (await devices.findOne({ businessId: claims.businessId, deviceId, recoveryRetiredAt: { $exists: true } })) return send(response, 409, { error: 'This enrollment was permanently retired by till recovery. Use a new device ID.' })
       await devices.updateOne({ businessId: claims.businessId, deviceId }, { $set: { businessId: claims.businessId, deviceId, label: String(input.label || deviceId), enrolledAt: new Date(), revokedAt: null, revokeReason: null } }, { upsert: true })
       return send(response, 201, { businessId: claims.businessId, deviceId, deviceToken: deviceToken(claims.businessId, deviceId) })
     }
@@ -635,8 +645,6 @@ const server = createServer(async (request, response) => {
       return send(response, 200, { ok: true })
     }
     if (!isDevice(claims)) return send(response, 403, { error: 'Device token required.' })
-    const device = await devices.findOne({ businessId: claims.businessId, deviceId: claims.deviceId })
-    if (!device || device.revokedAt) return send(response, 401, { error: 'This device has been revoked.' })
     if (request.url?.startsWith('/v1/pos-paystack/')) {
       try { return send(response, 200, await posPaystack({ businessId: claims.businessId, path: request.url, method: request.method, input: request.method === 'POST' ? await readJson(request) : {} })) }
       catch (error) { return send(response, 400, { error: error.message }) }

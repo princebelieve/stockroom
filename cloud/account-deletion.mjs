@@ -103,7 +103,7 @@ export function createAccountDeletion({ database, accounts, devices, refreshToke
       const businessId = request.businessId
       const accountIds = (await accounts.find({ businessId }).project({ _id: 1 }).toArray()).map(row => row._id)
       await eraseNotifications(accountIds.map(id => `account:${id}`))
-      const scoped = ['accounts', 'devices', 'business_settings', 'sync_operations', 'sync_entity_heads', 'customer_portal_accounts', 'subscription_payments', 'google_play_purchases', 'enterprise_subscription_requests', 'business_registration_keys', 'auth_refresh_tokens', 'inventory_alert_state', 'supermarket_resources', 'supermarket_admissions', 'product_form_ocr_usage']
+      const scoped = ['accounts', 'devices', 'business_settings', 'sync_operations', 'sync_entity_heads', 'customer_portal_accounts', 'checkout_tills', 'till_recoveries', 'subscription_payments', 'google_play_purchases', 'enterprise_subscription_requests', 'business_registration_keys', 'auth_refresh_tokens', 'inventory_alert_state', 'supermarket_resources', 'supermarket_admissions', 'product_form_ocr_usage']
       for (const name of scoped) await database.collection(name).deleteMany({ businessId })
       const prefix = `^${businessId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`
       for (const name of ['supermarket_admissions', 'product_form_ocr_usage']) await database.collection(name).deleteMany({ _id: { $regex: prefix } })

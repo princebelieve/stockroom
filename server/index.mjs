@@ -11,7 +11,7 @@ import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, adjustStock, createSale, getSettings, listProducts, exportProductCatalogCsv, updateSettings, storageName } from './repository.mjs'
 import { recordStaffRemovalLocal, authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
-import { getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
+import { registerLocalCheckout, getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudRemoveStaff, cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 
@@ -46,7 +46,7 @@ const server = createServer(async (request, response) => {
     const referralWalletRoute = ['/v1/referral-wallet/me', '/v1/referral-wallet/payouts', '/v1/referral-wallet/banks', '/v1/referral-wallet/resolve', '/v1/referral-wallet/profile'].includes(path.split('?')[0])
     if (!user || (!sessionRefreshRoute && !notificationRoute && !customerPortalRoute && !customerOrderRoute && user.role !== 'owner')) return sendJson(response, 401, { error: sessionRefreshRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
     if (customerPortalRoute && !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute && !customerPortalRoute && !customerOrderRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me', '/v1/till-recovery/tills', '/v1/till-recovery/recover'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute && !customerPortalRoute && !customerOrderRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
@@ -412,6 +412,11 @@ const server = createServer(async (request, response) => {
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
+  if (request.method === 'POST' && request.url === '/api/till-recovery/register') {
+    const user = sessionUser(request)
+    if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Owner access required.' })
+    try { return sendJson(response, 200, await registerLocalCheckout(String(request.headers['x-stockroom-till'] || ''))) } catch (error) { return sendJson(response, 409, { error: error.message }) }
+  }
   if (request.method === 'GET' && request.url === '/api/sync/status') return sendJson(response, 200, await syncConfigurationStatus())
   if (request.method === 'GET' && request.url === '/api/sync/conflicts') {
     const user = sessionUser(request)
@@ -427,7 +432,7 @@ const server = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/sync/now') {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access is required.' })
-    return sendJson(response, 200, await syncNow())
+    return sendJson(response, 200, await syncNow(String(request.headers['x-stockroom-till'] || '')))
   }
   if (request.method === 'POST' && request.url === '/api/sync/pull') {
     const user = sessionUser(request)

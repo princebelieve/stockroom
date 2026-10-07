@@ -1,3 +1,4 @@
+import { registerCheckoutTill } from '../../server/till-binding.mjs'
 import { salesHistory } from '../../server/sales-history.mjs'
 import { ensureStaffRemovals, recordStaffRemoval } from '../../server/staff-removal.mjs'
 import { requiresServiceJobSync } from '../../server/service-jobs.mjs'
@@ -212,6 +213,7 @@ async function syncNowImpl() {
   if (!config) return { configured: false, pending: 0, lastError: 'This phone has not been enrolled.' }
   const db = await openMobileDatabase()
   try {
+    await registerCheckoutTill(config, localStorage.getItem('stockroom-checkout-till-id') || '', originalFetch)
     while (true) {
     const pending = await db.query('SELECT operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, action, payload, created_at AS createdAt FROM sync_outbox WHERE synced_at IS NULL ORDER BY created_at, rowid LIMIT 500')
     const operations: Operation[] = (pending.values || []).map((row) => ({ ...row, payload: JSON.parse(String(row.payload)) })) as Operation[]
@@ -443,6 +445,12 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   const stocktakeResponse = await mobileStocktake(path, init, canOperate(user), queue)
   if (stocktakeResponse) return stocktakeResponse
+  if (path === '/api/till-recovery/register' && method === 'POST') {
+    if (user.role !== 'owner') return error('Owner access required.', 403)
+    const config = await getMobileSyncConfiguration()
+    if (!config) return error('Enroll this device first.', 409)
+    try { const bound = await registerCheckoutTill(config, new Headers(init?.headers).get('X-Stockroom-Till') || '', originalFetch); if (!bound) return error('Update the cloud server to enable till recovery.', 409); return json({ ...bound, businessId: config.businessId }) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Checkout registration failed.', 409) }
+  }
   if (path === '/api/sync/status') return json(await localSyncStatus())
   if (path === '/api/subscriptions/access') {
     if (!await sessionUser()) return error('Authentication required.', 401)

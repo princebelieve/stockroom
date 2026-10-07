@@ -1,6 +1,6 @@
 import { isNativeMobile } from './mobileDatabase'
 
-export type PrinterSettings = { receipt: string; report: string; width: 58 | 80; automatic: boolean }
+export type PrinterSettings = { receipt: string; report: string; kitchen?: string; bar?: string; automaticPreparation?: boolean; width: 58 | 80; automatic: boolean }
 export type InstalledPrinter = { name: string; displayName: string }
 declare global {
   interface Window { stockroomDesktop?: {
@@ -15,7 +15,7 @@ declare global {
 export function printerSettings(): PrinterSettings {
   try {
     const value = JSON.parse(localStorage.getItem('stockroom-printers') || '{}')
-    return { receipt: typeof value.receipt === 'string' ? value.receipt : '', report: typeof value.report === 'string' ? value.report : '', width: value.width === 58 ? 58 : 80, automatic: value.automatic === true }
+    return { receipt: typeof value.receipt === 'string' ? value.receipt : '', report: typeof value.report === 'string' ? value.report : '', kitchen: typeof value.kitchen === 'string' ? value.kitchen : '', bar: typeof value.bar === 'string' ? value.bar : '', automaticPreparation: value.automaticPreparation === true, width: value.width === 58 ? 58 : 80, automatic: value.automatic === true }
   } catch { return { receipt: '', report: '', width: 80, automatic: false } }
 }
 let printing = false

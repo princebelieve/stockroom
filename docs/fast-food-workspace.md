@@ -45,7 +45,7 @@ Here, "cloud server" means the project's existing Stockroom synchronization back
 
 The existing synchronization server and all participating apps must be updated before using QR ordering. Older clients are blocked from downloading online orders because they lack the till acceptance safeguard. Capability checks hold Fast food uploads on the device until the cloud supports them, and prevent older apps from consuming Fast food records and settings. Ordinary supermarket synchronization retains its existing protocol. The cloud changes in this repository must be deployed before using Fast food across devices.
 
-An unavailable original or accepting till currently requires operational recovery outside this screen. Automatic reassignment is not implemented; do not recreate an already paid or prepared order on another offline till. Restore and synchronize the original device where possible, and reconcile receipts and physical stock before resuming.
+The owner can recover a lost or broken checkout under **Business settings > Devices > Lost or broken till recovery**. Enroll a replacement with a different device ID, synchronize all its changes and resolve conflicts, then load recoverable tills. Finish or cancel its active work first. Select the lost checkout, enter the owner password, confirm that the source device is stopped and unsynchronized payments/preparation/stock have been reconciled, and type RECOVER. Recovery permanently retires the source device cloud access and assigns its checkout identity to the replacement, preserving receipt, bill, job and consumption IDs. The replacement downloads the latest synchronized history and reloads. If interrupted, resume the same saved request. Work that never reached the cloud must be reconciled manually. Original hardware must stay stopped; revocation cannot prevent it from operating while offline. Reusing that hardware requires a new enrollment ID. Recoverable ownership comes from checkout registration during synchronization or unambiguous original creation events; an unidentified legacy checkout cannot be guessed safely.
 
 ## Corrections, cancellation and refunds
 
@@ -53,7 +53,7 @@ An unavailable original or accepting till currently requires operational recover
 - **Cancel order:** stops an unpaid open order, requires a reason and retains its history. Cancelling does not deduct stock. A paid order must be refunded in full first.
 - **Refund order:** owners/admins can refund paid open or collected orders inside this workspace. Choose quantities and a reason. The amount uses the original receipt's tax, discounts and rewards. For bank/terminal refunds, first return the money outside the app, then confirm and record its reference. Cash refunds likewise record money staff return to the customer.
 - **Packaged stock:** a refund restores a packaged item's stock only when **Return this packaged item to stock** is selected. Prepared food is never restocked. Retries do not duplicate the refund. Fully refunded open orders cannot continue preparation or be handed over; cancel them to close the queue.
-- **Print preparation ticket:** prints the order number, customer, items, options and preparation note using the existing printer/browser print setup. It is clearly marked as a preparation ticket, not proof of payment. It does not automatically send jobs to a separate kitchen printer.
+- **Print preparation ticket:** prints the order number, customer, items, options and preparation note using the existing printer/browser print setup. It is clearly marked as a preparation ticket, not proof of payment. Windows can also route tickets to configured kitchen/bar printers automatically after sending or accepting an order.
 
 ## Prices, tax and rewards
 
@@ -69,7 +69,7 @@ The counter-service workflow supports ordering, preparation, full payment, recei
 
 - **Tables and open tabs:** for customers who remain seated or add purchases before paying, typically table-service restaurants and bars.
 - **Deposits:** for advance payments on future orders. Counter orders currently settle in full.
-- **Kitchen-printer routing:** for automatically sending specific items to separate kitchen/bar printers. Manual preparation tickets are available now.
+- **Preparation printer routing:** Windows supports configured kitchen/bar queues and automatic tickets. Browser and Android use manual system-dialog printing.
 
 ## Recipes, ingredient stock and food cost
 
@@ -104,7 +104,7 @@ Menu editing, recipes and packaged stock are under **Business settings > Food me
 Configuration now lives under **Business settings**, separate from transaction screens. Owners configure workspaces and sales rules; owners and admins can configure receipts, devices and enabled food/table workflows. Product variants and extras are under product management. **Cash register** is a separate daily-work screen; returns and customer history are under Sales history. The supermarket basket, POS receipt-reference scanner and customer display continue to use their existing operational controls.
 
 
-Printing uses the same configured 58 mm or 80 mm receipt printer for payment receipts, order reviews, preparation tickets and itemized bills. The selected action determines the document. Preparation tickets contain quantities and instructions, not payment totals. Customer documents retain item quantities/prices and applicable financial summaries. Detailed history stays available in the app. No additional printer is required.
+Manual printing uses the configured 58 mm or 80 mm receipt printer for payment receipts, order reviews, preparation tickets and itemized bills. The selected action determines the document. Preparation tickets contain quantities and instructions, not payment totals. Customer documents retain item quantities/prices and applicable financial summaries. Detailed history stays available in the app. No additional printer is required for manual printing. On Windows, choose separate Kitchen ticket and Bar ticket printer queues in Device settings and enable automatic preparation routing. Each station receives only its lines. Corrections replace earlier tickets; removed station items and cancellations are labelled. Failed or interrupted print jobs remain under Preparation tickets need attention for explicit retry. Check physical output before retrying because an interrupted job may already have printed. Printing failures do not recreate orders, payments or stock deductions. Preferences and the durable ticket queue are local to this device; queued jobs are not sent to another device automatically.
 
 ## Order type and split payment
 
