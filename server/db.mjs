@@ -1,3 +1,4 @@
+import { validateReservationBook, validateReservationArchive } from './restaurant-reservations.mjs'
 import { isStockWork, validateStockWork, applyStockWorkSync } from './stock-work.mjs'
 import { businessDate } from './report-timezone.mjs'
 import { validateServiceJob } from './service-jobs.mjs'
@@ -713,10 +714,12 @@ export function applyRemoteOperations(operations) {
           } catch (error) { database.exec('ROLLBACK'); throw error }
         }
       } else if (operation.entityType === 'pos_record') {
-        if(payload.kind==='service-job' && database.prepare("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1").get(payload.id)) throw new Error('An invoice has pending local work. Refresh kept it; use Sync now to reconcile this job.')
+        if(['service-job','restaurant-reservations'].includes(payload.kind) && database.prepare("SELECT operation_id FROM sync_outbox WHERE entity_type='pos_record' AND entity_id=? AND synced_at IS NULL LIMIT 1").get(payload.id)) throw new Error('This record has pending local work. Refresh kept it; use Sync now to reconcile it.')
         const existing = database.prepare('SELECT payload FROM pos_records WHERE scope=? AND id=?').get(organizationId, payload.id)
         database.exec('BEGIN')
         try {
+          if(payload.kind==='restaurant-reservation-archive')validateReservationArchive(payload,undefined,existing?JSON.parse(existing.payload):undefined)
+          if(payload.kind==='restaurant-reservations')validateReservationBook(payload,undefined,true)
           if(payload.kind==='service-job') validateServiceJob(payload,undefined,true)
           if(payload.kind==='service-job') for(const entry of payload.payments) if(!database.prepare('SELECT id FROM sales WHERE id=?').get(entry.sale.id)) for(const [sql,args] of restaurantSaleStatements(entry.sale,organizationId)) database.prepare(sql).run(...args)
           if(payload.kind==='restaurant-ledger' && !database.prepare('SELECT id FROM sales WHERE id=?').get(payload.latestSale.id)) {

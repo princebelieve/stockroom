@@ -1,3 +1,4 @@
+import { requiresReservationSync } from './restaurant-reservations.mjs'
 import { requiresStockWorkSync } from './stock-work.mjs'
 import { registerCheckoutTill } from './till-binding.mjs'
 import { requiresServiceJobSync } from './service-jobs.mjs'
@@ -74,7 +75,7 @@ async function pullRemoteChanges({ url, token, businessId, deviceId }) {
   markKnownLocalOperationsApplied()
   let cursor = getSyncCursor()
   while (true) {
-  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
+  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
   if (!pulled.ok) throw new Error(`Cloud pull failed (${pulled.status}).`)
   const result = await pulled.json()
   applyRemoteOperations(result.operations || [])
@@ -117,6 +118,10 @@ export async function syncNow(tillId) {
     const pending = getPendingSyncOperations()
     if (!pending.length) break
     if (pending.length) {
+      if(pending.some(requiresReservationSync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('restaurant-reservations-v1'))throw new Error('Update the existing sync server before sharing reservations. Records remain on this device.')
+      }
       if(pending.some(requiresStockWorkSync)) {
         const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
         if(!support.ok || !(await support.json()).capabilities?.includes('stock-work-v1'))throw new Error('Update the existing sync server before sharing material use or production. Records remain on this device.')
