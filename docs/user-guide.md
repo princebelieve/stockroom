@@ -284,8 +284,13 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 4. Review the itemized bill and outstanding total. Use Print itemized bill for a customer review before payment.
 5. Open Orders/Preparation to progress service. Kitchen/bar tickets contain the relevant station lines. Mark served when delivered.
 6. Owners/admins can open Orders / Preparation > Batch production for food made in advance. Record actual ingredients and usable yield, then confirm. Link finished stock in Menu or recipes; preparation consumes it at its captured batch cost.
+7. Open Reservations > New reservation for advance bookings. Enter guest details, party size, table and arrival/departure in the business reporting timezone. Unassigned requests hold no table; assigned bookings check capacity and overlap.
+8. Mark arrived, then Open reservation bill from 30 minutes before arrival until departure. Mark seated links that bill. Mark visit completed does not settle or close it; use the normal bill payment and closing controls.
+9. Cancel reservation or Mark no-show requires confirmation and a reason. Owners/admins can Archive finished reservations without deleting history, or Export reservation history as CSV summaries. Reservations do not collect deposits or record sales.
 
 **Remember:** A printed unpaid bill is not a payment receipt. Synchronize devices before sharing table occupancy; use one till to manage each open bill.
+
+Shared reservations require updated apps and a sync backend supporting `restaurant-reservations-v1`. Synchronize before confirming a table; review offline calendar conflicts in Sync issues.
 
 ## Tables & tabs > Take payment and close a bill
 
