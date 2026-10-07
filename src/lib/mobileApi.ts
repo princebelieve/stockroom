@@ -1,3 +1,4 @@
+import { conflictReview, conflictReviewSchema } from '../../server/sync-conflict-review.mjs'
 import { requiresChurchSync } from '../../server/church-ledger.mjs'
 import { requiresReservationSync } from '../../server/restaurant-reservations.mjs'
 import { requiresStockWorkSync } from '../../server/stock-work.mjs'
@@ -541,14 +542,25 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
       return await originalFetch(`${config.syncApiUrl}${routes[path]}`, { method, headers: { Authorization: `Bearer ${config.deviceToken}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ ...await body(init), branchId }) }), signal: AbortSignal.timeout(45000) })
     } catch { return error('Could not reach the payment service. Check payment status before retrying.', 503) }
   }
-  if (path === '/api/sync/conflicts' && method === 'GET') {
+  if (['/api/sync/conflicts','/api/sync/conflicts/reviews'].includes(path) && method === 'GET') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    return json({ conflicts: (await db.query('SELECT id,entity_type AS entityType,reason,created_at AS createdAt FROM sync_conflicts WHERE resolved_at IS NULL')).values })
+    await db.run(conflictReviewSchema)
+    const history=path.endsWith('/reviews')
+    return json({ conflicts: (await db.query('SELECT c.id,c.entity_type AS entityType,c.entity_id AS entityId,c.reason,c.local_payload AS localPayload,c.remote_payload AS remotePayload,c.created_at AS createdAt,c.resolved_at AS resolvedAt,r.note AS reviewNote,r.action AS reviewAction,r.reviewer_id AS reviewerId FROM sync_conflicts c LEFT JOIN sync_conflict_reviews r ON r.conflict_id=c.id WHERE c.resolved_at IS '+(history?'NOT NULL':'NULL')+' ORDER BY c.created_at DESC')).values })
   }
   const conflictMatch = path.match(/^\/api\/sync\/conflicts\/([^/]+)\/resolve$/)
   if (conflictMatch && method === 'POST') {
     if (!isManager(user)) return error('Owner or admin access required.', 403)
-    await db.run('UPDATE sync_conflicts SET resolved_at=? WHERE id=?', [now(), conflictMatch[1]])
+    let review: ReturnType<typeof conflictReview>
+    try { review = conflictReview(await body(init), user) } catch (caught) { return error((caught as Error).message, 400) }
+    if (!(await db.query('SELECT id FROM sync_conflicts WHERE id=? AND resolved_at IS NULL',[conflictMatch[1]])).values?.length) return error('This issue is no longer open. Refresh the list.',409)
+    await db.run(conflictReviewSchema)
+    await db.beginTransaction()
+    try {
+      await db.run('INSERT INTO sync_conflict_reviews VALUES (?,?,?,?,?)',[conflictMatch[1],review.action,review.note,review.reviewerId,review.reviewedAt],false)
+      await db.run('UPDATE sync_conflicts SET resolved_at=? WHERE id=?',[review.reviewedAt,conflictMatch[1]],false)
+      await db.commitTransaction()
+    } catch(error) { await db.rollbackTransaction(); throw error }
     return json({ ok: true })
   }
   if (path === '/api/retail') {

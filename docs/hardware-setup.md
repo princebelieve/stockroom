@@ -1,5 +1,11 @@
 # Hardware support and acceptance checks
 
+## Reported operational testing and support
+
+On 2026-10-07, the product owner confirmed real transactions and successful use of an XPrinter, a LaserJet printer and a barcode scanner. These are reported operational tests, not missing capabilities. Exact models, connection types and test dates were not supplied in this session; record those in Devices together with the observed receipt/A4/scanner results. Existing device test records remain unchanged. No weighing scale has been selected yet.
+
+Support is available at [support@sbi.globalcreest.com](mailto:support@sbi.globalcreest.com), general enquiries at [info@sbi.globalcreest.com](mailto:info@sbi.globalcreest.com), and [WhatsApp +234 703 392 8277](https://wa.me/2347033928277). These contacts remain on the public welcome/legal pages and are now directly accessible in the in-app guide. No message is sent automatically.
+
 ## Cash and terminal receipts
 
 Cash checkout requires the amount received, blocks underpayment, and calculates
@@ -121,7 +127,7 @@ New orders, corrections and cancellations produce station tickets. Pending stale
 
 Owners open **Business settings > Business > Business backup and restore**. Download a password-protected backup, or enter a backup password and choose a folder for daily scheduled backups. Prefer an external drive or a folder copied to secure off-device storage. Scheduled backups run while the Windows app is open, with the latest successful time and failures shown in settings. Windows secure storage protects the saved password. Keep a separate copy of the password; it cannot be recovered from the encrypted backup.
 
-Restore requires the matching business, checkout identity and database schema, the file password, current owner password and RESTORE confirmation. Stop staff using that checkout and synchronize before replacing its local records. Current credentials and removed-staff tombstones are preserved. A consistent local safety backup is created first. For replacement hardware, use lost-till recovery before restoring a matching checkout archive. Browser and Android continue to use synchronization and lost-till recovery; this file backup/restore control is Windows-only.
+Restore requires the matching business and checkout identity, with a supported database schema, the file password, current owner password and RESTORE confirmation. Stop staff using that checkout and synchronize before replacing its local records. Current credentials and removed-staff tombstones are preserved. A consistent local safety backup is created first. For replacement hardware, use lost-till recovery before restoring a matching checkout archive. Browser and Android continue to use synchronization and lost-till recovery; this file backup/restore control is Windows-only.
 
 Backups are separate from the product export-and-exit flow. Its fee remains controlled by the developer's settings, including zero when configured.
 
@@ -144,3 +150,9 @@ Cash-register entries retain a command identity through an interrupted response 
 The simulated trading-day test opens with 100, takes 30 cash, refunds 10 and pays out 3: expected closing cash is 117. The next cashier opens with 117, an owner refunds 5 from that till, and closing cash is 112. Separate checks cover retained cash extras, stale changes, permissions, transaction rollback and retries. Browser checks simulate a saved cash movement whose response is lost, then reload and retry without recording it twice. These checks do not certify physical devices or a live business.
 
 For the supervised pilot, use real opening stock and cash; cash, confirmed bank transfer and split payments; saved receipts and reprints; partial returns and restocking; petty cash; counted closing cash and explained differences; and outgoing/incoming staff shifts. Repeat an internet outage, synchronization recovery and replacement-device recovery. Check the actual scanner, receipt printer, cash drawer and any weighing scale with the intended Windows/browser/Android devices before relying on them during a queue. Update the sync service and participating apps before shared shift use.
+
+### Backup compatibility after updates
+
+New encrypted backups include source table and column metadata. Restoration supports additive upgrades: retained columns must keep their names, types, primary-key and required-field properties; additional columns must be nullable or have defaults. New tables start empty and constraints are checked before committing. Renamed/removed tables or columns and new mandatory fields without defaults require a dedicated migration and are rejected atomically. Current credentials and staff removal records remain protected.
+
+Older backups without metadata also restore across recognised historical field additions when the original structure fingerprint can be verified, including empty tables and the addition of local review history. For an unrecognised older structure, contact support or restore using the original compatible app first and create a metadata-bearing backup; arbitrary older-version conversion is not supported. Retain the original backup until recovery has been verified.

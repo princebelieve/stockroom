@@ -1,3 +1,4 @@
+import { SyncIssues, type SyncConflict } from './SyncIssues'
 import { readWeighing } from './lib/weighingSettings'
 import { weightLabel } from '../server/weighed-goods.mjs'
 import { OilPricing } from './OilPricing'
@@ -208,7 +209,6 @@ type SaleItemVoid = { id: string; orderId: string; productId: string; productNam
 
 type Movement = { id: string; productName: string; sku: string; quantity: number; reason: string; createdAt: string }
 type SyncStatus = { configured: boolean; pending: number; conflicts?: number; lastError: string; existingBusiness?: boolean }
-type SyncConflict = { id: string; entityType: string; entityId: string; reason: string; createdAt: string }
 type StaffUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess?: boolean; createdAt: string }
 type Reports = { costWarnings?: { incomplete: boolean; zeroCostSaleLines: number; missingRecipes: string[]; uncostedIngredients: number; uncostedMaterials?: number }; reportingTimeZone?: string; daily: { total: number; count: number }; weekly: { total: number; count: number }; monthly: { total: number; count: number }; inventory: { value: number; products: number; lowStock: number }; profit: { revenue: number; cost: number; expenses: number; amount: number } }
 type Expense = { id: string; category: string; description: string; amount: number; incurredAt: string; staffId?: string; staffName?: string }
@@ -999,8 +999,9 @@ function App() {
     await refreshSyncStatus()
     await refreshBusinessSettings()
   }
-  async function resolveConflict(id: string) {
-    const response = await fetch(`/api/sync/conflicts/${id}/resolve`, { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } })
+  async function resolveConflict(id: string, input: {action:string;note:string;confirmed:boolean}) {
+    const response = await fetch(`/api/sync/conflicts/${id}/resolve`, { method: 'POST', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+    if (!response.ok) { const result=await response.json(); throw new Error(result.error || 'Could not record the review.') }
     if (response.ok) setSyncConflicts((current) => current.filter((conflict) => conflict.id !== id))
   }
   async function createDisplayPairing() {
@@ -1980,7 +1981,7 @@ function App() {
       {((active==='Settings'&&settingsTab==='sales'&&user.role==='owner')||(active==='Inventory'&&canManageDeviceSetup)) && <PosTools mode={active==='Inventory'?'products':'settings'} stockEnabled={workspace.stock} data={pos.data} headers={authHeaders} reload={pos.reload} user={user} branches={branches} products={products} customers={customers} sales={allReceipts} money={formatMoney} restored={reloadPosStock} />}
       {active === 'Reports' && workspace.stock && <SupermarketReports headers={authHeaders} branchId={activeBranchId} money={formatMoney} revision={reports} oilMode={workspace.oil}/>}
       {active === 'Reports' && <ReportsDashboard reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
-      {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} />}
+      {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} navigate={screen=>setActive(screen)} headers={authHeaders} />}
       {active === 'Activity' && <StaffActivity timeZone={shopProfile.reportingTimeZone || 'UTC'} token={authToken} branchId={activeBranchId} currency={currency} />}
       {active === 'Team' && <>{['owner', 'admin'].includes(user.role) && <BusinessSignInLink businessId={linkedBusinessId} />}<TeamManagement removeStaff={removeStaff} staff={staff} loaded={staffLoaded} addStaff={addStaff} updateStaffRole={updateStaffRole} setCashierAccess={setCashierAccess} canCreateStaff={user.role === 'owner'} message={settingsMessage || cloudSessionError} />{user.role === 'owner' && <StaffPasswordReset staff={staff} resetStaffPassword={resetStaffPassword} />}</>}
       {(active==='Device'||active==='Settings'&&settingsTab==='devices') && canManageDeviceSetup && workspace.productSales && <Suspense fallback={<p>Loading weighing setup...</p>}><WeighingSetup key={user.organizationId} businessId={user.organizationId} products={products}/></Suspense>}
@@ -2232,9 +2233,6 @@ function ReportMetric({ label, value, note }: { label: string; value: string; no
   return <div className="metric-card"><span>{label}</span><strong>{value}</strong><small>{note}</small></div>
 }
 
-function SyncIssues({ conflicts, resolveConflict }: { conflicts: SyncConflict[]; resolveConflict: (id: string) => Promise<void> }) {
-  return <section className="panel full-panel"><div className="panel-heading"><div><h2>Sync issues</h2><p>Review competing edits, shared-stock shortages and customer reward differences reported by synchronized devices. Completed receipts are retained.</p></div><RefreshCw size={20} /></div>{conflicts.length ? <div className="table-wrap"><table><thead><tr><th>Record type</th><th>Reason</th><th>Detected</th><th></th></tr></thead><tbody>{conflicts.map((conflict) => <tr key={conflict.id}><td>{conflict.entityType}</td><td>{conflict.reason}</td><td>{new Date(conflict.createdAt).toLocaleString()}</td><td><button className="filter-button" onClick={() => resolveConflict(conflict.id)}>Mark reviewed</button></td></tr>)}</tbody></table></div> : <div className="empty-state">No sync conflicts need review.</div>}</section>
-}
 
 function InstallerScreen({ onActivate, message, onRegister }: { onRegister?: () => void; onActivate: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; message: string }) {
   const [mode, setMode] = useState<'choose' | 'new' | 'existing'>('choose')

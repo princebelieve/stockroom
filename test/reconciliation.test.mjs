@@ -37,3 +37,14 @@ test('reconciliation matches provider, reference, successful status, currency an
   assert.match(run([['001', '1,000.00', 'SUCCESS', 'NGN']])[0].result, /Invalid/)
   assert.equal(sale.total, 100)
 })
+
+test('transfer and split reconciliation uses payment portions, flags missing references and does not treat failures as matches',()=>{
+ const sales=[{id:'split',paymentMethod:'multiple',currency:'NGN',total:100,paymentDetails:{allocations:[{method:'cash',amount:30},{method:'bank-transfer',amount:70,reference:'transfer'}]}},{id:'missing',paymentMethod:'bank-transfer',currency:'NGN',total:20,paymentReference:'later'},{id:'no-ref',paymentMethod:'bank-transfer',currency:'NGN',total:5}]
+ const rows=[['transfer','70','SUCCESS','NGN']],mapping={reference:0,amount:1,status:2,currency:3}
+ const results=compareReport(rows,mapping,'','NGN','SUCCESS',sales,'bank-transfer',true)
+ assert.equal(results[0].result,'Matched');assert.equal(results[0].saleId,'split')
+ assert.equal(results[1].result,'Recorded payment absent from report');assert.equal(results[2].result,'Recorded payment has no reference')
+ assert.match(compareReport([['transfer','100','SUCCESS','NGN']],mapping,'','NGN','SUCCESS',sales,'bank-transfer')[0].result,/Amount mismatch/)
+ assert.match(compareReport([['transfer','70','FAILED','NGN']],mapping,'','NGN','SUCCESS',sales,'bank-transfer')[0].result,/not the selected success/)
+ assert.equal(sales[0].total,100)
+})

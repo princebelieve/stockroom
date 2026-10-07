@@ -7,6 +7,7 @@ await server.listen()
 const browser = await chromium.launch({ channel: 'msedge', headless: true })
 try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  page.setDefaultTimeout(30000)
   page.on('pageerror', error => console.error(error.message))
   const base = `http://127.0.0.1:${server.httpServer.address().port}`
   await page.route('**/*', route => route.request().url().startsWith(base) ? route.continue() : route.abort())
@@ -43,8 +44,14 @@ try {
     }
     createRoot(document.getElementById('root')).render(React.createElement(Setup))
   })
-  await page.getByRole('heading', { name: 'Shop setup wizard' }).waitFor()
-  await page.getByLabel('Business template').selectOption('printing')
+  await page.getByRole('heading', { name: 'Start with your business' }).waitFor()
+  await page.getByLabel('Business preset', { exact: true }).selectOption('restaurant')
+  await page.getByRole('button', { name: 'Preview preset', exact: true }).click()
+  await page.getByText(/reservation deposits are not provided/).waitFor()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByLabel('Catalogue type').selectOption('hotel')
+  await page.getByText(/Room bookings, occupancy and accommodation billing are not provided/).waitFor()
+  await page.getByLabel('Catalogue type').selectOption('printing')
   await page.getByRole('button', { name: 'Use this template' }).click()
   // Exercise the real bundled OCR reader against a clear screenshot fixture.
   await page.getByText('Start from a printed form or screenshot', { exact: true }).click()

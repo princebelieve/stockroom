@@ -20,7 +20,7 @@ Sales and their sync messages are saved atomically. Cloud coordination records c
 
 The migration adds stock batches and events without replacing existing business tables. Desktop creates an upgrade snapshot. Deploy the updated cloud service and update tills together: clients request retail-v3 so older software cannot silently misapply batch operations.
 
-The core supermarket stock and checkout workflows are implemented. Supplier account balances and payments, automatic costing of approved stock-count shortages/manual reductions, and CSV column mapping with existing barcode/SKU matching are implemented. See the operational rules below for opening balances and preventing duplicate deductions. Production deployment remains a separate release action. Restaurant and bar billing are implemented in the optional Tables & tabs workspace; hotel stays, reservations and club admission are not.
+The core supermarket stock and checkout workflows are implemented. Supplier account balances and payments, automatic costing of approved stock-count shortages/manual reductions, and CSV column mapping with existing barcode/SKU matching are implemented. See the operational rules below for opening balances and preventing duplicate deductions. Production deployment remains a separate release action. Restaurant and bar billing are implemented in the optional Tables & tabs workspace; table reservations are available there; hotel stays and club admission are not.
 
 Read [product migration](product-migration.md) and [report calculations](report-calculations.md) before choosing how to bring an existing shop onto the app.
 

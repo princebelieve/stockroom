@@ -113,7 +113,7 @@ Owners can publish QR bank details and enable takeaway delivery with a fixed cha
 5. For stock/product forms, use Choose template, Customize fields, then Preview and save. Review categories, unit, labels and custom fields before saving.
 6. Set Reporting timezone to the business timezone, such as Africa/Lagos. Select Save reporting timezone, then Sync now. Businesses without a saved timezone default to UTC.
 
-**Remember:** Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices.
+**Remember:** Catalogue templates supply labels, categories and units; they do not add specialist operations such as hotel bookings or prescription dispensing. Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices.
 
 ## Business settings > Sales
 
@@ -426,7 +426,7 @@ If Profit estimate has incomplete costs appears, review the named prepared items
 
 1. Connect to the internet and check the displayed sync readiness for this device.
 2. Press Sync now to share queued changes and receive accepted updates.
-3. If changes need review, open Sync issues and inspect the affected record and reason.
+3. If changes need review, open Sync issues, select the affected record and inspect both saved versions. Check current records and use Stock count, Sales history or the relevant workspace to correct the discrepancy.
 4. Use the available authorised resolution/retry control, then synchronize again.
 5. Check the relevant workspace/history after synchronization before continuing shared-device work.
 
@@ -457,3 +457,21 @@ If Profit estimate has incomplete costs appears, review the named prepared items
 
 **Remember:** Ordinary sales, menus, tables, receipt settings and renewals have in-app controls. Hosting, release publishing, mail delivery and payment-provider provisioning remain service-operator tasks, not instructions for a shop owner to edit code.
 
+
+## Support, reconciliation and recovery updates
+
+Find support email, information email and WhatsApp links in **How to use the app**. Report your device and the error shown; keep passwords and payment-card details private.
+
+In **Sync issues**, inspect submitted and accepted records, synchronize and verify the current outcome. Use the normal stock/payment/configuration tools for corrections. Choose an outcome, explain what you checked or corrected, confirm the check and select **Record review outcome**. Recorded outcomes remain visible in local history. This does not overwrite financial records or automatically correct a stock/customer balance. Review notes are local to the device, not synchronized to other devices.
+
+In sales reconciliation, select External POS or Bank transfer, map the statement columns and choose its currency and covered UTC sale dates. Split-payment portions are compared individually. Missing references, duplicate references, amount/currency mismatches, unsuccessful statement entries and recorded payments absent from the file need review. Exports retain the comparison; imported matches do not independently verify a bank transaction or change a receipt. Compare gross amounts, not amounts net of fees/refunds; synchronize and load all relevant receipts first.
+
+New Windows backups support compatible additive database updates. Older archives without schema metadata can be upgraded automatically for recognised field additions when their original structure can be verified. See [hardware and recovery](hardware-setup.md#backup-compatibility-after-updates).
+
+## Copy takeaway and restaurant menus
+
+1. Owners/admins open the destination menu in Business settings. Enable both workspaces and synchronize before loading the source.
+2. Open Copy menu items from restaurant/takeaway, preview the source and select items. Review prices, ingredient quantities and extras.
+3. Choose Add selected items to menu draft, review stock links, availability and stations, then Save menu. Cancel preview changes no menu; Discard menu changes removes unsaved additions.
+
+**Remember:** Existing items stay unchanged. Same-name and previously copied source items are blocked. Copies have fresh identities and independent future edits; submitted orders retain their snapshots.

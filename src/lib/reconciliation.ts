@@ -43,10 +43,14 @@ export function parseReport(text: string): string[][] {
 
 export type Mapping = { reference: number; amount: number; status: number; currency: number }
 export type Comparison = { reference: string; amount: string; result: string; saleId: string }
-export function compareReport(rows: string[][], mapping: Mapping, provider: string, currency: string, success: string, sales: Sale[]): Comparison[] {
+export function compareReport(rows: string[][], mapping: Mapping, provider: string, currency: string, success: string, sales: Sale[], method = 'external-pos', includeMissing = false): Comparison[] {
+  const payments = sales.flatMap(sale => {
+    const parts = sale.paymentMethod === 'multiple' ? sale.paymentDetails?.allocations || [] : [{ method: sale.paymentMethod, amount: sale.total, provider: sale.terminalProvider, reference: sale.paymentReference }]
+    return parts.filter(part => part.method === method && (method === 'bank-transfer' || part.provider?.trim().toLowerCase() === provider.trim().toLowerCase())).map(part => ({ sale, reference: part.reference?.trim() || '', amount: Number(part.amount) }))
+  })
   const refs = new Map<string, number>()
   rows.forEach(row => { const ref = row[mapping.reference]?.trim(); if (ref) refs.set(ref, (refs.get(ref) || 0) + 1) })
-  return rows.map(row => {
+  const results = rows.map(row => {
     const reference = row[mapping.reference]?.trim() || ''; const amount = row[mapping.amount]?.trim() || ''
     const result = (message: string, saleId = '') => ({ reference, amount, result: message, saleId })
     if (!reference || !/^\d+(\.\d{1,2})?$/.test(amount)) return result('Invalid reference or amount')
@@ -54,13 +58,18 @@ export function compareReport(rows: string[][], mapping: Mapping, provider: stri
     if (row[mapping.status]?.trim().toLowerCase() !== success.trim().toLowerCase()) return result('Provider status is not the selected success status')
     const rowCurrency = mapping.currency < 0 ? currency : row[mapping.currency]?.trim().toUpperCase()
     if (!/^[A-Z]{3}$/.test(rowCurrency || '')) return result('Invalid currency')
-    const matches = sales.filter(sale => sale.paymentMethod === 'external-pos' && sale.terminalProvider?.trim().toLowerCase() === provider.trim().toLowerCase() && sale.paymentReference?.trim() === reference)
+    const matches = payments.filter(payment => payment.reference === reference)
     if (!matches.length) return result('No matching loaded sale')
     if (matches.length > 1) return result('Duplicate reference in sales')
-    const sale = matches[0]
+    const { sale, amount: paid } = matches[0]
     if (!sale.currency) return result('Review: historical sale currency unavailable', sale.id)
     if (sale.currency !== rowCurrency) return result('Currency mismatch', sale.id)
-    if (Math.round(Number(amount) * 100) !== Math.round(sale.total * 100)) return result('Amount mismatch', sale.id)
+    if (Math.round(Number(amount) * 100) !== Math.round(paid * 100)) return result('Amount mismatch', sale.id)
     return result('Matched', sale.id)
   })
+  if (includeMissing) for (const payment of payments) {
+    if (payment.sale.currency !== currency) continue
+    if (!payment.reference || !refs.has(payment.reference)) results.push({ reference: payment.reference, amount: String(payment.amount), result: payment.reference ? 'Recorded payment absent from report' : 'Recorded payment has no reference', saleId: payment.sale.id })
+  }
+  return results
 }

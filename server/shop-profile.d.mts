@@ -8,3 +8,5 @@ export function businessWorkspace(profile: unknown): { checkoutLabel: string; ov
 
 export const businessPresets: Record<string, { label: string; industry: BusinessMode; workflow: ShopProfile['workflows']; screen: 'Oil' | 'POS' | 'Payments' | 'Counter' | 'Restaurant'; workspace: string; unit?: string; itemLabel?: string; inventoryLabel?: string; categories?: string[] }>
 export function applyBusinessPreset(profile: unknown, key: string): ShopProfile
+
+export const businessPresetGuidance: Record<string, string>

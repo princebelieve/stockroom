@@ -1,3 +1,4 @@
+import { conflictReview, conflictReviewSchema } from './sync-conflict-review.mjs'
 import { oilPricing } from './oil-pricing.mjs'
 import { validateChurchRecord } from './church-ledger.mjs'
 import { validateReservationBook, validateReservationArchive } from './restaurant-reservations.mjs'
@@ -342,12 +343,21 @@ export function recordSyncConflicts(conflicts) {
   }
 }
 
-export function listSyncConflicts() {
-  return database.prepare('SELECT id, operation_id AS operationId, entity_type AS entityType, entity_id AS entityId, reason, created_at AS createdAt, resolved_at AS resolvedAt FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY created_at DESC').all()
+export function listSyncConflicts(history = false) {
+  database.exec(conflictReviewSchema)
+  return database.prepare('SELECT c.id, c.operation_id AS operationId, c.entity_type AS entityType, c.entity_id AS entityId, c.reason, c.local_payload AS localPayload, c.remote_payload AS remotePayload, c.created_at AS createdAt, c.resolved_at AS resolvedAt, r.note AS reviewNote, r.action AS reviewAction, r.reviewer_id AS reviewerId FROM sync_conflicts c LEFT JOIN sync_conflict_reviews r ON r.conflict_id=c.id WHERE c.resolved_at IS '+(history?'NOT NULL':'NULL')+' ORDER BY c.created_at DESC').all()
 }
 
-export function resolveSyncConflict(id) {
-  database.prepare('UPDATE sync_conflicts SET resolved_at = ? WHERE id = ?').run(now(), id)
+export function resolveSyncConflict(id, input, user) {
+  const review = conflictReview(input, user)
+  if (!database.prepare('SELECT id FROM sync_conflicts WHERE id=? AND resolved_at IS NULL').get(id)) throw new Error('This issue is no longer open. Refresh the list.')
+  database.exec(conflictReviewSchema)
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    database.prepare('INSERT INTO sync_conflict_reviews VALUES (?,?,?,?,?)').run(id,review.action,review.note,review.reviewerId,review.reviewedAt)
+    database.prepare('UPDATE sync_conflicts SET resolved_at = ? WHERE id = ?').run(review.reviewedAt, id)
+    database.exec('COMMIT')
+  } catch(error) { database.exec('ROLLBACK'); throw error }
 }
 
 export function markSyncFailure(message) {

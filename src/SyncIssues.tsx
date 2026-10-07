@@ -1,0 +1,22 @@
+import { useEffect, useState } from 'react'
+import { AsyncForm, SubmitButton } from './AsyncControls'
+export type SyncConflict = { id: string; entityType: string; entityId: string; reason: string; createdAt: string; localPayload?: string; remotePayload?: string; reviewNote?: string; reviewAction?: string; reviewerId?: string; resolvedAt?: string }
+function display(raw?: string) {
+  try { return JSON.stringify(JSON.parse(raw || '{}'), (key, value) => /password|token|secret/i.test(key) ? '[hidden]' : value, 2) } catch { return 'Saved details unavailable. Contact support before recording an outcome.' }
+}
+export function SyncIssues({ conflicts, resolveConflict, navigate, headers }: { conflicts: SyncConflict[]; resolveConflict: (id: string, input: {action:string;note:string;confirmed:boolean}) => Promise<void>; navigate: (screen:string) => void; headers: Record<string,string> }) {
+  const [selected,setSelected]=useState('')
+  const [reviews,setReviews]=useState<SyncConflict[]>([])
+  const [historyError,setHistoryError]=useState('')
+  useEffect(()=>{let active=true;fetch('/api/sync/conflicts/reviews',{headers}).then(async response=>{if(!response.ok)throw new Error('Could not load review history.');return response.json()}).then(result=>{if(active){setReviews(result.conflicts);setHistoryError('')}}).catch(error=>{if(active)setHistoryError(error.message)});return()=>{active=false}},[conflicts,headers.Authorization])
+  const current=conflicts.find(row=>row.id===selected)
+  return <section className="panel full-panel"><h2>Sync issues</h2><p>Inspect both versions, then check the current business records. Recording an outcome retains this issue and your explanation; it does not rewrite a sale, stock or wallet balance.</p>
+    {conflicts.length ? <ul>{conflicts.map(row=><li key={row.id}><button className="filter-button" onClick={()=>setSelected(row.id)}>{row.entityType}: {row.entityId || row.id}</button><p>{row.reason}</p></li>)}</ul> : <p>No open sync issues.</p>}
+    {current && <article key={current.id}><h3>Review {current.entityType}: {current.entityId}</h3><p>{current.reason}</p><p>Detected {new Date(current.createdAt).toLocaleString()}</p><details open><summary>Change submitted by this device</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{display(current.localPayload)}</pre></details><details open><summary>Accepted record reported by synchronization</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{display(current.remotePayload)}</pre></details>
+      <p>Synchronize and inspect the current records first. For stock discrepancies, count the goods and use Stock count. For incorrect payments, inspect Sales history and use the existing authorized return/refund tools. For menu, table, job or price changes, edit the relevant workspace using its latest version. Never recreate a completed payment just to clear this issue.</p>
+      <div className="form-grid">{[['Stocktake','Open Stock count'],['Sales','Open Sales history'],['Inventory','Open Inventory'],['Payments','Open Payments & receipts'],['Settings','Open Business settings']].map(([screen,label])=><button key={screen} className="filter-button" onClick={()=>navigate(screen)}>{label}</button>)}</div>
+      <AsyncForm busyLabel="Recording outcome..." onSubmit={async event=>{const form=new FormData(event.currentTarget);await resolveConflict(current.id,{action:String(form.get('action')),note:String(form.get('note')),confirmed:form.get('confirmed')==='on'});setSelected('')}}><label>Outcome<select name="action"><option value="corrected">I corrected the affected records using their normal tools</option><option value="accepted">I checked and accept the current records</option></select></label><label>What you checked or corrected<textarea name="note" required minLength={10} maxLength={1000} placeholder="Include the receipt, stock count or corrected record reference." /></label><label><input type="checkbox" name="confirmed" required />I checked the current records and any money or stock difference.</label><SubmitButton className="primary-button">Record review outcome</SubmitButton></AsyncForm>
+    </article>}
+    <details><summary>Recorded review outcomes</summary>{historyError&&<p role="alert">{historyError}</p>}{reviews.map(row=><p key={row.id}><strong>{row.entityType}: {row.entityId}</strong> / {row.reviewAction} / {row.resolvedAt} / reviewer {row.reviewerId}<br/>{row.reviewNote}</p>)}{!reviews.length&&!historyError&&<p>No recorded review outcomes.</p>}</details>
+  </section>
+}

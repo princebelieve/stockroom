@@ -24,7 +24,7 @@ Owners can also choose **Order counter only**, or enable Fast food alongside the
 
 Business templates still customize product fields and wording. The saved payment-screen choice now controls the availability of the two workflows and relevant stock navigation independently of the template.
 
-The payment screen is useful across sectors when the task is simply recording an amount received and issuing a receipt. A printing press, church office or hotel can use it for that task. This does not imply that the app manages printing jobs, church administration or hotel reservations.
+The payment screen is useful across sectors when the task is simply recording an amount received and issuing a receipt. A printing press, church office or hotel can use it for that task. Optional Jobs & invoices manages printing/service jobs and recorded materials, and Church collections tracks funds, donors, pledges and statements. These extensions do not provide full church accounts or hotel reservations.
 
 See [Payments & receipts](payments-and-receipts.md) for setup and daily use.
 
@@ -43,7 +43,7 @@ Some core operations and schemas still have separate platform implementations. C
 
 ## Remaining limits
 
-Stock checkout and direct payment entry record fully paid transactions. Fast food now has persistent unpaid orders and independent preparation progress, with full settlement required before handover. Restaurant & bar supports open tabs and serving before payment. The optional Jobs & invoices extension supports estimates, service jobs, deposits, balance payments and refunds; see [Payments & receipts](payments-and-receipts.md). Tables & tabs supports partial item quantities, seats and equal-share settlement, with mixed payment methods; see its workspace guide. Counter orders still settle in full before collection. Reservations, room availability and hotel stays remain outside the implemented scope. Held retail baskets remain checkout drafts.
+Stock checkout and direct payment entry record fully paid transactions. Fast food now has persistent unpaid orders and independent preparation progress, with full settlement required before handover. Restaurant & bar supports open tabs and serving before payment. The optional Jobs & invoices extension supports estimates, service jobs, deposits, balance payments and refunds; see [Payments & receipts](payments-and-receipts.md). Tables & tabs supports partial item quantities, seats and equal-share settlement, with mixed payment methods; see its workspace guide. Counter orders still settle in full before collection. Table reservations are implemented in Tables & tabs. Room availability and hotel stays remain outside the implemented scope. Held retail baskets remain checkout drafts.
 
 Existing financial reports summarize receipts, recorded stock costs, expenses and returns. A payment without stock carries no inventory cost; its receipt alone does not capture the business's full service delivery cost.
 

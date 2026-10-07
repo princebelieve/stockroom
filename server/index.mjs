@@ -449,16 +449,16 @@ const server = createServer(async (request, response) => {
     try { return sendJson(response, 200, await registerLocalCheckout(String(request.headers['x-stockroom-till'] || ''))) } catch (error) { return sendJson(response, 409, { error: error.message }) }
   }
   if (request.method === 'GET' && request.url === '/api/sync/status') return sendJson(response, 200, await syncConfigurationStatus())
-  if (request.method === 'GET' && request.url === '/api/sync/conflicts') {
+  if (request.method === 'GET' && ['/api/sync/conflicts','/api/sync/conflicts/reviews'].includes(request.url)) {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    return sendJson(response, 200, { conflicts: listSyncConflicts() })
+    return sendJson(response, 200, { conflicts: listSyncConflicts(request.url.endsWith('/reviews')) })
   }
   const conflictMatch = request.url?.match(/^\/api\/sync\/conflicts\/([^/]+)\/resolve$/)
   if (request.method === 'POST' && conflictMatch) {
     const user = sessionUser(request)
     if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    resolveSyncConflict(conflictMatch[1]); return sendJson(response, 200, { ok: true })
+    return readJson(request, response, input => { resolveSyncConflict(conflictMatch[1], input, user); return sendJson(response, 200, { ok: true }) })
   }
   if (request.method === 'POST' && request.url === '/api/sync/now') {
     const user = sessionUser(request)

@@ -7,6 +7,10 @@ export function Reconciliation({ sales }: { sales: Sale[] }) {
   const [rows, setRows] = useState<string[][]>([])
   const [fileName, setFileName] = useState('')
   const [provider, setProvider] = useState('')
+  const [method, setMethod] = useState('external-pos')
+  const [from, setFrom] = useState('')
+  const [until, setUntil] = useState('')
+  const selectedSales = sales.filter(sale => (!from || sale.createdAt >= from) && (!until || sale.createdAt < new Date(new Date(until + 'T00:00:00Z').getTime() + 86400000).toISOString()))
   const [currency, setCurrency] = useState('NGN')
   const [success, setSuccess] = useState('SUCCESS')
   const [mapping, setMapping] = useState<Mapping>({ reference: -1, amount: -1, status: -1, currency: -1 })
@@ -24,14 +28,14 @@ export function Reconciliation({ sales }: { sales: Sale[] }) {
     {!!rows.length && <AsyncForm className="settings-form" busyLabel="Comparing..." onChange={() => setResults([])} onSubmit={() => {
       const required = [mapping.reference, mapping.amount, mapping.status]
       if (required.some(index => index < 0) || new Set([...required, ...(mapping.currency < 0 ? [] : [mapping.currency])]).size !== required.length + (mapping.currency < 0 ? 0 : 1)) throw new Error('Choose different columns for reference, amount, status and currency.')
-      setResults(compareReport(rows.slice(1), mapping, provider, currency.toUpperCase(), success, sales))
-    }}><p>{fileName}: {rows.length - 1} rows. Comparing against {sales.length} loaded sales only.</p>
-      <label>Provider name (as recorded in sales)<input required value={provider} onChange={e => setProvider(e.target.value)} /></label>
+      setResults(compareReport(rows.slice(1), mapping, provider, currency.toUpperCase(), success, selectedSales, method, true))
+    }}><p>{fileName}: {rows.length - 1} rows. Comparing against {selectedSales.length} loaded sales in the selected period only.</p>
+      <label>Payment type<select value={method} onChange={e => setMethod(e.target.value)}><option value="external-pos">External POS</option><option value="bank-transfer">Bank transfer</option></select></label>{method === 'external-pos' && <label>Provider name (as recorded in sales)<input required value={provider} onChange={e => setProvider(e.target.value)} /></label>}<label>Sales from (UTC date)<input type="date" required value={from} onChange={e => setFrom(e.target.value)} /></label><label>Sales through (UTC date)<input type="date" required min={from} value={until} onChange={e => setUntil(e.target.value)} /></label><p>Use the dates and currency covered by your statement. Payments absent from this file need review; the file may be incomplete or settlement delayed. Split-payment portions are compared separately. Refunds and fees are not netted against gross payment amounts.</p>
       {(Object.keys(mapping) as Array<keyof Mapping>).map(key => <label key={key}>{key} column<select value={mapping[key]} onChange={e => setMapping({ ...mapping, [key]: Number(e.target.value) })}><option value={-1}>{key === 'currency' ? 'Use report currency below' : 'Select column'}</option>{rows[0].map((header, index) => <option key={index} value={index}>{index + 1}: {header} (sample: {rows[1][index]})</option>)}</select></label>)}
-      {mapping.currency < 0 && <label>Report currency<input required pattern="[A-Za-z]{3}" maxLength={3} value={currency} onChange={e => setCurrency(e.target.value)} /></label>}
+      {<label>Report currency<input required pattern="[A-Za-z]{3}" maxLength={3} value={currency} onChange={e => setCurrency(e.target.value)} /></label>}
       <label>Exact successful-payment status in report<input required value={success} onChange={e => setSuccess(e.target.value)} /></label><SubmitButton className="primary-button">Compare transactions</SubmitButton>
     </AsyncForm>}
-    {!!results.length && <><p role="status">{results.filter(row => row.result === 'Matched').length} matched; {results.filter(row => row.result !== 'Matched').length} need review. Matching an imported file is not live provider verification.</p>
+    {!!results.length && <><p role="status">{results.filter(row => row.result === 'Matched').length} matched; {results.filter(row => row.result !== 'Matched').length} need review. These are statement comparisons, not live bank verification; recorded receipts remain unchanged.</p>
       <button className="filter-button" onClick={() => {
         const cell = (value: string) => '"' + (/^[=+@\-\t\r]/.test(value) ? "'" : '') + value.replaceAll('"', '""') + '"'
         const csv = [['Reference', 'Amount', 'Result', 'Sale ID'], ...results.map(row => [row.reference, row.amount, row.result, row.saleId])].map(row => row.map(cell).join(',')).join('\r\n')

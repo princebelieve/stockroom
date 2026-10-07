@@ -50,3 +50,22 @@ Refresh downloads business updates and reloads selling data without uploading qu
 ## Reporting timezone
 
 Owners set **Business settings > Workspaces > Reporting timezone**, save, then use **Sync now** to share the setting. Choose an IANA timezone such as `Africa/Lagos`; businesses without a saved choice default to UTC. Reports and their expired-stock summary use the business calendar across updated devices. See [report calculations](report-calculations.md).
+
+## Sector scope
+
+Business presets choose selling screens; catalogue templates suggest labels, categories and units. Neither creates a complete industry system. Configure real items, prices, stock, recipes, materials, tables and devices where needed.
+
+| Business | Implemented daily work | Additional specialist work outside this scope |
+| --- | --- | --- |
+| Retail and supermarket | Stock checkout, returns, supplier operations, cash shifts; configured keyboard weights and gram labels | Model-specific live scale protocols; actual hardware still needs a pilot |
+| Wholesale/retail oil | Measured and container sales, bulk thresholds and customer rates | Automatic pump/meter integration |
+| Services and printing | Receipts, reusable prices, estimates, jobs, invoices, deposits, statements and recorded job materials/costs | Appointments, print-machine metering and automatic material use merely from issuing a receipt |
+| Church office | Funds, donors, pledges, received contributions, refunds and statements | Fund spending, general ledger and full charity accounts |
+| Fast food, bakery and food goods | Orders, recipes and optional single-output batches, actual yield and captured costs | Production scheduling, multi-output manufacturing and agricultural processing |
+| Restaurant and bar | Tables, tabs, rounds, preparation, partial settlement and table reservations | Reservation deposits, admission and memberships |
+| Hotel and hospitality supplies | Stock sales and payment receipts | Rooms, stays, occupancy, accommodation billing, event bookings and rentals |
+| Pharmacy stock | Stock checkout and optional delivery batch/expiry records | Prescriptions and dispensing |
+| Clothing, electronics, furniture, books, stationery, building supplies, automotive and other goods | Catalogue, stock and checkout; optional configured variants and service jobs | Serial-number histories, warranty management, rentals and specialist installation/repair management |
+| Agriculture and farm supplies | Produce, feed and farm-input stock sales | Crop cycles, livestock management and processing |
+
+A selected label is not evidence of specialist support. Check the relevant workspace guide and complete a supervised trading day with the intended devices before adoption.
