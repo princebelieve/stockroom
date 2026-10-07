@@ -10,7 +10,7 @@ A new owner can choose **Printing and copy shop** or **Services / church office*
 
 1. Open **New payment**. Enter what the customer is paying for, quantity and unit price.
 2. Use **Add another item** for more descriptions. Customer name and phone are optional; receipt details can be expanded when needed.
-3. Choose **Payment Method**: **Cash**, **POS Terminal**, or **Bank Transfer**. Selected POS terminals from Business settings populate the dropdown; the first selected terminal is the default.
+3. Choose **Payment Method**: **Cash**, **POS Terminal**, **Bank Transfer**, or **Split payment**. Split parts must add up to the total; each external part needs its provider and reference. Owner-enabled **Customer wallet** is available for immediate payments; only the owner may explicitly approve credit when enabled. Selected POS terminals from Business settings populate the dropdown; the first selected terminal is the default.
 4. For cash, enter the amount handed over if it exceeds the total. For POS Terminal or Bank Transfer, confirm success outside the app and record its reference.
 5. Save once, then print or share the receipt. Reprinting does not create another payment.
 
@@ -27,6 +27,12 @@ These are descriptive receipt lines, with no SKU or inventory lookup. Saving cle
 Example: an invoice for 100, paid 30 then 70, has two receipts, 100 collected and no balance. The invoice itself is not another sale. Existing sales reports count collected payments and recorded refunds; the jobs list and Overview show outstanding invoices separately.
 
 Draft form entries remain editable before saving. Saved job descriptions, prices, customer details and receipt settings are retained as snapshots. To replace an issued job, the owner/admin refunds any retained payment, cancels the job and creates its replacement. Cancelled jobs and original receipts remain in history.
+
+## Saved services, finding jobs and statements
+
+Owners/admins can save reusable service names and prices in **Business settings > Receipts > Saved services and prices**. Use **Add saved service** on a payment or job; saved receipts and invoices retain their original prices.
+
+Search jobs by customer, phone, description or invoice ID. Filter unpaid invoices or overdue unfinished work using the business reporting timezone. Owners/admins can print invoice customer statements for this branch. Statements keep currencies separate and include refunds in net paid; they exclude estimates, cancelled jobs, separate walk-in receipts and wallet balances. Choose an existing customer account when creating a job to link its invoices reliably. Unlinked customers without a phone remain separate. Invoice payments support cash, terminal, bank transfer and split payments.
 
 ## Refunds
 

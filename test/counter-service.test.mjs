@@ -38,7 +38,7 @@ test('fast food is opt-in, with an exclusive workspace and preserved supermarket
   assert.equal(businessWorkspace({ mode: 'suggested', industry: 'supermarket' }).fastFood, false)
   const profile = normalizeShopProfile({ workflows: 'fast-food' })
   const workspace = businessWorkspace(JSON.stringify(profile))
-  assert.equal(workspace.fastFood, true); assert.equal(workspace.stock, false); assert.equal(workspace.payments, false)
+  assert.equal(workspace.fastFood, true); assert.equal(workspace.stock, true); assert.equal(workspace.payments, false)
   assert.equal(businessWorkspace({ workflows: 'both', fastFood: true }).stock, true)
 })
 test('orders snapshot priced options, survive reload, reject stale updates and require payment before handover', async () => {

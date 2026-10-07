@@ -1,6 +1,6 @@
 import { validQuantity } from './quantities.mjs'
 import { priceOrder, posSettings } from './pos-pricing.mjs'
-import { recordPayment } from './payment.mjs'
+import { recordPayment, paymentResult } from './payment.mjs'
 import { receiptSettings } from './receipts.mjs'
 import { saveRestaurantSale } from './restaurant-payments.mjs'
 const cents = value => Math.round(Number(value) * 100)
@@ -14,6 +14,7 @@ export function serviceJobBalance(job, returns = []) {
 export function validateServiceJob(job, previous, snapshot = false, refunds = []) {
   if (job.kind !== 'service-job' || !String(job.id).startsWith('service-job:') || !['estimate','new','in-progress','ready','completed','cancelled'].includes(job.status) || !job.branchId || !job.tillId || !Number.isFinite(Date.parse(job.updatedAt)) || !Number.isFinite(Date.parse(job.createdAt))) throw new Error('Invalid service job.')
   if (!job.customerName?.trim() || !job.title?.trim()) throw new Error('Enter a customer and job description.')
+  if (job.customerId !== undefined) text(job.customerId,150)
   text(job.id,150);text(job.tillId,100);text(job.branchId,100);text(job.customerName); text(job.customerPhone, 80); text(job.title); text(job.note, 1000); text(job.businessName, 100)
   if (!/^[A-Z]{3}$/.test(job.currency) || (job.dueDate && (!/^\d{4}-\d{2}-\d{2}$/.test(job.dueDate) || new Date(job.dueDate).toISOString().slice(0,10) !== job.dueDate))) throw new Error('Enter a valid currency and due date.')
   if (!Array.isArray(job.lines) || !job.lines.length || job.lines.length > 100 || new Set(job.lines.map(line=>line.id)).size !== job.lines.length) throw new Error('Add 1 to 100 job items.')
@@ -31,7 +32,7 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
   }
   if (!snapshot && previous) {
     if (job.expectedUpdatedAt!==previous.updatedAt) throw new Error('This job changed. Refresh before continuing.')
-    for (const key of ['id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
+    for (const key of ['id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','customerId','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
     if (!same(job.payments.slice(0,previous.payments.length),previous.payments) || job.payments.length<previous.payments.length || job.payments.length>previous.payments.length+1) throw new Error('Preserve saved invoice payments.')
     if (job.payments.length>previous.payments.length && (job.status!==previous.status || ['estimate','cancelled'].includes(job.status))) throw new Error('Issue the invoice before taking payment.')
     const balance = serviceJobBalance(previous, refunds)
@@ -51,6 +52,8 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
   return job
 }
 export function validateServiceJobPayment(sale) {
+  if (!['cash','external-pos','bank-transfer','multiple'].includes(sale.paymentMethod)) throw new Error('Choose a supported invoice payment method.')
+  if (sale.paymentMethod === 'multiple') paymentResult(sale, sale.paymentDetails?.policy)
   const link=sale.paymentDetails?.serviceJob
   if (!link || !String(sale.id).startsWith('service-payment:') || !String(link.id).startsWith('service-job:') || !Number.isFinite(link.invoiceTotal) || link.invoiceTotal<=0 || !Number.isFinite(link.balanceDue) || link.balanceDue<0 || sale.items?.length!==1 || !sale.items[0].productId.startsWith('service:') || sale.items[0].quantity!==1 || cents(sale.items[0].price)!==cents(sale.total) || !Number.isFinite(sale.total) || sale.total<=0) throw new Error('Invalid job payment.')
   text(sale.id,150);text(link.number,30);text(link.title);text(sale.staffId,150);text(sale.staffName,200)
@@ -67,7 +70,7 @@ export const requiresServiceJobSync = operation => operation.payload?.kind==='se
 export async function handleServiceJobs({db,scope,organizationId,branchId,user,path,method,input,tillId,sales,publish,saveRecord}) {
   const rows=()=>db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='service-job' AND branch_id=? ORDER BY updated_at DESC",[scope,branchId])
   const returns=async()=> (await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='return' AND branch_id=?",[scope,branchId])).values.map(row=>JSON.parse(row.payload))
-  if (method==='GET') { const jobs=(await rows()).values.map(row=>JSON.parse(row.payload)); const refunds=await returns(); return {jobs:jobs.map(job=>({...job,balance:serviceJobBalance(job,refunds)}))} }
+  if (method==='GET') { const jobs=(await rows()).values.map(row=>JSON.parse(row.payload)); const refunds=await returns(); return {jobs:jobs.map(job=>({...job,balance:serviceJobBalance(job,refunds)})),customers:(await db.query(`SELECT id,name,phone FROM customers ${organizationId?'WHERE organization_id=?':''}`,organizationId?[organizationId]:[])).values} }
   if (!tillId || !String(input.id).startsWith('service-job:') || typeof input.commandId!=='string' || !input.commandId) throw new Error('A registered till and job command are required.')
   const previousRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,input.id])).values[0]
   const previous=previousRow ? JSON.parse(previousRow.payload) : null
@@ -86,7 +89,11 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
     const profileRow=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND id='receipt-settings'",[scope])).values[0]
     const profile=receiptSettings(profileRow?JSON.parse(profileRow.payload).value:{})
     const lines=input.lines.map(line=>({id:text(line.id,100),description:text(line.description,150),quantity:Number(line.quantity),price:Number(line.price)}))
-    job={...stamp,id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
+    if(input.customerId) {
+      const customer=(await db.query(`SELECT id,name,phone FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[input.customerId,...(organizationId?[organizationId]:[])])).values[0]
+      if(!customer || customer.name.trim()!==String(input.customerName||'').trim() || String(customer.phone||'').trim()!==String(input.customerPhone||'').trim())throw new Error('Choose the matching customer account or enter this customer manually.')
+    }
+    job={...stamp,...(input.customerId?{customerId:text(input.customerId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
   } else {
     job={...previous,...stamp}
     const balance=serviceJobBalance(previous,await returns())
@@ -98,12 +105,12 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       if(['estimate','cancelled'].includes(job.status))throw new Error('Issue the invoice before recording payment.')
       const amount=Number(input.amount)
       if(!/^\d+(?:\.\d{1,2})?$/.test(String(input.amount)) || !Number.isFinite(amount) || amount<=0 || cents(amount)>cents(balance.due))throw new Error('Enter a payment up to the remaining balance.')
-      if(!['cash','external-pos','bank-transfer'].includes(input.method))throw new Error('Choose a supported Payment Method.')
+      if(!['cash','external-pos','bank-transfer','multiple'].includes(input.method))throw new Error('Choose a supported Payment Method.')
       const id='service-payment:'+input.commandId
       if((await db.query('SELECT id FROM sales WHERE id=?',[id])).values[0])throw new Error('This payment ID is already used by another job.')
       const link={id:job.id,number:job.id.slice(-8).toUpperCase(),title:job.title,invoiceTotal:job.pricing.total,balanceDue:(cents(balance.due)-cents(amount))/100}
       const policyRow=(await db.query(`SELECT payment_policy FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`,organizationId?[organizationId]:[])).values[0]
-      sale=recordPayment({id,branchId,organizationId,businessName:job.businessName,currency:job.currency,createdAt:updatedAt,staffId:user.id,staffName:user.name,items:[{productId:'service:'+job.id,productName:`${balance.netPaid===0 && amount<balance.due?'Deposit':'Payment'} - ${job.title}`.slice(0,200),quantity:1,price:amount}],total:amount,paymentMethod:input.method,paymentReference:text(input.reference||''),terminalProvider:text(input.provider||''),paymentDetails:{amountReceived:input.method==='cash'?(input.cash||amount):amount,serviceJob:link,servicePayment:{customerName:job.customerName,customerPhone:job.customerPhone}}},policyRow?.payment_policy)
+      sale=recordPayment({id,branchId,organizationId,businessName:job.businessName,currency:job.currency,createdAt:updatedAt,staffId:user.id,staffName:user.name,items:[{productId:'service:'+job.id,productName:`${balance.netPaid===0 && amount<balance.due?'Deposit':'Payment'} - ${job.title}`.slice(0,200),quantity:1,price:amount}],total:amount,paymentMethod:input.method,paymentReference:text(input.reference||''),terminalProvider:text(input.provider||''),paymentDetails:{...(input.method==='multiple'?{allocations:input.parts?.map(part=>({...part,amount:Number(part.amount)})),cashReceived:input.cash||undefined}:{}),amountReceived:input.method==='cash'?(input.cash||amount):amount,serviceJob:link,servicePayment:{customerName:job.customerName,customerPhone:job.customerPhone}}},policyRow?.payment_policy)
       const tax=cents(job.pricing.tax)*(cents(balance.netPaid)+cents(amount))/cents(job.pricing.total)
       const allocatedTax=(Math.round(tax)-Math.round(cents(job.pricing.tax)*cents(balance.netPaid)/cents(job.pricing.total)))/100
       const subtotal=(cents(amount)-cents(allocatedTax))/100

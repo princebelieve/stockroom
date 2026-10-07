@@ -99,6 +99,8 @@ This guide follows the current app screens. Availability depends on your workspa
 
 **Remember:** Business identity, currency and branch configuration are owner-only. Read expandable Help before enabling credit or retained-extra-payment rules.
 
+Owners can publish QR bank details and enable takeaway delivery with a fixed charge in Business settings. Save and synchronize. On Windows, Business backup and restore downloads encrypted backups or schedules daily backups to a chosen folder; restore requires the file password, owner password and RESTORE confirmation, and preserves current staff access.
+
 ## Business settings > Workspaces
 
 1. Open Workspaces and choose the Payment screens selection.
@@ -139,6 +141,8 @@ This guide follows the current app screens. Availability depends on your workspa
 5. Finish the wizard. Reopen the device later to adjust or retest it.
 
 **Remember:** Saved device details do not install a driver or prove hardware works. Windows printer drivers and scanner pairing are operating-system tasks. Unsupported connections remain unavailable; an ordinary manual POS receipt workflow does not require an automatic bank integration.
+
+For shared kitchen/bar printing, the owner designates a Windows checkout as the branch printer. Configure its installed station printers, keep the app signed in, connected and on that branch, and synchronize sending devices. Review interrupted tickets before retrying because paper may already have printed.
 
 ## Devices > POS and receipt scanning
 
@@ -215,10 +219,11 @@ This guide follows the current app screens. Availability depends on your workspa
 1. Open Payments & receipts > New payment. Enter Payment for, quantity and unit price.
 2. Select Add another item for each additional description. Review each line total and the grand total.
 3. Expand Customer and receipt details (optional) to add customer name/phone or transaction type.
-4. Choose Cash, Bank Transfer or POS Terminal. Enter required provider/reference for non-cash payment. Review cash/change when cash is tendered.
+4. Choose Cash, Bank Transfer, POS Terminal or Split payment. Split parts must equal the total; enter provider and reference for external parts. Owner-enabled Customer wallet requires a customer account; only the owner can approve enabled credit.
 5. Save the payment and print or share its receipt. Open Payment history to find a previous payment.
 6. For work that needs a deposit or later payment, open Jobs & invoices; New payment stays the simple full-payment form.
 7. Owners/admins use Payment history > Refund payment when money must be returned. The original receipt remains saved.
+8. Save reusable service names and prices in Business settings > Receipts > Saved services and prices. Add saved service copies the current price into the draft.
 
 **Remember:** These descriptions are non-stock receipt lines: no product deduction or ingredient consumption. Confirm externally received payment before saving a manual POS/transfer entry.
 
@@ -226,12 +231,14 @@ This guide follows the current app screens. Availability depends on your workspa
 
 1. Select New job / estimate. Enter the work description, customer, item descriptions, quantities and prices. Add an optional due date or instructions.
 2. Save as a job, or start as an estimate. Select Accept estimate / issue invoice before collecting money for an estimate.
-3. Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal or Bank Transfer; confirm external payments and their references before saving.
+3. Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal, Bank Transfer or Split payment; confirm external payments and their references before saving.
 4. Print the saved payment receipt. It shows the amount received and remaining invoice balance. For a 100 invoice paid 30 then 70, there are two receipts and a zero balance.
 5. Use Job details and actions to mark In progress and Ready. Collect the balance before marking Completed.
 6. Choose Print estimate, Print job ticket or Print invoice for the document needed. These use the existing receipt printer. An invoice shows what is owed; a job ticket shows work instructions.
 7. Owners/admins can open the job payment history and refund a payment by money amount. Refund retained payments before cancelling; history is kept.
 8. Reopen the same job for later payments or receipt reprints. Jobs and payment drafts survive offline reload. Use its original till; Sync now shares saved work with other devices.
+9. Search jobs and filter unpaid invoices or overdue unfinished work using the business reporting timezone. Choose an existing customer account on a new job for reliable invoice linking.
+10. Owners/admins can print invoice customer statements for this branch. Currencies remain separate; net paid includes refunds. Statements exclude estimates, cancelled jobs, separate walk-in receipts and wallet balances.
 
 **Remember:** Saved job details and prices are snapshots. Correct an issued job by refunding retained payments, cancelling and creating its replacement. Reports count payments and refunds; creating an estimate or invoice does not record revenue.
 
@@ -354,6 +361,8 @@ This guide follows the current app screens. Availability depends on your workspa
 
 **Remember:** Reports use saved records. Prepared items without recipes have untracked ingredient costs. The performance view is platform-dependent; do not enter purchased stock again as a running expense. Reports use the saved business reporting timezone shown on the report; date-only expenses keep their entered business date. Synchronize settings and records before comparing devices.
 
+If Profit estimate has incomplete costs appears, review the named prepared items, saved recipes and purchase costs before trusting profit. Delivery charges are excluded from recipe warnings. Enter running expenses separately.
+
 ## Staff & access and Staff activity
 
 1. As owner, open Staff & access > Team members to review names, usernames, roles and operational access.
@@ -390,6 +399,12 @@ This guide follows the current app screens. Availability depends on your workspa
 3. Count and close the cash register. Review differences and the day's sales.
 4. Synchronize when connected and review unresolved sync issues. Log out when handing the device to another user.
 5. Contact the app provider for unavailable release downloads, failed registration delivery, unavailable provider integration or persistent service problems. Contact the device supplier for printer-driver or hardware issues.
+
+6. For the first supervised pilot, use a separate practice business first. Record opening stock, purchase costs, recipes and an opening cash float. Agree who will check the cash, bank evidence and physical stock.
+7. Run cash, bank transfer, split payment, a correction and a refund. For food businesses, submit a QR pickup and a delivery order, verify the bank details and fee, and check kitchen/bar tickets from a second device.
+8. Disconnect the internet, record an ordinary local sale, reconnect and synchronize. Confirm one receipt, one stock deduction and no duplicate ticket. QR submissions and shared printing require connectivity.
+9. Close and count the register. Compare cash expected, counted cash, transfers, refunds, stock usage and estimated profit with an independent paper tally. Investigate every unexplained difference.
+10. Download an encrypted backup and check the scheduled backup folder. In the practice business, test restore and an enrolled replacement till recovery. Do not replace live records for a rehearsal. Begin the real-business pilot only after these checks pass, with someone available to help staff.
 
 **Remember:** Ordinary sales, menus, tables, receipt settings and renewals have in-app controls. Hosting, release publishing, mail delivery and payment-provider provisioning remain service-operator tasks, not instructions for a shop owner to edit code.
 

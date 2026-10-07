@@ -1,3 +1,4 @@
+import { backupSnapshot, encryptBackup, decryptBackup, restoreSnapshot } from './business-backup.mjs'
 import { salesHistory } from './sales-history.mjs'
 import { database } from './db.mjs'
 import { validQuantity } from './quantities.mjs'
@@ -46,7 +47,7 @@ const server = createServer(async (request, response) => {
     const referralWalletRoute = ['/v1/referral-wallet/me', '/v1/referral-wallet/payouts', '/v1/referral-wallet/banks', '/v1/referral-wallet/resolve', '/v1/referral-wallet/profile'].includes(path.split('?')[0])
     if (!user || (!sessionRefreshRoute && !notificationRoute && !customerPortalRoute && !customerOrderRoute && user.role !== 'owner')) return sendJson(response, 401, { error: sessionRefreshRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
     if (customerPortalRoute && !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me', '/v1/till-recovery/tills', '/v1/till-recovery/recover'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute && !customerPortalRoute && !customerOrderRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me', '/v1/till-recovery/tills', '/v1/till-recovery/recover', '/v1/preparation-print/configure'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute && !customerPortalRoute && !customerOrderRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
@@ -271,6 +272,36 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/movements') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
     return sendJson(response, 200, { movements: await listMovements(200, requestBranch(request)) })
+  }
+  if (request.url?.startsWith('/api/preparation-print/')) {
+    if (!sessionUser(request)) return sendJson(response, 401, { error: 'Sign in to use the printing queue.' })
+    const url = new URL(request.url, 'http://localhost')
+    const action = url.pathname.split('/').pop()
+    if (!['jobs', 'claim', 'result', 'retry'].includes(action)) return sendJson(response, 404, { error: 'Unknown printing action.' })
+    const config = await getCloudConfiguration()
+    if (!config.url || !config.token) return sendJson(response, 200, { shared: false, jobs: [] })
+    try {
+      let body = ''; for await (const chunk of request) { body += chunk; if(body.length > 4096) throw new Error('Printing request is too large.') }
+      const upstream = await fetch(`${config.url}/v1/preparation-print/${action}?branchId=${encodeURIComponent(requestBranch(request))}`, { method: request.method, headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' }, ...(body ? { body } : {}), signal: AbortSignal.timeout(10000) })
+      return sendJson(response, upstream.status, await upstream.json())
+    } catch (error) { return sendJson(response, 503, { error: error.message }) }
+  }
+  if (request.method === 'POST' && ['/api/backups/download', '/api/backups/restore'].includes(request.url)) {
+    const user = sessionUser(request)
+    if (user?.role !== 'owner') return sendJson(response, 403, { error: 'Owner access is required.' })
+    return readJson(request, response, async input => {
+      const config = await getCloudConfiguration()
+      const tillId = String(request.headers['x-stockroom-till'] || '')
+      if (!tillId) throw new Error('Checkout identity is required.')
+      const identity = { businessId: config.businessId || user.organizationId, tillId }
+      if (request.url === '/api/backups/download') return sendJson(response, 200, { archive: encryptBackup(backupSnapshot(database, identity), input.backupPassword) })
+      if (input.confirmation !== 'RESTORE' || authenticateUser(user.email, input.ownerPassword)?.id !== user.id) throw new Error('Confirm RESTORE and enter your current owner password.')
+      const snapshot = decryptBackup(input.archive, input.backupPassword)
+      // Retain a consistent local safety copy before replacing records.
+      await createBackup()
+      restoreSnapshot(database, snapshot, identity)
+      return sendJson(response, 200, { restoredAt: new Date().toISOString(), backupCreatedAt: snapshot.createdAt })
+    })
   }
   if (request.method === 'POST' && request.url === '/api/backups') {
     const user = sessionUser(request)
@@ -645,8 +676,11 @@ function serveFrontend(request, response) {
 
 function readJson(request, response, callback) {
   let body = ''
-  request.on('data', (chunk) => { body += chunk })
+  let tooLarge = false
+  const limit = request.url === '/api/backups/restore' ? 70_000_000 : 5_000_000
+  request.on('data', (chunk) => { if (tooLarge) return; body += chunk; if (Buffer.byteLength(body) > limit) { tooLarge = true; body = ''; sendJson(response, 413, { error: 'Request is too large.' }) } })
   request.on('end', () => {
+    if (tooLarge) return
     try {
       Promise.resolve(callback(JSON.parse(body))).catch((error) => sendJson(response, 400, { error: error.message }))
     } catch {

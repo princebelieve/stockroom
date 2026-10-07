@@ -85,7 +85,7 @@ export function validateCounterRecord(record, previous, snapshot = false) {
     if (JSON.stringify(record.tableService) !== JSON.stringify(previous.tableService)) throw new Error('Order table and seat cannot change.');
     return
   }
-  const immutable = order => JSON.stringify([order.id, order.branchId, order.lines, order.total, order.tillId, order.createdAt, order.customerName, order.note, order.currency, order.businessName, order.pos, order.tableService, order.diningOption, order.source, order.acceptedTillId, order.customerPortalId, order.restaurantOrder, order.customerPaymentMethod, order.customerPaymentProvider, order.customerPaymentReference])
+  const immutable = order => JSON.stringify([order.id, order.branchId, order.lines, order.total, order.tillId, order.createdAt, order.customerName, order.note, order.currency, order.businessName, order.pos, order.tableService, order.diningOption, order.source, order.acceptedTillId, order.customerPortalId, order.restaurantOrder, order.customerPaymentMethod, order.customerPaymentProvider, order.customerPaymentReference, order.delivery])
   if (immutable(record) !== immutable(previous)) throw new Error('Submitted order details cannot be changed.')
   if (record.status === 'cancelled' && previous.status !== 'cancelled' && (previous.status !== 'collected' || previous.tableService)) { text(record.changeReason, 'a cancellation reason', 300); return }
   if((record.tableService || record.restaurantOrder) && record.action==='station-ready') {

@@ -110,3 +110,17 @@ These references describe the mechanisms, not compatibility with every printer.
 In Windows Device settings, select Kitchen ticket printer and Bar ticket printer from installed queues, then enable automatic preparation routing. One queue can serve both stations if needed. Sending, correcting, cancelling or accepting an order creates station tickets locally. Failed or interrupted tickets remain visible for explicit retry; check physical output first to avoid duplicate paper. Driver acceptance is not proof that paper printed. Browser and Android printing continue through the system dialog and do not silently select station queues.
 
 Lost or broken till recovery is owner-only under Device settings. It requires a separately enrolled replacement, cloud connectivity, no active replacement work, owner password and confirmation that the original device has stopped and unsynchronized activity has been reconciled. The source enrollment is permanently retired and its checkout identity is restored on the replacement; historical documents are retained. See [Fast food recovery](fast-food-workspace.md#devices-and-recovery).
+
+## Shared preparation printing
+
+On the Windows checkout that will print for the branch, configure installed Kitchen and Bar queues, then choose **Use this checkout as branch printer** under Shared kitchen and bar printing in Devices. Only the owner can designate the printer. Keep that checkout signed in, open, connected, and on the selected branch. Orders sent from Android, browser or other Windows devices enter the queue after synchronization. Unaccepted QR orders are not printed; accept them on a till first. Local routing is suppressed when shared routing is enabled to prevent duplicate tickets.
+
+New orders, corrections and cancellations produce station tickets. Pending stale tickets are superseded by corrections; removed station items get cancellation tickets. A claimed ticket whose printing or acknowledgement was interrupted stays visible. Inspect physical output before **Retry ticket (may print twice)**. There is no automatic retry of uncertain output. Turning on shared printing does not replay earlier historical orders. No shared routing works through an internet outage; synchronized orders remain available for later handling.
+
+## Windows backup and restore
+
+Owners open **Business settings > Business > Business backup and restore**. Download a password-protected backup, or enter a backup password and choose a folder for daily scheduled backups. Prefer an external drive or a folder copied to secure off-device storage. Scheduled backups run while the Windows app is open, with the latest successful time and failures shown in settings. Windows secure storage protects the saved password. Keep a separate copy of the password; it cannot be recovered from the encrypted backup.
+
+Restore requires the matching business, checkout identity and database schema, the file password, current owner password and RESTORE confirmation. Stop staff using that checkout and synchronize before replacing its local records. Current credentials and removed-staff tombstones are preserved. A consistent local safety backup is created first. For replacement hardware, use lost-till recovery before restoring a matching checkout archive. Browser and Android continue to use synchronization and lost-till recovery; this file backup/restore control is Windows-only.
+
+Backups are separate from the product export-and-exit flow. Its fee remains controlled by the developer's settings, including zero when configured.

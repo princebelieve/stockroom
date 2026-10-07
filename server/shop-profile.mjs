@@ -78,14 +78,15 @@ export function businessWorkspace(profile) {
   const value = normalizeShopProfile(profile)
   const supermarket = value.industry === 'supermarket'
   const liquids = value.industry === 'liquids'
-  const stock = liquids || ['stock', 'both'].includes(value.workflows)
+  const productStock = liquids || ['stock', 'both'].includes(value.workflows)
+  const stock = productStock || value.fastFood || value.restaurant
   return {
     checkoutLabel: supermarket ? 'Checkout' : 'Sell (POS)',
     overviewTitle: supermarket ? 'Supermarket at a glance' : 'Business at a glance',
     overviewDescription: supermarket ? 'Review checkout sales, stock levels, and daily operations.' : 'Review business health, stock, and team activity.',
     liquids,
     oil: liquids,
-    productSales: stock && (!liquids || value.features.productSales),
+    productSales: productStock && (!liquids || value.features.productSales),
     services: value.features.services,
     stock,
     payments: ['payments', 'both'].includes(value.workflows),

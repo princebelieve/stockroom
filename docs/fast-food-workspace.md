@@ -2,6 +2,8 @@
 
 Fast food is a separate, optional workspace for counter-service orders. Enabling it does not add menu or preparation controls to supermarket checkout.
 
+The workspace also includes Inventory, Purchasing, Stock count, Stock movements and stock reports for ingredients and packaged goods. Owners and administrators can receive supplier deliveries, track batch costs and expiry dates, and record wastage without enabling Product sales.
+
 ## Setup
 
 Open **Business settings > Workspaces**:
@@ -104,7 +106,7 @@ Menu editing, recipes and packaged stock are under **Business settings > Food me
 Configuration now lives under **Business settings**, separate from transaction screens. Owners configure workspaces and sales rules; owners and admins can configure receipts, devices and enabled food/table workflows. Product variants and extras are under product management. **Cash register** is a separate daily-work screen; returns and customer history are under Sales history. The supermarket basket, POS receipt-reference scanner and customer display continue to use their existing operational controls.
 
 
-Manual printing uses the configured 58 mm or 80 mm receipt printer for payment receipts, order reviews, preparation tickets and itemized bills. The selected action determines the document. Preparation tickets contain quantities and instructions, not payment totals. Customer documents retain item quantities/prices and applicable financial summaries. Detailed history stays available in the app. No additional printer is required for manual printing. On Windows, choose separate Kitchen ticket and Bar ticket printer queues in Device settings and enable automatic preparation routing. Each station receives only its lines. Corrections replace earlier tickets; removed station items and cancellations are labelled. Failed or interrupted print jobs remain under Preparation tickets need attention for explicit retry. Check physical output before retrying because an interrupted job may already have printed. Printing failures do not recreate orders, payments or stock deductions. Preferences and the durable ticket queue are local to this device; queued jobs are not sent to another device automatically.
+Manual printing uses the configured 58 mm or 80 mm receipt printer for payment receipts, order reviews, preparation tickets and itemized bills. The selected action determines the document. Preparation tickets contain quantities and instructions, not payment totals. Customer documents retain item quantities/prices and applicable financial summaries. Detailed history stays available in the app. No additional printer is required for manual printing. On Windows, choose separate Kitchen ticket and Bar ticket printer queues in Device settings and enable automatic preparation routing. Each station receives only its lines. Corrections replace earlier tickets; removed station items and cancellations are labelled. Failed or interrupted print jobs remain under Preparation tickets need attention for explicit retry. Check physical output before retrying because an interrupted job may already have printed. Printing failures do not recreate orders, payments or stock deductions. Local automatic routing keeps its queue on that device. For orders from other devices, an owner can enable Shared kitchen and bar printing in Devices on a Windows checkout. That checkout handles the branch queue after orders synchronize; keep it open, connected and on the configured branch. Interrupted or uncertain tickets require explicit review and retry. Driver acceptance does not prove that paper printed.
 
 ## Order type and split payment
 
@@ -115,3 +117,9 @@ Use **Take payment > Payment Method > Split payment** when one order is paid usi
 ## Reporting periods
 
 Financial reports use the saved business reporting timezone, configured under Business settings > Workspaces and shared with Sync now. Existing businesses default to UTC. See [report calculations](report-calculations.md) for period boundaries and preparation-cost treatment.
+
+## QR transfer and delivery setup
+
+Under Business settings > Business, enter the public bank name, account name, account number and transfer instructions. Save and synchronize. The QR menu offers bank transfer only when all bank details are present; staff must still verify money received.
+
+Delivery is hidden until the owner enables it. Set a fixed delivery charge before tax, including zero for free delivery. QR customers must enter a phone number and complete address. The charge is included in the order total and receipt. Staff see the complete delivery details on the order and preparation ticket. This collects delivery information; it does not provide driver dispatch or location tracking. Local counter orders retain their existing handoff choices.

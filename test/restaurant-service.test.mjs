@@ -26,9 +26,9 @@ const newOrder=(f,tab,menu,id='round1',seat=1)=>f.command('restaurant/counter/or
 const advance=(f,order,status)=>f.command('restaurant/counter/status',{id:order.id,expectedUpdatedAt:order.updatedAt,status})
 const payment=order=>recordPayment({id:counterSaleId(order.id),currency:order.currency,branchId:'main',items:counterItems(order),total:order.total,paymentMethod:'cash',paymentDetails:{amountReceived:order.total,pos:order.pos,counterOrder:{id:order.id,tillId:order.tillId,tableService:order.tableService}}})
 
-test('restaurant workspace is opt-in and restaurant-only hides stock, payments and fast food',()=>{
+test('restaurant workspace is opt-in and restaurant-only includes stock tools and hides other selling screens',()=>{
  const basic=businessWorkspace({mode:'suggested',industry:'supermarket'});assert.equal(basic.restaurant,false)
- const workspace=businessWorkspace(normalizeShopProfile({workflows:'restaurant'}));assert.equal(workspace.restaurant,true);assert.equal(workspace.fastFood,false);assert.equal(workspace.stock,false);assert.equal(workspace.payments,false)
+ const workspace=businessWorkspace(normalizeShopProfile({workflows:'restaurant'}));assert.equal(workspace.restaurant,true);assert.equal(workspace.fastFood,false);assert.equal(workspace.stock,true);assert.equal(workspace.payments,false)
  assert.ok(requiresRestaurantSync({payload:{shopProfile:{restaurant:true}}}))
  assert.ok(requiresRestaurantSync({payload:{kind:'restaurant-tab'}}))
 })

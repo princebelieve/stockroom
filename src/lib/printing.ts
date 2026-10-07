@@ -4,6 +4,7 @@ export type PrinterSettings = { receipt: string; report: string; kitchen?: strin
 export type InstalledPrinter = { name: string; displayName: string }
 declare global {
   interface Window { stockroomDesktop?: {
+    scheduledBackups?: (input: { action: string; token: string; password?: string; tillId?: string }) => Promise<{ enabled: boolean; directory?: string; lastAt?: string; lastError?: string }>;
     openCustomerDisplay: (url: string) => Promise<void>
     listPrinters: () => Promise<InstalledPrinter[]>
     print: (options: { kind: 'receipt' | 'order' | 'report'; deviceName: string; width: number }) => Promise<void>

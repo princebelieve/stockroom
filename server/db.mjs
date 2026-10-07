@@ -463,7 +463,8 @@ export function getReports(branchId = 'main') {
   const batches=database.prepare('SELECT * FROM stock_batches WHERE branch_id=? AND quantity>0').all(branchId)
   const adjustments=database.prepare('SELECT payload FROM stock_events').all().map(row=>JSON.parse(row.payload)).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption'].includes(row.category))
   const registers=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='register'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
-  return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers,reportingTimeZone: normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile).reportingTimeZone })
+  const orders=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='counter-order'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
+  return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers,orders,reportingTimeZone: normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile).reportingTimeZone })
 }
 
 export function exportSalesCsv(branchId = 'main') {
@@ -671,7 +672,7 @@ export async function createBackup() {
   await mkdir(backupDirectory, { recursive: true })
   const fileName = `stockroom-${now().replace(/[:.]/g, '-')}.sqlite`
   const destination = join(backupDirectory, fileName)
-  await copyFile(databasePath, destination)
+  database.prepare('VACUUM INTO ?').run(destination)
   return { fileName, path: destination }
 }
 

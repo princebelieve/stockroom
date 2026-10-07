@@ -1,1 +1,1 @@
-export function buildReports(data: {reportingTimeZone?:string;sales:any[];items:any[];products:any[];expenses:any[];returns?:any[];retail?:any[];batches?:any[];adjustments?:any[];registers?:any[]},date?:Date): any
+export function buildReports(data: {reportingTimeZone?:string;sales:any[];items:any[];products:any[];expenses:any[];returns?:any[];retail?:any[];batches?:any[];adjustments?:any[];registers?:any[];orders?:any[]},date?:Date): any

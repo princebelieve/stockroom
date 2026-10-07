@@ -688,7 +688,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     const adjustments=((await db.query('SELECT payload FROM stock_events')).values||[]).map(row=>JSON.parse(String(row.payload))).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption'].includes(row.category))
     const registers=((await db.query("SELECT payload FROM pos_records WHERE scope='business' AND branch_id=? AND kind='register'",[branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
     const reportingTimeZone = normalizeShopProfile((await db.query('SELECT shop_profile FROM app_settings WHERE id = 1')).values?.[0]?.shop_profile).reportingTimeZone
-    return json(buildReports({ sales, items, products, expenses, returns,retail,batches:batchData.lots,adjustments,registers,reportingTimeZone }))
+    const orders=((await db.query("SELECT payload FROM pos_records WHERE branch_id=? AND kind='counter-order'",[branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
+    return json(buildReports({ sales, items, products, expenses, returns,retail,batches:batchData.lots,adjustments,registers,orders,reportingTimeZone }))
   }
   if (path === '/api/users' && method === 'GET') {
     if (user.role !== 'owner') return error('Owner access required.', 403)

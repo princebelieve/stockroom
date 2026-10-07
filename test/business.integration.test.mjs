@@ -192,6 +192,13 @@ test('wallet payments require owner settings, debit once, allow approved debt an
   assert.equal(final.balance, 0)
   assert.equal(final.transactions.length, 5)
   assert.equal(final.transactions.reduce((sum, entry) => sum + entry.amount, 0), final.balance)
+  await request(`/api/customers/${customer.id}/wallet`, { amount: 20, reason: 'Service deposit' })
+  const serviceSale = { ...sale, id: 'wallet-service', items: [{productId:'service:copying',productName:'Document copying',quantity:1,price:10}], paymentDetails:{customerId:customer.id,servicePayment:{customerName:'Wallet customer',customerPhone:''}} }
+  const stockBefore = (await request('/api/products',undefined,'GET')).body.products.find(row=>row.id===item.id).stock
+  assert.equal((await request('/api/sales',serviceSale)).response.status,201)
+  assert.equal((await request('/api/sales',serviceSale)).response.status,201)
+  assert.equal((await balance()).balance,10)
+  assert.equal((await request('/api/products',undefined,'GET')).body.products.find(row=>row.id===item.id).stock,stockBefore)
 })
 
 test('queued local changes synchronize after cloud service becomes reachable', async () => {

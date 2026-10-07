@@ -13,6 +13,15 @@ export function receiptSettings(input = {}) {
   result.taxRate = Number(input.taxRate || 0)
   result.taxLabel = String(input.taxLabel || 'Tax').trim().slice(0,40)
   posSettings(result)
+  if (input.serviceItems !== undefined) {
+    if (!Array.isArray(input.serviceItems) || input.serviceItems.length > 200) throw new Error('Use up to 200 saved services.')
+    const ids = new Set()
+    result.serviceItems = input.serviceItems.map(item => {
+      const id = String(item?.id || ''), name = String(item?.name || '').trim(), price = Number(item?.price)
+      if (!/^[a-zA-Z0-9_-]{3,100}$/.test(id) || ids.has(id) || !name || name.length > 150 || !Number.isFinite(price) || price < 0 || !Number.isSafeInteger(Math.round(price * 100)) || Math.abs(price * 100 - Math.round(price * 100)) > 0.000001) throw new Error('Enter unique saved services with valid names and prices.')
+      ids.add(id); return { id, name, price }
+    })
+  }
   return result
 }
 export function receiptSnapshot(input) {

@@ -1,3 +1,5 @@
+import { createPreparationPrint } from './preparation-print.mjs'
+import { customerOrderSettings, customerHandoff } from '../server/customer-order-settings.mjs'
 import { createTillRecovery } from './till-recovery.mjs'
 import { authorizeCustomerOrder, customerOrderLines, publishCustomerOrder, acceptCustomerOrder } from './customer-orders.mjs'
 import { createStaffRemoval } from './staff-removal.mjs'
@@ -218,6 +220,9 @@ async function serializeBusinessSync(businessId,job) {
 const staffRemoval = createStaffRemoval({ accounts, refreshTokens, operations, verifyToken, ownerPasswordIsValid, readJson, send })
 
 const tillRecovery = createTillRecovery({ database, devices, entityHeads, operations, serialize: serializeBusinessSync, verifyToken, ownerIsActive: async claims => ObjectId.isValid(claims.sub) && Boolean(await accounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, role: 'owner' })), ownerPasswordIsValid, readJson, send })
+await database.collection('preparation_printers').createIndex({ businessId: 1, branchId: 1 }, { unique: true })
+await database.collection('preparation_print_jobs').createIndex({ businessId: 1, branchId: 1, id: 1 }, { unique: true })
+const preparationPrint = createPreparationPrint({ database, devices, entityHeads, verifyToken, ownerIsActive: async claims => ObjectId.isValid(claims.sub) && Boolean(await accounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, role: 'owner', removedAt: { $exists: false } })), readJson, send })
 
 const server = createServer(async (request, response) => {
   const corsHeaders = corsHeadersFor(request.headers.origin, process.env.PWA_ALLOWED_ORIGINS)
@@ -286,7 +291,7 @@ const server = createServer(async (request, response) => {
       const publicTax = { taxEnabled: pricing.taxEnabled, taxRate: pricing.taxRate, taxLabel: pricing.taxLabel, taxIncluded: pricing.taxIncluded, taxRates: {} }
       const menu = head?.payload?.kind === 'counter-menu' ? head.payload : null
       publicTax.taxRates = Object.fromEntries((menu?.items || []).filter(item => item.available && item.type === 'stock' && !profile.restaurant).map(item => [item.id, pricing.taxRates[item.productId] ?? pricing.taxRate]))
-      return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: profile.restaurant ? 'restaurant' : 'fast-food', tax: publicTax, walletAllowed: settings.paymentPolicy?.allowWallet === true, menu: menu ? { id: menu.id, updatedAt: menu.updatedAt, items: menu.items.filter(item => item.available).map(item => ({ id: item.id, name: item.name, description: item.description || '', price: item.price, options: item.options.filter(option => option.available !== false).map(option => ({ id: option.id, name: option.name, price: option.price })) })) } : { id: menuId, updatedAt: '', items: [] } })
+      return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: profile.restaurant ? 'restaurant' : 'fast-food', tax: publicTax, walletAllowed: settings.paymentPolicy?.allowWallet === true, customerOrdering: customerOrderSettings(settings.paymentPolicy?.customerOrdering), menu: menu ? { id: menu.id, updatedAt: menu.updatedAt, items: menu.items.filter(item => item.available).map(item => ({ id: item.id, name: item.name, description: item.description || '', price: item.price, options: item.options.filter(option => option.available !== false).map(option => ({ id: option.id, name: option.name, price: option.price })) })) } : { id: menuId, updatedAt: '', items: [] } })
     }
     if (request.method === 'POST' && request.url === '/v1/customer-portal/guest') {
       const input = await readJson(request, 4096)
@@ -349,6 +354,9 @@ const server = createServer(async (request, response) => {
       const bankReference = String(input.paymentReference || '').trim().slice(0, 120)
       const bankProvider = String(input.paymentProvider || '').trim().slice(0, 100)
       if (requestedPayment === 'bank-transfer' && (!bankProvider || !bankReference)) return send(response, 400, { error: 'Enter the bank and transfer reference after making the transfer.' })
+      let handoff
+      try { handoff = customerHandoff(saved.settings?.paymentPolicy?.customerOrdering, input, Boolean(profile.restaurant)) } catch (error) { return send(response, 400, { error: error.message }) }
+      if (handoff.delivery?.fee > 0) lines.push({ id: 'delivery-fee', menuItemId: 'delivery-fee', name: 'Delivery charge', type: 'prepared', station: 'kitchen', productId: '', quantity: 1, price: handoff.delivery.fee, options: [], recipe: [] })
       const id = orderId, now = new Date().toISOString(), tillId = 'customer-portal'
       const settingsRecord = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: 'pos-settings' })
       const tax = posSettings(settingsRecord?.payload?.value)
@@ -358,7 +366,7 @@ const server = createServer(async (request, response) => {
       if (input.expectedTotal !== undefined && Math.round(Number(input.expectedTotal) * 100) !== Math.round(pos.pricing.total * 100)) return send(response, 409, { error: 'The total changed. Refresh the menu and review tax and prices before submitting.' })
       const paymentNote = requestedPayment === 'bank-transfer' ? `Bank transfer claimed: ${bankProvider} / ${bankReference}. Verify before handing over.` : ''
       const customerNote = String(input.note || '').trim().slice(0, 200)
-      const record = { id, kind: 'counter-order', source: 'customer-portal', customerPortalId: claims.customerId, acceptedTillId: '', restaurantOrder: Boolean(profile.restaurant), customerPaymentMethod: requestedPayment, ...(requestedPayment === 'bank-transfer' ? { customerPaymentProvider: bankProvider, customerPaymentReference: bankReference } : {}), branchId: 'main', status: 'queued', tillId, currency: saved.settings.currency || 'USD', businessName: saved.settings.appName || 'Business', createdAt: now, updatedAt: now, expectedUpdatedAt: '', customerName: customer.name, note: [customerNote, paymentNote].filter(Boolean).join(' · ').slice(0, 300), ...(profile.restaurant ? {} : { diningOption: ['Takeaway', 'Dine in', 'Delivery'].includes(input.diningOption) ? input.diningOption : 'Takeaway' }), lines, pos, total: pos.pricing.total, events: [{ status: 'queued', action: 'create', reason: '', staffId: `customer:${claims.customerId}`, at: now }] }
+      const record = { id, kind: 'counter-order', source: 'customer-portal', customerPortalId: claims.customerId, acceptedTillId: '', restaurantOrder: Boolean(profile.restaurant), customerPaymentMethod: requestedPayment, ...(requestedPayment === 'bank-transfer' ? { customerPaymentProvider: bankProvider, customerPaymentReference: bankReference } : {}), branchId: 'main', status: 'queued', tillId, currency: saved.settings.currency || 'USD', businessName: saved.settings.appName || 'Business', createdAt: now, updatedAt: now, expectedUpdatedAt: '', customerName: customer.name, note: [handoff.delivery ? `Deliver to ${handoff.delivery.address} / ${handoff.delivery.phone}` : '', customerNote, paymentNote].filter(Boolean).join(' · ').slice(0, 300), ...handoff, lines, pos, total: pos.pricing.total, events: [{ status: 'queued', action: 'create', reason: '', staffId: `customer:${claims.customerId}`, at: now }] }
       validateCounterRecord(record)
       let result, conflict = ''
       await serializeBusinessSync(claims.businessId, async () => {
@@ -420,6 +428,7 @@ const server = createServer(async (request, response) => {
       await customerPortalAccounts.updateOne({ businessId: claims.businessId, customerId }, { $set: { username: login, passwordHash: hashPassword(password), active: true, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true })
       return send(response, 200, { customerId, username: login })
     }
+    if (await preparationPrint.handle(request, response)) return
     if (await tillRecovery.handle(request, response)) return
     if (await productFormReader(request, response)) return
     if (await notifications.handle(request, response)) return

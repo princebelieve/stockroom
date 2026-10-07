@@ -68,7 +68,7 @@
       "Under Shop branches, add a branch name and optional address. Use Edit details or Staff access for an existing branch. Change the active branch using the top selector.",
       "Use the password form where available to change your password. In the browser build, use the sign-in password-recovery journey when directed."
     ],
-    "note": "Business identity, currency and branch configuration are owner-only. Read expandable Help before enabling credit or retained-extra-payment rules."
+    "note": "Business identity, currency and branch configuration are owner-only. Read expandable Help before enabling credit or retained-extra-payment rules. Owners can publish QR bank details and enable takeaway delivery with a fixed charge in Business settings. Save and synchronize. On Windows, Business backup and restore downloads encrypted backups or schedules daily backups to a chosen folder; restore requires the file password, owner password and RESTORE confirmation, and preserves current staff access."
   },
   {
     "id": "section-7",
@@ -117,7 +117,7 @@
       "Run the offered test, observe the result and confirm it only when it is correct.",
       "Finish the wizard. Reopen the device later to adjust or retest it."
     ],
-    "note": "Saved device details do not install a driver or prove hardware works. Windows printer drivers and scanner pairing are operating-system tasks. Unsupported connections remain unavailable; an ordinary manual POS receipt workflow does not require an automatic bank integration."
+    "note": "Saved device details do not install a driver or prove hardware works. Windows printer drivers and scanner pairing are operating-system tasks. Unsupported connections remain unavailable; an ordinary manual POS receipt workflow does not require an automatic bank integration. For shared kitchen/bar printing, the owner designates a Windows checkout as the branch printer. Configure its installed station printers, keep the app signed in, connected and on that branch, and synchronize sending devices. Review interrupted tickets before retrying because paper may already have printed."
   },
   {
     "id": "section-11",
@@ -210,10 +210,11 @@
       "Open Payments & receipts > New payment. Enter Payment for, quantity and unit price.",
       "Select Add another item for each additional description. Review each line total and the grand total.",
       "Expand Customer and receipt details (optional) to add customer name/phone or transaction type.",
-      "Choose Cash, Bank Transfer or POS Terminal. Enter required provider/reference for non-cash payment. Review cash/change when cash is tendered.",
+      "Choose Cash, Bank Transfer, POS Terminal or Split payment. Split parts must equal the total; enter provider and reference for external parts. Owner-enabled Customer wallet requires a customer account; only the owner can approve enabled credit.",
       "Save the payment and print or share its receipt. Open Payment history to find a previous payment.",
       "For work that needs a deposit or later payment, open Jobs & invoices; New payment stays the simple full-payment form.",
-      "Owners/admins use Payment history > Refund payment when money must be returned. The original receipt remains saved."
+      "Owners/admins use Payment history > Refund payment when money must be returned. The original receipt remains saved.",
+      "Save reusable service names and prices in Business settings > Receipts > Saved services and prices. Add saved service copies the current price into the draft."
     ],
     "note": "These descriptions are non-stock receipt lines: no product deduction or ingredient consumption. Confirm externally received payment before saving a manual POS/transfer entry."
   },
@@ -223,12 +224,14 @@
     "steps": [
       "Select New job / estimate. Enter the work description, customer, item descriptions, quantities and prices. Add an optional due date or instructions.",
       "Save as a job, or start as an estimate. Select Accept estimate / issue invoice before collecting money for an estimate.",
-      "Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal or Bank Transfer; confirm external payments and their references before saving.",
+      "Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal, Bank Transfer or Split payment; confirm external payments and their references before saving.",
       "Print the saved payment receipt. It shows the amount received and remaining invoice balance. For a 100 invoice paid 30 then 70, there are two receipts and a zero balance.",
       "Use Job details and actions to mark In progress and Ready. Collect the balance before marking Completed.",
       "Choose Print estimate, Print job ticket or Print invoice for the document needed. These use the existing receipt printer. An invoice shows what is owed; a job ticket shows work instructions.",
       "Owners/admins can open the job payment history and refund a payment by money amount. Refund retained payments before cancelling; history is kept.",
-      "Reopen the same job for later payments or receipt reprints. Jobs and payment drafts survive offline reload. Use its original till; Sync now shares saved work with other devices."
+      "Reopen the same job for later payments or receipt reprints. Jobs and payment drafts survive offline reload. Use its original till; Sync now shares saved work with other devices.",
+      "Search jobs and filter unpaid invoices or overdue unfinished work using the business reporting timezone. Choose an existing customer account on a new job for reliable invoice linking.",
+      "Owners/admins can print invoice customer statements for this branch. Currencies remain separate; net paid includes refunds. Statements exclude estimates, cancelled jobs, separate walk-in receipts and wallet balances."
     ],
     "note": "Saved job details and prices are snapshots. Correct an issued job by refunding retained payments, cancelling and creating its replacement. Reports count payments and refunds; creating an estimate or invoice does not record revenue."
   },
@@ -373,7 +376,7 @@
       "Use the offered report export/print action for the current data.",
       "Review missing costs before relying on the profit estimate."
     ],
-    "note": "Reports use saved records. Prepared items without recipes have untracked ingredient costs. The performance view is platform-dependent; do not enter purchased stock again as a running expense. Reports use the saved business reporting timezone shown on the report; date-only expenses keep their entered business date. Synchronize settings and records before comparing devices."
+    "note": "Reports use saved records. Prepared items without recipes have untracked ingredient costs. The performance view is platform-dependent; do not enter purchased stock again as a running expense. Reports use the saved business reporting timezone shown on the report; date-only expenses keep their entered business date. Synchronize settings and records before comparing devices. If Profit estimate has incomplete costs appears, review the named prepared items, saved recipes and purchase costs before trusting profit. Delivery charges are excluded from recipe warnings. Enter running expenses separately."
   },
   {
     "id": "section-31",
@@ -418,7 +421,12 @@
       "Print/reprint any required receipts. Confirm returns and separate cash movements are recorded once.",
       "Count and close the cash register. Review differences and the day's sales.",
       "Synchronize when connected and review unresolved sync issues. Log out when handing the device to another user.",
-      "Contact the app provider for unavailable release downloads, failed registration delivery, unavailable provider integration or persistent service problems. Contact the device supplier for printer-driver or hardware issues."
+      "Contact the app provider for unavailable release downloads, failed registration delivery, unavailable provider integration or persistent service problems. Contact the device supplier for printer-driver or hardware issues.",
+      "For the first supervised pilot, use a separate practice business first. Record opening stock, purchase costs, recipes and an opening cash float. Agree who will check the cash, bank evidence and physical stock.",
+      "Run cash, bank transfer, split payment, a correction and a refund. For food businesses, submit a QR pickup and a delivery order, verify the bank details and fee, and check kitchen/bar tickets from a second device.",
+      "Disconnect the internet, record an ordinary local sale, reconnect and synchronize. Confirm one receipt, one stock deduction and no duplicate ticket. QR submissions and shared printing require connectivity.",
+      "Close and count the register. Compare cash expected, counted cash, transfers, refunds, stock usage and estimated profit with an independent paper tally. Investigate every unexplained difference.",
+      "Download an encrypted backup and check the scheduled backup folder. In the practice business, test restore and an enrolled replacement till recovery. Do not replace live records for a rehearsal. Begin the real-business pilot only after these checks pass, with someone available to help staff."
     ],
     "note": "Ordinary sales, menus, tables, receipt settings and renewals have in-app controls. Hosting, release publishing, mail delivery and payment-provider provisioning remain service-operator tasks, not instructions for a shop owner to edit code."
   }

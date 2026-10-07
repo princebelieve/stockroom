@@ -3,6 +3,29 @@ import assert from 'node:assert/strict'
 import { businessModes, businessPresets, applyBusinessPreset, businessWorkspace, normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
 import { validateCustomValues, readCustomValues } from '../server/shop-fields.mjs'
 
+test('every selling choice supplies its required stock tools without enabling another checkout', () => {
+  for (const workflows of ['payments', 'stock', 'both', 'fast-food', 'restaurant']) {
+    const workspace = businessWorkspace({ workflows })
+    assert.equal(workspace.stock, workflows !== 'payments', workflows)
+    assert.equal(workspace.productSales, ['stock', 'both'].includes(workflows), workflows)
+    assert.equal(workspace.payments, ['payments', 'both'].includes(workflows), workflows)
+    assert.equal(workspace.fastFood, workflows === 'fast-food', workflows)
+    assert.equal(workspace.restaurant, workflows === 'restaurant', workflows)
+  }
+  for (const option of ['fastFood', 'restaurant']) {
+    const workspace = businessWorkspace({ workflows: 'payments', [option]: true })
+    assert.equal(workspace.stock, true)
+    assert.equal(workspace.productSales, false)
+    assert.equal(workspace.payments, true)
+  }
+  for (const industry of Object.keys(businessModes)) {
+    for (const workflows of ['payments', 'stock', 'both', 'fast-food', 'restaurant']) {
+      const workspace = businessWorkspace({ mode: 'suggested', industry, workflows })
+      assert.equal(workspace.stock, industry === 'liquids' || workflows !== 'payments')
+    }
+  }
+})
+
 test('supermarket workspace defaults and owner feature overrides survive normalization', () => {
   const profile = normalizeShopProfile({ mode: 'suggested', industry: 'supermarket' })
   assert.equal(businessWorkspace(profile).checkoutLabel, 'Checkout')
@@ -58,7 +81,7 @@ test('explicit business presets activate only their operational workspace and pr
     const result = applyBusinessPreset(current, key)
     const workspace = businessWorkspace(result)
     assert.equal(result.workflows, preset.workflow)
-    assert.equal(workspace.stock, ['POS', 'Oil'].includes(preset.screen))
+    assert.equal(workspace.stock, ['POS', 'Oil', 'Counter', 'Restaurant'].includes(preset.screen))
     assert.equal(workspace.oil, preset.screen === 'Oil')
     assert.equal(workspace.productSales, preset.screen === 'POS')
     assert.equal(workspace.payments, preset.screen === 'Payments')

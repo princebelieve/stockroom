@@ -1,7 +1,7 @@
 import { supplierAccounts } from './supplier-accounts.mjs'
 import { reportCalendar, reportTimeZone } from './report-timezone.mjs'
 // All adapters use receipt totals once and the costs captured at sale time.
-export function buildReports({ sales, items, products, expenses, returns = [], retail = [], batches = [], adjustments = [], registers = [], reportingTimeZone = 'UTC' }, date = new Date()) {
+export function buildReports({ sales, items, products, expenses, returns = [], retail = [], batches = [], adjustments = [], registers = [], orders = [], reportingTimeZone = 'UTC' }, date = new Date()) {
   reportingTimeZone = reportTimeZone(reportingTimeZone)
   const calendar = reportCalendar(reportingTimeZone, date)
   const day = calendar(date.toISOString())
@@ -51,6 +51,13 @@ export function buildReports({ sales, items, products, expenses, returns = [], r
     }
   }
   const zeroCostSaleLines = items.filter(item => monthlySales.has(item.saleId) && !String(item.productId || '').startsWith('service:') && !(Number(item.unitCost) > 0)).length
+  const paidOrders = new Set(sales.filter(sale => monthlySales.has(sale.id)).flatMap(sale => {
+    const details = parse(sale.paymentDetails)
+    return [details?.counterOrder?.id, ...(details?.restaurantBill?.selections || []).map(row => row.orderId)].filter(Boolean)
+  }))
+  const missingRecipes = orders.filter(order => paidOrders.has(order.id)).flatMap(order => (order.lines || []).filter(line => line.id !== 'delivery-fee' && !line.productId && !line.ingredients?.length).map(line => line.name))
+  const uncostedIngredients = adjustments.filter(row => row.category === 'recipe-consumption' && within(row.createdAt, month) && !(Number(row.unitCost) > 0)).length
+  const costWarnings = { zeroCostSaleLines, missingRecipes: [...new Set(missingRecipes)], uncostedIngredients, incomplete: zeroCostSaleLines > 0 || missingRecipes.length > 0 || uncostedIngredients > 0 }
   const costValue=products.reduce((sum,product)=>{const lots=batches.filter(lot=>lot.product_id===product.id);const tracked=lots.reduce((total,lot)=>total+lot.quantity,0);return sum+lots.reduce((total,lot)=>total+lot.quantity*lot.unit_cost,0)+Math.max(0,Number(product.stock)-tracked)*Number(product.cost||0)},0)
   const stockLoss=adjustments.filter(row=>row.category==='stock-loss' && within(row.createdAt,month)).reduce((sum,row)=>sum+Math.max(0,-Number(row.delta))*Number(row.unitCost||0),0)
   const ingredientCost=adjustments.filter(row=>row.category==='recipe-consumption' && within(row.createdAt,month)).reduce((sum,row)=>sum+Math.max(0,-Number(row.delta))*Number(row.unitCost||0),0)
@@ -59,6 +66,7 @@ export function buildReports({ sales, items, products, expenses, returns = [], r
   const expenseTotal = expenses.filter(expense => within(expense.incurredAt, month)).reduce((sum, expense) => sum + Number(expense.amount), 0)
   return {
     reportingTimeZone,
+    costWarnings,
     daily: window(day), weekly: window(week), monthly: window(month),
     inventory: { value: round(products.reduce((sum, product) => sum + Number(product.stock || 0) * Number(product.price || 0), 0)), products: products.length, lowStock: products.filter(product => Number(product.stock) <= Number(product.reorder)).length },
     supermarket: { suppliers:supplierAccounts(retail), stockLoss:round(stockLoss),cashShortage:round(registers.filter(row=>row.closedAt && within(row.closedAt,month)).reduce((sum,row)=>sum+Math.max(0,-Number(row.difference||0)),0)),cashSurplus:round(registers.filter(row=>row.closedAt && within(row.closedAt,month)).reduce((sum,row)=>sum+Math.max(0,Number(row.difference||0)),0)),zeroCostSaleLines, tax:round(tax),costValue: round(costValue), purchases: round(purchases), wastage: round(waste), outstanding, bestSellers: [...sellers.values()].filter(row=>row.quantity>0).sort((a,b)=>b.quantity-a.quantity).slice(0,20), expired: batches.filter(lot=>lot.quantity>0 && lot.expiry && lot.expiry<day) },

@@ -12,6 +12,13 @@ const data = {
   expenses: [{ amount: 3, incurredAt: current }, { amount: 50, incurredAt: old }],
 }
 
+test('profit prominently flags untracked recipes and zero ingredient costs', () => {
+  const result=buildReports({ ...data, sales:[{id:'food',total:20,createdAt:current,paymentDetails:{counterOrder:{id:'order'}}}], orders:[{id:'order',lines:[{id:'meal',name:'Meal',type:'prepared',ingredients:[]},{id:'delivery-fee',name:'Delivery',type:'prepared'}]}], adjustments:[{category:'recipe-consumption',createdAt:current,delta:-1,unitCost:0}] },date)
+  assert.equal(result.costWarnings.incomplete,true)
+  assert.deepEqual(result.costWarnings.missingRecipes,['Meal'])
+  assert.equal(result.costWarnings.uncostedIngredients,1)
+})
+
 test('reports count basket revenue once and use current-month sale costs and expenses', () => {
   const result = buildReports(data, date)
   assert.deepEqual(result.profit, { revenue: 30, cost: 14, expenses: 3, amount: 13 })

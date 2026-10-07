@@ -1,6 +1,8 @@
 # Tables & tabs workspace
 
-In **Business settings > Workspaces > Payment screens**, choose **Tables & tabs only**. For a mixed business, keep your existing payment-screen choice and check **Enable separate Tables & tabs workspace**, then **Save payment screens**.
+In **Business settings > Workspaces > Payment screens**, choose **Tables & tabs only**. For a mixed business, keep your existing payment-screen choice and check **Enable separate Tables & tabs workspace**, then **Save workspaces**.
+
+Inventory, Purchasing, Stock count, Stock movements and stock reports are available for ingredients and drinks. Owners and administrators can receive supplier deliveries, track batch costs and expiry dates, and record wastage without enabling Product sales.
 
 This adds its own navigation screen, menu, table setup, bill sessions and orders. Fast food and supermarket screens keep their existing operations. Existing products can be linked explicitly to packaged menu offerings or recipes; payment-only receipt descriptions remain independent of stock.
 
@@ -45,3 +47,5 @@ Financial reports use the saved business reporting timezone, configured under Bu
 The business customer QR/link supports guest orders using a pickup name, alongside optional customer wallet sign-in. Review these orders in Live orders and select **Accept on this till** while connected, then synchronize. The accepting till handles ingredient consumption and payment; online orders use their own payment screen rather than an unrelated table bill. Packaged restaurant drinks consume linked stock when preparation starts. Transfer references require staff verification.
 
 In Preparation, choose All stations, Kitchen or Bar to focus on the relevant lines. Kitchen/bar readiness is available for both table rounds and accepted restaurant online orders. Windows can route station tickets automatically to selected kitchen/bar printer queues after order submission or acceptance. Failed and interrupted jobs remain visible for explicit retry. Browser/Android station printing uses the system dialog. The owner can recover an original checkout identity on a different enrolled device from Business settings > Devices, preserving open bills and prior payments. See [Fast food](fast-food-workspace.md) for connection, payment and recovery limits.
+
+For orders from other devices, use owner-configured Shared kitchen and bar printing on a Windows checkout. Keep it open, connected and on the selected branch. The synchronized cloud queue claims tickets once; interrupted printing or acknowledgement requires explicit review and retry. See [hardware setup](hardware-setup.md#shared-preparation-printing). Configure public QR bank details in Business settings > Business. Takeaway delivery configuration applies to the fast-food QR menu, not restaurant table orders.

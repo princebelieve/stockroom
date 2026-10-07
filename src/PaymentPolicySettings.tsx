@@ -1,3 +1,4 @@
+import { customerOrderSettings } from '../server/customer-order-settings.mjs'
 import { WorkspaceHelp } from './WorkspaceHelp'
 import { useState } from 'react'
 import { extraReasons, type PaymentPolicy } from '../server/payment.mjs'
@@ -11,7 +12,16 @@ export function PaymentPolicySettings({ value, onChange }: { value: PaymentPolic
     onChange({ ...value, providers: [...value.providers, provider] })
     setNewProvider('')
   }
-  return <section><h3>Wallet payments</h3>
+  const ordering = customerOrderSettings(value.customerOrdering)
+  const setOrdering = (patch: Partial<typeof ordering>) => onChange({ ...value, customerOrdering: { ...ordering, ...patch } })
+  return <section><h3>Customer ordering</h3><p>These details are displayed publicly on your QR ordering page. Save business settings, then synchronize to publish them.</p>
+    <label>Bank name<input maxLength={100} value={ordering.bankName} onChange={e => setOrdering({ bankName: e.target.value })} /></label>
+    <label>Account name<input maxLength={120} value={ordering.accountName} onChange={e => setOrdering({ accountName: e.target.value })} /></label>
+    <label>Account number<input maxLength={40} value={ordering.accountNumber} onChange={e => setOrdering({ accountNumber: e.target.value })} /></label>
+    <label>Transfer instructions<textarea maxLength={300} value={ordering.transferInstructions} onChange={e => setOrdering({ transferInstructions: e.target.value })} /></label>
+    <label><input type="checkbox" checked={ordering.deliveryEnabled} onChange={e => setOrdering({ deliveryEnabled: e.target.checked })} />Offer delivery on the takeaway QR menu</label>
+    {ordering.deliveryEnabled && <label>Fixed delivery charge (before tax)<input type="number" min="0" max="1000000" step="0.01" value={ordering.deliveryFee} onChange={e => setOrdering({ deliveryFee: Number(e.target.value) })} /></label>}
+    <h3>Wallet payments</h3>
     <label className="checkbox-label"><input type="checkbox" checked={value.allowWallet} onChange={e => onChange({ ...value, allowWallet: e.target.checked })} />Enable customer wallet payments</label>
     <label className="checkbox-label"><input type="checkbox" checked={value.allowWalletCredit} disabled={!value.allowWallet} onChange={e => onChange({ ...value, allowWalletCredit: e.target.checked })} />Allow owner-approved purchases on credit</label><WorkspaceHelp><p>Prepaid funds are used first. Only an owner can approve a sale that creates debt. Repayments reduce the amount owed. Save business settings to apply these options.</p></WorkspaceHelp>
     <h3>Extra-payment rules</h3><WorkspaceHelp><p>Saved with business settings. Extra amounts are kept separate from sales revenue. Internal payment records are retained regardless of receipt visibility.</p></WorkspaceHelp>

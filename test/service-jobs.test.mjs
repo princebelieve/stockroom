@@ -16,6 +16,23 @@ function fixture() {
  const create={id:'service-job:test',commandId:'create',expectedUpdatedAt:'',title:'200 flyers',customerName:'Ada',customerPhone:'555',lines:[{id:'flyers',description:'Flyers',quantity:200,price:0.5}]}
  return {sql,db,call,pos:(path,input)=>handlePos({...options,path,method:'POST',input,sales:()=>sql.prepare('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails FROM sales').all().map(row=>({...row,paymentDetails:JSON.parse(row.paymentDetails),items:sql.prepare('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=?').all(row.id)}))}),create,published,setFail:value=>fail=value}
 }
+
+test('split invoice payment validates totals, retries once and counts only net cash in the till',async()=>{
+ const f=fixture();try{
+ const register=await f.pos('/api/pos/registers',{action:'open',amount:0})
+ const {job}=await f.call('',f.create)
+ const request={id:job.id,commandId:'split',expectedUpdatedAt:job.updatedAt,amount:'100',method:'multiple',cash:'50',parts:[{method:'cash',amount:'40',cashReceived:'50'},{method:'bank-transfer',amount:'60',provider:'Bank',reference:'bank-confirmed'}]}
+ await assert.rejects(f.call('/pay',{...request,parts:[{method:'cash',amount:'30'},{method:'bank-transfer',amount:'60',provider:'Bank',reference:'bank-confirmed'}]}),/total|sum|match|equal/i)
+ assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM sales').get().n,0)
+ const result=await f.call('/pay',request)
+ assert.equal(serviceJobBalance(result.job).due,0)
+ assert.equal(result.sale.paymentDetails.changeGiven,10)
+ await f.call('/pay',request)
+ assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM sales').get().n,1)
+ const closing=await f.pos('/api/pos/registers',{id:register.id,action:'close',amount:40})
+ assert.equal(closing.expectedCash,40);assert.equal(closing.difference,0)
+ }finally{f.sql.close()}
+})
 test('invoice snapshots, deposits, retry safety, balances and non-stock accounting',async()=>{
  const f=fixture();try{
  const register=await f.pos('/api/pos/registers',{action:'open',amount:0})

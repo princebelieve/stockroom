@@ -1,4 +1,6 @@
-import { app, BrowserWindow, Notification, dialog, ipcMain, screen, session, shell } from 'electron'
+import { createScheduledBackups } from './scheduled-backups.mjs'
+import { backupSnapshot } from '../server/business-backup.mjs'
+import { app, BrowserWindow, Notification, dialog, ipcMain, screen, session, shell, safeStorage } from 'electron'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sendHardwareCommand } from './hardware.mjs'
@@ -105,6 +107,21 @@ app.whenReady().then(async () => {
     })
     ipcMain.handle('customer-display:open', (_event, pairingUrl) => openCustomerDisplay(pairingUrl))
     await import('../server/index.mjs')
+    const { database } = await import('../server/db.mjs')
+    const { sessionUser: backupUser } = await import('../server/repository.mjs')
+    const { getCloudConfiguration } = await import('../server/sync.mjs')
+    const scheduledBackups = createScheduledBackups({ configPath: join(app.getPath('userData'),'scheduled-backups.json'), chooseDirectory: async () => { const result=await dialog.showOpenDialog(mainWindow,{title:'Choose a backup folder on another drive or secure storage',properties:['openDirectory','createDirectory']});return result.canceled ? '' : result.filePaths[0] }, encryptSecret: password => { if(!safeStorage.isEncryptionAvailable())throw new Error('Windows secure password storage is unavailable. Use manual encrypted backups.');return safeStorage.encryptString(password) }, decryptSecret: bytes => safeStorage.decryptString(bytes), snapshot: async tillId => { const config=await getCloudConfiguration();return backupSnapshot(database,{businessId:config.businessId||'local-shop-organization',tillId}) } })
+    ipcMain.handle('backups:scheduled',async(event,input)=>{
+      trustedSender(event)
+      if(backupUser(input?.token)?.role!=='owner')throw new Error('Owner access is required.')
+      if(input.action==='configure')return scheduledBackups.configure(input)
+      if(input.action==='disable')return scheduledBackups.disable()
+      if(input.action==='run'){await scheduledBackups.run(true);return scheduledBackups.status()}
+      return scheduledBackups.status()
+    })
+    void scheduledBackups.run()
+    const backupTimer=setInterval(()=>{void scheduledBackups.run().catch(()=>{})},3600000);backupTimer.unref()
+
     await waitForLocalServer()
     createWindow()
   } catch (error) {

@@ -15,6 +15,16 @@ async function locked<T>(work: () => Promise<T>): Promise<T> {
 }
 export async function routePreparation(scope: string, order: CounterOrder, print: (order: CounterOrder, station?: 'kitchen' | 'bar') => Promise<void>, previous?: CounterOrder) {
   if (!printerSettings().automaticPreparation || !window.stockroomDesktop) return
+  const token = localStorage.getItem('stockroom-token')
+  if (token) {
+    const response = await fetch('/api/preparation-print/jobs', { headers: { Authorization: `Bearer ${token}`, 'X-Stockroom-Branch': scope.split(':').at(-1) || 'main' } })
+    if (!response.ok && response.status !== 404) throw new Error('Check shared printer routing before printing locally. The order is saved.')
+    if (response.ok) {
+      const shared = Boolean((await response.json()).shared)
+      localStorage.setItem('stockroom-shared-print:' + scope, JSON.stringify(shared))
+      if (shared) return
+    }
+  } else if (localStorage.getItem('stockroom-shared-print:' + scope) === 'true') return
   await locked(async () => {
     const jobs = preparationJobs(scope)
     const stations = [...new Set([...order.lines, ...(order.changeReason ? previous?.lines || [] : [])].map(line => line.station || 'kitchen'))]
