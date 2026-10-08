@@ -1,4 +1,5 @@
 import { hasPermission } from './staff-permissions.mjs'
+import { deliveryProgress, validateDeliveryTracking } from './delivery-tracking.mjs'
 import { validateServiceJob } from './service-jobs.mjs'
 import { floorId,restaurantTabs,billContains,validateFloorSnapshot } from './restaurant-floor.mjs'
 import { restaurantOrderPayment, selectionsForOrder } from './restaurant-payments.mjs'
@@ -80,15 +81,18 @@ export function validateCounterRecord(record, previous, snapshot = false) {
   }
   const pricing = record.pos ? priceOrder(counterItems(record), record.pos) : priceOrder(counterItems(record))
   if (money(record.total) <= 0 || Math.round(pricing.total * 100) !== Math.round(record.total * 100) || (record.pos && JSON.stringify(pricing) !== JSON.stringify(record.pos.pricing))) throw new Error('Invalid order total.')
+  validateDeliveryTracking(record, previous)
   if (!previous) { if (!snapshot && record.status !== 'queued') throw new Error('A new order must enter the preparation queue.'); return }
   if (record.action === 'edit' && previous.status === 'queued' && record.status === 'queued') {
     text(record.changeReason, 'an order correction reason', 300)
     if (['id','branchId','tillId','createdAt','currency','businessName','source','acceptedTillId','customerPortalId','restaurantOrder','retailOrder'].some(key => record[key] !== previous[key])) throw new Error('Order identity cannot change.')
     if (JSON.stringify(record.tableService) !== JSON.stringify(previous.tableService)) throw new Error('Order table and seat cannot change.');
+    if (JSON.stringify(record.delivery) !== JSON.stringify(previous.delivery)) throw new Error('Submitted delivery details cannot be changed.')
     return
   }
   const immutable = order => JSON.stringify([order.id, order.branchId, order.lines, order.total, order.tillId, order.createdAt, order.customerName, order.note, order.currency, order.businessName, order.pos, order.tableService, order.diningOption, order.source, order.acceptedTillId, order.customerPortalId, order.restaurantOrder, order.retailOrder, order.customerPaymentMethod, order.customerPaymentProvider, order.customerPaymentReference, order.delivery])
   if (immutable(record) !== immutable(previous)) throw new Error('Submitted order details cannot be changed.')
+  if (record.action === 'delivery') return
   if (record.status === 'cancelled' && previous.status !== 'cancelled' && (previous.status !== 'collected' || previous.tableService)) { text(record.changeReason, 'a cancellation reason', 300); return }
   if((record.tableService || record.restaurantOrder) && record.action==='station-ready') {
     const stations=[...new Set(previous.lines.map(line=>line.station||'kitchen'))]
@@ -206,7 +210,9 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
   } else if (path === '/api/pos/counter/status') {
     if (!existing || existing.kind !== 'counter-order' || existing.branchId !== branchId) throw new Error('Order not found in this branch.')
     if (existing.source === 'customer-portal' && input.status !== 'cancelled' && !existing.acceptedTillId) throw new Error('Accept this online order on a till before processing it.')
-    if (input.status === 'preparing' && recipeRequirements(existing).length) {
+    if (input.deliveryAction && input.status !== existing.status) throw new Error('Refresh the order before updating delivery.')
+    if (input.deliveryAction === 'dispatch' && !loadedSales.some(sale => selectionsForOrder(sale,existing).length)) throw new Error('Take payment before dispatching the delivery.')
+    if (!input.deliveryAction && input.status === 'preparing' && recipeRequirements(existing).length) {
       if (counterActionTill(existing) !== tillId) throw new Error('Start recipe preparation on the original till to prevent duplicate ingredient use. Other devices can mark it ready after synchronization.')
       if (settings.offlineStockPoolsEnabled && settings.stockPools[tillId] !== branchId) throw new Error("Prepare recipes at this till's assigned stock location.")
       prepare = !records.some(record => record.id === consumptionId(existing.id))
@@ -220,10 +226,16 @@ export async function handleCounter({ db, scope, organizationId, branchId, user,
     if (input.status === 'cancelled' && loadedSales.some(sale => selectionsForOrder(sale,existing).length) && refundTotal(existing.id) < restaurantOrderPayment(existing,loadedSales).paidAmount-0.000001) throw new Error('Refund the paid order in full before cancelling it.')
     if (input.status !== 'cancelled' && refundTotal(existing.id) >= existing.total) throw new Error('Cancel a fully refunded order instead of preparing or handing it over.')
     if (input.status === 'collected' && !existing.tableService && !loadedSales.some(sale => selectionsForOrder(sale,existing).length)) throw new Error('Take payment before handing over the order.')
+    if (input.status === 'collected' && existing.delivery && existing.deliveryTracking?.status !== 'dispatched') throw new Error('Dispatch the delivery before completing it.')
     if(input.station && (!(existing.tableService || existing.restaurantOrder) || input.status!=='ready' || existing.status!=='preparing' || !existing.lines.some(line=>(line.station||'kitchen')===input.station) || existing.stationReady?.[input.station])) throw new Error('Choose an unfinished preparation station.')
     const stationReady=(existing.tableService || existing.restaurantOrder) && input.status==='ready' ? {...existing.stationReady,...Object.fromEntries((input.station?[input.station]:[...new Set(existing.lines.map(line=>line.station||'kitchen'))]).map(station=>[station,true]))} : existing.stationReady
     const status=input.station && !existing.lines.every(line=>stationReady[line.station||'kitchen'])?'preparing':input.status
     record = { ...existing, ...stamp, ...(stationReady?{stationReady}:{}), action: input.station?'station-ready':'status', changeReason: input.status === 'cancelled' ? text(input.reason, 'a cancellation reason', 300) : '', status, events: [...existing.events, { status, ...(input.station?{station:input.station}:{}), reason: input.status === 'cancelled' ? input.reason.trim() : '', staffId: user.id, at: updatedAt }] }
+    if (input.deliveryAction) {
+      record.deliveryTracking = deliveryProgress(existing, input, updatedAt)
+      record.action = 'delivery'; record.deliveryAction = input.deliveryAction
+      record.events[record.events.length - 1].action = `delivery-${input.deliveryAction}`
+    } else if (status === 'collected' && existing.deliveryTracking) record.deliveryTracking = { ...existing.deliveryTracking, status: 'delivered', deliveredAt: updatedAt }
     validateCounterRecord(record, existing)
   } else throw new Error('Unknown counter-service action.')
   await db.beginTransaction()

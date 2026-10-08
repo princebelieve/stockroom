@@ -17,6 +17,9 @@ test('individual permissions deny other workspaces and owner-only actions, inclu
  assert.throws(()=>parsePermissions({inventory:'yes'}),/Invalid/)
  assert.equal(canRequest({role:'cashier',permissions:{counter:true}},'/api/sales','POST',{paymentDetails:{counterOrder:{id:'order'}},items:[{productId:'service:counter:rice'}]}),true)
  assert.equal(canRequest({role:'cashier',permissions:{counter:true}},'/api/pos/counter/status','POST',{status:'preparing'}),false)
+ assert.equal(canRequest({role:'cashier',permissions:{counter:true}},'/api/pos/counter/status','POST',{status:'ready',deliveryAction:'dispatch'}),true)
+ assert.equal(canRequest({role:'cashier',permissions:{production:true}},'/api/pos/counter/status','POST',{status:'ready',deliveryAction:'dispatch'}),false)
+ assert.equal(canRequest({role:'cashier',permissions:{}},'/api/integrations/support/requests','POST'),true)
  assert.equal(Object.keys(staffCapabilities).length,19)
 })
 test('catalogue starters cover every stock industry and never replace saved names',()=>{

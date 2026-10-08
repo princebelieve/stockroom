@@ -1,4 +1,5 @@
 import { WorkspaceHelp } from './WorkspaceHelp'
+import { TimeZoneSelect } from './TimeZoneSelect'
 ﻿import { useEffect, useRef, useState } from 'react'
 import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
 import { businessModes, businessPresets, businessPresetGuidance, applyBusinessPreset, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
@@ -67,7 +68,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     {dirty && <p>Save your current changes before applying a business preset.</p>}
     {previewPreset && <div className="panel" aria-label="Business preset preview"><h3>{businessPresets[previewPreset].workspace}</h3><p>{businessPresetGuidance[previewPreset]}</p><p>This will become your selling workspace. Other selling screens will be hidden; you can enable them again below.</p><p>Your products, menu, tables, receipts and saved configuration are kept. Add your items and prices in Business settings when needed.</p><AsyncButton className="primary-button" busyLabel="Applying preset..." disabled={dirty} onClick={async () => { await save(applyBusinessPreset(value, previewPreset)); setDirty(false); setPreviewPreset(''); openWorkspace?.(businessPresets[previewPreset].screen) }}>Apply preset and start selling</AsyncButton><button type="button" className="filter-button" onClick={() => setPreviewPreset('')}>Cancel</button></div>}
     <h3>Reporting timezone</h3>
-    <label htmlFor="reporting-timezone">Business timezone</label><input id="reporting-timezone" value={draft.reportingTimeZone || 'UTC'} placeholder="Africa/Lagos" maxLength={100} onChange={event => change({ ...draft, reportingTimeZone: event.target.value })} /><p>Use a timezone such as Africa/Lagos, Europe/London or America/Los_Angeles. Reports use this timezone on every device. Existing businesses default to UTC.</p>
+    <TimeZoneSelect value={draft.reportingTimeZone || 'UTC'} onChange={reportingTimeZone => change({ ...draft, reportingTimeZone })} />
     <AsyncButton className="primary-button" busyLabel="Saving timezone..." onClick={async () => { const reportingTimeZone = validateShopProfile({ ...value, reportingTimeZone: draft.reportingTimeZone }).reportingTimeZone; const otherChanges = JSON.stringify({ ...draft, reportingTimeZone: value.reportingTimeZone }) !== JSON.stringify(value); await save({ ...value, reportingTimeZone }); setDraft(current => ({ ...current, reportingTimeZone })); setDirty(otherChanges); setMessage('Reporting timezone saved. Use Sync now to share it with other devices.') }}>Save reporting timezone</AsyncButton>
     <h3>Customise workspaces (optional)</h3>
     {draft.industry === 'liquids' ? <>

@@ -182,3 +182,26 @@ test('retail online orders reuse fulfilment without enabling the food workspace'
   assert.throws(()=>validateCounterPayment({...payment,paymentDetails:{...payment.paymentDetails,counterOrder:{id:order.id,tillId:'till'}}},order,'till'),/workspace/)
  }finally{f.sqlite.close()}
 })
+test('delivery routing saves agent progress offline, rejects unpaid dispatch and retries without duplicate events', async () => {
+  const f = fixture()
+  try {
+    const menu = await f.call('/menu', { id:'counter-menu',commandId:'delivery-menu',expectedUpdatedAt:'',items })
+    let order = await f.call('/orders', { id:'delivery-order',commandId:'create-delivery',expectedUpdatedAt:'',menuUpdatedAt:menu.updatedAt,customerName:'Ada',note:'',lines:[{id:'line',menuItemId:'burger',quantity:1,optionIds:[]}] })
+    order = {...order,diningOption:'Delivery',delivery:{phone:'08012345678',address:'12 Market Street',fee:0}}
+    f.sqlite.prepare('UPDATE pos_records SET payload=? WHERE id=?').run(JSON.stringify(order),order.id)
+    const status = input => f.call('/status',{id:order.id,expectedUpdatedAt:order.updatedAt,commandId:crypto.randomUUID(),...input})
+    order = await status({status:'queued',deliveryAction:'assign',courierName:'Rider Ada',courierPhone:'08098765432'})
+    order = await status({status:'preparing'});order = await status({status:'ready'})
+    await assert.rejects(status({status:'ready',deliveryAction:'dispatch'}),/payment/)
+    const sale=recordPayment({id:counterSaleId(order.id),currency:order.currency,branchId:'main',total:order.total,items:counterItems(order),paymentMethod:'cash',paymentDetails:{amountReceived:order.total,pos:order.pos,counterOrder:{id:order.id,tillId:'till',diningOption:'Delivery'}}})
+    f.sales.push(sale)
+    await assert.rejects(status({status:'collected'}),/Dispatch/)
+    const dispatch={id:order.id,expectedUpdatedAt:order.updatedAt,commandId:'dispatch-once',status:'ready',deliveryAction:'dispatch'}
+    order=await f.call('/status',dispatch);const eventCount=order.events.length
+    assert.equal((await f.call('/status',dispatch)).events.length,eventCount)
+    assert.equal((await f.call('')).orders[0].deliveryTracking.status,'dispatched')
+    await assert.rejects(status({status:'ready',deliveryAction:'assign',courierName:'Other',courierPhone:'08012345678'}),/reassigned/)
+    order=await status({status:'collected'});assert.equal(order.deliveryTracking.status,'delivered')
+    assert.equal(order.deliveryTracking.courierName,'Rider Ada')
+  } finally { f.sqlite.close() }
+})

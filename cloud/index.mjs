@@ -25,7 +25,8 @@ import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { mailConfigured, mailDiagnostics, sendPosReceipt, sendBusinessRegistrationKey, sendPasswordReset } from './mailer.mjs'
+import { mailConfigured, mailDiagnostics, sendPosReceipt, sendBusinessRegistrationKey, sendPasswordReset, sendSupportRequest } from './mailer.mjs'
+import { submitSupportRequest } from './support-requests.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
 import { createRegistration, canIssueRegistrationKey } from './registration.mjs'
@@ -62,6 +63,7 @@ async function publishedRetail(businessId,settings){
  return retailCatalogue(rows.map(row=>row.payload),config,taxHead?.updatedAt||'')
 }
 const accounts = database.collection('accounts')
+const supportRequests = database.collection('support_requests')
 const devices = database.collection('devices')
 const passwordResets = database.collection('password_resets')
 const refreshTokens = database.collection('auth_refresh_tokens')
@@ -452,7 +454,7 @@ const server = createServer(async (request, response) => {
       const orderHeads = await entityHeads.find({ businessId: claims.businessId, entityType: 'pos_record', 'payload.kind': 'counter-order', 'payload.pos.customerId': claims.customerId }).sort({ updatedAt: -1 }).limit(100).toArray()
       const orders = await Promise.all(orderHeads.map(async head => {
         const payment = await operations.findOne({ businessId: claims.businessId, entityType: 'sale', entityId: counterSaleId(head.entityId) })
-        return { id: head.entityId, delivery:Boolean(head.payload.delivery), status: head.payload.source === 'customer-portal' && !head.payload.acceptedTillId && head.payload.status === 'queued' ? 'pending' : head.payload.status, total: head.payload.total, currency: head.payload.currency, createdAt: head.payload.createdAt, updatedAt: head.payload.updatedAt, lines: head.payload.lines.map(line => ({ name: line.name, quantity: line.quantity, options: line.options.map(option => option.name) })), paymentMethod: payment?.payload?.paymentMethod || head.payload.customerPaymentMethod || '', paymentReference: payment?.payload?.paymentReference || head.payload.customerPaymentReference || '', paymentPending: Boolean(['bank-transfer', 'wallet'].includes(head.payload.customerPaymentMethod) && !payment) }
+        return { id: head.entityId, delivery:Boolean(head.payload.delivery), deliveryStatus:head.payload.deliveryTracking?.status, status: head.payload.source === 'customer-portal' && !head.payload.acceptedTillId && head.payload.status === 'queued' ? 'pending' : head.payload.status, total: head.payload.total, currency: head.payload.currency, createdAt: head.payload.createdAt, updatedAt: head.payload.updatedAt, lines: head.payload.lines.map(line => ({ name: line.name, quantity: line.quantity, options: line.options.map(option => option.name) })), paymentMethod: payment?.payload?.paymentMethod || head.payload.customerPaymentMethod || '', paymentReference: payment?.payload?.paymentReference || head.payload.customerPaymentReference || '', paymentPending: Boolean(['bank-transfer', 'wallet'].includes(head.payload.customerPaymentMethod) && !payment) }
       }))
       return send(response, 200, { customer: { id: claims.customerId, name: customer.payload.name, phone: customer.payload.phone || '', balance: allTransactions.reduce((sum, row) => sum + row.amount, 0) }, transactions: allTransactions.slice(0, 50), orders, businessId: claims.businessId })
     }
@@ -709,6 +711,10 @@ const server = createServer(async (request, response) => {
       return send(response, 200, { ok: true })
     }
     if (!isDevice(claims)) return send(response, 403, { error: 'Device token required.' })
+    if (request.method === 'POST' && request.url === '/v1/support/requests') {
+      try { return send(response, 200, await submitSupportRequest({ collection: supportRequests, identity: claims, input: await readJson(request), sendMail: sendSupportRequest })) }
+      catch (error) { return send(response, 400, { error: error.message }) }
+    }
     if (request.url?.startsWith('/v1/pos-paystack/')) {
       try { return send(response, 200, await posPaystack({ businessId: claims.businessId, path: request.url, method: request.method, input: request.method === 'POST' ? await readJson(request) : {} })) }
       catch (error) { return send(response, 400, { error: error.message }) }
@@ -962,7 +968,7 @@ const server = createServer(async (request, response) => {
                   if(document.payload.status==='cancelled' && refunded<Math.round(state.paidAmount*100))throw new Error('Synchronize the full paid portion refund before cancelling this order.')
                 }
               }
-              if (document.payload.kind === 'counter-order' && document.payload.status === 'collected' && !document.payload.tableService && !await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })) throw new Error('Synchronize the order payment before handover.')
+              if (document.payload.kind === 'counter-order' && (document.payload.status === 'collected' || document.payload.action === 'delivery' && document.payload.deliveryAction === 'dispatch') && !document.payload.tableService && !await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })) throw new Error('Synchronize the order payment before handover or delivery dispatch.')
             } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message, localPayload: document.payload, remotePayload: current?.payload || {} }); continue }
           }
           if(document.entityType==='customer' && document.payload.birthday!==undefined){try{birthdayValue(document.payload.birthday)}catch(error){conflicts.push({operationId:document.operationId,reason:error.message});continue}}

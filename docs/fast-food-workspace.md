@@ -110,7 +110,7 @@ Manual printing uses the configured 58 mm or 80 mm receipt printer for payment r
 
 ## Order type and split payment
 
-In **New order > Customer and order details**, choose **Takeaway** (default), **Dine in**, or **Delivery**. This describes how to hand over the order; it does not add table billing or dispatch tracking. The saved order and preparation ticket retain the choice.
+In **New order > Customer and order details**, choose **Takeaway** (default), **Dine in**, or **Delivery**. This describes how to hand over the order; it does not add table billing. QR delivery orders use the delivery progress controls described below. The saved order and preparation ticket retain the choice.
 
 Use **Take payment > Payment Method > Split payment** when one order is paid using more than one method. Enter each cash, POS Terminal or Bank Transfer part; the parts must match the order total. If cash handed over exceeds its part, enter it to calculate change. Confirm external payment parts before saving. One receipt lists the parts; stock and ingredients are still charged only once.
 
@@ -122,7 +122,7 @@ Financial reports use the saved business reporting timezone, configured under Bu
 
 Under Business settings > Business, enter the public bank name, account name, account number and transfer instructions. Save and synchronize. The QR menu offers bank transfer only when all bank details are present; staff must still verify money received.
 
-Delivery is hidden until the owner enables it. Set a fixed delivery charge before tax, including zero for free delivery. QR customers must enter a phone number and complete address. The charge is included in the order total and receipt. Staff see the complete delivery details on the order and preparation ticket. This collects delivery information; it does not provide driver dispatch or location tracking. Local counter orders retain their existing handoff choices.
+Delivery is hidden until the owner enables it. Set a fixed delivery charge before tax, including zero for free delivery, or add delivery areas with their own charges. If areas exist, customers must choose a served area; the server captures its configured charge. QR customers must enter a phone number and complete address. The charge is included in the order total and receipt. Staff see the complete delivery details on the order and preparation ticket. Assign a delivery agent by name and phone, prepare the order, mark it ready, confirm payment, then choose **Dispatch delivery**. Customer tracking shows **Out for delivery** after synchronization. Choose **Complete delivery** when it arrives. Assignment, dispatch and completion are retained in order history; these controls work locally after acceptance and synchronization. This is recorded delivery progress, not GPS tracking. Agent reassignment is blocked after dispatch. Local counter orders retain their existing handoff choices.
 
 ## Food batch production
 

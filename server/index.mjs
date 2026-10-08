@@ -68,7 +68,7 @@ const server = createServer(async (request, response) => {
 
   if (request.url?.startsWith('/api/integrations/')) {
     if (!sessionUser(request)) return sendJson(response, 401, { error: 'Authentication required.' })
-    const paths = { '/api/integrations/paystack/config': '/v1/pos-paystack/config', '/api/integrations/paystack/presence': '/v1/pos-paystack/presence', '/api/integrations/paystack/start': '/v1/pos-paystack/start', '/api/integrations/paystack/verify': '/v1/pos-paystack/verify', '/api/integrations/receipts/send': '/v1/receipts/send' }
+    const paths = { '/api/integrations/paystack/config': '/v1/pos-paystack/config', '/api/integrations/paystack/presence': '/v1/pos-paystack/presence', '/api/integrations/paystack/start': '/v1/pos-paystack/start', '/api/integrations/paystack/verify': '/v1/pos-paystack/verify', '/api/integrations/receipts/send': '/v1/receipts/send', '/api/integrations/support/requests': '/v1/support/requests' }
     const upstreamPath = paths[request.url]
     if (!upstreamPath) return sendJson(response, 404, { error: 'Integration route not found.' })
     const forward = async input => {

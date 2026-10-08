@@ -541,7 +541,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return json((await db.query('SELECT p.id, p.name, p.sku, p.category, i.stock, i.reorder_point AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id = ? AND i.branch_id = ?', [stock[1], branchId])).values?.[0])
   }
   if (path.startsWith('/api/integrations/')) {
-    const routes: Record<string, string> = { '/api/integrations/paystack/config': '/v1/pos-paystack/config', '/api/integrations/paystack/presence': '/v1/pos-paystack/presence', '/api/integrations/paystack/start': '/v1/pos-paystack/start', '/api/integrations/paystack/verify': '/v1/pos-paystack/verify', '/api/integrations/receipts/send': '/v1/receipts/send' }
+    const routes: Record<string, string> = { '/api/integrations/paystack/config': '/v1/pos-paystack/config', '/api/integrations/paystack/presence': '/v1/pos-paystack/presence', '/api/integrations/paystack/start': '/v1/pos-paystack/start', '/api/integrations/paystack/verify': '/v1/pos-paystack/verify', '/api/integrations/receipts/send': '/v1/receipts/send', '/api/integrations/support/requests': '/v1/support/requests' }
     if (!routes[path]) return error('Integration route not found.', 404)
     const config = await getMobileSyncConfiguration()
     if (!config) return error('Connect this device to the cloud first.', 503)

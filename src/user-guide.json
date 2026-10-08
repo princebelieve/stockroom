@@ -80,7 +80,7 @@
       "Choose Order counter only or Tables & tabs only when that is your main workflow. The separate enable checkboxes can add these workflows to another screen selection.",
       "Select Save workspaces. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.",
       "For stock/product forms, use Choose template, Customize fields, then Preview and save. Review categories, unit, labels and custom fields before saving.",
-      "Set Reporting timezone to the business timezone, such as Africa/Lagos. Select Save reporting timezone, then Sync now. Businesses without a saved timezone default to UTC."
+      "Choose a city from the Reporting timezone dropdown, grouped by continent, such as Africa → Lagos. Check the UTC and local-time previews below the dropdown. Select Save reporting timezone, then Sync now. Existing saved timezones are retained until changed; businesses without a saved timezone default to UTC."
     ],
     "note": "Catalogue templates supply labels, categories and units; they do not add specialist operations such as hotel bookings or prescription dispensing. Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices."
   },
@@ -509,11 +509,21 @@
     "steps": [
       "As owner, open Business settings > Business. Enable online retail ordering and choose the products to publish. Save business settings and synchronize. Only selected products with positive selling prices are published; costs and stock counts stay private.",
       "Share the retail customer link under Business sign-in links, or its QR code. Mixed food/retail businesses use the retail link for stock products and the existing food link for menus.",
-      "Configure published bank details and optional fixed delivery charge. Customers can order as guests, request delivery and submit transfer references without Paystack verification. A transfer reference is a claim; staff must verify receipt of money.",
+      "Configure published bank details and optional fixed delivery charge or delivery-area prices. Customers can order as guests, request delivery and submit transfer references without Paystack verification. A transfer reference is a claim; staff must verify receipt of money.",
       "Open Online retail orders on the fulfilment branch (currently Main branch). Sign in as staff granted Product sales access, or Oil sales for an oil order. Accept the order while connected and sync it to this till.",
-      "Use the Picking queue to start picking and mark ready. Take payment on the accepted till, then hand over or complete delivery. Payment uses existing cash, transfer, terminal, split and owner-enabled wallet controls; stock is deducted once when payment is recorded.",
+      "Use the Picking queue to start picking and mark ready. Take payment on the accepted till. For delivery, assign an agent, mark ready, Dispatch delivery, then Complete delivery on arrival. Pickup orders use Hand over. Payment uses existing cash, transfer, terminal, split and owner-enabled wallet controls; stock is deducted once when payment is recorded.",
       "After acceptance and sync, picking and payment save locally through an outage. Sync when connected to update customer tracking. Online requests do not reserve stock; check actual availability before confirming payment."
     ],
     "note": "Retail online prices are the published product retail prices in base units. Walk-in pack, bulk and customer pricing remain in the selling workspaces. Online ordering and remote notifications need an internet connection; ordinary checkout remains offline first."
+  },
+  {
+    "id": "support-requests",
+    "title": "Contact support through Gmail",
+    "steps": [
+      "Open How to use the app > Contact Stockroom support > Send a support request. Enter your name, contact email, subject and what happened.",
+      "Drafts are saved on this device while offline. Press Send support request when connected. Keep the displayed reference.",
+      "If sending is interrupted, use Retry saved request. It retains the same reference. Support replies to your contact email; email and WhatsApp links remain available."
+    ],
+    "note": "The form requires an enrolled device and internet to send. It does not read your Gmail inbox. Do not include passwords or payment-card details."
   }
 ]

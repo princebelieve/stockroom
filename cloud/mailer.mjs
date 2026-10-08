@@ -81,12 +81,13 @@ function base64Lines(value) {
   return Buffer.from(String(value), 'utf8').toString('base64').replace(/.{1,76}/g, '$&\r\n').trimEnd()
 }
 
-function rawMessage({ to, subject, text, html }) {
+function rawMessage({ to, subject, text, html, replyTo = process.env.SUPPORT_REPLY_TO || 'support@sbi.globalcreest.com' }) {
   const safeHeader = value => String(value).replace(/[\r\n]+/g, ' ').trim()
   const boundary = `stockroom-${randomUUID()}`
   const parts = [
     `From: Stockroom Business <${safeHeader(process.env.GMAIL_USER)}>`,
     `To: ${safeHeader(to)}`,
+    `Reply-To: ${safeHeader(replyTo)}`,
     `Subject: ${safeHeader(subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
@@ -102,17 +103,24 @@ function rawMessage({ to, subject, text, html }) {
   return Buffer.from(parts.join('\r\n'), 'utf8').toString('base64url')
 }
 
-async function sendMail({ to, subject, text, html }) {
+async function sendMail({ to, subject, text, html, replyTo }) {
   if (!configured()) throw new Error('Email is not configured.')
   const token = await gmailAccessToken()
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw: rawMessage({ to, subject, text, html }) }),
+    body: JSON.stringify({ raw: rawMessage({ to, subject, text, html, replyTo }) }),
     signal: AbortSignal.timeout(12_000),
   })
   const result = await response.json().catch(() => ({}))
   if (!response.ok || !result.id) throw new Error(`Gmail API send failed (${response.status}): ${result.error?.message || 'no message id returned'}`)
+  return { messageId: result.id, threadId: result.threadId || '' }
+}
+
+export async function sendSupportRequest(ticket) {
+  return sendMail({ to: process.env.SUPPORT_EMAIL || 'support@sbi.globalcreest.com', replyTo: ticket.email,
+    subject: `[Stockroom ${ticket.reference}] ${ticket.subject}`,
+    text: `Support reference: ${ticket.reference}\nBusiness: ${ticket.businessId}\nContact: ${ticket.name} <${ticket.email}>\nDevice: ${ticket.deviceId}\nApp version: ${ticket.appVersion || 'not supplied'}\nPlatform: ${ticket.platform || 'not supplied'}\n\n${ticket.message}` })
 }
 
 export async function sendPasswordReset({ to, token }) {

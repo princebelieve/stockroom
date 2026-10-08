@@ -10,6 +10,7 @@ export function hasPermission(user,key){return Boolean(user&&(user.role==='owner
 export function screenPermission(screen){return {POS:'productSales',RetailOrders:'productSales',Oil:'oilSales',Payments:'payments',Counter:'counter',Restaurant:'restaurant',Register:'register',Wallet:'customers',Inventory:'inventory',Stocktake:'stocktake',Movements:'movements',Sales:'sales',Reports:'reports',Activity:'activity',Settings:'configuration',Device:'configuration',Sync:'configuration',Owner:'reports',Display:'productSales'}[screen]}
 export function routePermission(path,method='GET',input={}){
  path=path.split('?')[0]
+ if(path==='/api/integrations/support/requests')return null
  if(path.startsWith('/api/integrations/receipts/send'))return 'checkoutRead'
  if(path.startsWith('/api/integrations/paystack/')&& !path.endsWith('/config'))return 'checkoutRead'
  if(path.startsWith('/api/backups')||path.startsWith('/api/till-recovery'))return 'owner'
@@ -25,6 +26,7 @@ export function routePermission(path,method='GET',input={}){
  if(path.startsWith('/api/pos/service-jobs'))return 'serviceJobs'
  if(path.startsWith('/api/pos/stock-work'))return 'production'
  if(path.startsWith('/api/pos/church'))return 'church'
+ if(path.endsWith('/counter/status')&&input.deliveryAction)return path.startsWith('/api/pos/restaurant')?'restaurant':'counter'
  if(path.endsWith('/counter/status')&&['preparing','ready'].includes(input.status))return 'production'
  if(path.startsWith('/api/pos/restaurant/counter/menu')||path.startsWith('/api/pos/counter/menu')||path==='/api/pos/restaurant/layout'||path.startsWith('/api/pos/settings')||path==='/api/pos/receipt-settings')return 'configuration'
  if(path.startsWith('/api/pos/retail-orders'))return 'retailSelling'

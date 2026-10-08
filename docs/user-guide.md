@@ -102,7 +102,7 @@ This guide follows the current app screens. Availability depends on your workspa
 
 **Remember:** Business identity, currency and branch configuration are owner-only. Read expandable Help before enabling credit or retained-extra-payment rules.
 
-Owners can publish QR bank details and enable takeaway delivery with a fixed charge in Business settings. Save and synchronize. On Windows, Business backup and restore downloads encrypted backups or schedules daily backups to a chosen folder; restore requires the file password, owner password and RESTORE confirmation, and preserves current staff access.
+Owners can publish QR bank details and enable takeaway delivery with a fixed charge or delivery-area prices in Business settings. Save and synchronize. On Windows, Business backup and restore downloads encrypted backups or schedules daily backups to a chosen folder; restore requires the file password, owner password and RESTORE confirmation, and preserves current staff access.
 
 ## Business settings > Workspaces
 
@@ -111,7 +111,7 @@ Owners can publish QR bank details and enable takeaway delivery with a fixed cha
 3. Choose Order counter only or Tables & tabs only when that is your main workflow. The separate enable checkboxes can add these workflows to another screen selection.
 4. Select Save workspaces. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.
 5. For stock/product forms, use Choose template, Customize fields, then Preview and save. Review categories, unit, labels and custom fields before saving.
-6. Set Reporting timezone to the business timezone, such as Africa/Lagos. Select Save reporting timezone, then Sync now. Businesses without a saved timezone default to UTC.
+6. Choose a city from the Reporting timezone dropdown, grouped by continent, such as Africa → Lagos. Check the UTC and local-time previews below the dropdown. Select Save reporting timezone, then Sync now. Existing saved timezones are retained until changed; businesses without a saved timezone default to UTC.
 
 **Remember:** Catalogue templates supply labels, categories and units; they do not add specialist operations such as hotel bookings or prescription dispensing. Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices.
 
@@ -481,11 +481,15 @@ New Windows backups support compatible additive database updates. Older archives
 
 1. As owner, open Business settings > Business. Enable online retail ordering and choose the products to publish. Save business settings and synchronize. Only selected products with positive selling prices are published; costs and stock counts stay private.
 2. Share the retail customer link under Business sign-in links, or its QR code. Mixed food/retail businesses use the retail link for stock products and the existing food link for menus.
-3. Configure published bank details and optional fixed delivery charge. Customers can order as guests, request delivery and submit transfer references without Paystack verification. A transfer reference is a claim; staff must verify receipt of money.
+3. Configure published bank details and optional fixed delivery charge or delivery-area prices. Customers can order as guests, request delivery and submit transfer references without Paystack verification. A transfer reference is a claim; staff must verify receipt of money.
 4. Open Online retail orders on the fulfilment branch (currently Main branch). Sign in as staff granted Product sales access, or Oil sales for an oil order. Accept the order while connected and sync it to this till.
-5. Use the Picking queue to start picking and mark ready. Take payment on the accepted till, then hand over or complete delivery. Payment uses existing cash, transfer, terminal, split and owner-enabled wallet controls; stock is deducted once when payment is recorded.
+5. Use the Picking queue to start picking and mark ready. Take payment on the accepted till. For delivery, assign an agent, mark ready, Dispatch delivery, then Complete delivery on arrival. Pickup orders use Hand over. Payment uses existing cash, transfer, terminal, split and owner-enabled wallet controls; stock is deducted once when payment is recorded.
 6. After acceptance and sync, picking and payment save locally through an outage. Sync when connected to update customer tracking. Online requests do not reserve stock; check actual availability before confirming payment.
 
 **Remember:** Retail online prices are the published product retail prices in base units. Walk-in pack, bulk and customer pricing remain in the selling workspaces. Online ordering and remote notifications need an internet connection; ordinary checkout remains offline first.
 
 Owners can use How to use the app > Set up your business for a saved checklist that links to the existing workspace, staff and device tools. Setup, catalogue entry, training and troubleshooting assistance is available to request through the existing support contacts; support confirms availability and any charge.
+
+## Contact support through Gmail
+
+Open How to use the app > Contact Stockroom support > Send a support request. Enter your name, contact email, subject and what happened. Drafts stay on this device while offline; press Send support request when connected. Keep the displayed reference. If sending is interrupted, use Retry saved request to retain that reference. Support replies to your contact email. The form requires an enrolled device and does not read your Gmail inbox. Email and WhatsApp links remain available. Do not include passwords or payment-card details.
