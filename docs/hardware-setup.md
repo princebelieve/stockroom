@@ -2,7 +2,7 @@
 
 ## Reported operational testing and support
 
-On 2026-10-07, the product owner confirmed real transactions and successful use of an XPrinter, a LaserJet printer and a barcode scanner. These are reported operational tests, not missing capabilities. Exact models, connection types and test dates were not supplied in this session; record those in Devices together with the observed receipt/A4/scanner results. Existing device test records remain unchanged. No weighing scale has been selected yet.
+On 2026-10-07, the product owner confirmed real transactions and successful use of an XPrinter, a LaserJet printer and a barcode scanner. These are reported operational tests, not missing capabilities. The owner subsequently identified XPrinter DKT-M81 (supplied printing-speed figure: 230 mm/s), HP LaserJet P1102 (HP 85A / CE285A toner), and a 2D barcode scanner, model 8120. The speed figure is not a measured Stockroom benchmark. Connection types and individual test dates were not supplied; record those in Devices with the receipt/A4/scanner results. Existing device test records remain unchanged. No weighing scale has been selected yet.
 
 Support is available at [support@sbi.globalcreest.com](mailto:support@sbi.globalcreest.com), general enquiries at [info@sbi.globalcreest.com](mailto:info@sbi.globalcreest.com), and [WhatsApp +234 703 392 8277](https://wa.me/2347033928277). These contacts remain on the public welcome/legal pages and are now directly accessible in the in-app guide. No message is sent automatically.
 

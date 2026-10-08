@@ -74,7 +74,7 @@ footer { align-items: center; border-color: rgba(21, 60, 52, .14); }
 
 @media (max-width: 760px) {
   .brand img { width: 40px; height: 40px; }
-  .hero::before { width: 260px; height: 260px; top: 40px; right: -15%; }
+  .hero::before { width: 260px; height: 260px; top: 40px; right: 5%; }
   .preview { animation: none; box-shadow: 8px 12px 0 rgba(242, 161, 127, .42), 0 20px 36px rgba(21, 60, 52, .1); }
   #features article:hover, .installs article:hover { transform: none; }
   .registration > div:last-child { padding: 22px; }
@@ -104,5 +104,11 @@ header #main-nav>a.landing-register{background:#d5e95c;color:#17352d}
 header #main-nav>a.landing-register:hover{background:#e2f182}
 header .menu-toggle{background:#214b40;border-color:#467766;color:#fff}
 header summary:focus-visible{outline:3px solid #d5e95c;outline-offset:3px}
+header #main-nav a[aria-current="page"]{background:#286052;color:#fff;font-weight:700}
+.public-page-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+.public-page-tabs>a,.public-page-tabs>a:not(.small-button){display:inline-flex;padding:10px 14px;border:1px solid #b9c8b5;border-radius:8px;text-decoration:none;background:#fff;color:#173f35}
+.public-page-tabs>a[aria-current="page"]{background:#173f35;color:#fff}
+main>section>.grid article h2{font-size:24px;letter-spacing:-.4px}
+main>section>.grid article p{overflow-wrap:anywhere}
 @media(max-width:1050px) and (min-width:761px){header{flex-wrap:wrap;gap:14px}header #main-nav{justify-content:flex-start}}
 @media(max-width:760px){header{padding:18px 22px;gap:14px}header .brand{flex-shrink:1}header #main-nav{background:#17352d;border-color:#467766;gap:5px;align-items:stretch}header #main-nav>a,header #main-nav>a:not(.small-button){color:#dce9df;padding:12px}header #main-nav .landing-nav-group{width:100%}header #main-nav .landing-nav-group summary{justify-content:space-between;padding:12px}header #main-nav .landing-subnav{position:static;min-width:0;margin:4px 10px 8px;padding:0 0 0 10px;border:0;border-left:1px solid #467766;border-radius:0;background:transparent;box-shadow:none}header #main-nav .landing-subnav a{padding:10px;font-size:12px}header #main-nav a:hover,header #main-nav a:focus-visible{background:#286052;color:#fff}}

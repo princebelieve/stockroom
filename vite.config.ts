@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
     __STOCKROOM_WINDOWS_VERSION__: JSON.stringify(appPackage.version),
     __STOCKROOM_ANDROID_VERSION__: JSON.stringify(androidVersion),
   },
-  build: { target: 'es2022', rollupOptions: { input: { app: resolve('index.html'), welcome: resolve('welcome.html'), developer: resolve('developer.html'), visitor: resolve('visitor.html'), accountDeletion: resolve('account-deletion.html') } } },
+  build: { target: 'es2022', rollupOptions: { input: { app: resolve('index.html'), welcome: resolve('welcome.html'), developer: resolve('developer.html'), visitor: resolve('visitor.html'), accountDeletion: resolve('account-deletion.html'), 'features': resolve('features.html'), 'workspaces': resolve('workspaces.html'), 'hardware': resolve('hardware.html'), 'getting-started': resolve('getting-started.html'), 'downloads': resolve('downloads.html'), 'referrals': resolve('referrals.html'), 'support': resolve('support.html') } } },
   plugins: [react(), {
     name: 'local-receipt-ocr',
     configureServer(server) {
@@ -39,7 +39,7 @@ export default defineConfig(({ mode }) => {
   }, {
     name: 'offline-shell',
     writeBundle(options, bundle) {
-      const assets = ['/', '/welcome', '/developer', '/visitor', '/privacy', '/terms', '/account-deletion', '/manifest.webmanifest', '/icon.svg', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', ...Object.keys(bundle).filter(name => !['index.html', 'welcome.html', 'developer.html', 'visitor.html', 'account-deletion.html'].includes(name)).map(name => `/${name}`)]
+      const assets = ['/', '/features', '/workspaces', '/hardware', '/getting-started', '/downloads', '/referrals', '/support', '/welcome', '/developer', '/visitor', '/privacy', '/terms', '/account-deletion', '/manifest.webmanifest', '/icon.svg', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', ...Object.keys(bundle).filter(name => !['index.html', 'welcome.html', 'developer.html', 'visitor.html', 'account-deletion.html'].includes(name)).map(name => `/${name}`)]
       const hash = createHash('sha256').update(JSON.stringify(assets)).update(readFileSync(resolve(options.dir || 'dist', 'index.html'))).update(readFileSync(resolve(options.dir || 'dist', 'welcome.html'))).update(readFileSync(resolve(options.dir || 'dist', 'developer.html'))).update(readFileSync(resolve(options.dir || 'dist', 'visitor.html'))).update(readFileSync(resolve(options.dir || 'dist', 'account-deletion.html'))).update(readFileSync(resolve(options.dir || 'dist', 'privacy.html'))).update(readFileSync(resolve(options.dir || 'dist', 'terms.html'))).digest('hex').slice(0, 16)
       // A unique shell name lets a newly deployed worker discard every older
       // app shell. Keep this in sync with the declaration in public/sw.js,

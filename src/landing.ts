@@ -1,5 +1,7 @@
 import './landing.css'
 import './landing-effects.css'
+import { publicNavigation } from './publicNavigation'
+publicNavigation()
 
 const menuButton = document.getElementById('landing-menu-toggle') as HTMLButtonElement | null
 const mainNav = document.getElementById('main-nav')
@@ -9,6 +11,7 @@ if (menuButton && mainNav) {
   menuButton.addEventListener('click', () => {
     const open = menuButton.getAttribute('aria-expanded') !== 'true'
     menuButton.setAttribute('aria-expanded', String(open)); menuButton.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu'); mainNav.classList.toggle('open', open)
+    if (open) mainNav.querySelector<HTMLElement>('a,summary')?.focus()
   })
   mainNav.querySelectorAll<HTMLDetailsElement>('details').forEach(group => {
     group.addEventListener('toggle', () => { if (group.open) mainNav.querySelectorAll<HTMLDetailsElement>('details').forEach(other => { if (other !== group) other.open = false }) })
@@ -17,12 +20,24 @@ if (menuButton && mainNav) {
     if (event.target instanceof Node && !mainNav.contains(event.target) && !menuButton.contains(event.target)) closeMenu()
   }, true)
   mainNav.addEventListener('click', event => { if ((event.target as HTMLElement).closest('a')) closeMenu() })
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu() })
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && (mainNav.contains(document.activeElement) || menuButton.getAttribute('aria-expanded') === 'true')) {
+      const group = document.activeElement?.closest('details')
+      closeMenu()
+      if (menuButton.getClientRects().length) menuButton.focus()
+      else group?.querySelector<HTMLElement>('summary')?.focus()
+    }
+    if (event.key !== 'Tab' || menuButton.getAttribute('aria-expanded') !== 'true') return
+    const items = [menuButton, ...mainNav.querySelectorAll<HTMLElement>('a[href],summary')].filter(item => item.getClientRects().length)
+    if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1)?.focus() }
+    else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); menuButton.focus() }
+  })
+  window.addEventListener('resize', () => { if (!window.matchMedia('(max-width:760px)').matches) closeMenu() })
 }
 
 const appUrl = import.meta.env.VITE_PUBLIC_APP_URL || 'https://stockroom.globalcreest.com/'
 const cloud = __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
-const text = (id: string, value: string) => { document.getElementById(id)!.textContent = value }
+const text = (id: string, value: string) => { const target = document.getElementById(id); if (target) target.textContent = value }
 if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   const animated = document.querySelectorAll('.hero > div, #features article, .offline > div, .installs article, .referrals > div, .registration > div')
   const observer = new IntersectionObserver(entries => {
@@ -41,6 +56,7 @@ for (const [id, configured, label] of [['apk', import.meta.env.VITE_APK_DOWNLOAD
     const url = new URL(configured)
     if (url.protocol !== 'https:') continue
     const link = document.getElementById(id) as HTMLAnchorElement
+    if (!link) continue
     link.href = url.href; link.removeAttribute('aria-disabled'); link.textContent = label
     text(`${id}-note`, id === 'desktop' ? 'Download and open the installer, then follow the installation steps.' : 'Download the APK and follow Android’s install prompts.')
   } catch { /* Downloads remain visibly unavailable until configured. */ }
@@ -50,7 +66,7 @@ window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault(); installPrompt = event as typeof installPrompt
   text('pwa', 'Install PWA')
 })
-document.getElementById('pwa')!.addEventListener('click', async () => {
+document.getElementById('pwa')?.addEventListener('click', async () => {
   if (!installPrompt) { location.assign(appUrl); return }
   const prompt = installPrompt; installPrompt = null
   try { await prompt.prompt(); await prompt.userChoice } finally { text('pwa', 'Open PWA') }
@@ -93,7 +109,7 @@ async function loadReferralRates() {
       : 'Visitor promoter rewards are only partly configured; contact the developer before sharing a link.'
   text('visitor-referral-status', visitorStatus)
 }
-void loadReferralRates().catch(async () => {
+if (document.getElementById('owner-referral-status')) void loadReferralRates().catch(async () => {
   text('owner-referral-status', 'Could not load the business-owner reward percentages.')
   text('visitor-referral-status', 'Could not check whether visitor promoter rewards have been set.')
   await new Promise(resolve => setTimeout(resolve, 2500))
@@ -108,5 +124,6 @@ for (const [id, screen] of [['register-app', 'register'], ['subscription-app', r
   const destination = new URL(appUrl)
   destination.searchParams.set('screen', screen)
   if (/^[a-f0-9]{32}$/.test(referral)) destination.searchParams.set('ref', referral)
-  ;(document.getElementById(id) as HTMLAnchorElement).href = destination.href
+  const link = document.getElementById(id) as HTMLAnchorElement | null
+  if (link) link.href = destination.href
 }

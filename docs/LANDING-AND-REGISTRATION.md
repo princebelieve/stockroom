@@ -4,7 +4,9 @@ This updates the existing Render service and Vercel project; do not create a sec
 
 The public page is available after deployment at `https://stockroom.globalcreest.com/welcome` using the app's existing domain. Vercel clean URLs hide the `.html` suffix. This works without adding another domain. `sbi.globalcreest.com` already serves a separate website and should remain attached to that deployment.
 
-The build contains the main app plus public landing, developer, visitor and account-deletion entry points. The two ordinary customer URLs are:
+Public navigation now opens separate pages: `/features`, `/workspaces`, `/hardware`, `/getting-started`, `/downloads`, `/referrals` and `/support`. Each has its own HTML entry, title and content; the shared navigation lives in `src/publicNavigation.ts`. Vercel clean URLs and the Windows server serve these destinations directly. The offline shell includes them, and referral codes are retained when moving between public pages. Account registration, subscriptions and authenticated wallets remain in their existing applications. Device information lists the owner-tested DKT-M81, HP LaserJet P1102 and model 8120 scanner; the supplied 230 mm/s figure is identified as printer speed rather than paper weight or a measured app benchmark.
+
+The build contains the main app, the separate public information pages, and developer, visitor and account-deletion entry points. The two primary customer URLs are:
 
 - `https://stockroom.globalcreest.com/welcome`: public landing page for Stockroom Business by S. B. Ibhadode technology.
 - `https://stockroom.globalcreest.com/`: existing PWA and sign-in page.

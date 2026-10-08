@@ -25,6 +25,12 @@
 .visitor-portal .portal-nav button,.visitor-portal .portal-nav>a{padding:12px;border-radius:8px;font-size:14px;color:#9eb5a9;gap:12px;width:100%}
 .visitor-portal .portal-nav button.active,.visitor-portal .portal-nav button:hover,.visitor-portal .portal-nav a:hover{background:#286052;color:#fff}
 .visitor-nav-group{display:grid;gap:3px}
+.customer-portal .visitor-subnav{display:grid;gap:2px;margin:0 0 4px 30px;padding-left:10px;border-left:1px solid #467766}
+.customer-portal .visitor-subnav a{padding:8px;font-size:12px;color:#bdd5ca}
+.customer-portal .nav-disclosure{margin-left:auto}
+.customer-portal [id^="customer-"]{scroll-margin-top:100px}
+.customer-portal .portal-nav :focus-visible{outline:2px solid #d5e95c;outline-offset:2px}
+@media(max-width:650px){.customer-portal .portal-sidebar{width:min(300px,85vw)}.customer-portal .portal-top{height:auto;min-height:76px;gap:10px;padding-block:10px;flex-wrap:wrap}.customer-portal .portal-top>.portal-actions{flex:1;flex-wrap:nowrap}.customer-portal .portal-top h1{font-size:16px}.customer-portal .portal-top p{font-size:11px}}
 .visitor-nav-chevron{margin-left:auto;transition:transform .2s}
 .visitor-nav-chevron.expanded{transform:rotate(180deg)}
 .visitor-portal .visitor-subnav{display:grid;gap:2px;margin:0 0 4px 30px;padding-left:10px;border-left:1px solid #467766}
@@ -36,6 +42,8 @@
 .visitor-portal .portal-nav :focus-visible,.visitor-portal .portal-sidebar-foot button:focus-visible{outline:2px solid #d5e95c;outline-offset:2px}
 .visitor-portal [id^="visitor-"]{scroll-margin-top:96px}
 .visitor-nav-backdrop{display:none}
+@media(max-width:650px){.customer-portal .portal-sidebar:not(.open),.visitor-portal .portal-sidebar:not(.open){visibility:hidden}}
+@media(max-width:650px){.developer-portal .portal-sidebar:not(.open){visibility:hidden}}
 @media(max-width:650px){.visitor-nav-backdrop{display:block;position:fixed;inset:0;z-index:6;background:#102b2580;border:0}.visitor-portal .portal-sidebar{width:min(300px,85vw)}.visitor-portal .portal-top{height:auto;min-height:64px;gap:8px;padding-block:10px;flex-wrap:wrap}.visitor-portal .portal-top>.portal-actions{flex:1;flex-wrap:nowrap}.visitor-portal .portal-top p{font-size:10px}.visitor-portal .portal-top h1{font-size:16px}}
 @media(prefers-reduced-motion:reduce){.visitor-portal .portal-sidebar,.visitor-nav-chevron{transition:none}.visitor-portal{scroll-behavior:auto}}
 

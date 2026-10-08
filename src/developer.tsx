@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Building2, ChartNoAxesCombined, CircleDollarSign, FileText, KeyRound, LogOut, Menu, Settings2, Users, WalletCards } from 'lucide-react'
 import { moneyMinor, ownerPortalKeys, portalRequest, portalSignIn } from './lib/portalApi'
+import { usePortalMenu } from './lib/usePortalMenu'
 import './portal.css'
 
 type Overview = { registeredBusinesses: number; referredBusinesses: number; visitorPromoters: number; automaticTransfersEnabled: boolean; businesses: Business[]; referrers: Referrer[]; payouts: Payout[] }
@@ -22,9 +23,7 @@ function DeveloperPortal() {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('')
   const [signedIn, setSignedIn] = useState(false); const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false); const [businessFilter, setBusinessFilter] = useState('')
-  const menuRef = useRef<HTMLElement>(null)
-  const menuToggleRef = useRef<HTMLButtonElement>(null)
+  const {open:menuOpen,setOpen:setMenuOpen,menu:menuRef,toggle:menuToggleRef} = usePortalMenu(); const [businessFilter,setBusinessFilter] = useState('')
   useEffect(() => {
     if (!menuOpen) return
     const closeOutside = (event: PointerEvent) => {

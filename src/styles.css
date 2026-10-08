@@ -570,6 +570,11 @@ body { background: #dfece5; }
 @media(max-width: 900px) { .counter-entry-grid { grid-template-columns: minmax(0,1fr); } }
 
 .sidebar-section-label { margin: 18px 12px 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #aac5bc; }
+.sidebar .navigation-section{width:100%;min-width:0}
+.sidebar .navigation-section>summary{margin:12px 0 5px;padding:9px 12px;color:#aac5bc;font-size:12px;font-weight:700;cursor:pointer}
+.sidebar .navigation-section>div{display:grid;gap:5px}
+.sidebar .navigation-section>summary:focus-visible{outline:2px solid #d5e95c;outline-offset:2px;border-radius:6px}
+@media(max-width:650px){.sidebar:not(.mobile-menu-open){visibility:hidden}}
 
 .transaction-options, .order-actions { margin: 14px 0; padding: 12px; border: 1px solid var(--border, #dce3e8); border-radius: 10px; }
 .transaction-options > summary, .order-actions > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }

@@ -20,7 +20,7 @@ Stockroom Business is an offline-first business operations app for organizations
 - **Subscriptions and referrals:** owners can manage subscription payments and share business invitations. Visitor promoters can create an account, share a tracked link, and review verified rewards in their wallet.
 - **Account closure:** owners can close the business; staff have no account-deletion control; visitor promoters can close their promoter account. The waiting period defaults to 14 days. Offline device copies are not remotely erased. The confirmation screen explains the effects and offers Cancel and a red confirmation button.
 
-Support: [support@sbi.globalcreest.com](mailto:support@sbi.globalcreest.com), [info@sbi.globalcreest.com](mailto:info@sbi.globalcreest.com), [WhatsApp +234 703 392 8277](https://wa.me/2347033928277). The product owner reports successful XPrinter, LaserJet and barcode-scanner use with real transactions; exact model evidence can be retained through Devices.
+Support: [support@sbi.globalcreest.com](mailto:support@sbi.globalcreest.com), [info@sbi.globalcreest.com](mailto:info@sbi.globalcreest.com), [WhatsApp +234 703 392 8277](https://wa.me/2347033928277). The owner confirmed real transactions using XPrinter DKT-M81, HP LaserJet P1102 (HP 85A / CE285A toner) and a model 8120 2D barcode scanner. Connection and test records can be retained through Devices. Public Features, Workspaces, Devices, Getting Started, Downloads, Referrals and Support pages explain the current product through shared navigation.
 
 See [hardware setup](docs/hardware-setup.md), [subscription behavior](docs/subscriptions.md), and [PWA deployment and platform limitations](PWA-DEPLOYMENT.md) for details.
 

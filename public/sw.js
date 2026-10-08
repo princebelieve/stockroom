@@ -44,7 +44,9 @@ self.addEventListener('fetch', event => {
     // have. The replacement worker is activated immediately and reloads the
     // client, so cache-first navigation does not leave the app on an old
     // release once the new shell is ready.
-    const shellUrl = ['/welcome', '/welcome.html'].includes(url.pathname) ? '/welcome'
+    const publicPages = ['features','workspaces','hardware','getting-started','downloads','referrals','support']
+    const publicPage = publicPages.find(page => url.pathname === '/' + page || url.pathname === '/' + page + '.html')
+    const shellUrl = publicPage ? '/' + publicPage : ['/welcome', '/welcome.html'].includes(url.pathname) ? '/welcome'
       : ['/developer', '/developer.html'].includes(url.pathname) ? '/developer'
         : ['/visitor', '/visitor.html'].includes(url.pathname) ? '/visitor' : '/'
     event.respondWith(caches.open(CACHE_NAME).then(async cache => {

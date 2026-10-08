@@ -13,6 +13,8 @@ import { BusinessBackup } from './BusinessBackup'
 import { TillRecovery } from './TillRecovery'
 import { businessDate, businessDayStart, nextBusinessDate } from '../server/report-timezone.mjs'
 import { RemoveStaffButton } from './RemoveStaffButton'
+import { usePortalMenu } from './lib/usePortalMenu'
+import { NavigationSection } from './NavigationSection'
 import { OrderDocument, type PrintableOrder } from './OrderDocument'
 import { PosProviderSelect } from './PosProviderSelect'
 import { lazy, Suspense } from 'react'
@@ -288,9 +290,7 @@ function App() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const mobileMenuRef = useRef<HTMLElement>(null)
-  const mobileMenuToggleRef = useRef<HTMLButtonElement>(null)
+  const {open:mobileMenuOpen,setOpen:setMobileMenuOpen,menu:mobileMenuRef,toggle:mobileMenuToggleRef} = usePortalMenu()
   useEffect(() => {
     if (!mobileMenuOpen) return
     const closeOutside = (event: PointerEvent) => {
@@ -1869,12 +1869,12 @@ function App() {
 
   return <div className="app-shell">
     {(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
-    <button ref={mobileMenuToggleRef} className="mobile-nav-toggle" type="button" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}><Menu size={22} /></button>
+    <button ref={mobileMenuToggleRef} className="mobile-nav-toggle" type="button" aria-controls="business-navigation" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}><Menu size={22} /></button>
     {mobileMenuOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />}
-    <aside ref={mobileMenuRef} className={`sidebar${mobileMenuOpen ? ' mobile-menu-open' : ''}`}>
+    <aside ref={mobileMenuRef} id="business-navigation" className={`sidebar${mobileMenuOpen ? ' mobile-menu-open' : ''}`}>
       <div className="brand"><div className="brand-mark">{logoData ? <img src={logoData} alt="" className="brand-logo" /> : <Boxes size={21} />}</div><div><strong>{appName}</strong><span>Business operations</span></div></div>
-      <nav onClick={(event) => { if (!(event.target as HTMLElement).closest('.sidebar-nav-group')) setMobileMenuOpen(false) }}>
-        <p className="sidebar-section-label">Daily work</p>
+      <nav onClick={(event) => { const item = (event.target as HTMLElement).closest('a,button'); if (item && !item.hasAttribute('aria-expanded')) setMobileMenuOpen(false) }}>
+        <NavigationSection title="Daily work" active={active} screens={["Overview","Restaurant","RetailOrders","Counter","Oil","POS","Payments","Register"]}>
         {canManageOperations && screenAllowedForUser('Overview',user) && <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}><LayoutDashboard size={18} />Overview</button>}
         {workspace.restaurant && screenAllowedForUser('Restaurant',user) && <button className={active === 'Restaurant' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Restaurant')}><Store size={18} />Tables &amp; tabs</button>}
         {workspace.stock && screenAllowedForUser('RetailOrders',user) && <button className={active==='RetailOrders'?'nav-item active':'nav-item'} onClick={()=>setActive('RetailOrders')}><Store size={18}/>Online retail orders</button>}
@@ -1883,7 +1883,7 @@ function App() {
         {workspace.productSales && screenAllowedForUser('POS',user) && <button className={active === 'POS' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('POS')}><ShoppingCart size={18} />{salesWorkspaceName}</button>}
         {workspace.payments && screenAllowedForUser('Payments',user) && <button className={active === 'Payments' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Payments')}><WalletCards size={18} />Payments &amp; receipts</button>}
         {screenAllowedForUser('Register',user)&&<button className={active==='Register'?'nav-item active':'nav-item'} onClick={()=>setActive('Register')}><WalletCards size={18}/>Cash register</button>}
-        {canManageOperations && <p className="sidebar-section-label">Records and management</p>}
+        </NavigationSection><NavigationSection title="Records and management" active={active} screens={["Sales","Inventory","Stocktake","Display","Movements","Wallet","Owner","Reports","Activity","Sync"]}>
         {canManageOperations && screenAllowedForUser('Sales',user) && <div className="sidebar-nav-group"><button className={active === 'Sales' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Sales'} onClick={() => { setActive('Sales'); setExpandedSidebarGroup(group => group === 'Sales' ? null : 'Sales') }}><ShoppingCart size={18} />Sales history <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Sales' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Sales' && <div className="sidebar-subnav"><a href="#sales-receipt-history" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-receipt-history') }}>Receipt history</a><a href="#sales-void-history" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-void-history') }}>Voided items</a><a href="#sales-payment-evidence" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-payment-evidence') }}>Payment evidence</a><a href="#sales-history" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-history') }}>Sales history</a><a href="#sales-reconciliation" onClick={event => { event.preventDefault(); navigateToSection('Sales', 'sales-reconciliation') }}>Match payments</a></div>}</div>}
         {workspace.stock && canManageOperations && screenAllowedForUser('Inventory',user) && <button className={active === 'Inventory' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Inventory')}><Boxes size={18} />{shopProfile.inventoryLabel} <b>{products.length}</b></button>}
         {workspace.stock && canManageInventory && screenAllowedForUser('Stocktake',user) && <button className={active === 'Stocktake' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Stocktake')}><CheckSquare size={18} />Stock count</button>}
@@ -1894,14 +1894,14 @@ function App() {
         {screenAllowedForUser('Reports',user) && <button className={active === 'Reports' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Reports')}><BarChart3 size={18} />Reports</button>}
         {screenAllowedForUser('Activity',user) && <button className={active === 'Activity' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Activity')}><UserRoundCog size={18} />Staff activity</button>}
         {screenAllowedForUser('Sync',user) && <button className={active === 'Sync' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Sync')}><RefreshCw size={18} />Sync issues {syncConflicts.length > 0 && <b>{syncConflicts.length}</b>}</button>}
-        {user.role === 'owner' && <div className="sidebar-nav-group"><button className={active === 'Team' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Team'} onClick={() => { setActive('Team'); setExpandedSidebarGroup(group => group === 'Team' ? null : 'Team') }}><UserRoundCog size={18} />Staff & access <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Team' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Team' && <div className="sidebar-subnav"><a href="#team-cashier-activity" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-cashier-activity') }}>Cashier activity</a><a href="#team-members" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-members') }}>Team members</a><a href="#team-add-staff" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-add-staff') }}>Add staff</a>{staff.some(member => member.role === 'cashier' || member.role === 'admin') && <a href="#team-password-recovery" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-password-recovery') }}>Staff passwords</a>}</div>}</div>}
+        </NavigationSection><NavigationSection title="Account and setup" active={active} screens={["Team","Subscription","Account","Guide","Settings","Device"]}>{user.role === 'owner' && <div className="sidebar-nav-group"><button className={active === 'Team' ? 'nav-item active' : 'nav-item'} aria-expanded={expandedSidebarGroup === 'Team'} onClick={() => { setActive('Team'); setExpandedSidebarGroup(group => group === 'Team' ? null : 'Team') }}><UserRoundCog size={18} />Staff & access <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Team' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Team' && <div className="sidebar-subnav"><a href="#team-cashier-activity" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-cashier-activity') }}>Cashier activity</a><a href="#team-members" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-members') }}>Team members</a><a href="#team-add-staff" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-add-staff') }}>Add staff</a>{staff.some(member => member.role === 'cashier' || member.role === 'admin') && <a href="#team-password-recovery" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-password-recovery') }}>Staff passwords</a>}</div>}</div>}
         {user.role === 'owner' && <button className={active === 'Subscription' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Subscription')}><WalletCards size={18} />Subscription</button>}
         {user.role === 'owner' && <button className={active === 'Account' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Account')}><Trash2 size={18} />Close business account</button>}
         <button className={active==='Guide'?'nav-item active':'nav-item'} onClick={()=>setActive('Guide')}><BookOpen size={18}/>How to use the app</button>
-        <a className="nav-item" href="https://stockroom.globalcreest.com/welcome#install" target="_blank" rel="noreferrer"><Download size={18} />Download / install Stockroom</a>
+        <a className="nav-item" href="https://stockroom.globalcreest.com/downloads" target="_blank" rel="noreferrer"><Download size={18} />Download / install Stockroom</a>
 
         {screenAllowedForUser('Settings',user) && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} onClick={() => {setSettingsTab(user.role==='owner'?'business':'devices');setActive('Settings')}}><UserRoundCog size={18} />Business settings</button>}
-      </nav>
+      </NavigationSection></nav>
       <div className="sidebar-foot pwa-sync-controls"><div className={online && syncStatus.configured ? 'sync-status sync-ready' : 'sync-status offline'}>{online && syncStatus.configured ? <Wifi size={16} /> : <CloudOff size={16} />}<span>{online && syncStatus.configured ? `Cloud sync ready${syncStatus.pending ? ` · ${syncStatus.pending} queued` : ''}` : online ? 'Cloud sync not configured' : 'Offline · saved locally'}</span></div><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Upload local changes and download business updates"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button><p className="sync-feedback" role="status" aria-live="polite">{syncFeedback}</p><small>{syncStatus.lastError || (syncConflicts.length ? `${syncConflicts.length} change${syncConflicts.length === 1 ? '' : 's'} need review.` : online ? 'Sales are always saved locally first.' : 'Changes will sync when internet returns.')}</small></div>
       <div className="sidebar-subscription-actions">
         {user.role === 'owner' && <button type="button" className={subscriptionButtonClass} onClick={() => setActive('Subscription')} aria-label={subscriptionButtonLabel}>

@@ -1,5 +1,7 @@
 # Desktop checkout and navigation review
 
+The business sidebar groups Daily work, Records and management, and Account and setup into expandable sections. Existing role and permission checks still determine which links appear. Sales history and Staff & access keep their existing nested shortcuts. Customer navigation adds expandable Wallet and Order online shortcuts, including balance/activity and items/basket destinations. Visitor referrals and wallet/payout groups remain expandable. Mobile menus across business, customer, visitor and developer workspaces support Escape, keyboard focus containment and focus return; closed mobile sidebars are hidden from keyboard navigation. Public navigation opens separate information pages, documented in [public website setup](LANDING-AND-REGISTRATION.md).
+
 This review records the desktop checkout layout. For current workspace/configuration locations, see [workspaces](workspaces.md) and [user guide](user-guide.md).
 
 The desktop register has two steps. Add products with a smaller catalogue beside a wider basket. Choose **Take payment** to replace the catalogue with payment inputs beside the basket. **Back to products** preserves the basket and payment entries. The register uses the available desktop width rather than the general dashboard's wide side margins.
