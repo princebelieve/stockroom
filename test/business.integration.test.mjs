@@ -66,6 +66,23 @@ after(async () => {
   await Promise.all(tempDirectories.map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
+test('branch operations cannot fall back to Main when every branch is inactive', async () => {
+  const { baseUrl, dataDirectory } = await startBusiness()
+  const token = await createOwner(baseUrl)
+  const item = await product(baseUrl, token, 5)
+  const db = new DatabaseSync(join(dataDirectory, 'stockroom.sqlite'))
+  try { db.prepare('UPDATE branches SET is_active=0').run() } finally { db.close() }
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  assert.equal((await json(`${baseUrl}/api/products`, { headers })).response.status,403)
+  const sale = await json(`${baseUrl}/api/sales`, { method:'POST',headers,body:JSON.stringify({items:[{productId:item.id,quantity:1,price:10}],total:10,paymentMethod:'cash'}) })
+  assert.equal(sale.response.status,403)
+  assert.match(sale.body.error,/No active shop branch/)
+  assert.equal((await json(`${baseUrl}/api/branches`,{headers})).response.status,200)
+  const snapshot = new DatabaseSync(join(dataDirectory,'stockroom.sqlite'))
+  try { assert.equal(snapshot.prepare('SELECT stock FROM branch_inventory WHERE branch_id=? AND product_id=?').get('main',item.id).stock,5) } finally { snapshot.close() }
+  assert.equal((await fetch(`${baseUrl}/api/auth/logout`,{method:'POST',headers})).status,204)
+})
+
 test('expired subscriptions reject sales without changing stock; developer test mode restores POS', async () => {
   const entitlement = { testMode: false, expiresAt: '2000-01-01T00:00:00Z' }
   const { baseUrl } = await startBusiness({ entitlement })

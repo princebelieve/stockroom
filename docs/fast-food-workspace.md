@@ -1,5 +1,7 @@
 # Order counter workspace
 
+For the original-versus-refactored frontend and backend comparison, rendered screenshots, verified workflows and remaining acceptance limits, see [Refactor comparison](refactor-comparison.md).
+
 Fast food is a separate, optional workspace for counter-service orders. Enabling it does not add menu or preparation controls to supermarket checkout.
 
 The workspace also includes Inventory, Purchasing, Stock count, Stock movements and stock reports for ingredients and packaged goods. Owners and administrators can receive supplier deliveries, track batch costs and expiry dates, and record wastage without enabling Product sales.

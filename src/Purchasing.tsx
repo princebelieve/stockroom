@@ -33,8 +33,8 @@ export function Purchasing({ headers, products, branchId, businessId, refresh, o
     try {
       const response = await fetch('/api/retail', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(pending) })
       const result = await response.json()
-      if (!response.ok) { remember(null); throw new Error(result.error || 'Could not save purchasing changes.') }
-      remember(null); setLines([blank()]); await reload(); await refresh() }
+      if (!response.ok) { if(response.status<500) remember(null); throw new Error(result.error || 'Could not save purchasing changes.') }
+      remember(null); setLines([blank()]); await reload(); await refresh(); if(pending.kind==='supplier')setView('suppliers'); else if(pending.kind==='receipt')setView('history') }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save purchasing changes.'); throw caught }
   }
   const suppliers = records.filter(row => row.kind === 'supplier')

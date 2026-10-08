@@ -1,4 +1,5 @@
 import { canRequest, hasPermission } from './staff-permissions.mjs'
+import { isBranchOperation, hasActiveBranchAccess } from './branch-access.mjs'
 import { updateCustomerBirthday, setStaffPermissions } from './db.mjs'
 import { cloudSetStaffPermissions } from './cloud-auth.mjs'
 import { backupSnapshot, encryptBackup, decryptBackup, restoreSnapshot } from './business-backup.mjs'
@@ -84,6 +85,11 @@ const server = createServer(async (request, response) => {
   }
   const accessUser=sessionUser(request)
   if(accessUser && (request.url!=='/api/sales' || request.method!=='POST') && !canRequest(accessUser,request.url||'',request.method))return sendJson(response,403,{error:'The owner has not granted access to this operation.'})
+  // Configuration and sign-in remain available so the owner can restore access.
+  // Never fall through to Main branch for transactions when no active branch is permitted.
+  if (accessUser && isBranchOperation(request.url || '') && !hasActiveBranchAccess(accessUser,listBranches())) {
+    return sendJson(response,403,{error:'No active shop branch is assigned to this account. Ask the owner to check branch access.'})
+  }
   if (request.url?.startsWith('/api/pos')) {
     const user = sessionUser(request)
     if (!user) return sendJson(response, 401, { error: 'Authentication required.' })

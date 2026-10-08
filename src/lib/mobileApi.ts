@@ -1,4 +1,5 @@
 import { birthdayValue } from '../../server/customer-birthdays.mjs'
+import { isBranchOperation } from '../../server/branch-access.mjs'
 import { parsePermissions, canRequest, hasPermission } from '../../server/staff-permissions.mjs'
 import { conflictReview, conflictReviewSchema } from '../../server/sync-conflict-review.mjs'
 import { requiresChurchSync } from '../../server/church-ledger.mjs'
@@ -413,7 +414,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   const requestedBranchId = new Headers(init?.headers).get('X-Stockroom-Branch') || 'main'
   const allBranches = (await db.query('SELECT id, name, address, is_default AS isDefault, is_active AS isActive, assigned_user_ids AS assignedUserIds, created_at AS createdAt, updated_at AS updatedAt FROM branches ORDER BY is_default DESC, name')).values || []
   const permittedBranches = allBranches.filter(branch => user.role === 'owner' || !(JSON.parse(String(branch.assignedUserIds || '[]') || '[]') as string[]).length || (JSON.parse(String(branch.assignedUserIds || '[]') || '[]') as string[]).includes(user.id))
-  if (user.role !== 'owner' && !permittedBranches.some(branch => Number(branch.isActive))) return error('No active shop branch is assigned to this account.', 403)
+  if (isBranchOperation(path) && !permittedBranches.some(branch => Number(branch.isActive))) return error('No active shop branch is assigned to this account. Ask the owner to check branch access.', 403)
   const branchId = (permittedBranches.find(branch => branch.id === requestedBranchId && Number(branch.isActive)) || permittedBranches.find(branch => Number(branch.isActive)))?.id || 'main'
   if (path === '/api/branches' && method === 'GET') return json({ branches: permittedBranches })
   if (path === '/api/branches' && method === 'POST') {
