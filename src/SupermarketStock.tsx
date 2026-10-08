@@ -1,3 +1,4 @@
+import { WorkspaceHelp } from './WorkspaceHelp'
 import { useEffect, useState } from 'react'
 import type { Product } from './types'
 import { posRequest } from './PosTools'
@@ -10,7 +11,7 @@ export function SupermarketStock({headers,products,branchId,refresh,money}:{head
   useEffect(()=>{void reload().catch(caught=>setError(caught.message))},[branchId,headers.Authorization,products])
   const product=products.find(row=>row.id===productId),batch=data.batches.lots.find((row:any)=>row.id===batchId)
   async function save(input:any){setError('');try{await posRequest('/api/retail',headers,{id:crypto.randomUUID(),...input});await refresh();await reload()}catch(caught){setError(caught instanceof Error?caught.message:'Could not save changes.');throw caught}}
-  return <section className="panel full-panel"><h2>Stock costs and expiry</h2>{error && <p role="alert">{error}</p>}<p>Expiry dates and batch labels are optional. Ordinary stock is tracked automatically.</p><p>Inventory at recorded purchase cost: <strong>{money(data.batches.costValue)}</strong>. Opening stock uses its existing catalogue cost until a delivery supplies a recorded cost.</p>
+  return <section className="panel full-panel"><h2>Stock costs and expiry</h2>{error && <p role="alert">{error}</p>}<WorkspaceHelp title="Stock costs and expiry"><p>Expiry dates and batch labels are optional. Ordinary stock is tracked automatically.</p></WorkspaceHelp><p>Inventory at recorded purchase cost: <strong>{money(data.batches.costValue)}</strong>. Opening stock uses its existing catalogue cost until a delivery supplies a recorded cost.</p>
     {data.batches.expired.length>0 && <p role="alert">{data.batches.expired.length} expired batches cannot be sold. Record disposal under Purchasing and receiving: Record wastage.</p>}
     {data.batches.expiring.length>0 && <p role="status">{data.batches.expiring.length} batches expire in the next 30 days.</p>}
     <details><summary>Batch stock and expiry alerts</summary><div className="table-wrap"><table><thead><tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Stock</th><th>Cost per unit</th></tr></thead><tbody>{data.batches.lots.map((row:any)=><tr key={`${row.id}:${row.branch_id}`}><td>{row.productName}</td><td>{row.batch_number||'Unlabelled'}</td><td>{row.expiry||'No expiry recorded'}</td><td>{row.quantity} {row.unit}</td><td>{money(row.unit_cost)}</td></tr>)}</tbody></table></div></details>

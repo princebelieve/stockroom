@@ -64,12 +64,16 @@ export function SubscriptionSettings({ apiUrl, token, localToken, onAccess, onTo
     }
     await Promise.all([
       section('Subscription', '/v1/subscriptions', (next: Summary) => {
+        if(!next?.access || typeof next.access.blocked!=='boolean' || typeof next.access.status!=='string')throw new Error('Subscription details are unavailable. Refresh to retry.')
         setSummary(next); onAccess(next.access)
         try { localStorage.setItem(summaryCacheKey, JSON.stringify(next)) } catch { /* Storage may be unavailable. */ }
       }),
       section('Export and exit', '/v1/subscriptions/business-exit', setBusinessExit),
       section('Invitation link', '/v1/subscriptions/referrals', setReferral),
-      section('Referral wallet', '/v1/referral-wallet/me', setReferralWallet),
+      section('Referral wallet', '/v1/referral-wallet/me', (next:ReferralWallet)=>{
+        if(!Array.isArray(next?.balances)||!Array.isArray(next.commissions))throw new Error('Referral wallet is unavailable. Refresh to retry.')
+        setReferralWallet(next)
+      }),
     ])
     if (!current()) return
     setNeedsSignIn(authenticationFailed)

@@ -1,3 +1,4 @@
+import { WorkspaceHelp } from './WorkspaceHelp'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { AsyncButton, AsyncForm, SubmitButton } from './AsyncControls'
 import { posRequest } from './PosTools'
@@ -29,7 +30,7 @@ export function StockWork({headers,storageKey,money,job,refresh}: {
   const rows=(patch:Partial<Ingredient>,index:number)=>setDraft({...draft,ingredients:draft.ingredients.map((row,i)=>i===index?{...row,...patch}:row)})
   return <section className="panel stock-work"><h3>{job?'Job materials and costs':'Food batch production'}</h3>
     <p>{job?'Record paper, ink or other stock actually used for this job. Materials reduce stock and estimated profit when used, even if the job is later refunded. Customer payment does not consume materials.':'Record ingredients actually used and the finished units produced. Ingredient cost moves into the finished stock batch. It becomes a cost when that stock is sold, prepared or written off.'}</p>
-    {!job&&<p>Create a separate finished product below, then link it in Menu using Stocked goods. For a recipe assembled to order, use the finished product as its ingredient. Use either raw ingredients or finished stock for the same portion to avoid consuming both.</p>}
+    {!job&&<WorkspaceHelp title="Production and stock use"><p>Create a separate finished product below, then link it in Menu using Stocked goods. For a recipe assembled to order, use the finished product as its ingredient. Use either raw ingredients or finished stock for the same portion to avoid consuming both.</p></WorkspaceHelp>}
     {job&&<p>Total recorded material cost for this job: <strong>{money(visible.reduce((n,row)=>n+row.totalCost,0))}</strong>. This excludes labour, overheads and any materials not recorded.</p>}
     {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
     {!review?<AsyncForm className="settings-form" onSubmit={async()=>{setError('');setReview(true)}}>
@@ -51,7 +52,7 @@ export function StockWork({headers,storageKey,money,job,refresh}: {
       <h4>Confirm physical stock changes</h4><p>{draft.note}</p>
       {draft.ingredients.map(row=><p key={row.productId}>Consume {row.quantity} {products.find(product=>product.id===row.productId)?.unit}: {products.find(product=>product.id===row.productId)?.name}</p>)}
       {!job&&<p>Produce {draft.outputQuantity}: {products.find(product=>product.id===draft.outputProductId)?.name}. Expected: {draft.expectedQuantity}.</p>}
-      <p>Confirm only after the work happened. Saving permanently records these stock movements. Refunds and cancelled jobs do not put used materials back.</p>
+      <WorkspaceHelp title="Production and stock use"><p>Confirm only after the work happened. Saving permanently records these stock movements. Refunds and cancelled jobs do not put used materials back.</p></WorkspaceHelp>
       <button type="button" className="filter-button" disabled={saving} onClick={()=>setReview(false)}>Cancel</button>
       <AsyncButton className="closure-confirm" busyLabel="Recording stock..." onClick={async()=>{
         setSaving(true)
@@ -62,7 +63,7 @@ export function StockWork({headers,storageKey,money,job,refresh}: {
         }finally{setSaving(false)}
       }}>Confirm stock changes</AsyncButton>
     </section>}
-    <details><summary>{job?'Add material stock':'Add ingredient or finished product'}</summary><p>Use consistent stock units. Opening stock uses the purchase cost entered here. Use Purchasing for later supplier receipts, costs and expiry dates.</p>
+    <details><summary>{job?'Add material stock':'Add ingredient or finished product'}</summary><WorkspaceHelp title="Production and stock use"><p>Use consistent stock units. Opening stock uses the purchase cost entered here. Use Purchasing for later supplier receipts, costs and expiry dates.</p></WorkspaceHelp>
       <AsyncForm className="settings-form" onSubmit={async event=>{const form=event.currentTarget,data=new FormData(form);await posRequest('/api/products',headers,{name:data.get('name'),sku:'WORK-'+crypto.randomUUID(),category:job?'Service materials':'Food production',unit:data.get('unit'),cost:Number(data.get('cost')),price:Number(data.get('price')),stock:Number(data.get('stock')),reorder:0});form.reset();await reload();await refresh?.();window.dispatchEvent(new Event('stockroom-data-refreshed'));setMessage('Stock product added.') }}>
         <label>Stock product name<input name="name" required maxLength={100}/></label><label>Stock unit<input name="unit" required maxLength={20} placeholder="piece, sheet, kg, litre"/></label><label>Purchase cost per unit<input name="cost" required type="number" min="0" step="0.01" defaultValue="0"/></label><label>Selling price per unit<input name="price" required type="number" min="0" step="0.01" defaultValue="0"/></label><label>Opening quantity<input name="stock" required type="number" min="0" step="0.001" defaultValue="0"/></label><SubmitButton className="filter-button">Add stock product</SubmitButton>
       </AsyncForm>

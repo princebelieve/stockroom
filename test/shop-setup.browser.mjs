@@ -44,13 +44,16 @@ try {
     }
     createRoot(document.getElementById('root')).render(React.createElement(Setup))
   })
-  await page.getByRole('heading', { name: 'Start with your business' }).waitFor()
+  await page.getByLabel('Business preset', { exact:true }).waitFor()
   await page.getByLabel('Business preset', { exact: true }).selectOption('restaurant')
   await page.getByRole('button', { name: 'Preview preset', exact: true }).click()
   await page.getByText(/reservation deposits are not provided/).waitFor()
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByLabel('Workspace settings',{exact:true}).selectOption('form')
   await page.getByLabel('Catalogue type').selectOption('hotel')
-  await page.getByText(/Room bookings, occupancy and accommodation billing are not provided/).waitFor()
+  await page.getByRole('button',{name:'Help: Catalogue template',exact:true}).click()
+  await page.getByRole('dialog').getByText(/Room bookings, occupancy and accommodation billing are not provided/).waitFor()
+  await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click()
   await page.getByLabel('Catalogue type').selectOption('printing')
   await page.getByRole('button', { name: 'Use this template' }).click()
   // Exercise the real bundled OCR reader against a clear screenshot fixture.

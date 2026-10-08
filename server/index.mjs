@@ -540,8 +540,8 @@ const server = createServer(async (request, response) => {
         const posTerminalId = input.posTerminalId === undefined ? current.posTerminalId : String(input.posTerminalId).trim()
         const posConnection = input.posConnection === undefined ? current.posConnection : String(input.posConnection)
         const logoData = input.logoData === undefined ? (current.logoData || '') : String(input.logoData)
-        const mongoUri = String(input.mongoUri || '').trim()
-        const mongoDatabase = String(input.mongoDatabase || 'stockroom').trim() || 'stockroom'
+        const mongoUri = input.mongoUri === undefined ? undefined : String(input.mongoUri || '').trim()
+        const mongoDatabase = input.mongoDatabase === undefined ? undefined : String(input.mongoDatabase || 'stockroom').trim() || 'stockroom'
         if (!appName || appName.length > 60) return sendJson(response, 400, { error: 'App name must be between 1 and 60 characters.' })
         if (!/^[A-Z]{3}$/.test(currency)) return sendJson(response, 400, { error: 'Currency must be a three-letter code.' })
         if (logoData && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(logoData) || logoData.length > 1_400_000)) return sendJson(response, 400, { error: 'Logo must be a PNG, JPEG, or WebP image smaller than 1 MB.' })

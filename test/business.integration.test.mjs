@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -64,6 +64,26 @@ after(async () => {
   await Promise.all(processes.map((child) => stop(child)))
   await Promise.all(subscriptionClouds.map(cloud => new Promise(resolve => { cloud.close(resolve); cloud.closeAllConnections() })))
   await Promise.all(tempDirectories.map((directory) => rm(directory, { recursive: true, force: true })))
+})
+
+test('saving a setup step preserves previously configured business and device settings', async () => {
+  const { baseUrl,dataDirectory }=await startBusiness()
+  const token=await createOwner(baseUrl)
+  const headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'}
+  const configPath=join(dataDirectory,'shop-config.json')
+  const config=JSON.parse(await readFile(configPath,'utf8'))
+  await writeFile(configPath,JSON.stringify({...config,mongoUri:'mongodb://example.invalid/test',mongoDatabase:'existing-business'}))
+  const device=await json(`${baseUrl}/api/settings`,{method:'PUT',headers,body:JSON.stringify({posTerminalId:'existing-terminal',posConnection:'usb'})})
+  assert.equal(device.response.status,200)
+  const saved=await json(`${baseUrl}/api/settings`,{method:'PUT',headers,body:JSON.stringify({currency:'NGN',paymentPolicy:{providers:['OPay']}})})
+  assert.equal(saved.response.status,200)
+  assert.equal(saved.body.appName,'Test Shop')
+  assert.equal(saved.body.posTerminalId,'existing-terminal')
+  assert.equal(saved.body.posConnection,'usb')
+  assert.equal(saved.body.currency,'NGN')
+  const preserved=JSON.parse(await readFile(configPath,'utf8'))
+  assert.equal(preserved.mongoUri,'mongodb://example.invalid/test')
+  assert.equal(preserved.mongoDatabase,'existing-business')
 })
 
 test('branch operations cannot fall back to Main when every branch is inactive', async () => {

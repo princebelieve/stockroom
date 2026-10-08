@@ -1,3 +1,4 @@
+import { WorkspaceHelp } from './WorkspaceHelp'
 import { useEffect, useMemo, useState } from 'react'
 
 const common = ['UTC', 'Africa/Lagos', 'Africa/Accra', 'Africa/Nairobi', 'Africa/Johannesburg', 'Africa/Cairo', 'Europe/London', 'Europe/Paris', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Shanghai', 'Asia/Tokyo', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto', 'America/Sao_Paulo', 'Australia/Sydney', 'Pacific/Auckland']
@@ -28,7 +29,7 @@ export function TimeZoneSelect({ value, onChange }: { value: string; onChange: (
   return <div>
     <label htmlFor="reporting-timezone">Business timezone</label>
     <select id="reporting-timezone" value={value} onChange={event => { onChange(event.target.value); setNow(new Date()) }}>{groups.map(group => <optgroup key={group} label={group}>{options.filter(option => option.group === group).map(option => <option key={option.zone} value={option.zone}>{option.zone === 'UTC' ? 'UTC' : option.label}</option>)}</optgroup>)}</select>
-    <p>Choose a city in your business’s timezone, such as Africa → Lagos. City timezones handle daylight-saving changes automatically. Save reporting timezone to apply your selection to reports on every device.</p>
-    <p>UTC time: <time aria-label="UTC time" dateTime={now.toISOString()}>{time('UTC')}</time><br />Local time for your selection: <time aria-label="Selected local time" dateTime={now.toISOString()}>{time(value)}</time></p>
+    <WorkspaceHelp title="Business timezone"><p>Choose a city in your business’s timezone, such as Africa → Lagos. City timezones handle daylight-saving changes automatically. Save reporting timezone to apply your selection to reports on every device.</p>
+    <p>UTC time: <time aria-label="UTC time" dateTime={now.toISOString()}>{time('UTC')}</time><br />Local time for your selection: <time aria-label="Selected local time" dateTime={now.toISOString()}>{time(value)}</time></p></WorkspaceHelp>
   </div>
 }

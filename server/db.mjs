@@ -939,11 +939,11 @@ export function approveStocktake(id, reason = '') {
   } catch (error) { database.exec('ROLLBACK'); throw error }
 }
 
-export async function updateSettings(appName, currency = 'USD', posProvider = '', posTerminalId = '', posConnection = 'manual', mongoUri = '', mongoDatabase = 'stockroom', logoData = '', policy) {
+export async function updateSettings(appName, currency = 'USD', posProvider = '', posTerminalId = '', posConnection = 'manual', mongoUri, mongoDatabase, logoData = '', policy) {
   const updatedAt = now()
   database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?').run(appName, currency, posProvider, posTerminalId, posConnection, logoData, updatedAt, organizationId)
   if (policy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(policy)), organizationId)
-  const config = { appName, shopName: appName, mongoUri, mongoDatabase, updatedAt }
+  const config = { appName, shopName: appName, ...(mongoUri === undefined ? {} : { mongoUri }), ...(mongoDatabase === undefined ? {} : { mongoDatabase }), updatedAt }
   await writeShopConfig({ ...(await readShopConfig().catch(() => ({}))), ...config })
   const settings = await getSettings()
   queueSync('settings', organizationId, 'upsert', settings)

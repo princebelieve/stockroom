@@ -9,7 +9,7 @@ The Shopkite filenames describe a journey: introduction (Screens 1–5), registr
 | Area | Original / refactor problem | Current change |
 | --- | --- | --- |
 | Fresh Inventory | Empty catalogue followed by transfer, expiry, pricing, purchasing, import and product-option panels | Separate task selection; empty catalogue explains the next action |
-| Entry | Long setup and operational configuration mixed into entry | Introduction, sign-in/registration, three account steps, review and branch choice; operational setup remains available later |
+| Entry | Long setup and operational configuration mixed into entry | Illustrated introduction, sign-in/registration, branch choice, then three saved workspace steps: business type, location/currency, payment methods |
 | Branch choice | Failed request silently creates a Main-branch placeholder | Display the API error, disable Continue, offer retry and sign-out |
 | Desktop | Early refactor applied drawer navigation at all sizes | Persistent desktop sidebar and full-width workspace; drawer on narrower screens |
 | Sales, staff, customers, expenses | Lists and unrelated creation/configuration forms share a page | Selected task displays its own content; customer, supplier and expense saves lead to the corresponding list |
@@ -19,6 +19,9 @@ The Shopkite filenames describe a journey: introduction (Screens 1–5), registr
 | Reports | Refactor's empty state hid stock valuation before the first sale | Only show a wholly empty report when there are no sales, stock or profit inputs |
 | Overview | Removing panels also removed active-work information | Load active orders, open bills or unpaid invoices for the selected workspace; daily payments use that workspace and business timezone |
 | Staff access | Purchasing-only staff saw product modification tasks | Show purchasing as their Inventory task; hide stock editing/transfer choices. Sales task choices respect sales/refund permissions |
+| Instructions | Repeated guides compete with business details | Screen instructions open from Help; validation errors and transaction confirmations remain visible |
+| Subscription | Billing reminders follow users across workspaces | Expiry gates selling with a link to the subscription page; records, inventory and settings remain accessible |
+| Configuration | Payment and workspace options fill one long page | Select a configuration task; Cash is ready and additional payment providers are added when needed |
 
 Original mobile [Inventory](screenshots/before-inventory.png), [Overview](screenshots/before-overview.png), [Settings](screenshots/before-settings.png), and [desktop Inventory](screenshots/before-desktop-inventory.png) were captured from the isolated baseline. Compare with current [mobile Inventory](screenshots/fresh-inventory.png), [desktop Inventory](screenshots/desktop-inventory.png), [supplies](screenshots/fresh-supplies.png), [branch entry](screenshots/entry-branch.png) and [account review](screenshots/entry-review.png). These are real rendered screenshots from isolated test businesses.
 
@@ -40,8 +43,12 @@ Sale calculations, stock consumption, refunds, recipe costs, supplier balances, 
 
 ## Verification and limits
 
+The browser run also verifies saved setup choices through real local APIs, reload/resume, completed setup opening directly into the workspace, on-demand screen help, payment-setting task separation, expiry restricted to selling, and sales remaining available during grace. Updated rendered examples: [introduction](screenshots/introduction.png), [business setup](screenshots/setup-workspace.png), [payment setup](screenshots/setup-payment.png), and [expired sales](screenshots/expired-sales.png).
+
+The introduction/help browser check and product-form browser check also pass. The latter exercises actual bundled screenshot OCR, custom field editing, required-field validation, offline persistence, restart, and incoming profile sync.
+
 - Production TypeScript/Vite build passes. Vite still warns about a bundle over 500 kB; this is an existing performance concern, not a failed build.
-- All 290 Node tests pass after the branch changes. Coverage includes API permissions, sale idempotency, offline persistence/sync, stock pools, refunds, counter recipes and financial reports.
+- All 291 Node tests pass. Coverage includes API permissions, sale idempotency, offline persistence/sync, stock pools, refunds, counter recipes, financial reports, and preserving business/device settings when saving a setup step.
 - The usability browser test covers fresh states, isolated tasks, successful supplier/customer creation, draft retention between Inventory tasks, real product checkout and receipt persistence, stock reports before sales, mobile drawer/desktop sidebar, Back/Forward/reload, real local sign-in, failed branch loading/retry, and registration-step value retention.
 - Three older browser scripts were also run against the original baseline. Purchasing timed out on its Pack conversions selector; supermarket checkout and service payments timed out locating Business settings. These baseline failures are recorded, not counted as successful workflow validation.
 - Registration-step checks use a mocked settings response and do not prove production cloud enrollment. Physical printers, native Android packaging, production payment integrations and live multi-device synchronization were not exercised by this browser run. Node tests cover their local rules, not real hardware or production services.
