@@ -66,6 +66,29 @@ function memoryDatabase() {
   } }
 }
 
+test('catalogue export cloud eligibility enforces subscription and payment together', async () => {
+  const database = memoryDatabase(), accounts = database.collection('accounts')
+  await accounts.insertOne({ _id: 'owner', businessId: 'shop', email: 'owner@test.local', role: 'owner' })
+  await database.collection('subscription_settings').insertOne({ _id: 'control', testMode: false })
+  await database.collection('subscription_settings').insertOne({ _id: 'plan', productExportFeeAmount: 1000, currency: 'NGN' })
+  const handler = await createSubscriptions({ database, accounts, verifyToken: request => request.claims, send: (response, status, data) => Object.assign(response, { status, data }) })
+  const call = async (path, method = 'GET') => {
+    const request = Readable.from([Buffer.from('{}')])
+    Object.assign(request, { url: `/v1/subscriptions/business-exit${path}`, method, headers: {}, claims: { kind: 'access', role: 'owner', businessId: 'shop', email: 'owner@test.local' } })
+    const response = { setHeader() {} }; await handler(request, response); return response
+  }
+  assert.equal((await call('')).data.subscriptionAvailable, false)
+  assert.equal((await call('/exported', 'POST')).status, 402)
+  await database.collection('subscriptions').insertOne({ _id: 'shop', expiresAt: new Date(Date.now()+86400000), planId: 'monthly' })
+  assert.equal((await call('')).data.canExport, false)
+  await database.collection('business_exit_payments').insertOne({ _id: 'shop', reference: 'paid', amount: 1000, paidAt: new Date() })
+  assert.equal((await call('')).data.canExport, true)
+  assert.equal((await call('/exported', 'POST')).status, 200)
+  await database.collection('subscriptions').updateOne({ _id: 'shop' }, { $set: { expiresAt: new Date(Date.now()-86400000) } })
+  assert.equal((await call('')).data.canExport, false)
+  assert.equal((await call('/exported', 'POST')).status, 402)
+})
+
 test('cloud routes enforce developer authorization and attribute first/recurring credits once', async () => {
   const oldUrl = process.env.SUBSCRIPTION_PUBLIC_URL
   const oldKey = process.env.PAYSTACK_SECRET_KEY

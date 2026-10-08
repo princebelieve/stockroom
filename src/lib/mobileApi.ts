@@ -355,7 +355,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === '/api/auth/registration-key' && method === 'POST') {
     if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
-    return originalFetch(`${cloudUrl}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
+    return originalFetch(`${cloudUrl}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(60000) })
   }
   if (['/api/auth/password-reset/request', '/api/auth/password-reset/confirm'].includes(path) && method === 'POST') {
     return originalFetch(`${cloudUrl}${path.replace('/api/', '/v1/')}`, { method, signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: init?.body })
@@ -486,8 +486,9 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     if (user.role !== 'owner') return error('Owner access required.', 403)
     try {
       const response = await cloudRequest('/v1/subscriptions/business-exit')
-      const status = await response.json() as { feeAmount?: number; paid?: boolean; closed?: boolean }
-      if (!response.ok || status.closed || (Number(status.feeAmount) > 0 && !status.paid)) return error('Complete the one-time product export payment before downloading.', 402)
+      const status = await response.json() as { businessId?: string; canExport?: boolean; exportError?: string }
+      const config = await getMobileSyncConfiguration()
+      if (!response.ok || status.businessId !== config?.businessId || status.canExport !== true) return error(status.exportError || 'Could not confirm the subscription and developer export payment. Connect and try again.', response.ok ? 402 : response.status)
     } catch { return error('Could not verify product export eligibility with Stockroom cloud.', 503) }
     const rows = (await db.query('SELECT p.name, p.sku, p.barcode, p.category, p.cost_price AS cost, p.price, p.unit, p.custom_values AS customValues, b.name AS branch, COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder FROM products p CROSS JOIN branches b LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=b.id ORDER BY p.name,b.is_default DESC,b.name')).values || []
     const cell = (value: unknown) => `"${String(value ?? '').replace(/^[=+@-]/, "'$&").replace(/"/g, '""')}"`
@@ -651,7 +652,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     try {
       const headers=new Headers(init?.headers)
       const profile=normalizeShopProfile((await db.query('SELECT shop_profile FROM app_settings WHERE id=1')).values?.[0]?.shop_profile)
-      return json(await salesHistory(db,{branchId,timeZone:profile.reportingTimeZone,query:decodeURIComponent(headers.get('X-History-Query')||''),from:headers.get('X-History-From')||'',to:headers.get('X-History-To')||'',page:Number(headers.get('X-History-Page')||0)}))
+      return json(await salesHistory(db,{branchId,timeZone:profile.reportingTimeZone,query:decodeURIComponent(headers.get('X-History-Query')||''),from:headers.get('X-History-From')||'',to:headers.get('X-History-To')||'',order:headers.get('X-History-Order')||'newest',page:Number(headers.get('X-History-Page')||0)}))
     } catch(caught) {return error(caught instanceof Error ? caught.message : 'Could not load history.',400)}
   }
   if (path === '/api/sales' && method === 'GET') {

@@ -23,3 +23,14 @@ References: [Square item grid](https://squareup.com/help/us/en/article/8334-set-
 Reviewed and retained: Overview, Inventory (or the owner's catalogue name), Customer display, Stock movements, Reports, Staff activity, Sync issues, Subscription, Business settings and Close your account. Their labels describe distinct existing destinations. No routes, stored screen identifiers, permissions or subscription rules were renamed.
 
 Inventory also contains Purchasing and receiving, Stock costs and expiry, and the existing product intake options. Supplier order/conversion/history tools are expandable; batch/expiry inputs are optional inside delivery receiving. Reports contain expenses, the current-month profit estimate and supermarket purchasing/expiry summaries. Visible labels above describe the current UI; internal route identifiers remain unchanged.
+
+
+## Shared UI refactor
+
+The sidebar uses related Sales & orders, Stock, Reports, Settings and Help menus alongside customer, staff and receipt destinations. Expanding a parent reveals children without navigating. Empty groups are omitted; screen permissions remain authoritative. Find a tool searches the available destinations.
+
+The guide has visible topics, Previous/Next buttons, search, permission-checked screen shortcuts and an example of the staff-access editor. Owner access is still chosen in the staff table; the guide names the Access column. Help & support is available from the app and portal headers, using existing email, WhatsApp and support-request channels.
+
+Brand colours remain derived from the owner's logo by default. Business Settings offers an optional manual colour, a preview and cancellation. The saved choice lives in shopProfile.brandColor and uses existing settings synchronization. Neutral surfaces, complementary accents and varied charts prevent a single-colour interface. Customer catalogues expose only the public logo and selected brand colour. Visitor/developer pages use Stockroom branding. Receipt styling and warning colours are unchanged.
+
+Reports include local month-to-date daily net-sales bars, gross receipt totals by checkout method, top quantities sold less returns, and expenses by category. Split receipts are one checkout-method slice, not purported bank reconciliation. Tables accompany each chart. Search/sort controls cover catalogue names/updates, customer names, and full receipt history. Receipt ordering happens before pagination on all adapters. Windows Business Settings renders one backup panel.

@@ -1,5 +1,9 @@
 # Public website and remote registration
 
+Share previews read static Open Graph and Twitter metadata on the app, public pages and wallet entry pages. Their image is the absolute HTTPS URL of `public/icon-512.png`; JavaScript is not required to discover it. After deployment, messaging services may retain an older preview until their cache refreshes.
+
+Public key requests validate business details before consuming the hourly request allowance. Gmail delivery has a longer client timeout; if its response is uncertain, the hashed key remains redeemable until its normal expiry. The error tells customers to check their inbox and spam folder before retrying. A successful send means Gmail accepted the message, not that a recipient read it. Key redemption still uses one MongoDB transaction for the owner account, business settings, initial sync event and subscription record.
+
 This updates the existing Render service and Vercel project; do not create a second business backend or replace the live database.
 
 The public page is available after deployment at `https://stockroom.globalcreest.com/welcome` using the app's existing domain. Vercel clean URLs hide the `.html` suffix. This works without adding another domain. `sbi.globalcreest.com` already serves a separate website and should remain attached to that deployment.

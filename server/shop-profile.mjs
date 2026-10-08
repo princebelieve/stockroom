@@ -69,6 +69,7 @@ export function normalizeShopProfile(input) {
   value.workflows = ['stock', 'payments', 'both', 'fast-food', 'restaurant'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
   value.fastFood = input.fastFood === true || value.workflows === 'fast-food'
   value.restaurant = input.restaurant === true || value.workflows === 'restaurant'
+  value.brandColor = /^#[a-f0-9]{6}$/i.test(input.brandColor || '') ? input.brandColor.toLowerCase() : ''
   try { value.reportingTimeZone = reportTimeZone(input.reportingTimeZone ?? 'UTC') } catch { value.reportingTimeZone = 'UTC' }
   value.version = 2
   return value
@@ -96,6 +97,7 @@ export function businessWorkspace(profile) {
 }
 
 export function validateShopProfile(input) {
+  if (input?.brandColor && !/^#[a-f0-9]{6}$/i.test(input.brandColor)) throw new Error('Choose a six-digit brand colour.')
   reportTimeZone(input?.reportingTimeZone ?? 'UTC')
   validateFields(input?.fields)
   if (!input || typeof input !== 'object' || Array.isArray(input) || !['general', 'suggested', 'custom'].includes(input.mode)

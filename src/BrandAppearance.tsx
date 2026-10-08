@@ -1,0 +1,9 @@
+import { useState } from 'react'
+import type { ShopProfile } from '../server/shop-profile.mjs'
+import { AsyncButton } from './AsyncControls'
+export function BrandAppearance({profile,save,preview}:{profile:ShopProfile;save:(profile:ShopProfile)=>Promise<void>;preview:(color:string)=>void}){
+ const [message,setMessage]=useState('')
+ const [color,setColor]=useState(profile.brandColor||'#176b73'),[automatic,setAutomatic]=useState(!profile.brandColor)
+ function update(value:string,auto=automatic){setColor(value);setAutomatic(auto);preview(auto?'':value)}
+ return <section className="panel brand-appearance"><h3>Brand colours</h3><p>Keep your logo, choose a colour you like, and preview the coordinated accents. Neutral surfaces and varied charts keep the workspace readable.</p><label className="checkbox-label"><input type="checkbox" checked={automatic} onChange={event=>update(color,event.target.checked)}/> Suggest colours from my logo</label><label>Primary colour<input type="color" value={color} disabled={automatic} onChange={event=>update(event.target.value,false)}/></label><div className="brand-preview"><span className="brand-preview-selected">Selected menu</span><button type="button" className="primary-button">Primary action</button><span className="brand-preview-accent">Supporting accent</span></div><div className="report-actions"><AsyncButton className="primary-button" onClick={async()=>{await save({...profile,brandColor:automatic?'':color});setMessage('Appearance saved. Sync to apply it on other devices.')}}>Save appearance</AsyncButton><button type="button" className="filter-button" onClick={()=>{setAutomatic(!profile.brandColor);setColor(profile.brandColor||'#176b73');preview(profile.brandColor||'')}}>Cancel preview</button></div>{message&&<p role="status">{message}</p>}</section>
+}

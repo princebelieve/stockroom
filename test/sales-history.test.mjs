@@ -15,6 +15,11 @@ test('receipt search finds old sales, isolates business/branch and pages full re
  const db={query:async(q,p=[])=>({values:sql.prepare(q).all(...p)})}
  const options={branchId:'main',organizationId:'shop'}
  assert.equal((await salesHistory(db,options)).total,125)
+ const oldest=await salesHistory(db,{...options,order:'oldest',pageSize:1})
+ assert.equal(oldest.sales[0].id,'receipt-0')
+ const newest=await salesHistory(db,{...options,order:'newest',pageSize:1})
+ assert.equal(newest.sales[0].id,'receipt-124')
+ assert.equal((await salesHistory(db,{...options,order:'oldest; DROP TABLE sales',pageSize:1})).sales[0].id,'receipt-124')
  assert.equal((await salesHistory(db,{...options,page:2})).sales.length,25)
  const found=await salesHistory(db,{...options,query:'100%_special'})
  assert.equal(found.total,1);assert.equal(found.sales[0].id,'receipt-0')

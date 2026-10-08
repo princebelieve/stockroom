@@ -11,7 +11,7 @@ export function registrationInput(input) {
   const slug = businessName.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'business'
   const businessId = `${slug}-${randomBytes(5).toString('hex')}`
   const expiresInDays = Number(input.expiresInDays ?? 7)
-  if (!/^[a-z0-9][a-z0-9-]{2,80}$/.test(businessId) || !/^\S+@\S+\.\S+$/.test(email) || email.length > 254 || !businessName || businessName.length > 60 || !Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 30) throw new Error('Enter a business ID, business name, owner email, and validity of 1–30 days.')
+  if (!/^[a-z0-9][a-z0-9-]{2,80}$/.test(businessId) || !/^\S+@\S+\.\S+$/.test(email) || email.length > 254 || !businessName || businessName.length > 60 || !Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 30) throw new Error('Enter a business name, valid owner email, and validity of 1–30 days.')
   return { businessId, email, businessName, expiresInDays }
 }
 
@@ -49,7 +49,7 @@ export async function createRegistration({ database, client, accounts, hashPassw
     issue,
     async issuePublic(input, ipAddress = '') {
       const email = String(input.email || '').trim().toLowerCase()
-      if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 254) throw new Error('Enter a valid owner email address.')
+      registrationInput({ ...input, email, expiresInDays: 7 })
       const ipHash = createHash('sha256').update(String(ipAddress || 'unknown')).digest('hex')
       const emailHash = createHash('sha256').update(email).digest('hex')
       const allowed = await Promise.all([allowRequest(`ip:${ipHash}`, 10), allowRequest(`email:${emailHash}`, 3)])
@@ -57,8 +57,8 @@ export async function createRegistration({ database, client, accounts, hashPassw
       const setup = await database.collection('subscription_settings').findOne({ _id: 'plan' })
       const expiresInDays = Number(setup?.registrationKeyDurationDays ?? 7)
       const result = await issue({ ...input, email, expiresInDays })
-      try { await sendBusinessRegistrationKey({ to: email, businessName: result.businessName, key: result.key, expiresAt: result.expiresAt }) }
-      catch (error) { await keys.deleteOne({ _id: registrationKeyHash(result.key), usedAt: null }); throw new Error('We could not email your key. Please try again later or contact Stockroom support.') }
+      try { await sendBusinessRegistrationKey({ to: email, businessName: result.businessName, key: result.key, expiresAt: result.expiresAt }); await keys.updateOne({ _id: registrationKeyHash(result.key) }, { $set: { deliveryStatus: 'sent' } }) }
+      catch (error) { await keys.updateOne({ _id: registrationKeyHash(result.key) }, { $set: { deliveryStatus: 'unconfirmed' } }); throw new Error('We could not confirm email delivery. Check your inbox and spam folder; any key received is still valid. If none arrives, retry or contact Stockroom support.') }
       return { businessName: result.businessName, email: result.email, expiresAt: result.expiresAt }
     },
     async redeem(input) {

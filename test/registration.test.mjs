@@ -32,6 +32,12 @@ function fixture() {
       updateOne: async (filter, update) => {
         let row = rows().find(row => matches(row, filter))
         if (!row) { row = { ...filter, ...update.$setOnInsert }; rows().push(row) }
+        if (Array.isArray(update)) {
+          const active = row.expiresAt > new Date()
+          row.count = active ? (row.count || 0) + 1 : 1
+          if (!active) row.expiresAt = new Date(Date.now() + 3600000)
+          return
+        }
         Object.assign(row, update.$set)
       },
     }
@@ -49,6 +55,28 @@ function fixture() {
 const registrationService = db => createRegistration({ database: db.database, client: db.client, accounts: db.accounts, hashPassword: db.hashPassword })
 const details = { businessName: 'New Shop', email: 'owner@test.com', expiresInDays: 7 }
 const owner = { ownerName: 'Shop Owner', email: 'owner@test.com', password: 'strong-password', currency: 'NGN' }
+
+test('uncertain Gmail delivery keeps an emailed key redeemable and limits retries', async () => {
+  const db = fixture(); let delivered
+  const service = await createRegistration({ ...db, sendBusinessRegistrationKey: async message => { delivered = message; throw new Error('Provider response timeout') } })
+  await assert.rejects(service.issuePublic({ ...details, businessName: '' }, '127.0.0.1'), /business name/)
+  assert.equal(db.rows('public_registration_key_rate_limits').length, 0)
+  await assert.rejects(service.issuePublic(details, '127.0.0.1'), /any key received is still valid/)
+  assert.equal(db.rows('business_registration_keys')[0].deliveryStatus, 'unconfirmed')
+  for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(service.issuePublic(details, '127.0.0.1'), /confirm email delivery/)
+  await assert.rejects(service.issuePublic(details, '127.0.0.1'), /Too many key requests/)
+  assert.ok((await service.redeem({ ...owner, key: delivered.key })).businessId)
+})
+
+test('successful public requests return delivery details without exposing the key', async () => {
+  const db = fixture(); let delivered
+  const service = await createRegistration({ ...db, sendBusinessRegistrationKey: async message => { delivered = message } })
+  const result = await service.issuePublic(details, '127.0.0.1')
+  assert.equal(result.email, details.email)
+  assert.equal(result.key, undefined)
+  assert.equal(db.rows('business_registration_keys')[0].deliveryStatus, 'sent')
+  assert.ok((await service.redeem({ ...owner, key: delivered.key })).businessId)
+})
 
 test('keys are unpredictable, hashed at rest and bound to email and business', async () => {
   const db = fixture(); const service = await registrationService(db)

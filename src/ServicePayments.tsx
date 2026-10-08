@@ -20,14 +20,15 @@ const fresh = (): Draft => ({ id: crypto.randomUUID(), lines: [newLine()], name:
 function restore(key: string): Draft {
   try { const previous = JSON.parse(localStorage.getItem(key) || '{}'); return { ...fresh(), ...previous, lines: previous.lines?.length ? previous.lines : [{ ...newLine(), description: previous.purpose || '', price: previous.amount || '' }] } } catch { return fresh() }
 }
-export function ServicePayments({ access, industry='general', walletAllowed = false, creditAllowed = false, owner = false, timeZone = 'UTC', providers = [], storageKey, hidden, enabled, manager, customers, receipts, headers, save, print, beforeSend, money, configuration = false }: {
-  access?:Record<string,boolean>;industry?:string;timeZone?:string; walletAllowed?: boolean; creditAllowed?: boolean; owner?: boolean; providers?: string[];configuration?:boolean;storageKey: string; hidden: boolean; enabled: boolean; manager: boolean; customers: Customer[]; receipts: Sale[]; headers: Record<string, string>;
+export function ServicePayments({ requestId, requestedTab, access, industry='general', walletAllowed = false, creditAllowed = false, owner = false, timeZone = 'UTC', providers = [], storageKey, hidden, enabled, manager, customers, receipts, headers, save, print, beforeSend, money, configuration = false }: {
+  requestId?:number;requestedTab?:string;access?:Record<string,boolean>;industry?:string;timeZone?:string; walletAllowed?: boolean; creditAllowed?: boolean; owner?: boolean; providers?: string[];configuration?:boolean;storageKey: string; hidden: boolean; enabled: boolean; manager: boolean; customers: Customer[]; receipts: Sale[]; headers: Record<string, string>;
   save: (draft: Draft & { profile: ReceiptSettings }) => Promise<Sale>; print: (sale: Sale) => Promise<void>; beforeSend: () => Promise<void>; money: (amount: number) => string
 }) {
   const [walletCustomers,setWalletCustomers] = useState(customers)
   useEffect(()=>{if(walletAllowed&&!hidden)void posRequest('/api/pos',headers).then(data=>setWalletCustomers(data.customers||customers)).catch(error=>setSetupError(error.message))},[walletAllowed,hidden,headers.Authorization,headers['X-Stockroom-Branch']])
   const allowed=(key:string)=>!access||access[key]===true
   const [tab,setTab]=useState(configuration?'Receipt settings':allowed('payments')?'New payment':allowed('serviceJobs')?'Jobs & invoices':'Church collections')
+  useEffect(()=>{if(configuration||hidden)return;if(requestedTab==='New payment'&&allowed('payments')||requestedTab==='Jobs & invoices'&&allowed('serviceJobs'))setTab(requestedTab)},[requestedTab,requestId,hidden,configuration])
   const [draft, setDraft] = useState<Draft>(() => restore(storageKey))
   const [profile, setProfile] = useState(receiptSettings())
   const [profileDraft, setProfileDraft] = useState<ReceiptSettings | null>(null)

@@ -1,4 +1,4 @@
-const themeProperties = ['--ink', '--mint', '--lime', '--brand-hover', '--brand-accent'] as const
+const themeProperties = ['--ink', '--mint', '--lime', '--brand-hover', '--brand-accent', '--brand-primary', '--brand-secondary'] as const
 
 function resetTheme() {
   for (const property of themeProperties) document.documentElement.style.removeProperty(property)
@@ -40,13 +40,18 @@ async function dominantLogoColor(source: string) {
   return rgbToHsl(best.red / best.count, best.green / best.count, best.blue / best.count)
 }
 
-export async function applyLogoTheme(logoData: string) {
+let themeRevision = 0
+export async function applyLogoTheme(logoData: string, brandColor = '') {
+  const revision = ++themeRevision
   resetTheme()
-  if (!logoData) return
+  if (!logoData && !brandColor) return
   try {
-    const { hue, saturation } = await dominantLogoColor(logoData)
+    const { hue, saturation } = /^#[a-f0-9]{6}$/i.test(brandColor) ? rgbToHsl(parseInt(brandColor.slice(1,3),16),parseInt(brandColor.slice(3,5),16),parseInt(brandColor.slice(5,7),16)) : await dominantLogoColor(logoData)
+    if (revision !== themeRevision) return
     const vividness = Math.max(42, Math.min(78, saturation))
     const root = document.documentElement
+    root.style.setProperty('--brand-primary', `hsl(${hue} ${Math.min(65, vividness)}% 27%)`)
+    root.style.setProperty('--brand-secondary', `hsl(${(hue+150)%360} 48% 42%)`)
     root.style.setProperty('--ink', `hsl(${hue} ${Math.min(52, vividness)}% 20%)`)
     root.style.setProperty('--brand-hover', `hsl(${hue} ${Math.min(58, vividness)}% 29%)`)
     root.style.setProperty('--brand-accent', `hsl(${hue} ${vividness}% 62%)`)
@@ -54,6 +59,6 @@ export async function applyLogoTheme(logoData: string) {
     root.style.setProperty('--lime', `hsl(${hue} ${Math.min(65, vividness)}% 72%)`)
     root.dataset.logoTheme = 'active'
   } catch {
-    resetTheme()
+    if (revision === themeRevision) resetTheme()
   }
 }

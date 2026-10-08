@@ -4,6 +4,8 @@ Stockroom Business is an offline-first business operations app for organizations
 
 ## What the app does
 
+- **Navigation and appearance:** related sidebar menus, tool search, a searchable guide with Previous/Next topics, consistent support access, and owner logo-derived or manually chosen brand colours. Customer portals use the business's public branding. Local reports include sales bars, payment-method doughnuts, product quantities and expense charts with accompanying tables. Catalogue, customer and receipt lists offer relevant search and sorting controls.
+
 - **Inventory:** maintain products, SKUs and barcodes, categories, costs, prices, quantities, and reorder points; record stock movements and stocktakes.
 - **Point of sale:** record cash, bank transfer, manually confirmed external-terminal, split, and supported wallet payments. Sales reduce stock and produce receipts. Optional checkout settings support product-specific tax rates, customer reward redemption, and separate stock locations for offline tills.
 - **Payments & receipts:** record descriptive items and immediate full payment without changing stock. Its Church collections tab tracks funds, donor identities, pledges, contributions, refund-adjusted totals and donor statements. Its optional Jobs & invoices tab supports estimates, service progress, deposits, split payments, balance payments, refunds, search, overdue filters and branch invoice customer statements. Issued jobs can record stock materials used and their captured costs. Saved service prices are reusable; immediate payments also support owner-enabled customer wallets. See [Payments & receipts](docs/payments-and-receipts.md).

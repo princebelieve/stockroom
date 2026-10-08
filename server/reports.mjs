@@ -1,4 +1,5 @@
 import { supplierAccounts } from './supplier-accounts.mjs'
+import { reportCharts } from './report-charts.mjs'
 import { reportCalendar, reportTimeZone } from './report-timezone.mjs'
 // All adapters use receipt totals once and the costs captured at sale time.
 export function buildReports({ sales, items, products, expenses, returns = [], retail = [], batches = [], adjustments = [], registers = [], orders = [], reportingTimeZone = 'UTC' }, date = new Date()) {
@@ -68,6 +69,7 @@ export function buildReports({ sales, items, products, expenses, returns = [], r
   const expenseTotal = expenses.filter(expense => within(expense.incurredAt, month)).reduce((sum, expense) => sum + Number(expense.amount), 0)
   return {
     reportingTimeZone,
+    charts: reportCharts({ sales, items, expenses, returns, sellers, calendar, month, day }),
     costWarnings,
     daily: window(day), weekly: window(week), monthly: window(month),
     inventory: { value: round(products.reduce((sum, product) => sum + Number(product.stock || 0) * Number(product.price || 0), 0)), products: products.length, lowStock: products.filter(product => Number(product.stock) <= Number(product.reorder)).length },

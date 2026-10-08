@@ -129,7 +129,7 @@ Owners open **Business settings > Business > Business backup and restore**. Down
 
 Restore requires the matching business and checkout identity, with a supported database schema, the file password, current owner password and RESTORE confirmation. Stop staff using that checkout and synchronize before replacing its local records. Current credentials and removed-staff tombstones are preserved. A consistent local safety backup is created first. For replacement hardware, use lost-till recovery before restoring a matching checkout archive. Browser and Android continue to use synchronization and lost-till recovery; this file backup/restore control is Windows-only.
 
-Backups are separate from the product export-and-exit flow. Its fee remains controlled by the developer's settings, including zero when configured.
+Backups are separate from the product export-and-exit flow. Catalogue downloads require a current active subscription or trial (or developer test mode), plus the developer-configured one-time export fee when nonzero. Trading grace does not authorize catalogue downloads. An export payment already started retains its quoted fee. Reports and encrypted backups are not subject to this catalogue gate.
 
 ## Weighed goods
 

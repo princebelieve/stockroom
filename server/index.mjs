@@ -116,7 +116,7 @@ const server = createServer(async (request, response) => {
     if (config.businessId || (await getSettings()).ownerConfigured) return sendJson(response, 409, { error: 'This installation already belongs to a business. Sign in to continue.' })
     try {
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
-      const result = await fetch(`${config.url}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(20000) })
+      const result = await fetch(`${config.url}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(60000) })
       return sendJson(response, result.status, await result.json())
     } catch { return sendJson(response, 503, { error: 'Could not request a registration key. Check your internet connection and try again.' }) }
   })
@@ -200,7 +200,7 @@ const server = createServer(async (request, response) => {
     try {
       const db={query:async(sql,params=[])=>({values:database.prepare(sql).all(...params)})}
       const profile=(await getSettings()).shopProfile
-      return sendJson(response,200,await salesHistory(db,{organizationId:user.organizationId,branchId:requestBranch(request),timeZone:profile?.reportingTimeZone || 'UTC',query:decodeURIComponent(String(request.headers['x-history-query']||'')),from:String(request.headers['x-history-from']||''),to:String(request.headers['x-history-to']||''),page:Number(request.headers['x-history-page']||0)}))
+      return sendJson(response,200,await salesHistory(db,{organizationId:user.organizationId,branchId:requestBranch(request),timeZone:profile?.reportingTimeZone || 'UTC',query:decodeURIComponent(String(request.headers['x-history-query']||'')),from:String(request.headers['x-history-from']||''),to:String(request.headers['x-history-to']||''),order:String(request.headers['x-history-order']||'newest'),page:Number(request.headers['x-history-page']||0)}))
     } catch(error) {return sendJson(response,400,{error:error.message})}
   }
   if (request.method === 'GET' && request.url === '/api/sales') {
@@ -608,7 +608,7 @@ const server = createServer(async (request, response) => {
       if (!config.url || !cloudToken) return sendJson(response, 402, { error: 'Connect to Stockroom cloud and confirm the one-time export fee before downloading.' })
       const access = await fetch(`${config.url}/v1/subscriptions/business-exit`, { headers: { Authorization: cloudToken }, signal: AbortSignal.timeout(8000) })
       const status = await access.json()
-      if (!access.ok || status.closed || (Number(status.feeAmount) > 0 && !status.paid)) return sendJson(response, 402, { error: 'Complete the one-time product export payment before downloading.' })
+      if (!access.ok || status.businessId !== config.businessId || status.canExport !== true) return sendJson(response, access.ok ? 402 : access.status, { error: status.exportError || 'Could not confirm the subscription and developer export payment. Connect and try again.' })
     } catch { return sendJson(response, 503, { error: 'Could not verify product export eligibility with Stockroom cloud.' }) }
     response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-products.csv"' })
     return response.end(exportProductCatalogCsv())

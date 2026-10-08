@@ -1,3 +1,4 @@
+import { productExportEligibility } from '../server/product-export-policy.mjs'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { mailConfigured, sendReferralBonusNotice, sendSubscriptionConfirmation, sendSubscriptionGraceNotice, sendSubscriptionPaymentFailed, sendSubscriptionReminder } from './mailer.mjs'
 import { graceDaysEndsAt, graceEndsAt, subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
@@ -412,12 +413,14 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const configured = await getPlan(), record = await businessExits.findOne({ _id: claims.businessId })
         const business = await database.collection('business_settings').findOne({ businessId: claims.businessId })
         const hasStarted = Boolean(record?.reference || record?.exportedAt)
-        return reply(200, { businessName: business?.settings?.appName || owner.businessName || '', feeAmount: hasStarted ? Number(record.amount) || 0 : Number(configured?.productExportFeeAmount) || 0, feeCurrency: hasStarted ? record.currency : configured?.productExportFeeCurrency || configured?.currency || 'NGN', paid: Boolean(record?.paidAt), exported: Boolean(record?.exportedAt), closed: Boolean(record?.closedAt), paymentStatus: record?.status || 'unpaid' })
+        return reply(200, { businessId: claims.businessId, businessName: business?.settings?.appName || owner.businessName || '', feeAmount: hasStarted ? Number(record.amount) || 0 : Number(configured?.productExportFeeAmount) || 0, feeCurrency: hasStarted ? record.currency : configured?.productExportFeeCurrency || configured?.currency || 'NGN', paid: Boolean(record?.paidAt), exported: Boolean(record?.exportedAt), closed: Boolean(record?.closedAt), paymentStatus: record?.status || 'unpaid', ...productExportEligibility(await access(claims.businessId), record, configured) })
       }
       if (url.pathname === '/v1/subscriptions/business-exit/checkout' && request.method === 'POST') {
         const input = JSON.parse(await body(request)), business = await database.collection('business_settings').findOne({ businessId: claims.businessId })
         const businessName = String(business?.settings?.appName || owner.businessName || '').trim()
         if (!businessName || String(input.businessName || '').trim().toLocaleLowerCase() !== businessName.toLocaleLowerCase()) return reply(400, { error: 'Enter the exact business name shown in Business settings to continue.' })
+        const entitlement = await access(claims.businessId)
+        if (!productExportEligibility(entitlement, null).subscriptionAvailable) return reply(402, { error: productExportEligibility(entitlement, null).exportError })
         const configured = await getPlan(), amount = Number(configured?.productExportFeeAmount) || 0, currency = String(configured?.productExportFeeCurrency || configured?.currency || 'NGN')
         let record = await businessExits.findOne({ _id: claims.businessId })
         if (record?.closedAt) return reply(409, { error: 'This business has already completed its Stockroom exit.' })
@@ -446,7 +449,8 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       }
       if (url.pathname === '/v1/subscriptions/business-exit/exported' && request.method === 'POST') {
         const configured = await getPlan(), record = await businessExits.findOne({ _id: claims.businessId })
-        if ((Number(configured?.productExportFeeAmount) || 0) > 0 && !record?.paidAt) return reply(402, { error: 'Pay the one-time export fee before downloading products.' })
+        const eligibility = productExportEligibility(await access(claims.businessId), record, configured)
+        if (!eligibility.canExport) return reply(402, { error: eligibility.exportError })
         await businessExits.updateOne({ _id: claims.businessId }, { $set: { businessId: claims.businessId, amount: Number(record?.amount ?? configured?.productExportFeeAmount) || 0, currency: record?.currency || configured?.productExportFeeCurrency || configured?.currency || 'NGN', exportedAt: new Date() } }, { upsert: true })
         return reply(200, { exported: true })
       }
