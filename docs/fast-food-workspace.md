@@ -8,13 +8,15 @@ The workspace also includes Inventory, Purchasing, Stock count, Stock movements 
 
 ## Setup
 
-First-time sign-in opens a short, skippable introduction with illustrations of sales, inventory, orders and customers. Select **Explore what Stockroom can do** on the sign-in screen to replay it.
+First-time sign-in opens a skippable introduction with seven illustrated benefits: offline trading after setup; retail, oil, services, counter and table workspaces; payments/receipts; stock/purchasing; preparation; customer/supplier balances; and sales/cost/staff visibility. Each screen has one caption. Select **Explore what Stockroom can do** on the sign-in screen to replay it. The full capability and expectation review is in [Product capabilities and user expectations](product-capabilities-and-expectations.md).
 
 Owner registration progresses through business details, account details and review; Back retains entered values. After branch selection, new owners choose their business type, currency/timezone and payment provider on three short setup screens. Each step saves real configuration. Setup resumes after reload and can be postponed. Existing businesses enter their saved workspace directly. Reopen setup through **Help > Open the user guide > Set up my workspace**. Add products, a menu, staff and devices as needed.
 
 Desktop keeps a persistent sidebar and a workspace that uses the available width. Phones and smaller tablets use the Menu drawer. Operational screens use a white canvas; **Choose screen**, **Order screen** or **Restaurant screen** selects one task within that area. Inventory opens the product list, while supply records, new supply, suppliers, transfers, imports and stock costs have separate screens. Customer and staff creation, expenses and receipt tasks are also separate from their lists.
 
 The mobile drawer opens without focusing a text field. It has no tool-search box, scrolls independently, and blocks touches to the workspace until dismissed. Desktop keeps tool search. Sync controls are inside the mobile drawer rather than floating over business records. Waiting setup/settings changes are identified separately from business activity; a connection error does not mean a sale occurred or remove saved changes.
+
+Desktop **Log out** stays beside Help at the sidebar bottom. For the investigated cloud fetch failure and deployment requirement, see [Sync connectivity review](sync-connectivity-review.md).
 
 A new business shows empty placeholders until records are created. Empty products, supplies, receipts, customers, stock counts, stock movements, sales reports, order queues and tables explain the action that will populate them. No sample transactions or inventory are created for these placeholders. Screenshots from an isolated fresh-business browser check are saved under [screenshots](screenshots/).
 

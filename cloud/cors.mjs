@@ -3,7 +3,7 @@ export function corsHeadersFor(origin, configured = '') {
   return {
     ...(allowed.has(origin) ? { 'Access-Control-Allow-Origin': origin } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Key, X-Stockroom-Staff-Permissions',
     Vary: 'Origin',
   }
 }

@@ -142,6 +142,19 @@ try {
   assert.equal(await page.locator('#business-navigation').getAttribute('inert'),null)
   assert.equal(await page.getByRole('button',{name:'Open navigation menu'}).isVisible(),false)
   assert.equal(await page.getByRole('searchbox',{name:'Find a tool'}).isVisible(),true)
+  const logoutBox=await page.getByRole('button',{name:'Log out',exact:true}).boundingBox()
+  assert.ok(logoutBox && logoutBox.y>=0 && logoutBox.y+logoutBox.height<=900 && logoutBox.x+logoutBox.width<=280,'Desktop logout must stay within the visible sidebar')
+  const contrast=await page.evaluate(()=>{
+    const rgb=value=>value.match(/[\d.]+/g).slice(0,3).map(Number)
+    const luminance=color=>rgb(color).map(value=>{const channel=value/255;return channel<=.04045?channel/12.92:((channel+.055)/1.055)**2.4}).reduce((sum,value,index)=>sum+value*[.2126,.7152,.0722][index],0)
+    return [...document.querySelectorAll('.sidebar .sync-status,.sidebar .sync-button,.logout-button,.main-content .primary-button,.main-content .filter-button')].filter(element=>element.getClientRects().length&&!element.disabled).map(element=>{
+      let surface=element
+      while(surface.parentElement&&getComputedStyle(surface).backgroundColor==='rgba(0, 0, 0, 0)')surface=surface.parentElement
+      const foreground=luminance(getComputedStyle(element).color),background=luminance(getComputedStyle(surface).backgroundColor)
+      return {text:element.textContent.trim(),ratio:(Math.max(foreground,background)+.05)/(Math.min(foreground,background)+.05)}
+    })
+  })
+  assert.deepEqual(contrast.filter(item=>item.ratio<4.5),[],'Sidebar and action text must remain readable')
   await page.screenshot({path:'docs/screenshots/desktop-inventory.png',fullPage:true})
   const product=await fetch(base+'/api/products',{method:'POST',headers,body:JSON.stringify({name:'Orange juice',price:15,category:'Drinks',sku:'JUICE',stock:20,reorder:2,cost:3,unit:'piece'})})
   assert.equal(product.ok,true)

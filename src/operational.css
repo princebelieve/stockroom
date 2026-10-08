@@ -78,7 +78,7 @@
 }
 @media screen and (min-width:1024px) {
   .app-shell { display:flex; }
-  .app-shell .sidebar { position:sticky; inset:auto; top:0; width:280px; min-width:280px; transform:none; z-index:20; border-left:0; border-right:1px solid var(--line); padding:24px 16px; }
+  .app-shell .sidebar { position:sticky; inset:auto; top:0; width:280px; min-width:280px; transform:none; z-index:20; border-left:0; border-right:1px solid var(--line); padding:24px 16px 80px; }
   .app-shell .main-content { flex:1; width:calc(100% - 280px); min-width:0; max-width:none; margin:0; padding:32px clamp(24px,3vw,56px) 64px; }
   .app-shell .mobile-nav-toggle,.app-shell .mobile-nav-backdrop { display:none; }
   .app-shell .topbar { justify-content:space-between; flex-wrap:nowrap; }
@@ -117,3 +117,17 @@
 .workspace-onboarding .primary-button,.app-introduction .primary-button,.login-card .login-button { border-radius:28px; box-shadow:none; background:var(--brand-primary); }
 .help-menu { top:18px; left:18px; bottom:auto; }
 .help-menu-panel { top:46px; bottom:auto; }
+/* White operational surfaces need their own foregrounds and fixed account action. */
+.app-shell .sidebar .sync-status { color:var(--ink); line-height:1.5; }
+.app-shell .sidebar .sync-status.offline { color:#8a350d; }
+.app-shell .sidebar .sync-status.sync-ready { color:#18563d; }
+.app-shell .sidebar .sync-button { color:white; background:var(--brand-primary); font-size:14px; }
+.app-shell .sidebar .sync-feedback { color:var(--ink); font-size:13px; line-height:1.5; }
+.app-shell .sidebar .sidebar-foot small { color:var(--muted); font-size:12px; line-height:1.5; }
+.app-shell .primary-button,.login-card .primary-button { color:white; }
+.app-shell .filter-button,.app-shell .text-button:not(.logout-button) { color:var(--ink); background:var(--mint); }
+.app-shell .filter-button:hover,.app-shell .text-button:not(.logout-button):hover { color:var(--ink); background:var(--mint); }
+.app-shell button:disabled,.login-card button:disabled { opacity:1; cursor:not-allowed; color:var(--muted); background:#edf0f4; border-color:var(--line); box-shadow:none; }
+@media screen and (min-width:1024px) {
+  .app-shell .sidebar .logout-button { position:fixed; left:172px; bottom:16px; z-index:26; width:92px; margin:0; padding:12px; min-height:44px; border:1px solid var(--line); border-radius:8px; color:var(--ink); background:white; }
+}

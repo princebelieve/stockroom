@@ -1,13 +1,20 @@
 import { useState } from 'react'
 
 const slides = [
-  { title: 'Sell and print receipts' },
-  { title: 'Track stock and supplies' },
-  { title: 'Keep orders moving' },
-  { title: 'Manage customers and staff' },
+  { title: 'Keep trading offline after setup', illustration: 4 },
+  { title: 'Choose a workspace for the way you sell', illustration: 5 },
+  { title: 'Sell goods, take payments and print receipts', illustration: 0 },
+  { title: 'Track stock, supplies and purchase costs', illustration: 1 },
+  { title: 'Keep orders moving from counter to kitchen', illustration: 2 },
+  { title: 'Keep customer and supplier balances clear', illustration: 3 },
+  { title: 'See sales, costs and staff activity', illustration: 6 },
 ]
-function IntroIllustration({step}:{step:number}) {
+function IntroIllustration({step:slideIndex}:{step:number}) {
+  const step=slides[slideIndex].illustration
   return <svg viewBox="0 0 480 300" aria-hidden="true"><circle cx="240" cy="148" r="128" fill="currentColor" opacity=".08"/><ellipse cx="240" cy="270" rx="165" ry="10" fill="currentColor" opacity=".1"/>
+    {step===4&&<><rect x="101" y="57" width="138" height="185" rx="16" fill="white" stroke="currentColor" strokeWidth="5"/><path d="M128 93h84m-84 24h61m-61 24h84m-84 24h61" stroke="currentColor" strokeWidth="5" opacity=".4"/><path d="M144 203l17 17 41-43" fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round"/><path d="M294 139c-31 0-39-39-15-52 3-37 58-44 72-12 38-5 57 43 26 60" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" opacity=".45"/><path d="M283 63l103 96" stroke="currentColor" strokeWidth="7" strokeLinecap="round"/><circle cx="333" cy="220" r="32" fill="currentColor"/><path d="M318 220l11 11 23-25" stroke="white" strokeWidth="6" fill="none" strokeLinecap="round"/></>}
+    {step===5&&<>{['Retail','Oil','Services','Counter','Tables'].map((label,index)=>{const x=index===4?181:111+(index%2)*146,y=index===4?207:39+Math.floor(index/2)*84;return <g key={label}><rect x={x} y={y} width="118" height="68" rx="12" fill="white" stroke="currentColor" strokeWidth="3"/><rect x={x+48} y={y+12} width="22" height="18" rx="4" fill="currentColor" opacity={.3+index*.12}/><text x={x+59} y={y+51} textAnchor="middle" fill="currentColor" fontSize="17">{label}</text></g>})}</>}
+    {step===6&&<><rect x="103" y="47" width="274" height="203" rx="14" fill="white" stroke="currentColor" strokeWidth="5"/><path d="M129 76h122m-122 22h72" stroke="currentColor" strokeWidth="5" opacity=".35"/>{[59,87,116,143].map((height,index)=><rect key={height} x={133+index*57} y={224-height} width="33" height={height} rx="5" fill="currentColor" opacity={.25+index*.2}/>)}<circle cx="371" cy="225" r="32" fill="currentColor"/><circle cx="371" cy="216" r="9" fill="white"/><path d="M353 242q0-22 18-22t18 22" fill="white"/></>}
     {step===0&&<><rect x="84" y="124" width="196" height="123" rx="20" fill="currentColor"/><rect x="105" y="145" width="154" height="62" rx="8" fill="white" opacity=".9"/><path d="M116 124V45h130v79" fill="white" stroke="currentColor" strokeWidth="5"/><path d="M136 66h88m-88 20h65m-65 20h88" stroke="currentColor" strokeWidth="5" opacity=".5"/><rect x="316" y="78" width="74" height="166" rx="15" fill="white" stroke="currentColor" strokeWidth="5"/><rect x="328" y="101" width="50" height="91" rx="4" fill="currentColor" opacity=".12"/><circle cx="353" cy="221" r="6" fill="currentColor"/><path d="M269 91q30-31 60-4m-52 21q19-18 38-4" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round"/></>}
     {step===1&&<><path d="M103 103l137-64 137 64v152H103z" fill="white" stroke="currentColor" strokeWidth="5"/><path d="M87 103h306v39H87z" fill="currentColor"/><path d="M120 104v38m48-38v38m48-38v38m48-38v38m48-38v38m48-38v38" stroke="white" strokeWidth="15" opacity=".4"/><path d="M124 201h231m-231 46h231" stroke="currentColor" strokeWidth="5"/><rect x="134" y="161" width="46" height="38" rx="4" fill="currentColor" opacity=".3"/><rect x="195" y="154" width="46" height="45" rx="4" fill="currentColor"/><rect x="257" y="164" width="79" height="35" rx="4" fill="currentColor" opacity=".2"/><rect x="139" y="218" width="79" height="27" rx="4" fill="currentColor" opacity=".2"/><rect x="241" y="213" width="46" height="32" rx="4" fill="currentColor" opacity=".5"/></>}
     {step===2&&<><rect x="84" y="47" width="312" height="133" rx="16" fill="white" stroke="currentColor" strokeWidth="5"/>{[111,210,309].map((x,index)=><g key={x}><rect x={x} y="72" width="61" height="81" rx="7" fill="currentColor" opacity={.15+index*.2}/><path d={`M${x+14} 100h33m-33 15h24`} stroke="white" strokeWidth="5"/></g>)}<rect x="113" y="230" width="254" height="14" rx="7" fill="currentColor"/><path d="M137 225a48 48 0 0196 0m25 0a40 40 0 0180 0" fill="currentColor" opacity=".3"/><circle cx="347" cy="190" r="30" fill="currentColor"/><path d="M332 190l10 10 20-23" fill="none" stroke="white" strokeWidth="6" strokeLinecap="round"/></>}

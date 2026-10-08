@@ -1,0 +1,11 @@
+# Sync connectivity and sidebar corrections
+
+Checked 2026-10-08. The saved Windows enrollment points to `https://stockroom-0vm5.onrender.com`. Read-only live checks returned HTTP 200 from `/health` and HTTP 204 from upload preflight for both the public PWA origin and Android's `https://localhost` origin.
+
+The live preflight permits `Content-Type, Authorization, X-Admin-Key`, but [browser](../src/lib/browserApi.ts) and [Android](../src/lib/mobileApi.ts) sync uploads also require `X-Stockroom-Staff-Permissions: staff-permissions-v1`. The browser blocks this upload before it reaches the handler, producing a generic fetch failure despite available internet. This header was introduced with staff-access synchronization in commit `5da0c8f`; the subsequent sync-status presentation change did not alter it.
+
+The local fix in [CORS rules](../cloud/cors.mjs) permits that specific header while retaining the existing origin allowlist. Staff permission enforcement remains intact; removing the header would cause restricted-staff synchronization to be rejected by the cloud handler. **The live Render sync API must deploy this change before the observed live preflight defect is resolved.** No production records were uploaded, deleted or marked synchronized during diagnosis. A local Windows API was not listening on port 8787 during the check, so this does not establish the state of a running Windows sync worker.
+
+[Real-browser regression](../test/sync-cors.browser.mjs) reproduces the rejected preflight with the old rules and confirms one acknowledged fixture upload with the corrected rules. It uses two local origins and synthetic data. [CORS unit checks](../test/cors.test.mjs) retain rejection of unapproved origins.
+
+Desktop Log out is now fixed beside Help at the sidebar bottom, independent of navigation length. White sidebar surfaces use dark sync/status text; primary buttons retain white text on dark backgrounds, secondary buttons use dark text on pale surfaces, and disabled controls have readable neutral colours. [Usability browser checks](../test/empty-workspaces.browser.mjs) verify logout's viewport position and minimum 4.5:1 contrast for the rendered sidebar/action controls. Build and all 293 Node tests pass.

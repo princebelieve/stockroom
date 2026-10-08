@@ -20,14 +20,25 @@ try {
       React.createElement(AppIntroduction, { onContinue: () => { document.body.dataset.finished = 'yes' } }),
       React.createElement(WorkspaceHelp, { title: 'Order guide' }, React.createElement('p', null, 'Choose items, then send the order.'))))
   })
-  await page.getByRole('heading', { name: 'Sell and print receipts' }).waitFor()
+  await page.getByRole('heading', { name: 'Keep trading offline after setup' }).waitFor()
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 844 })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   }
   await page.getByRole('button', { name: 'Next', exact: true }).click()
-  await page.getByRole('heading', { name: 'Track stock and supplies' }).waitFor()
+  await page.getByRole('heading', { name: 'Choose a workspace for the way you sell' }).waitFor()
   await page.getByRole('button', { name: 'Back', exact: true }).click()
+  const steps=page.getByRole('navigation',{name:'Introduction steps'}).getByRole('button')
+  assert.equal(await steps.count(),7)
+  for(let index=0;index<7;index++) {
+    await steps.nth(index).click()
+    assert.equal(await steps.nth(index).getAttribute('aria-current'),'step')
+    assert.equal(await page.locator('.intro-illustration svg').count(),1)
+    assert.equal(await page.locator('.intro-illustration svg').evaluate(svg=>svg.children.length>2),true)
+  }
+  await page.getByRole('button',{name:'Continue to sign in',exact:true}).click()
+  assert.equal(await page.evaluate(()=>document.body.dataset.finished),'yes')
+  await steps.first().click()
   await page.getByRole('button', { name: 'Skip introduction' }).click()
   assert.equal(await page.evaluate(() => document.body.dataset.finished), 'yes')
   await page.getByRole('button', { name: 'Help: Order guide' }).click()
