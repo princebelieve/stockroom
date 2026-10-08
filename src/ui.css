@@ -28,9 +28,12 @@
 .list-toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:14px; margin:18px 0; }
 .list-toolbar label,.list-sort { display:grid; gap:6px; font-size:13px; color:var(--muted); }
 .list-toolbar input,.list-sort select { padding:10px 12px; border:1px solid var(--line); border-radius:9px; background:white; color:#213247; min-height:44px; }
-.help-menu { position:relative; order:9; }
-.help-menu>summary { list-style:none; cursor:pointer; font-size:13px; min-height:44px; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:white; color:#213247; }
-.help-menu-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:31; width:min(420px,86vw); max-height:70vh; overflow:auto; padding:12px; border-radius:12px; border:1px solid var(--line); background:white; box-shadow:0 12px 32px #192e4929; }
+.help-menu { position:fixed; left:max(18px,env(safe-area-inset-left)); bottom:calc(18px + env(safe-area-inset-bottom)); z-index:25; }
+.help-menu>summary { display:flex; align-items:center; gap:8px; list-style:none; cursor:pointer; font-size:13px; font-weight:600; min-height:44px; padding:10px 12px; border-radius:10px; border:1px solid var(--brand-primary); background:var(--mint); color:var(--ink); box-shadow:0 3px 12px #192e4929; }
+.help-menu>summary::-webkit-details-marker { display:none; }
+.help-menu-panel { position:absolute; bottom:calc(100% + 8px); left:0; width:min(420px,calc(100vw - 36px)); max-height:min(70dvh,calc(100dvh - 140px)); overflow:auto; box-sizing:border-box; padding:12px; border-radius:12px; border:1px solid var(--line); background:white; box-shadow:0 12px 32px #192e4929; }
+@media(max-width:650px){.help-menu{left:max(12px,env(safe-area-inset-left));bottom:calc(82px + env(safe-area-inset-bottom))}.help-menu-panel{width:min(420px,calc(100vw - 24px))}}
+@media print{.help-menu{display:none}}
 .help-menu-panel .panel { margin:0; padding:14px; }
 .help-menu-panel h2 { font-size:18px; }
 .help-menu-panel p { font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
