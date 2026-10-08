@@ -57,6 +57,12 @@ export async function sendReferralBonusNotice({ to, amount, currency, kind }) {
 let cachedAccessToken = ''
 let accessTokenExpiresAt = 0
 
+export async function checkMailAuthorization() {
+  if(!configured())return {authorized:false,stage:'configuration',code:'missing_credentials',status:0}
+  try {await gmailAccessToken();return {authorized:true,stage:'authorization',code:'accepted',status:200}}
+  catch(error){return {authorized:false,stage:['authorization','send'].includes(error.mailStage)?error.mailStage:'transport',code:['invalid_grant','invalid_client','unauthorized_client','token_failed','gmail_scope_missing'].includes(error.mailCode)?error.mailCode:'authorization_unconfirmed',status:Number(error.responseCode)||0}}
+}
+
 async function gmailAccessToken() {
   if (cachedAccessToken && Date.now() < accessTokenExpiresAt - 60_000) return cachedAccessToken
   const response = await fetch('https://oauth2.googleapis.com/token', {
@@ -64,14 +70,15 @@ async function gmailAccessToken() {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
-      client_id: process.env.GMAIL_CLIENT_ID,
-      client_secret: process.env.GMAIL_CLIENT_SECRET,
-      refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+      client_id: process.env.GMAIL_CLIENT_ID?.trim(),
+      client_secret: process.env.GMAIL_CLIENT_SECRET?.trim(),
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN?.trim(),
     }),
     signal: AbortSignal.timeout(12_000),
   })
   const result = await response.json().catch(() => ({}))
-  if (!response.ok || !result.access_token) throw new Error(`Google OAuth token request failed (${response.status}): ${result.error_description || result.error || 'no access token returned'}`)
+  if (!response.ok || !result.access_token) throw Object.assign(new Error(`Google OAuth token request failed (${response.status}).`), { mailStage:'authorization', responseCode:response.status, mailCode:['invalid_grant','invalid_client','unauthorized_client'].includes(result.error)?result.error:'token_failed' })
+  if(result.scope && !String(result.scope).split(/\s+/).some(scope=>['https://www.googleapis.com/auth/gmail.send','https://www.googleapis.com/auth/gmail.compose','https://www.googleapis.com/auth/gmail.modify','https://mail.google.com/'].includes(scope)))throw Object.assign(new Error('Gmail sending permission is missing.'),{mailStage:'authorization',mailCode:'gmail_scope_missing',responseCode:403})
   cachedAccessToken = result.access_token
   accessTokenExpiresAt = Date.now() + Number(result.expires_in || 3600) * 1000
   return cachedAccessToken
@@ -105,15 +112,23 @@ function rawMessage({ to, subject, text, html, replyTo = process.env.SUPPORT_REP
 
 async function sendMail({ to, subject, text, html, replyTo }) {
   if (!configured()) throw new Error('Email is not configured.')
+  const raw = rawMessage({ to, subject, text, html, replyTo })
+  let response, result
+  for (let attempt=0;attempt<2;attempt++) {
   const token = await gmailAccessToken()
-  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+  response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw: rawMessage({ to, subject, text, html, replyTo }) }),
+    body: JSON.stringify({ raw }),
     signal: AbortSignal.timeout(12_000),
   })
-  const result = await response.json().catch(() => ({}))
-  if (!response.ok || !result.id) throw new Error(`Gmail API send failed (${response.status}): ${result.error?.message || 'no message id returned'}`)
+  result = await response.json().catch(() => ({}))
+  // A 401 explicitly rejected the request, so refreshing cannot duplicate an
+  // accepted email. Never automatically resend after an uncertain timeout.
+  if(response.status===401 && attempt===0){cachedAccessToken='';accessTokenExpiresAt=0;continue}
+  break
+  }
+  if (!response.ok || !result.id) throw Object.assign(new Error(`Gmail API send failed (${response.status}).`), { mailStage:'send', responseCode:response.status, mailCode:response.status===403?'gmail_permission':response.status===429?'gmail_rate_limit':'send_failed' })
   return { messageId: result.id, threadId: result.threadId || '' }
 }
 

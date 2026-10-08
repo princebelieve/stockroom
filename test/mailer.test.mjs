@@ -4,6 +4,41 @@ import { mailConfigured, mailDiagnostics, sendSupportRequest, sendSubscriptionRe
 
 const names = ['GMAIL_USER', 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
 
+test('mail startup check distinguishes rejected OAuth and missing send scope without exposing credentials',async()=>{
+  const previous=Object.fromEntries(names.map(name=>[name,process.env[name]])),originalFetch=globalThis.fetch
+  try {
+    Object.assign(process.env,Object.fromEntries(names.map(name=>[name,'private-value'])))
+    globalThis.fetch=async()=>({ok:false,status:400,json:async()=>({error:'invalid_grant',error_description:'private-value'})})
+    const rejected=await import('../cloud/mailer.mjs?authorization-rejected-test')
+    const failure=await rejected.checkMailAuthorization()
+    assert.deepEqual(failure,{authorized:false,stage:'authorization',code:'invalid_grant',status:400})
+    assert.equal(JSON.stringify(failure).includes('private-value'),false)
+    globalThis.fetch=async()=>({ok:true,status:200,json:async()=>({access_token:'private-value',scope:'openid email'})})
+    const scope=await import('../cloud/mailer.mjs?authorization-scope-test')
+    assert.deepEqual(await scope.checkMailAuthorization(),{authorized:false,stage:'authorization',code:'gmail_scope_missing',status:403})
+  } finally {globalThis.fetch=originalFetch;for(const name of names)previous[name]===undefined?delete process.env[name]:process.env[name]=previous[name]}
+})
+
+test('registration mail trims credentials and refreshes an explicitly rejected token once',async()=>{
+  const previous=Object.fromEntries(names.map(name=>[name,process.env[name]])),originalFetch=globalThis.fetch
+  let sends=0,tokens=0
+  try {
+    Object.assign(process.env,{GMAIL_USER:' sender@example.test ',GMAIL_CLIENT_ID:' client ',GMAIL_CLIENT_SECRET:' secret ',GMAIL_REFRESH_TOKEN:' refresh '})
+    globalThis.fetch=async(url,init)=>{
+      if(String(url).includes('oauth2.googleapis.com')){
+        tokens++
+        assert.equal(init.body.get('client_id'),'client');assert.equal(init.body.get('refresh_token'),'refresh')
+        return {ok:true,status:200,json:async()=>({access_token:'mock-token-'+tokens,expires_in:3600})}
+      }
+      sends++
+      return sends===1?{ok:false,status:401,json:async()=>({error:{message:'Expired'}})}:{ok:true,status:200,json:async()=>({id:'accepted'})}
+    }
+    const {sendBusinessRegistrationKey}=await import('../cloud/mailer.mjs?registration-retry-test')
+    await sendBusinessRegistrationKey({to:'owner@example.test',businessName:'Test',key:'mock-key',expiresAt:new Date()})
+    assert.equal(sends,2);assert.equal(tokens,2)
+  } finally {globalThis.fetch=originalFetch;for(const name of names)previous[name]===undefined?delete process.env[name]:process.env[name]=previous[name]}
+})
+
 test('Gmail support messages target support and direct replies to the contact without exposing credentials', async () => {
   const envNames=[...names,'SUPPORT_EMAIL','SUPPORT_REPLY_TO'], previous=Object.fromEntries(envNames.map(name=>[name,process.env[name]])), originalFetch=globalThis.fetch
   const messages=[]

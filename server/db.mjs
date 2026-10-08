@@ -1,3 +1,4 @@
+import { nextSettingsTimestamp } from './settings-sync.mjs'
 import { birthdayValue } from './customer-birthdays.mjs'
 import { parsePermissions } from './staff-permissions.mjs'
 import { conflictReview, conflictReviewSchema } from './sync-conflict-review.mjs'
@@ -854,6 +855,14 @@ export function applyRemoteOperations(operations) {
         }catch(error){database.exec('ROLLBACK');throw error}
         continue
       } else if (operation.entityType === 'settings' && operation.action === 'upsert') {
+        const local = database.prepare('SELECT updated_at,app_name,currency,shop_profile,payment_policy FROM app_settings WHERE organization_id = ?').get(organizationId)
+        const pending = database.prepare("SELECT 1 FROM sync_outbox WHERE entity_type = 'settings' AND synced_at IS NULL LIMIT 1").get()
+        if (pending) throw new Error('Business settings have unsent changes. Use Sync now before refreshing them.')
+        const placeholder = local?.app_name==='My Business' && local?.currency==='USD' && (!local.shop_profile || local.shop_profile==='null') && (!local.payment_policy || local.payment_policy==='{}')
+        if (!placeholder && local?.updated_at > (payload.updatedAt || operation.createdAt)) {
+          database.prepare('INSERT INTO sync_inbox (operation_id, received_at) VALUES (?, ?)').run(operation.operationId, now())
+          continue
+        }
         if (payload.paymentPolicy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(payload.paymentPolicy)), organizationId)
         if (payload.shopProfile != null) database.prepare('UPDATE app_settings SET shop_profile = ? WHERE organization_id = ?').run(JSON.stringify(normalizeShopProfile(payload.shopProfile)), organizationId)
         database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?')
@@ -941,7 +950,7 @@ export function approveStocktake(id, reason = '') {
 }
 
 export async function updateSettings(appName, currency = 'USD', posProvider = '', posTerminalId = '', posConnection = 'manual', mongoUri, mongoDatabase, logoData = '', policy) {
-  const updatedAt = now()
+  const updatedAt = nextSettingsTimestamp(database.prepare('SELECT updated_at FROM app_settings WHERE organization_id = ?').get(organizationId)?.updated_at)
   database.prepare('UPDATE app_settings SET app_name = ?, currency = ?, pos_provider = ?, pos_terminal_id = ?, pos_connection = ?, logo_data = ?, updated_at = ? WHERE organization_id = ?').run(appName, currency, posProvider, posTerminalId, posConnection, logoData, updatedAt, organizationId)
   if (policy !== undefined) database.prepare('UPDATE app_settings SET payment_policy = ? WHERE organization_id = ?').run(JSON.stringify(paymentPolicy(policy)), organizationId)
   const config = { appName, shopName: appName, ...(mongoUri === undefined ? {} : { mongoUri }), ...(mongoDatabase === undefined ? {} : { mongoDatabase }), updatedAt }
@@ -964,7 +973,7 @@ export async function queueInitialSettingsSnapshot() {
 
 export async function updateShopProfile(input) {
   const profile = validateShopProfile(input)
-  database.prepare('UPDATE app_settings SET shop_profile = ?, updated_at = ? WHERE organization_id = ?').run(JSON.stringify(profile), now(), organizationId)
+  database.prepare('UPDATE app_settings SET shop_profile = ?, updated_at = ? WHERE organization_id = ?').run(JSON.stringify(profile), nextSettingsTimestamp(database.prepare('SELECT updated_at FROM app_settings WHERE organization_id = ?').get(organizationId)?.updated_at), organizationId)
   const settings = await getSettings()
   queueSync('settings', organizationId, 'upsert', settings)
   return profile

@@ -58,7 +58,12 @@ export async function createRegistration({ database, client, accounts, hashPassw
       const expiresInDays = Number(setup?.registrationKeyDurationDays ?? 7)
       const result = await issue({ ...input, email, expiresInDays })
       try { await sendBusinessRegistrationKey({ to: email, businessName: result.businessName, key: result.key, expiresAt: result.expiresAt }); await keys.updateOne({ _id: registrationKeyHash(result.key) }, { $set: { deliveryStatus: 'sent' } }) }
-      catch (error) { await keys.updateOne({ _id: registrationKeyHash(result.key) }, { $set: { deliveryStatus: 'unconfirmed' } }); throw new Error('We could not confirm email delivery. Check your inbox and spam folder; any key received is still valid. If none arrives, retry or contact Stockroom support.') }
+      catch (error) {
+        const delivery = { stage:['authorization','send'].includes(error.mailStage)?error.mailStage:'transport', code:['invalid_grant','invalid_client','unauthorized_client','token_failed','gmail_scope_missing','gmail_permission','gmail_rate_limit','send_failed'].includes(error.mailCode)?error.mailCode:'unconfirmed', status:Number(error.responseCode)||0 }
+        await keys.updateOne({ _id: registrationKeyHash(result.key) }, { $set: { deliveryStatus:'unconfirmed', deliveryFailure:delivery } })
+        console.error('Registration email failed.',JSON.stringify(delivery))
+        throw Object.assign(new Error('We could not confirm email delivery. Check your inbox and spam folder; any key received is still valid. If none arrives, retry or contact Stockroom support.'),{statusCode:503})
+      }
       return { businessName: result.businessName, email: result.email, expiresAt: result.expiresAt }
     },
     async redeem(input) {

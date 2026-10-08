@@ -24,8 +24,8 @@ import { createPosPaystack } from './pos-paystack.mjs'
 import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
-import { isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { mailConfigured, mailDiagnostics, sendPosReceipt, sendBusinessRegistrationKey, sendPasswordReset, sendSupportRequest } from './mailer.mjs'
+import { identicalSettings, isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
+import { checkMailAuthorization, mailConfigured, mailDiagnostics, sendPosReceipt, sendBusinessRegistrationKey, sendPasswordReset, sendSupportRequest } from './mailer.mjs'
 import { submitSupportRequest } from './support-requests.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
@@ -980,6 +980,7 @@ const server = createServer(async (request, response) => {
             conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This record was changed on another till. Refresh and review the other version.',localPayload:document.payload,remotePayload:current?.payload||{}});continue
           }
           if (!isNewerMutableOperation(document, current)) {
+            if (identicalSettings(document,current)) { acceptedOperationIds.push(document.operationId); continue }
             conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'A newer version of this record was saved on another device.', localPayload: document.payload, remotePayload: current.payload })
             continue
           }
@@ -1052,4 +1053,5 @@ const server = createServer(async (request, response) => {
 server.listen(port, () => {
   console.log(`Sync API listening on ${port}`)
   console.info('Mail transport configuration:', JSON.stringify(mailDiagnostics()))
+  void checkMailAuthorization().then(result=>console.info('Mail authorization:',JSON.stringify(result)))
 })

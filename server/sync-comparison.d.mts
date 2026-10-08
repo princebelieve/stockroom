@@ -1,0 +1,1 @@
+export function syncComparison(local?:string, remote?:string): {available:boolean;matching:boolean;rows:Array<{label:string;local:string;remote:string;logo:boolean;localLogo:string;remoteLogo:string}>}

@@ -78,6 +78,15 @@ test('successful public requests return delivery details without exposing the ke
   assert.ok((await service.redeem({ ...owner, key: delivered.key })).businessId)
 })
 
+test('registration retains safe actionable mail diagnostics without leaking secrets',async()=>{
+  const db=fixture()
+  const service=await createRegistration({...db,sendBusinessRegistrationKey:async()=>{throw Object.assign(new Error('secret-token and private email'),{mailStage:'authorization',mailCode:'invalid_grant',responseCode:400})}})
+  await assert.rejects(service.issuePublic(details,'127.0.0.1'),error=>error.statusCode===503&&!error.message.includes('secret-token'))
+  const row=db.rows('business_registration_keys')[0]
+  assert.deepEqual(row.deliveryFailure,{stage:'authorization',code:'invalid_grant',status:400})
+  assert.equal(JSON.stringify(row).includes('secret-token'),false)
+})
+
 test('keys are unpredictable, hashed at rest and bound to email and business', async () => {
   const db = fixture(); const service = await registrationService(db)
   const issued = await service.issue(details)

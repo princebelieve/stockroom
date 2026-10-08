@@ -13,6 +13,31 @@ import { registerCheckoutTill } from '../server/till-binding.mjs'
 
 for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
   const source = readFileSync(path, 'utf8')
+  test(`${path}: settings refresh preserves pending edits and never rolls settings back`,async()=>{
+    const sqlite=new DatabaseSync(':memory:')
+    sqlite.exec(`CREATE TABLE sync_inbox(operation_id TEXT PRIMARY KEY,received_at TEXT);
+      CREATE TABLE sync_outbox(entity_type TEXT,synced_at TEXT);
+      CREATE TABLE app_settings(id INTEGER PRIMARY KEY,app_name TEXT,currency TEXT,pos_provider TEXT,pos_terminal_id TEXT,pos_connection TEXT,logo_data TEXT,updated_at TEXT,payment_policy TEXT,shop_profile TEXT);
+      INSERT INTO app_settings(id,app_name,currency,updated_at) VALUES(1,'Local shop','NGN','2026-10-08T12:00:01.000Z');
+      INSERT INTO sync_outbox VALUES('settings',NULL);`)
+    const db={query:async(sql,args=[])=>({values:sqlite.prepare(sql).all(...args)}),run:async(sql,args=[])=>sqlite.prepare(sql).run(...args)}
+    const code=source.slice(source.indexOf('async function applyOperation('),source.indexOf('\n// Serialize network sync jobs'))
+    const apply=vm.runInNewContext(stripTypeScriptTypes(`(${code})`),{openMobileDatabase:async()=>db,ensureBranches:async()=>{},now:()=>new Date().toISOString()})
+    try {
+      const remote={operationId:'older-settings',entityType:'settings',action:'upsert',createdAt:'2026-10-08T12:00:00.000Z',payload:{appName:'Old shop',currency:'USD',updatedAt:'2026-10-08T12:00:00.000Z'}}
+      await assert.rejects(apply(remote),/unsent changes/)
+      assert.equal(sqlite.prepare('SELECT app_name FROM app_settings').get().app_name,'Local shop')
+      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM sync_inbox').get().n,0,'Pending refresh must be retried after upload')
+      sqlite.exec('DELETE FROM sync_outbox')
+      await apply(remote)
+      assert.equal(sqlite.prepare('SELECT app_name FROM app_settings').get().app_name,'Local shop')
+      await apply({...remote,operationId:'new-settings',payload:{...remote.payload,appName:'New shop',updatedAt:'2026-10-08T12:00:02.000Z'}})
+      assert.equal(sqlite.prepare('SELECT app_name FROM app_settings').get().app_name,'New shop')
+      sqlite.exec("UPDATE app_settings SET app_name='My Business',currency='USD',payment_policy='{}',shop_profile=NULL,updated_at='2026-10-08T12:00:03.000Z'")
+      await apply({...remote,operationId:'registration-seed',payload:{...remote.payload,appName:'Registered shop'}})
+      assert.equal(sqlite.prepare('SELECT app_name FROM app_settings').get().app_name,'Registered shop','Fresh placeholder must hydrate registration settings even if its initialization clock is newer')
+    } finally {sqlite.close()}
+  })
   test(`${path}: synced partial repayments preserve debt and apply once`, async () => {
     const sqlite = new DatabaseSync(':memory:')
     sqlite.exec(`CREATE TABLE customers (id TEXT PRIMARY KEY, balance REAL);
