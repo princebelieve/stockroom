@@ -8,6 +8,12 @@ The workspace also includes Inventory, Purchasing, Stock count, Stock movements 
 
 First-time sign-in opens a short, skippable introduction to sales, inventory, orders and team workflows. Select **Explore what Stockroom can do** on the sign-in screen to replay it. The setup checklist groups tasks into business and catalogue, team and devices, and readiness for daily work.
 
+The introduction also appears before setup on a new installation. Owner registration progresses through business details, account details and review; Back retains entered values. After sign-in, choose a branch and continue into the workspace. Add a catalogue or menu, payment configuration and staff gradually as needed.
+
+Desktop keeps a persistent sidebar and a workspace that uses the available width. Phones and smaller tablets use the Menu drawer. Operational screens use a white canvas; **Choose screen**, **Order screen** or **Restaurant screen** selects one task within that area. Inventory opens the product list, while supply records, new supply, suppliers, transfers, imports and stock costs have separate screens. Customer and staff creation, expenses and receipt tasks are also separate from their lists.
+
+A new business shows empty placeholders until records are created. Empty products, supplies, receipts, customers, stock counts, stock movements, sales reports, order queues and tables explain the action that will populate them. No sample transactions or inventory are created for these placeholders. Screenshots from an isolated fresh-business browser check are saved under [screenshots](screenshots/).
+
 Select **Quick guide** on workspace screens to open contextual instructions in a popup without leaving your work. Close it with **Got it**, **Close**, or Escape. Transaction errors, payment confirmations and recovery instructions remain alongside their actions.
 
 Open **Business settings > Workspaces**:
