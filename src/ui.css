@@ -19,7 +19,10 @@
 .sidebar .navigation-parent span { margin-left:auto; }
 .sidebar .sidebar-subnav { padding:4px 0 8px 12px; margin:0; border-left:1px solid #ffffff25; }
 .sidebar .sidebar-subnav .nav-item,.sidebar .sidebar-subnav a { width:100%; padding:10px; font-size:13px; min-height:40px; }
-.sidebar .nav-item.active,.sidebar .nav-item:hover { background:#ffffff15; color:white; }
+.sidebar .nav-item:hover { background:#ffffff15; color:white; }
+.sidebar .nav-item.active,.sidebar .nav-item.active:hover { background:var(--mint); color:var(--ink); font-weight:700; box-shadow:inset 4px 0 var(--brand-primary); }
+.sidebar .nav-item.active b { background:var(--ink); color:var(--mint); }
+.sidebar .nav-item:focus-visible { outline:2px solid var(--brand-accent); outline-offset:2px; }
 .sidebar .sidebar-subnav a:hover { background:#ffffff15; }
 .tool-search { position:relative; min-width:180px; max-width:260px; flex:1; }
 .list-toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:14px; margin:18px 0; }
