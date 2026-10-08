@@ -26,7 +26,7 @@ export function ServicePayments({ requestId, requestedTab, access, industry='gen
 }) {
   const [walletCustomers,setWalletCustomers] = useState(customers)
   useEffect(()=>{if(walletAllowed&&!hidden)void posRequest('/api/pos',headers).then(data=>setWalletCustomers(data.customers||customers)).catch(error=>setSetupError(error.message))},[walletAllowed,hidden,headers.Authorization,headers['X-Stockroom-Branch']])
-  const allowed=(key:string)=>!access||access[key]===true
+  const allowed=(key:string)=>(key!=='church'||industry==='services')&&(!access||access[key]===true)
   const [tab,setTab]=useState(configuration?'Receipt settings':allowed('payments')?'New payment':allowed('serviceJobs')?'Jobs & invoices':'Church collections')
   useEffect(()=>{if(configuration||hidden)return;if(requestedTab==='New payment'&&allowed('payments')||requestedTab==='Jobs & invoices'&&allowed('serviceJobs'))setTab(requestedTab)},[requestedTab,requestId,hidden,configuration])
   const [draft, setDraft] = useState<Draft>(() => restore(storageKey))

@@ -4,6 +4,8 @@ For the original-versus-refactored frontend and backend comparison, rendered scr
 
 Fast food is a separate, optional workspace for counter-service orders. Enabling it does not add menu or preparation controls to supermarket checkout.
 
+Online orders also support explicitly published goods in Product sales and Oil sales workspaces. These screens use picking and fulfilment language; food ordering keeps its menu and preparation workflow. Ingredient stock alone does not enable retail online orders. Product ordering and delivery settings, customer links, navigation and staff-access choices follow the enabled workspaces. Hidden staff permissions remain saved when a workspace is disabled. Printing uses job/material permissions; church collections appear only in the services/church profile. Service bookings and online invoice requests are not currently implemented.
+
 The workspace also includes Inventory, Purchasing, Stock count, Stock movements and stock reports for ingredients and packaged goods. Owners and administrators can receive supplier deliveries, track batch costs and expiry dates, and record wastage without enabling Product sales.
 
 ## Setup

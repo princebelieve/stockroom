@@ -113,7 +113,7 @@ test('account navigation is restricted to owners', async () => {
   const end = source.indexOf('function preferredScreen', start)
   const code = stripTypeScriptTypes(source.slice(start,end), { mode: 'strip' })
   for (const role of ['owner', 'admin', 'cashier']) {
-    assert.equal(runInNewContext(code + "; screenAllowedForUser('Account', user)", { user: { role, operationalAccess: false }, isBrowserPwa:()=>false, isNativeMobile:()=>false }), role === 'owner')
+    assert.equal(runInNewContext(code + "; screenAllowedByRole('Account', user)", { user: { role, operationalAccess: false }, isBrowserPwa:()=>false, isNativeMobile:()=>false }), role === 'owner')
   }
 })
 
