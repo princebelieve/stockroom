@@ -8,13 +8,15 @@ export function usePortalMenu(persistentDrawer = false) {
     if (!open) return
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    menu.current?.querySelector<HTMLElement>('button, a[href], summary, input, select')?.focus()
+    const initialFocus = persistentDrawer ? menu.current : menu.current?.querySelector<HTMLElement>('button, a[href], summary')
+    initialFocus?.focus({ preventScroll: true })
     const close = () => { setOpen(false); toggle.current?.focus() }
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); close() }
       if (event.key !== 'Tab') return
       const items = [...(menu.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], summary, input:not(:disabled), select:not(:disabled)') || [])].filter(item => item.getClientRects().length)
       if (!items.length) return
+      if (document.activeElement === menu.current) { event.preventDefault(); (event.shiftKey ? items.at(-1) : items[0])?.focus(); return }
       if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1)?.focus() }
       else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0].focus() }
     }

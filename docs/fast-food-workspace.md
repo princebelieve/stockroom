@@ -14,6 +14,8 @@ Owner registration progresses through business details, account details and revi
 
 Desktop keeps a persistent sidebar and a workspace that uses the available width. Phones and smaller tablets use the Menu drawer. Operational screens use a white canvas; **Choose screen**, **Order screen** or **Restaurant screen** selects one task within that area. Inventory opens the product list, while supply records, new supply, suppliers, transfers, imports and stock costs have separate screens. Customer and staff creation, expenses and receipt tasks are also separate from their lists.
 
+The mobile drawer opens without focusing a text field. It has no tool-search box, scrolls independently, and blocks touches to the workspace until dismissed. Desktop keeps tool search. Sync controls are inside the mobile drawer rather than floating over business records. Waiting setup/settings changes are identified separately from business activity; a connection error does not mean a sale occurred or remove saved changes.
+
 A new business shows empty placeholders until records are created. Empty products, supplies, receipts, customers, stock counts, stock movements, sales reports, order queues and tables explain the action that will populate them. No sample transactions or inventory are created for these placeholders. Screenshots from an isolated fresh-business browser check are saved under [screenshots](screenshots/).
 
 Select **Help & support > Help for this screen** for contextual instructions. Routine instructions stay out of working screens; errors, payment confirmations and destructive-action warnings remain visible when needed. Close Help with **Close** or Escape.

@@ -17,7 +17,7 @@
   .app-shell .sidebar .nav-item.active { color:var(--brand-primary); background:var(--mint); }
   .app-shell .sidebar .navigation-parent { margin-top:12px; font-size:18px; }
   .app-shell .sidebar .sidebar-foot { margin-top:24px; border-color:var(--line); }
-  .app-shell .sidebar .tool-search { width:100%; margin:20px 0; }
+  .app-shell .sidebar .tool-search { width:100%; min-width:0; max-width:none; flex:none; order:0; margin:20px 0; }
   .app-shell .sidebar .logout-button { display:block; color:var(--brand-primary); padding:16px; margin:12px 0; }
   .app-shell .mobile-nav-toggle { display:flex; position:fixed; top:14px; right:18px; left:auto; z-index:120; width:44px; height:44px; align-items:center; justify-content:center; background:white; color:var(--brand-primary); border:0; box-shadow:none; }
   .app-shell .mobile-nav-backdrop { display:block; position:fixed; inset:0; z-index:100; background:#0007; border:0; }
@@ -58,11 +58,20 @@
   .intro-illustration { width:240px; height:240px; }
   .app-shell .app-copyright { margin-top:48px; text-align:center; }
 }
+@media screen and (max-width:1023px) {
+  .app-shell .sidebar { width:min(320px,80vw); overscroll-behavior:contain; touch-action:pan-y; }
+  .app-shell .sidebar .tool-search { display:none; }
+  .app-shell .sidebar nav { display:grid; overflow:visible; }
+  .app-shell .sidebar .pwa-sync-controls { display:block; }
+  .app-shell .mobile-pwa-sync { display:none; }
+  .app-shell .mobile-nav-backdrop { touch-action:none; }
+  .app-shell .sidebar.mobile-menu-open { padding-top:max(64px,env(safe-area-inset-top)); }
+}
 @media screen and (max-width:650px) {
   .app-shell .main-content { padding:88px 20px 88px; }
   .app-shell .topbar { margin-inline:0; padding:0 0 18px; }
   .app-shell .topbar h1 { font-size:26px; }
-  .app-shell .sidebar { width:min(360px,86vw); }
+  .app-shell .sidebar { width:min(320px,80vw); }
   .app-shell .panel { padding:12px 0; }
   .app-shell .top-actions .tool-search { order:0; width:auto; flex-basis:auto; }
   .empty-screen { min-height:48dvh; padding:32px 8px; }

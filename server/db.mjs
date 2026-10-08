@@ -372,9 +372,10 @@ export function getSyncCursor() { return database.prepare("SELECT value FROM syn
 export function setSyncCursor(cursor) { database.prepare("INSERT INTO sync_state (key, value) VALUES ('cursor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(cursor || '')) }
 export function getSyncStatus() {
   const pending = database.prepare('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL').get().count
+  const pendingSettings = database.prepare("SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL AND entity_type = 'settings'").get().count
   const lastError = database.prepare('SELECT last_error AS value FROM sync_outbox WHERE synced_at IS NULL AND last_error <> \'\' ORDER BY id DESC LIMIT 1').get()?.value || ''
   const conflicts = database.prepare('SELECT COUNT(*) AS count FROM sync_conflicts WHERE resolved_at IS NULL').get().count
-  return { configured: Boolean(process.env.SYNC_API_URL && process.env.SYNC_DEVICE_TOKEN && process.env.BUSINESS_ID), pending, conflicts, lastError }
+  return { configured: Boolean(process.env.SYNC_API_URL && process.env.SYNC_DEVICE_TOKEN && process.env.BUSINESS_ID), pending, pendingSettings, conflicts, lastError }
 }
 export async function getSettings() {
   const row = database.prepare('SELECT app_name AS appName, currency, pos_provider AS posProvider, pos_terminal_id AS posTerminalId, pos_connection AS posConnection, logo_data AS logoData, payment_policy AS paymentPolicy, shop_profile AS shopProfile, updated_at AS updatedAt FROM app_settings WHERE organization_id = ?').get(organizationId)

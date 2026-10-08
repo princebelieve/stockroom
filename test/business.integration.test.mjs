@@ -66,6 +66,25 @@ after(async () => {
   await Promise.all(tempDirectories.map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
+test('sync identifies queued setup changes separately from business activity', async () => {
+  const {baseUrl}=await startBusiness()
+  const token=await createOwner(baseUrl)
+  const headers={'Content-Type':'application/json',Authorization:`Bearer ${token}`}
+  const settings=(await json(`${baseUrl}/api/settings`,{headers})).body
+  const before=(await json(`${baseUrl}/api/sync/status`,{headers})).body
+  for(const currency of ['NGN','USD','GHS']) {
+    const result=await json(`${baseUrl}/api/settings`,{method:'PUT',headers,body:JSON.stringify({...settings,currency})})
+    assert.equal(result.response.status,200)
+  }
+  const after=(await json(`${baseUrl}/api/sync/status`,{headers})).body
+  assert.equal(after.pendingSettings-before.pendingSettings,3)
+  assert.equal(after.pending,after.pendingSettings)
+  await product(baseUrl,token)
+  const activity=(await json(`${baseUrl}/api/sync/status`,{headers})).body
+  assert.equal(activity.pendingSettings,after.pendingSettings)
+  assert.ok(activity.pending>activity.pendingSettings)
+})
+
 test('saving a setup step preserves previously configured business and device settings', async () => {
   const { baseUrl,dataDirectory }=await startBusiness()
   const token=await createOwner(baseUrl)

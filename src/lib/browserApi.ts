@@ -317,7 +317,8 @@ async function localSyncStatus() {
   const db = await openMobileDatabase()
   const pending = await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')
   const conflicts = await db.query('SELECT COUNT(*) AS count FROM sync_conflicts WHERE resolved_at IS NULL')
-  return { configured: Boolean(config), pending: Number(pending.values?.[0]?.count || 0), conflicts: Number(conflicts.values?.[0]?.count || 0), lastError: config ? await setting('lastSyncError') : 'This browser has not been enrolled.' }
+  const settings = await db.query("SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL AND entity_type = 'settings'")
+  return { configured: Boolean(config), pending: Number(pending.values?.[0]?.count || 0), pendingSettings: Number(settings.values?.[0]?.count || 0), conflicts: Number(conflicts.values?.[0]?.count || 0), lastError: config ? await setting('lastSyncError') : 'This browser has not been enrolled.' }
 }
 
 async function cloudRequest(path: string, init: RequestInit = {}) {
@@ -525,7 +526,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const status = path === '/api/sync/pull' ? await pullLatest() : await syncNow()
     await subscriptionStatus(true)
     await setSetting('lastSyncError', status.lastError)
-    return json(status)
+    return json({ ...status, ...(await localSyncStatus()) })
   }
   if (path === '/api/products' && method === 'GET') return json({ products: (await db.query('SELECT p.id, p.name, p.sku, p.barcode, p.category, COALESCE(i.stock, 0) AS stock, COALESCE(i.reorder_point, p.reorder_point) AS reorder, p.price, p.cost_price AS cost, p.unit, p.custom_values AS customValues, p.updated_at AS updated FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? ORDER BY p.updated_at DESC', [branchId])).values || [] })
   if (path === '/api/products/export' && method === 'GET') {
