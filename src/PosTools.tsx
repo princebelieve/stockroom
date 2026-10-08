@@ -1,3 +1,4 @@
+import { hasPermission } from '../server/staff-permissions.mjs'
 import { WorkspaceHelp } from './WorkspaceHelp'
 import { receiptText } from '../server/receipts.mjs'
 import { checkoutTillId } from './lib/checkoutTill'
@@ -15,7 +16,7 @@ export async function posRequest(path: string, headers: Record<string, string>, 
   return result
 }
 export function PosTools({ data, headers, reload, user, branches, products, customers, sales, money, restored, stockEnabled = true, mode = 'operations' }: {
-  mode?:'operations'|'settings'|'products'|'register'|'history';stockEnabled?:boolean;branches: Array<{id: string; name: string; isActive?: boolean}>; data: PosData; headers: Record<string, string>; reload: () => Promise<void>; user: { id: string; role: string }; products: Product[]; customers: Customer[]; sales: Sale[]; money: (n: number) => string; restored: () => Promise<void>
+  mode?:'operations'|'settings'|'products'|'register'|'history';stockEnabled?:boolean;branches: Array<{id: string; name: string; isActive?: boolean}>; data: PosData; headers: Record<string, string>; reload: () => Promise<void>; user: { id: string; role: string; permissions?:Record<string,boolean>|null }; products: Product[]; customers: Customer[]; sales: Sale[]; money: (n: number) => string; restored: () => Promise<void>
 }) {
   const [error, setError] = useState('')
   const [settings, setSettings] = useState(data.settings)
@@ -62,7 +63,7 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
       {data.registers.filter(record => record.closedAt && (user.role !== 'cashier' || record.staffId === user.id)).map(record => <p key={record.id}>{record.staffName} · {new Date(record.closedAt).toLocaleString()} · expected {money(record.expectedCash)} · counted {money(record.countedCash)} · difference {money(record.difference)}{record.closingReason && ` · ${record.closingReason}`}</p>)}
     </details>
     }
-    {['operations','history'].includes(mode) && <>{['owner', 'admin'].includes(user.role) && <details><summary>Return items from a completed receipt</summary><p>Choose the receipt and returned quantities. Restock only goods that can be sold again.</p>
+    {['operations','history'].includes(mode) && <>{(user.permissions?hasPermission(user,'refunds'):['owner','admin'].includes(user.role)) && <details><summary>Return items from a completed receipt</summary><p>Choose the receipt and returned quantities. Restock only goods that can be sold again.</p>
       <label>Receipt<select value={selectedSale} onChange={event => { setSelectedSale(event.target.value); setQuantities({}); setRestock({}) }}><option value="">Choose receipt</option>{sales.map(record => <option key={record.id} value={record.id}>{new Date(record.createdAt).toLocaleString()} · {record.id} · {money(record.total)}</option>)}</select></label>
       {sale && <AsyncForm busyLabel="Saving return..." onSubmit={async event => {
         const form = new FormData(event.currentTarget)
@@ -102,7 +103,7 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
       </details>
       <SubmitButton className="filter-button">Save POS settings</SubmitButton>
     </AsyncForm></details>}
-    {mode==='products' && stockEnabled && ['owner', 'admin'].includes(user.role) && <details><summary>Product variants and extras</summary><WorkspaceHelp><p>Each stock variant uses its own existing product/SKU. Group them here and optionally configure extras that add to its selling price.</p></WorkspaceHelp><label>Product<select value={productId} onChange={event => setProductId(event.target.value)}><option value="">Choose product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label>
+    {mode==='products' && stockEnabled && (user.permissions?hasPermission(user,'inventory'):['owner','admin'].includes(user.role)) && <details><summary>Product variants and extras</summary><WorkspaceHelp><p>Each stock variant uses its own existing product/SKU. Group them here and optionally configure extras that add to its selling price.</p></WorkspaceHelp><label>Product<select value={productId} onChange={event => setProductId(event.target.value)}><option value="">Choose product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label>
       {productId && <AsyncForm key={productId} busyLabel="Saving product options..." onSubmit={async event => {
         const form = new FormData(event.currentTarget)
         const modifiers = String(form.get('modifiers') || '').split('\n').filter(line => line.trim()).map(line => { const index = line.lastIndexOf('|'); if (index < 1) throw new Error('Use Extra name | price for each line.'); return { name: line.slice(0, index).trim(), price: Number(line.slice(index + 1).trim()) } })

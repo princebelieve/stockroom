@@ -1,3 +1,4 @@
+import { setStaffPermissions } from './db.mjs'
 import { requiresChurchSync } from './church-ledger.mjs'
 import { requiresReservationSync } from './restaurant-reservations.mjs'
 import { requiresStockWorkSync } from './stock-work.mjs'
@@ -69,16 +70,17 @@ export async function syncConfigurationStatus() {
 }
 
 async function pullRemoteChanges({ url, token, businessId, deviceId }) {
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const headers = { 'Content-Type': 'application/json', 'X-Stockroom-Staff-Permissions':'staff-permissions-v1', Authorization: `Bearer ${token}` }
   // Include this device's own cloud history. This is essential after its local
   // SQLite database is restored or replaced during deployment; normal local
   // operations are pre-recorded in the inbox and therefore remain idempotent.
   markKnownLocalOperationsApplied()
   let cursor = getSyncCursor()
   while (true) {
-  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&churchCapability=church-collections-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
+  const pulled = await fetch(`${url}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&staffPermissionsCapability=staff-permissions-v1&serviceJobWalletCapability=service-jobs-wallet-v1&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&churchCapability=church-collections-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&retailOrderCapability=retail-orders-v1&businessId=${encodeURIComponent(businessId)}&deviceId=${encodeURIComponent(deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers })
   if (!pulled.ok) throw new Error(`Cloud pull failed (${pulled.status}).`)
   const result = await pulled.json()
+  for(const account of result.staffAccess||[])if(account.permissions){try{setStaffPermissions(account.id,account.permissions)}catch(error){if(!error.message.includes('not found'))throw error}}
   applyRemoteOperations(result.operations || [])
   if (result.cursor) setSyncCursor(result.cursor)
   if ((result.operations || []).length < 500 || !result.cursor || result.cursor === cursor) break
@@ -113,7 +115,7 @@ export async function syncNow(tillId) {
   running = true
   try {
     await registerCheckoutTill({ url, token }, tillId)
-    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+    const headers = { 'Content-Type': 'application/json', 'X-Stockroom-Staff-Permissions':'staff-permissions-v1', Authorization: `Bearer ${token}` }
     if (!existingBusiness && !(await cloudHasBusinessSettings({ url, token, businessId }))) await queueInitialSettingsSnapshot()
     while (true) {
     const pending = getPendingSyncOperations()
@@ -131,6 +133,8 @@ export async function syncNow(tillId) {
         const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
         if(!support.ok || !(await support.json()).capabilities?.includes('stock-work-v1'))throw new Error('Update the existing sync server before sharing material use or production. Records remain on this device.')
       }
+      if(pending.some(operation=>operation.payload?.kind==='service-job'&&operation.payload.payments?.some(entry=>entry.sale.paymentMethod==='wallet'))){const support=await fetch(`${url}/v1/sync/capabilities`,{headers});if(!support.ok||!(await support.json()).capabilities?.includes('service-jobs-wallet-v1'))throw new Error('Update the sync server before sharing wallet invoice payments. Records remain on this device.')}
+      if(pending.some(operation=>operation.payload?.retailOrder===true||operation.payload?.paymentDetails?.counterOrder?.retailOrder===true)){const support=await fetch(`${url}/v1/sync/capabilities`,{headers});if(!support.ok||!(await support.json()).capabilities?.includes('retail-orders-v1'))throw new Error('Update the sync server before sharing retail online orders. Records remain on this device.')}
       if(pending.some(requiresServiceJobSync)) {
         const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
         if(!support.ok || !(await support.json()).capabilities?.includes('service-jobs-v1'))throw new Error('Update the existing sync server before sharing service jobs. Records remain on this device.')

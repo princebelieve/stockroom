@@ -1,3 +1,4 @@
+import { hasPermission } from './staff-permissions.mjs'
 import { supplierAccounts } from './supplier-accounts.mjs'
 import { stockSchema, stockChange, batchReport, expiryDate, allocateStock } from './stock-ledger.mjs'
 import { quantity } from './quantities.mjs'
@@ -128,7 +129,7 @@ export async function applyRetailRecord(db, scope, record, organizationId) {
 }
 export async function handleRetail({ db, scope, organizationId, branchId, user, method, input, publish, currency = 'USD' }) {
   db = transactionDb(db)
-  if (!['owner', 'admin'].includes(user.role)) throw new Error('Owner or admin access required for purchasing.')
+  if (!hasPermission(user,'purchasing')) throw new Error('Owner or admin access required for purchasing.')
   const records = await retailRecords(db, scope)
   if (method === 'GET') return { accounts:supplierAccounts(records,branchId), batches: await batchReport(db,branchId), records: records.filter(record => ['supplier','conversion','pricing'].includes(record.kind) || record.branchId === branchId) }
   if (method !== 'POST') throw new Error('Unsupported purchasing method.')

@@ -3,7 +3,7 @@
 export function teamSessionFetch(fetcher: typeof fetch, origin: string, prepareSession: () => Promise<string>): typeof fetch {
   return async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), origin)
-    if (url.origin !== origin || !/^\/api\/users(?:\/[^/]+\/(?:role|operational-access|password|remove))?$/.test(url.pathname)) return fetcher(input, init)
+    if (url.origin !== origin || !/^\/api\/users(?:\/[^/]+\/(?:role|operational-access|permissions|password|remove))?$/.test(url.pathname)) return fetcher(input, init)
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
     try {
       headers.set('X-Cloud-Access-Token', await prepareSession())

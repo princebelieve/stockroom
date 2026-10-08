@@ -1,3 +1,5 @@
+import { birthdayValue } from '../../server/customer-birthdays.mjs'
+import { parsePermissions, canRequest, hasPermission } from '../../server/staff-permissions.mjs'
 import { conflictReview, conflictReviewSchema } from '../../server/sync-conflict-review.mjs'
 import { requiresChurchSync } from '../../server/church-ledger.mjs'
 import { requiresReservationSync } from '../../server/restaurant-reservations.mjs'
@@ -25,7 +27,7 @@ import { mobileStocktake } from './mobileStocktake'
 import { cloudRequest as requestCloud } from './cloudRequest'
 import { collectStaffActivity } from './staffActivityData'
 
-type MobileUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; organizationId: string }
+type MobileUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; operationalAccess: boolean; permissions?:Record<string,boolean>|null; organizationId: string }
 type Operation = { operationId: string; entityType: string; entityId: string; action: string; payload: Record<string, unknown>; createdAt: string }
 
 const networkFetch = window.fetch.bind(window)
@@ -61,10 +63,10 @@ async function sessionUser(): Promise<MobileUser | null> {
   if (!userId) return null
   const db = await openMobileDatabase()
   await ensureStaffRemovals(db)
-  const result = await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND id NOT IN (SELECT id FROM staff_removals)', [userId])
+  const result = await db.query('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess FROM users WHERE id = ? AND id NOT IN (SELECT id FROM staff_removals)', [userId])
   const user = result.values?.[0]
   const config = await getMobileSyncConfiguration()
-  return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId: config?.businessId || 'mobile-local' } as MobileUser : null
+  return user ? { ...user, permissions:parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess), organizationId: config?.businessId || 'mobile-local' } as MobileUser : null
 }
 async function restoreCloudSession(): Promise<MobileUser | null> {
   const config = await getMobileSyncConfiguration()
@@ -78,23 +80,23 @@ async function restoreCloudSession(): Promise<MobileUser | null> {
     await setSetting('cloudAccessToken', '')
     return null
   }
-  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
+  const localUser: MobileUser = { id: account.id, name: account.name, email: account.email || `${account.id}@staff.local.invalid`, username: account.username || '', role: account.role, permissions:parsePermissions(account.permissions), operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
   const db = await openMobileDatabase()
-  await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
-  const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
+  await db.run('INSERT INTO users (id, name, email, username, role, operational_access, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access, permissions=excluded.permissions', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, JSON.stringify(localUser.permissions||null), now()])
+  const stored = (await db.query('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
   if (!stored) return null
   await setSetting('sessionUserId', String(stored.id))
-  return { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId } as MobileUser
+  return { ...stored, permissions:parsePermissions(stored.permissions), operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId } as MobileUser
 }
 async function restoreSavedSession(): Promise<MobileUser | null> {
   const saved = JSON.parse(localStorage.getItem('stockroom-user') || 'null') as Partial<MobileUser> | null
   if (!saved?.id) return null
   const config = await getMobileSyncConfiguration()
-  const localUser: MobileUser = { id: saved.id, name: String(saved.name || ''), email: String(saved.email || `${saved.id}@staff.local.invalid`), username: String(saved.username || ''), role: saved.role || 'cashier', operationalAccess: Boolean(saved.operationalAccess), organizationId: config?.businessId || String(saved.organizationId || 'mobile-local') }
+  const localUser: MobileUser = { id: saved.id, name: String(saved.name || ''), email: String(saved.email || `${saved.id}@staff.local.invalid`), username: String(saved.username || ''), role: saved.role || 'cashier', permissions:parsePermissions(saved.permissions), operationalAccess: Boolean(saved.operationalAccess), organizationId: config?.businessId || String(saved.organizationId || 'mobile-local') }
   const db = await openMobileDatabase()
   await ensureStaffRemovals(db)
   if ((await db.query('SELECT id FROM staff_removals WHERE id = ?', [localUser.id])).values?.length) return null
-  await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
+  await db.run('INSERT INTO users (id, name, email, username, role, operational_access, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access, permissions=excluded.permissions', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, JSON.stringify(localUser.permissions||null), now()])
   await setSetting('sessionUserId', localUser.id)
   return localUser
 }
@@ -186,6 +188,7 @@ async function applyOperation(operation: Operation) {
     await applySyncedSale(db,payload,operation,debitSaleWallet)
   } else if (operation.entityType === 'customer' && operation.action === 'upsert') {
     await db.run('INSERT INTO customers (id, name, phone, balance) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, phone=excluded.phone', [payload.id, payload.name, payload.phone || '', Number(payload.balance) || 0])
+    if(payload.birthday!==undefined)await db.run('UPDATE customers SET birthday=?,birthday_reminders=? WHERE id=?',[birthdayValue(payload.birthday),payload.birthdayReminders===true||payload.birthdayReminders===1?1:0,payload.id])
   } else if (operation.entityType === 'wallet' && operation.action === 'adjust') {
     const customer = await db.query('SELECT id FROM customers WHERE id = ?', [payload.customerId])
     if (customer.values?.length) {
@@ -234,6 +237,8 @@ async function syncNowImpl() {
       const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
       if(!support.ok || !(await support.json()).capabilities?.includes('stock-work-v1'))throw new Error('Update the existing sync server before sharing material use or production. Records remain on this device.')
     }
+    if(operations.some((operation:any)=>operation.payload?.kind==='service-job'&&operation.payload.payments?.some((entry:any)=>entry.sale.paymentMethod==='wallet'))){const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}});if(!support.ok||!(await support.json()).capabilities?.includes('service-jobs-wallet-v1'))throw new Error('Update the sync server before sharing wallet invoice payments. Records remain on this device.')}
+    if(operations.some((operation:any)=>operation.payload?.retailOrder===true||operation.payload?.paymentDetails?.counterOrder?.retailOrder===true)){const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}});if(!support.ok||!(await support.json()).capabilities?.includes('retail-orders-v1'))throw new Error('Update the sync server before sharing retail online orders. Records remain on this device.')}
     if(operations.some(requiresServiceJobSync)) {
       const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
       if(!support.ok || !(await support.json()).capabilities?.includes('service-jobs-v1'))throw new Error('Update the existing sync server before sharing service jobs. Records remain on this device.')
@@ -247,7 +252,7 @@ async function syncNowImpl() {
       if (!support.ok || !(await support.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing counter orders. Your records remain on this device.')
     }
     {
-      const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
+      const response = await originalFetch(`${config.syncApiUrl}/v1/sync/push`, { method: 'POST', headers: { 'Content-Type': 'application/json','X-Stockroom-Staff-Permissions':'staff-permissions-v1', Authorization: `Bearer ${config.deviceToken}` }, body: JSON.stringify({ businessId: config.businessId, deviceId: config.deviceId, operations }) })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Cloud push failed.')
       for (const conflict of result.conflicts || []) {
@@ -279,10 +284,11 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
   try {
     let cursor = await setting('syncCursor')
     while (true) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&churchCapability=church-collections-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&staffPermissionsCapability=staff-permissions-v1&serviceJobWalletCapability=service-jobs-wallet-v1&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&churchCapability=church-collections-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&retailOrderCapability=retail-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) await applyOperation(operation)
+    for(const account of result.staffAccess||[])if(account.permissions)await db.run('UPDATE users SET permissions=?,operational_access=? WHERE id=? AND role!=?', [JSON.stringify(parsePermissions(account.permissions)),account.operationalAccess?1:0,account.id,'owner'])
     if (result.cursor) await setSetting('syncCursor', result.cursor)
     if ((result.operations || []).length < 500 || !result.cursor || result.cursor === cursor) break
     cursor = result.cursor
@@ -336,8 +342,8 @@ async function cloudRequest(path: string, init: RequestInit = {}) {
 }
 async function cachedStaff(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
   await ensureStaffRemovals(db)
-  const rows = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id NOT IN (SELECT id FROM staff_removals) ORDER BY created_at ASC')).values || []
-  return rows.map(account => ({ ...account, operationalAccess: Boolean(account.operationalAccess) }))
+  const rows = (await db.query('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id NOT IN (SELECT id FROM staff_removals) ORDER BY created_at ASC')).values || []
+  return rows.map(account => ({ ...account, permissions:parsePermissions(account.permissions), operationalAccess: Boolean(account.operationalAccess) }))
 }
 
 
@@ -391,18 +397,19 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     const identifier = String(input.identifier || input.email || '').trim()
     const response = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId: config.businessId }) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
-    const account = result.account; if (account.businessId !== config.businessId) return error('This account belongs to a different business.', 403); const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, username: account.username || '', role: account.role, operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
-    await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, now()])
-    const stored = (await db.query('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
+    const account = result.account; if (account.businessId !== config.businessId) return error('This account belongs to a different business.', 403); const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, username: account.username || '', role: account.role, permissions:parsePermissions(account.permissions), operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
+    await db.run('INSERT INTO users (id, name, email, username, role, operational_access, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access, permissions=excluded.permissions', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, JSON.stringify(localUser.permissions||null), now()])
+    const stored = (await db.query('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
     await setSetting('sessionUserId', String(stored.id))
     await setSetting('cloudAccessToken', String(result.accessToken))
     await setSetting('cloudRefreshToken', String(result.refreshToken || ''))
     await pullLatest(config)
     const initialized = await hydrateBusinessSettings(config)
     await db.run('INSERT INTO app_settings (id, app_name, currency, pos_provider, pos_terminal_id, pos_connection, logo_data, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET app_name=excluded.app_name, currency=excluded.currency, pos_provider=excluded.pos_provider, pos_terminal_id=excluded.pos_terminal_id, pos_connection=excluded.pos_connection, logo_data=excluded.logo_data, updated_at=excluded.updated_at', [initialized.appName || 'My Business', initialized.currency || 'USD', initialized.posProvider || '', initialized.posTerminalId || '', initialized.posConnection || 'manual', initialized.logoData || '', initialized.updatedAt || now()])
-    return json({ token: id(), user: { ...stored, operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken, refreshToken: result.refreshToken })
+    return json({ token: id(), user: { ...stored, permissions:parsePermissions(stored.permissions), operationalAccess: Boolean(stored.operationalAccess), organizationId: config.businessId }, cloudAccessToken: result.accessToken, refreshToken: result.refreshToken })
   }
   if (!user) return error('Authentication required.', 401)
+  if (!canRequest(user,path,method,method==='GET'?{}:await body(init))) return error('The owner has not granted access to this operation.',403)
   const requestedBranchId = new Headers(init?.headers).get('X-Stockroom-Branch') || 'main'
   const allBranches = (await db.query('SELECT id, name, address, is_default AS isDefault, is_active AS isActive, assigned_user_ids AS assignedUserIds, created_at AS createdAt, updated_at AS updatedAt FROM branches ORDER BY is_default DESC, name')).values || []
   const permittedBranches = allBranches.filter(branch => user.role === 'owner' || !(JSON.parse(String(branch.assignedUserIds || '[]') || '[]') as string[]).length || (JSON.parse(String(branch.assignedUserIds || '[]') || '[]') as string[]).includes(user.id))
@@ -543,14 +550,14 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     } catch { return error('Could not reach the payment service. Check payment status before retrying.', 503) }
   }
   if (['/api/sync/conflicts','/api/sync/conflicts/reviews'].includes(path) && method === 'GET') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     await db.run(conflictReviewSchema)
     const history=path.endsWith('/reviews')
     return json({ conflicts: (await db.query('SELECT c.id,c.entity_type AS entityType,c.entity_id AS entityId,c.reason,c.local_payload AS localPayload,c.remote_payload AS remotePayload,c.created_at AS createdAt,c.resolved_at AS resolvedAt,r.note AS reviewNote,r.action AS reviewAction,r.reviewer_id AS reviewerId FROM sync_conflicts c LEFT JOIN sync_conflict_reviews r ON r.conflict_id=c.id WHERE c.resolved_at IS '+(history?'NOT NULL':'NULL')+' ORDER BY c.created_at DESC')).values })
   }
   const conflictMatch = path.match(/^\/api\/sync\/conflicts\/([^/]+)\/resolve$/)
   if (conflictMatch && method === 'POST') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     let review: ReturnType<typeof conflictReview>
     try { review = conflictReview(await body(init), user) } catch (caught) { return error((caught as Error).message, 400) }
     if (!(await db.query('SELECT id FROM sync_conflicts WHERE id=? AND resolved_at IS NULL',[conflictMatch[1]])).values?.length) return error('This issue is no longer open. Refresh the list.',409)
@@ -564,7 +571,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return json({ ok: true })
   }
   if (path === '/api/retail') {
-    if (!isManager(user)) return error('Owner or admin access required for purchasing.', 403)
+    if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required for purchasing.', 403)
     try { return json(await handleRetail({ currency: (await hydrateBusinessSettings()).currency, db, scope: 'business', branchId, user, method, input: method === 'GET' ? {} : await body(init), publish: (record: Record<string, unknown>) => queue('retail_record', String(record.id), 'create', record, false) }), method === 'GET' ? 200 : 201) }
     catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not save purchasing changes.') }
   }
@@ -658,9 +665,16 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     if (!canOperate(user)) return error('Operational access is required.', 403)
     return json({ movements: (await db.query('SELECT m.id, p.name AS productName, p.sku, m.quantity, m.reason, m.created_at AS createdAt FROM inventory_movements m JOIN products p ON p.id = m.product_id WHERE m.branch_id = ? ORDER BY m.created_at DESC', [branchId])).values || [] })
   }
+  const birthdayRoute=path.match(/^\/api\/customers\/([^/]+)\/birthday$/)
+  if(birthdayRoute && method==='PUT'){
+   if(!canOperate(user))return error('Customer account access is required.',403)
+   const input=await body(init);const customerId=decodeURIComponent(birthdayRoute[1]);const birthday=birthdayValue(input.birthday)
+   const customer=(await db.query('SELECT id,name,phone,balance FROM customers WHERE id=?',[customerId])).values?.[0];if(!customer)return error('Customer not found.',404)
+   await db.run('UPDATE customers SET birthday=?,birthday_reminders=? WHERE id=?',[birthday,input.birthdayReminders===true?1:0,customerId]);Object.assign(customer,{birthday,birthdayReminders:input.birthdayReminders===true});await queue('customer',customerId,'upsert',customer);return json(customer)
+  }
   if (path === '/api/customers' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const customers = (await db.query('SELECT id, name, phone, balance FROM customers ORDER BY name')).values || []
+    const customers = (await db.query('SELECT id, name, phone, balance,birthday,birthday_reminders AS birthdayReminders FROM customers ORDER BY name')).values || []
     return json({ customers: await Promise.all(customers.map(async customer => ({ ...customer, transactions: (await db.query('SELECT id, amount, reason, created_at AS createdAt FROM wallet_transactions WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50', [customer.id])).values || [] }))) })
   }
   if (path === '/api/customers' && method === 'POST') {
@@ -674,7 +688,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   if (wallet && method === 'POST') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
     const input = await body(init); const amount = Number(input.amount); if (!Number.isSafeInteger(Math.round(amount * 100)) || amount === 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) return error('Enter a non-zero amount with at most two decimals.')
-    const customer = (await db.query('SELECT id, name, phone, balance FROM customers WHERE id = ?', [wallet[1]])).values?.[0]; if (!customer || (amount < 0 && Number(customer.balance) + amount < 0)) return error('Customer wallet cannot be negative.')
+    const customer = (await db.query('SELECT id, name, phone, balance,birthday,birthday_reminders AS birthdayReminders FROM customers WHERE id = ?', [wallet[1]])).values?.[0]; if (!customer || (amount < 0 && Number(customer.balance) + amount < 0)) return error('Customer wallet cannot be negative.')
     const createdAt = now()
     await db.beginTransaction()
     try {
@@ -686,24 +700,24 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     return json({ ...customer, balance: Number(customer.balance) + amount })
   }
   if (path === '/api/expenses' && method === 'GET') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     return json({ expenses: (await db.query('SELECT id, category, description, amount, incurred_at AS incurredAt, created_at AS createdAt, staff_id AS staffId, staff_name AS staffName FROM expenses WHERE branch_id = ? ORDER BY incurred_at DESC', [branchId])).values || [] })
   }
   if (path === '/api/expenses' && method === 'POST') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     const input = await body(init); const expense = { id: id(), category: String(input.category || '').trim(), description: String(input.description || '').trim(), amount: Number(input.amount), incurredAt: String(input.incurredAt || now()), createdAt: now(), branchId, staffId: user.id, staffName: user.name }
     if (!expense.category || !expense.description || !Number.isFinite(expense.amount) || expense.amount <= 0) return error('Expense category, description, and a positive amount are required.')
     if (!Number.isFinite(Date.parse(expense.incurredAt))) return error('Enter a valid expense date.')
     await db.run('INSERT INTO expenses (id, category, description, amount, incurred_at, created_at, branch_id, staff_id, staff_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [expense.id, expense.category, expense.description, expense.amount, expense.incurredAt, expense.createdAt, branchId, expense.staffId, expense.staffName]); await queue('expense', expense.id, 'create', expense); return json(expense, 201)
   }
   if (path === '/api/staff/activity' && method === 'GET') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     const headers = new Headers(init?.headers), from = headers.get('X-Activity-From') || '', to = headers.get('X-Activity-To') || ''
     if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) return error('A valid start and end date are required.')
     return json(await collectStaffActivity(db, branchId, new Date(from).toISOString(), new Date(to).toISOString()))
   }
   if (path === '/api/reports' && method === 'GET') {
-    if (!isManager(user)) return error('Owner or admin access required.', 403)
+    if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     await ensurePos(db)
     const sales = (await db.query('SELECT id,total,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id = ?', [branchId])).values || []
     const items = (await db.query('SELECT si.sale_id AS saleId,si.product_id AS productId,si.product_name AS productName,si.quantity, si.unit_cost AS unitCost FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.branch_id = ? ORDER BY si.rowid', [branchId])).values || []
@@ -720,11 +734,11 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === '/api/users' && method === 'GET') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    try { const result = await cloudRequest('/v1/staff'); for (const account of result.users || []) if (account.removedAt) await recordStaffRemoval(db,account.id,String(account.removedAt)); else await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, String(account.createdAt || now())]); return json({ users: await cachedStaff(db), refreshed: true }) } catch (caught) { return json({ users: await cachedStaff(db), refreshed: false, refreshError: caught instanceof Error ? caught.message : 'Could not refresh team accounts.' }) }
+    try { const result = await cloudRequest('/v1/staff'); for (const account of result.users || []) if (account.removedAt) await recordStaffRemoval(db,account.id,String(account.removedAt)); else await db.run('INSERT INTO users (id, name, email, username, role, operational_access, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access, permissions=excluded.permissions', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, JSON.stringify(parsePermissions(account.permissions)), String(account.createdAt || now())]); return json({ users: await cachedStaff(db), refreshed: true }) } catch (caught) { return json({ users: await cachedStaff(db), refreshed: false, refreshError: caught instanceof Error ? caught.message : 'Could not refresh team accounts.' }) }
   }
   if (path === '/api/users' && method === 'POST') {
     if (user.role !== 'owner') return error('Owner access required.', 403)
-    try { const input = await body(init); const result = await cloudRequest('/v1/staff', { method: 'POST', body: JSON.stringify(input) }); const account = result.account; await db.run('INSERT INTO users (id, name, email, username, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, now()]); return json(account, 201) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not create staff.', 400) }
+    try { const input = await body(init); const result = await cloudRequest('/v1/staff', { method: 'POST', body: JSON.stringify(input) }); const account = result.account; await db.run('INSERT INTO users (id, name, email, username, role, operational_access, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access, permissions=excluded.permissions', [account.id, account.name, account.email || `${account.id}@staff.local.invalid`, account.username || '', account.role, account.operationalAccess ? 1 : 0, JSON.stringify(parsePermissions(account.permissions)), now()]); return json(account, 201) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Could not create staff.', 400) }
   }
   const staffRemoval = path.match(/^\/api\/users\/([^/]+)\/remove$/)
   if (staffRemoval && method === 'POST') {
@@ -735,6 +749,11 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
       await recordStaffRemoval(db,result.id,String(result.removedAt))
       return json(result)
     } catch(caught) { return error(caught instanceof Error ? caught.message : 'Could not remove staff.',400) }
+  }
+  const staffPermissions=path.match(/^\/api\/users\/([^/]+)\/permissions$/)
+  if(staffPermissions&&method==='PUT'){
+    if(user.role!=='owner')return error('Owner access required.',403)
+    try{const input=await body(init);const result=await cloudRequest(`/v1/staff/${encodeURIComponent(staffPermissions[1])}/permissions`,{method:'PUT',body:JSON.stringify(input)});const account=result.account;await db.run('UPDATE users SET permissions=?, operational_access=? WHERE id=?',[JSON.stringify(parsePermissions(account.permissions)),account.operationalAccess?1:0,account.id]);return json(account)}catch(caught){return error(caught instanceof Error?caught.message:'Could not update staff permissions.',400)}
   }
   const staffAccess = path.match(/^\/api\/users\/([^/]+)\/operational-access$/)
   if (staffAccess && method === 'PUT') {

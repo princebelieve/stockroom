@@ -130,3 +130,8 @@ export async function cloudRemoveStaff(accessToken, userId, ownerPassword) {
  if (!response.ok) throw new Error(result.error || 'Could not remove staff.')
  return result
 }
+
+export async function cloudSetStaffPermissions(accessToken,userId,permissions,ownerPassword){
+ const {url}=await getCloudConfiguration();if(!url||!accessToken)throw new Error('Connect and sign in as owner before changing staff access.')
+ const response=await fetch(`${url}/v1/staff/${encodeURIComponent(userId)}/permissions`,{method:'PUT',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify({permissions,ownerPassword})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not update staff permissions.');return result
+}

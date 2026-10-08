@@ -1,3 +1,7 @@
+import { birthdayValue, birthdayCustomers } from '../server/customer-birthdays.mjs'
+import { businessDate } from '../server/report-timezone.mjs'
+import { retailCatalogue } from '../server/retail-catalogue.mjs'
+import { parsePermissions, hasPermission, operationPermission } from '../server/staff-permissions.mjs'
 import { oilPricing } from '../server/oil-pricing.mjs'
 import { validateChurchRecord, requiresChurchSync } from '../server/church-ledger.mjs'
 import { reservationBookId, validateReservationBook, validateReservationArchive, checkReservationOpening, requiresReservationSync } from '../server/restaurant-reservations.mjs'
@@ -5,7 +9,7 @@ import { isStockWork, validateStockWork } from '../server/stock-work.mjs'
 import { createPreparationPrint } from './preparation-print.mjs'
 import { customerOrderSettings, customerHandoff } from '../server/customer-order-settings.mjs'
 import { createTillRecovery } from './till-recovery.mjs'
-import { authorizeCustomerOrder, customerOrderLines, publishCustomerOrder, acceptCustomerOrder } from './customer-orders.mjs'
+import { authorizeCustomerOrder, customerOrderLines, publishCustomerOrder as publishOrder, acceptCustomerOrder } from './customer-orders.mjs'
 import { createStaffRemoval } from './staff-removal.mjs'
 import { validateServiceJob, requiresServiceJobSync } from '../server/service-jobs.mjs'
 import { floorId,restaurantTabs,billContains,validateRestaurantFloor } from '../server/restaurant-floor.mjs'
@@ -50,6 +54,13 @@ const coordinateSupermarket=createSupermarketCoordinator(database,client)
 const entityHeads = database.collection('sync_entity_heads')
 const businessSettings = database.collection('business_settings')
 const inventoryAlertState = database.collection('inventory_alert_state')
+async function publishedRetail(businessId,settings){
+ const config=customerOrderSettings(settings?.paymentPolicy?.customerOrdering)
+ if(!config.retailEnabled)throw new Error('Online retail ordering is not enabled.')
+ const rows=await entityHeads.find({businessId,entityType:'product',entityId:{$in:config.retailProductIds}}).toArray()
+ const taxHead=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:'pos-settings'})
+ return retailCatalogue(rows.map(row=>row.payload),config,taxHead?.updatedAt||'')
+}
 const accounts = database.collection('accounts')
 const devices = database.collection('devices')
 const passwordResets = database.collection('password_resets')
@@ -104,8 +115,8 @@ function signToken(payload) {
 }
 function hashPassword(password) { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}` }
 function matchesPassword(password, stored) { const [salt, value] = String(stored).split(':'); if (!salt || !value) return false; const actual = scryptSync(password, salt, 64); const expected = Buffer.from(value, 'hex'); return actual.length === expected.length && timingSafeEqual(actual, expected) }
-function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, username: account.username || '', role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess) } }
-function accessToken(account) { return signToken({ kind: 'access', sub: account._id?.toString() || '', businessId: account.businessId, email: account.email || '', username: account.username || '', role: account.role || 'owner', operationalAccess: Boolean(account.operationalAccess), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
+function publicAccount(account) { return { id: account._id?.toString(), businessId: account.businessId, name: account.name || account.ownerName, email: account.email, username: account.username || '', role: account.role || 'owner', permissions:parsePermissions(account.permissions), operationalAccess: Boolean(account.operationalAccess) } }
+function accessToken(account) { return signToken({ kind: 'access', sub: account._id?.toString() || '', businessId: account.businessId, email: account.email || '', username: account.username || '', role: account.role || 'owner', permissions:parsePermissions(account.permissions), operationalAccess: Boolean(account.operationalAccess), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 }) }
 function refreshTokenHash(token) { return createHmac('sha256', jwtSecret).update(token).digest('hex') }
 async function cloudSession(account) {
   const refreshToken = randomBytes(32).toString('base64url')
@@ -182,6 +193,30 @@ async function inventoryDelta(businessId, branchId, productId, delta, source, be
     await notifyInventoryTeam(businessId, { title: 'Stocktake discrepancy', body: `The count found ${Math.abs(delta)} fewer ${product.unit || 'units'} of ${productName} than expected at ${branch}.`, type: 'inventory-discrepancy', url: inventoryUrl })
   }
 }
+
+async function notifyCustomerTeam(businessId,message,capability='customers'){
+ const team=await accounts.find({businessId,removedAt:{$exists:false}}).toArray()
+ await Promise.all(team.filter(account=>hasPermission(account,capability)).map(account=>notifications.notifyAccount(account._id.toString(),message)))
+}
+async function publishCustomerOrder(operations,head){
+ await publishOrder(operations,head)
+ if(head.payload.source==='customer-portal')await notifyCustomerTeam(head.businessId,{title:'New customer order',body:`${head.payload.customerName} placed an order. Accept it on a till before processing.`,type:'customer-order',url:'/?screen='+ (head.payload.retailOrder?'retail-orders':head.payload.restaurantOrder?'restaurant':'counter'),dedupeKey:'order:'+head.entityId},head.payload.retailOrder?(head.payload.pos?.workspace==='oil'?'oilSales':'productSales'):head.payload.restaurantOrder?'restaurant':'counter')
+}
+let birthdaysRunning=false
+async function notifyBirthdays(){
+ if(birthdaysRunning)return
+ birthdaysRunning=true
+ try{
+ const businesses=await businessSettings.find({}).toArray()
+ for(const business of businesses){
+  const heads=await entityHeads.find({businessId:business.businessId,entityType:'customer','payload.birthdayReminders':{$in:[true,1]}}).toArray()
+  const timeZone=normalizeShopProfile(business.settings?.shopProfile).reportingTimeZone||'UTC'
+  for(const customer of birthdayCustomers(heads.map(head=>head.payload),new Date(),timeZone))await notifyCustomerTeam(business.businessId,{title:'Customer birthday',body:`${customer.name} has a birthday today. Open Customer accounts to review their contact details.`,type:'customer-birthday',url:'/?screen=customers',dedupeKey:'birthday:'+customer.id+':'+businessDate(new Date(),timeZone)})
+ }
+ }finally{birthdaysRunning=false}
+}
+const birthdayTimer=setInterval(()=>{void notifyBirthdays().catch(error=>console.error('Birthday reminders failed.',error.message))},60*60*1000);birthdayTimer.unref()
+void notifyBirthdays().catch(error=>console.error('Birthday reminders failed.',error.message))
 
 async function notifyInventoryTeam(businessId, message) {
   const team = await accounts.find({ businessId, $or: [{ role: { $in: ['owner', 'admin'] } }, { role: 'cashier', operationalAccess: true }] }).project({ _id: 1 }).toArray()
@@ -287,15 +322,16 @@ const server = createServer(async (request, response) => {
       if (!saved) return send(response, 404, { error: 'Business customer ordering is not available.' })
       const settings = saved.settings || {}
       const profile = normalizeShopProfile(settings.shopProfile)
-      const menuId = profile.restaurant ? 'restaurant-menu' : profile.fastFood ? 'counter-menu' : ''
+      const retail=customerOrderSettings(settings.paymentPolicy?.customerOrdering).retailEnabled && (query.get('mode')==='retail' || (!profile.fastFood&&!profile.restaurant))
+      const menuId = retail ? 'retail-catalogue' : profile.restaurant ? 'restaurant-menu' : profile.fastFood ? 'counter-menu' : ''
       if (!menuId) return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: 'account', menu: null })
       const head = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: menuId })
       const taxHead = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: 'pos-settings' })
       const pricing = posSettings(taxHead?.payload?.value)
       const publicTax = { taxEnabled: pricing.taxEnabled, taxRate: pricing.taxRate, taxLabel: pricing.taxLabel, taxIncluded: pricing.taxIncluded, taxRates: {} }
-      const menu = head?.payload?.kind === 'counter-menu' ? head.payload : null
-      publicTax.taxRates = Object.fromEntries((menu?.items || []).filter(item => item.available && item.type === 'stock' && !profile.restaurant).map(item => [item.id, pricing.taxRates[item.productId] ?? pricing.taxRate]))
-      return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: profile.restaurant ? 'restaurant' : 'fast-food', tax: publicTax, walletAllowed: settings.paymentPolicy?.allowWallet === true, customerOrdering: customerOrderSettings(settings.paymentPolicy?.customerOrdering), menu: menu ? { id: menu.id, updatedAt: menu.updatedAt, items: menu.items.filter(item => item.available).map(item => ({ id: item.id, name: item.name, description: item.description || '', price: item.price, options: item.options.filter(option => option.available !== false).map(option => ({ id: option.id, name: option.name, price: option.price })) })) } : { id: menuId, updatedAt: '', items: [] } })
+      const menu = retail ? await publishedRetail(businessId,settings) : head?.payload?.kind === 'counter-menu' ? head.payload : null
+      publicTax.taxRates = Object.fromEntries((menu?.items || []).filter(item => item.available && item.type === 'stock' && (retail || !profile.restaurant)).map(item => [item.id, pricing.taxRates[item.productId] ?? pricing.taxRate]))
+      return send(response, 200, { businessId, businessName: settings.appName || 'Business', currency: settings.currency || 'USD', mode: retail ? 'retail' : profile.restaurant ? 'restaurant' : 'fast-food', tax: publicTax, walletAllowed: settings.paymentPolicy?.allowWallet === true, customerOrdering: customerOrderSettings(settings.paymentPolicy?.customerOrdering), menu: menu ? { id: menu.id, updatedAt: menu.updatedAt, items: menu.items.filter(item => item.available).map(item => ({ id: item.id, name: item.name, description: item.description || '', price: item.price, options: item.options.filter(option => option.available !== false).map(option => ({ id: option.id, name: option.name, price: option.price })) })) } : { id: menuId, updatedAt: '', items: [] } })
     }
     if (request.method === 'POST' && request.url === '/v1/customer-portal/guest') {
       const input = await readJson(request, 4096)
@@ -305,7 +341,7 @@ const server = createServer(async (request, response) => {
       const closing = await database.collection('account_deletion_requests').findOne({ type: 'business', businessId, status: { $in: ['pending', 'processing'] } })
       const saved = await businessSettings.findOne({ businessId })
       const profile = normalizeShopProfile(saved?.settings?.shopProfile)
-      if (closing || !saved || (!profile.fastFood && !profile.restaurant)) return send(response, 403, { error: 'Guest ordering is not available for this business.' })
+      if (closing || !saved || (!profile.fastFood && !profile.restaurant && !customerOrderSettings(saved?.settings?.paymentPolicy?.customerOrdering).retailEnabled)) return send(response, 403, { error: 'Guest ordering is not available for this business.' })
       const rateKey = `guest-entry:${String(request.socket.remoteAddress || '')}:${businessId}`
       const rateNow = Date.now(), rate = customerPortalLoginLimits.get(rateKey)
       const window = rate?.until > rateNow ? rate : { count: 0, until: rateNow + 15 * 60 * 1000 }
@@ -320,6 +356,8 @@ const server = createServer(async (request, response) => {
       const staff = await accounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, removedAt: { $exists: false } })
       if (!staff) return send(response, 403, { error: 'Staff access is no longer available.' })
       const input = await readJson(request, 4096)
+      const pendingOrder=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:String(input.orderId||'')})
+      if(staff.permissions&&!hasPermission(staff,pendingOrder?.payload.retailOrder?(pendingOrder.payload.pos?.workspace==='oil'?'oilSales':'productSales'):pendingOrder?.payload.restaurantOrder?'restaurant':'counter'))return send(response,403,{error:'The owner has not granted access to accept this order.'})
       try {
         const order = await acceptCustomerOrder({ entityHeads, operations, serialize: serializeBusinessSync, businessId: claims.businessId, orderId: String(input.orderId || ''), tillId: String(input.tillId || ''), staffId: claims.sub })
         return send(response, 200, { order })
@@ -345,32 +383,33 @@ const server = createServer(async (request, response) => {
       if (prior) { authorizeCustomerOrder(prior.payload, claims.customerId); await publishCustomerOrder(operations, prior); return send(response, 200, { order: prior.payload }) }
       const saved = await businessSettings.findOne({ businessId: claims.businessId })
       const profile = normalizeShopProfile(saved?.settings?.shopProfile)
-      if (!profile.fastFood && !profile.restaurant) return send(response, 403, { error: 'Online ordering is available for food and restaurant workspaces.' })
-      const menuId = profile.restaurant ? 'restaurant-menu' : 'counter-menu'
-      const menu = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: menuId })
+      const retail=input.catalogMode==='retail' || (!profile.fastFood&&!profile.restaurant)
+      if (retail && !customerOrderSettings(saved?.settings?.paymentPolicy?.customerOrdering).retailEnabled || !retail && !profile.fastFood && !profile.restaurant) return send(response,403,{error:'This online catalogue is not enabled.'})
+      const menuId = retail ? 'retail-catalogue' : profile.restaurant ? 'restaurant-menu' : 'counter-menu'
+      const menu = retail ? {payload:await publishedRetail(claims.businessId,saved.settings)} : await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: menuId })
       if (!menu?.payload || input.menuUpdatedAt !== menu.payload.updatedAt) return send(response, 409, { error: 'The menu changed. Refresh it and review your basket.' })
       const customerHead = claims.guest ? { payload: { name: claims.name } } : await entityHeads.findOne({ businessId: claims.businessId, entityType: 'customer', entityId: claims.customerId })
       if (!customerHead) return send(response, 403, { error: 'Customer account is no longer available.' })
       let lines
-      try { lines = await customerOrderLines(menu.payload, input.lines, Boolean(profile.restaurant), async id => (await entityHeads.findOne({ businessId: claims.businessId, entityType: 'product', entityId: id }))?.payload) } catch (error) { return send(response, 400, { error: error.message }) }
+      try { lines = await customerOrderLines(menu.payload, input.lines, !retail && Boolean(profile.restaurant), async id => (await entityHeads.findOne({ businessId: claims.businessId, entityType: 'product', entityId: id }))?.payload, retail) } catch (error) { return send(response, 400, { error: error.message }) }
       const requestedPayment = ['wallet', 'bank-transfer', 'cash'].includes(input.paymentMethod) ? input.paymentMethod : 'cash'
       if (requestedPayment === 'wallet' && (claims.guest || saved?.settings?.paymentPolicy?.allowWallet !== true)) return send(response, 400, { error: 'Wallet payment requires an enabled customer wallet account.' })
       const bankReference = String(input.paymentReference || '').trim().slice(0, 120)
       const bankProvider = String(input.paymentProvider || '').trim().slice(0, 100)
       if (requestedPayment === 'bank-transfer' && (!bankProvider || !bankReference)) return send(response, 400, { error: 'Enter the bank and transfer reference after making the transfer.' })
       let handoff
-      try { handoff = customerHandoff(saved.settings?.paymentPolicy?.customerOrdering, input, Boolean(profile.restaurant)) } catch (error) { return send(response, 400, { error: error.message }) }
+      try { handoff = customerHandoff(saved.settings?.paymentPolicy?.customerOrdering, input, !retail && Boolean(profile.restaurant)) } catch (error) { return send(response, 400, { error: error.message }) }
       if (handoff.delivery?.fee > 0) lines.push({ id: 'delivery-fee', menuItemId: 'delivery-fee', name: 'Delivery charge', type: 'prepared', station: 'kitchen', productId: '', quantity: 1, price: handoff.delivery.fee, options: [], recipe: [] })
       const id = orderId, now = new Date().toISOString(), tillId = 'customer-portal'
       const settingsRecord = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: 'pos-settings' })
       const tax = posSettings(settingsRecord?.payload?.value)
       const customer = customerHead.payload
-      const pos = { tillId, customerId: claims.guest ? '' : claims.customerId, customerName: customer.name, discountType: 'amount', discountValue: 0, loyaltyRedeemed: 0, tax, note: String(input.note || '').trim().slice(0, 300) }
+      const pos = { ...(retail&&profile.industry==='liquids'?{workspace:'oil'}:{}), tillId, customerId: claims.guest ? '' : claims.customerId, customerName: customer.name, discountType: 'amount', discountValue: 0, loyaltyRedeemed: 0, tax, note: String(input.note || '').trim().slice(0, 300) }
       pos.pricing = priceOrder(counterItems({ lines }), pos)
       if (input.expectedTotal !== undefined && Math.round(Number(input.expectedTotal) * 100) !== Math.round(pos.pricing.total * 100)) return send(response, 409, { error: 'The total changed. Refresh the menu and review tax and prices before submitting.' })
       const paymentNote = requestedPayment === 'bank-transfer' ? `Bank transfer claimed: ${bankProvider} / ${bankReference}. Verify before handing over.` : ''
       const customerNote = String(input.note || '').trim().slice(0, 200)
-      const record = { id, kind: 'counter-order', source: 'customer-portal', customerPortalId: claims.customerId, acceptedTillId: '', restaurantOrder: Boolean(profile.restaurant), customerPaymentMethod: requestedPayment, ...(requestedPayment === 'bank-transfer' ? { customerPaymentProvider: bankProvider, customerPaymentReference: bankReference } : {}), branchId: 'main', status: 'queued', tillId, currency: saved.settings.currency || 'USD', businessName: saved.settings.appName || 'Business', createdAt: now, updatedAt: now, expectedUpdatedAt: '', customerName: customer.name, note: [handoff.delivery ? `Deliver to ${handoff.delivery.address} / ${handoff.delivery.phone}` : '', customerNote, paymentNote].filter(Boolean).join(' · ').slice(0, 300), ...handoff, lines, pos, total: pos.pricing.total, events: [{ status: 'queued', action: 'create', reason: '', staffId: `customer:${claims.customerId}`, at: now }] }
+      const record = { id, kind: 'counter-order', source: 'customer-portal', customerPortalId: claims.customerId, acceptedTillId: '', ...(retail?{retailOrder:true}:{}), restaurantOrder: !retail && Boolean(profile.restaurant), customerPaymentMethod: requestedPayment, ...(requestedPayment === 'bank-transfer' ? { customerPaymentProvider: bankProvider, customerPaymentReference: bankReference } : {}), branchId: 'main', status: 'queued', tillId, currency: saved.settings.currency || 'USD', businessName: saved.settings.appName || 'Business', createdAt: now, updatedAt: now, expectedUpdatedAt: '', customerName: customer.name, note: [handoff.delivery ? `Deliver to ${handoff.delivery.address} / ${handoff.delivery.phone}` : '', customerNote, paymentNote].filter(Boolean).join(' · ').slice(0, 300), ...handoff, lines, pos, total: pos.pricing.total, events: [{ status: 'queued', action: 'create', reason: '', staffId: `customer:${claims.customerId}`, at: now }] }
       validateCounterRecord(record)
       let result, conflict = ''
       await serializeBusinessSync(claims.businessId, async () => {
@@ -378,7 +417,7 @@ const server = createServer(async (request, response) => {
         let head = await entityHeads.findOne(filter)
         if (head) authorizeCustomerOrder(head.payload, claims.customerId)
         else {
-          const currentMenu = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: menuId })
+          const currentMenu = retail ? {payload:await publishedRetail(claims.businessId,(await businessSettings.findOne({businessId:claims.businessId}))?.settings)} : await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: menuId })
           if (currentMenu?.payload?.updatedAt !== input.menuUpdatedAt) { conflict = 'The menu changed. Refresh it and review your basket.'; return }
           head = { ...filter, operationId: `customer-order:${clientOrderId}`, updatedAt: now, payload: record, deviceId: tillId, receivedAt: new Date() }
           await entityHeads.insertOne(head)
@@ -405,13 +444,15 @@ const server = createServer(async (request, response) => {
       const allTransactions = events.map(row => ({ id: row.operationId, amount: Number(row.payload?.amount || 0), reason: String(row.payload?.reason || 'Wallet activity'), createdAt: row.payload?.createdAt || row.createdAt }))
       const walletSales = await operations.find({ businessId: claims.businessId, entityType: 'sale', $or: [{ 'payload.paymentDetails.customerId': claims.customerId }, { 'payload.paymentDetails.pos.customerId': claims.customerId }] }).toArray()
       for (const row of walletSales) if (row.payload.paymentMethod === 'wallet') allTransactions.push({ id: row.operationId, amount: -Number(row.payload.total || 0), reason: `Purchase ${row.payload.id || row.entityId}`, createdAt: row.payload.createdAt || row.createdAt })
+      const invoiceWallets=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.payments.sale.paymentDetails.customerId':claims.customerId}).toArray()
+      for(const row of invoiceWallets)for(const entry of row.payload.payments||[])if(entry.sale.paymentMethod==='wallet'&&entry.sale.paymentDetails?.customerId===claims.customerId)allTransactions.push({id:entry.sale.id,amount:-Number(entry.sale.total),reason:`Invoice ${row.payload.title}`,createdAt:entry.sale.createdAt})
       const returns = await entityHeads.find({ businessId: claims.businessId, entityType: 'pos_record', 'payload.kind': 'return', 'payload.walletCustomerId': claims.customerId }).toArray()
       for (const row of returns) allTransactions.push({ id: row.entityId, amount: Number(row.payload.total || 0), reason: `Return ${row.payload.saleId}: ${row.payload.reason || ''}`, createdAt: row.payload.updatedAt || row.updatedAt })
       allTransactions.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
       const orderHeads = await entityHeads.find({ businessId: claims.businessId, entityType: 'pos_record', 'payload.kind': 'counter-order', 'payload.pos.customerId': claims.customerId }).sort({ updatedAt: -1 }).limit(100).toArray()
       const orders = await Promise.all(orderHeads.map(async head => {
         const payment = await operations.findOne({ businessId: claims.businessId, entityType: 'sale', entityId: counterSaleId(head.entityId) })
-        return { id: head.entityId, status: head.payload.source === 'customer-portal' && !head.payload.acceptedTillId && head.payload.status === 'queued' ? 'pending' : head.payload.status, total: head.payload.total, currency: head.payload.currency, createdAt: head.payload.createdAt, updatedAt: head.payload.updatedAt, lines: head.payload.lines.map(line => ({ name: line.name, quantity: line.quantity, options: line.options.map(option => option.name) })), paymentMethod: payment?.payload?.paymentMethod || head.payload.customerPaymentMethod || '', paymentReference: payment?.payload?.paymentReference || head.payload.customerPaymentReference || '', paymentPending: Boolean(['bank-transfer', 'wallet'].includes(head.payload.customerPaymentMethod) && !payment) }
+        return { id: head.entityId, delivery:Boolean(head.payload.delivery), status: head.payload.source === 'customer-portal' && !head.payload.acceptedTillId && head.payload.status === 'queued' ? 'pending' : head.payload.status, total: head.payload.total, currency: head.payload.currency, createdAt: head.payload.createdAt, updatedAt: head.payload.updatedAt, lines: head.payload.lines.map(line => ({ name: line.name, quantity: line.quantity, options: line.options.map(option => option.name) })), paymentMethod: payment?.payload?.paymentMethod || head.payload.customerPaymentMethod || '', paymentReference: payment?.payload?.paymentReference || head.payload.customerPaymentReference || '', paymentPending: Boolean(['bank-transfer', 'wallet'].includes(head.payload.customerPaymentMethod) && !payment) }
       }))
       return send(response, 200, { customer: { id: claims.customerId, name: customer.payload.name, phone: customer.payload.phone || '', balance: allTransactions.reduce((sum, row) => sum + row.amount, 0) }, transactions: allTransactions.slice(0, 50), orders, businessId: claims.businessId })
     }
@@ -594,7 +635,7 @@ const server = createServer(async (request, response) => {
       if (!await ownerPasswordIsValid(claims, input.ownerPassword)) return send(response, 401, { error: 'Owner password confirmation is required to create a staff account.' })
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
       if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 10 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“32 character username, and a 10-character password.' })
-      const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, passwordHash: hashPassword(password), createdAt: new Date() }
+      const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, permissions:{}, operationalAccess:false, passwordHash: hashPassword(password), createdAt: new Date() }
       try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) {
         if (error?.code === 11000) {
           const duplicate = error.keyPattern?.username ? 'username' : error.keyPattern?.email ? 'contact email' : 'staff account'
@@ -610,6 +651,16 @@ const server = createServer(async (request, response) => {
       if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       const staff = await Promise.all((await accounts.find({ businessId: claims.businessId }).sort({ createdAt: 1 }).toArray()).map(assignLegacyStaffUsername))
       return send(response, 200, { users: staff.map((account) => ({ ...publicAccount(account), createdAt: account.createdAt, removedAt: account.removedAt || null })) })
+    }
+    const permissionMatch=request.url?.match(/^\/v1\/staff\/([^/]+)\/permissions$/)
+    if(request.method==='PUT'&&permissionMatch){
+      if(!isAccess(claims)||claims.role!=='owner')return send(response,403,{error:'Owner access token required.'})
+      if(!ObjectId.isValid(permissionMatch[1]))return send(response,400,{error:'Invalid staff account.'})
+      const input=await readJson(request);if(!await ownerPasswordIsValid(claims,input.ownerPassword))return send(response,401,{error:'Owner password confirmation required.'})
+      const permissions=parsePermissions(input.permissions);if(!permissions)return send(response,400,{error:'Choose staff permissions.'})
+      const updated=await accounts.findOneAndUpdate({_id:new ObjectId(permissionMatch[1]),businessId:claims.businessId,role:{$in:['admin','cashier']},removedAt:{$exists:false}},{$set:{permissions,operationalAccess:Object.values(permissions).some(Boolean)}},{returnDocument:'after'})
+      if(!updated)return send(response,404,{error:'Staff account not found.'})
+      await refreshTokens.deleteMany({accountId:updated._id});return send(response,200,{account:publicAccount(updated)})
     }
     const accessMatch = request.url?.match(/^\/v1\/staff\/([^/]+)\/operational-access$/)
     if (request.method === 'PUT' && accessMatch) {
@@ -672,7 +723,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1', 'customer-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1', 'church-collections-v1'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1','service-jobs-wallet-v1','staff-permissions-v1', 'customer-orders-v1', 'retail-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1', 'church-collections-v1'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -693,6 +744,8 @@ const server = createServer(async (request, response) => {
         if (access.blocked) return send(response, 402, { error: access.reason, status: access.status })
       }
       if (incoming.some(operation => operation.entityType === 'staff_removal')) return send(response, 403, { error: 'Staff removal requires owner authentication.' })
+      const restrictedStaff=await accounts.findOne({businessId,role:{$in:['admin','cashier']},permissions:{$exists:true},removedAt:{$exists:false}})
+      if(restrictedStaff&&request.headers['x-stockroom-staff-permissions']!=='staff-permissions-v1')return send(response,426,{error:'Update this device before synchronizing individual staff permissions.'})
       const documents = incoming.map((operation) => ({ businessId, deviceId, operationId: String(operation.operationId), entityType: String(operation.entityType), entityId: String(operation.entityId), action: String(operation.action), payload: operation.payload || {}, createdAt: operation.createdAt || new Date().toISOString(), receivedAt: new Date() }))
       const acceptedOperationIds = []
       const conflicts = []
@@ -705,6 +758,8 @@ const server = createServer(async (request, response) => {
           acceptedOperationIds.push(document.operationId)
           continue
         }
+        const actorId=document.payload.staffId||document.payload.createdBy
+        if(actorId&&ObjectId.isValid(actorId)){const actor=await accounts.findOne({_id:new ObjectId(actorId),businessId,removedAt:{$exists:false}});const permission=operationPermission(document);if(actor?.permissions&&permission&&!hasPermission(actor,permission)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'The owner has not granted this staff operation.'});continue}}
         if(document.entityType==='sale' && document.payload.paymentDetails?.serviceJob) {
           conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'Synchronize invoice payments through their job record.'});continue
         }
@@ -714,7 +769,7 @@ const server = createServer(async (request, response) => {
             const ledger=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:restaurantLedgerId(document.payload.paymentDetails.restaurantBill.sessionId)})
             const entry=ledger?.payload.payments.find(entry=>entry.id===document.entityId)
             if(!entry || entry.receiptHash!==await restaurantReceiptHash(document.payload)) throw new Error('Synchronize the accepted bill payment allocation before its receipt.')
-            recordPayment(document.payload)
+            recordPayment(document.payload,document.payload.paymentDetails?.policy)
             const previous=await operations.findOne({businessId,entityType:'sale',entityId:document.entityId})
             if(previous) { if(await restaurantReceiptHash(previous.payload)!==entry.receiptHash) throw new Error('A different payment already uses this receipt ID.'); acceptedOperationIds.push(document.operationId);continue }
           }catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message});continue}
@@ -767,6 +822,7 @@ const server = createServer(async (request, response) => {
           }
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
+          if(document.entityType==='customer' && current?.payload && document.payload.birthday===undefined)document.payload={...document.payload,birthday:current.payload.birthday||'',birthdayReminders:current.payload.birthdayReminders||false}
           if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || document.payload.kind==='register' || document.payload.kind==='product' && Boolean(document.payload.oilPricing) || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
             if(JSON.stringify(current.payload)!==JSON.stringify(document.payload)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This operation ID already has different details.'});continue}
             // Recover a response/database interruption between storing the
@@ -798,7 +854,7 @@ const server = createServer(async (request, response) => {
             try{if(document.entityId!==document.payload.id||document.action!=='upsert')throw new Error('Invalid church record operation.');validateChurchRecord(document.payload,current?.payload)}catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
           }
           if(document.entityType==='pos_record' && document.payload.kind==='service-job') {
-            try { if(document.entityId!==document.payload.id || document.action!=='upsert')throw new Error('Invalid service job operation.');if(document.payload.church&&!current){const link=document.payload.church;for(const [id,kind,name,phone] of [[link.fundId,'church-fund',link.fundName,''],...(link.donorId?[[link.donorId,'church-donor',link.donorName,link.donorPhone]]:[])]){const identity=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:id});if(!identity||identity.payload.kind!==kind||identity.payload.branchId!==document.payload.branchId||identity.payload.name!==name||identity.payload.phone!==phone||identity.payload.status==='archived'&&Date.parse(identity.payload.updatedAt)<=Date.parse(document.payload.createdAt))throw new Error('Synchronize matching active funds and donors before new contributions.')}}const refunds=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:(current?.payload?.payments||[]).map(entry=>entry.sale.id)}}).toArray();validateServiceJob(document.payload,current?.payload,false,refunds.map(row=>row.payload));for(const entry of document.payload.payments){recordPayment(entry.sale);if(await entityHeads.findOne({businessId,entityType:'pos_record',entityId:{$ne:document.entityId},'payload.kind':'service-job','payload.payments.sale.id':entry.sale.id}))throw new Error('This payment ID is already used by another job.')} }
+            try { if(document.entityId!==document.payload.id || document.action!=='upsert')throw new Error('Invalid service job operation.');if(document.payload.church&&!current){const link=document.payload.church;for(const [id,kind,name,phone] of [[link.fundId,'church-fund',link.fundName,''],...(link.donorId?[[link.donorId,'church-donor',link.donorName,link.donorPhone]]:[])]){const identity=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:id});if(!identity||identity.payload.kind!==kind||identity.payload.branchId!==document.payload.branchId||identity.payload.name!==name||identity.payload.phone!==phone||identity.payload.status==='archived'&&Date.parse(identity.payload.updatedAt)<=Date.parse(document.payload.createdAt))throw new Error('Synchronize matching active funds and donors before new contributions.')}}const refunds=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:(current?.payload?.payments||[]).map(entry=>entry.sale.id)}}).toArray();validateServiceJob(document.payload,current?.payload,false,refunds.map(row=>row.payload));for(const entry of document.payload.payments){recordPayment(entry.sale,entry.sale.paymentDetails?.policy);if(await entityHeads.findOne({businessId,entityType:'pos_record',entityId:{$ne:document.entityId},'payload.kind':'service-job','payload.payments.sale.id':entry.sale.id}))throw new Error('This payment ID is already used by another job.')} }
             catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
           }
           const restaurantFloor=document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-')||document.payload.tableService) ? await entityHeads.findOne({businessId,entityType:'pos_record',entityId:floorId(document.payload.branchId)}) : null
@@ -824,7 +880,7 @@ const server = createServer(async (request, response) => {
               const tab=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.tabId})
               const orders=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'counter-order','payload.branchId':document.payload.branchId}).toArray()
               const legacy=await operations.find({businessId,entityType:'sale',entityId:{$in:orders.map(row=>`counter-payment:${row.entityId}`)}}).toArray()
-              recordPayment(document.payload.latestSale)
+              recordPayment(document.payload.latestSale,document.payload.latestSale.paymentDetails?.policy)
               const effective=tab&&restaurantTabs([tab.payload],restaurantFloor?.payload)[0]
               await validateRestaurantLedger(document.payload,current?.payload,effective,orders.map(row=>row.payload).filter(order=>effective&&billContains(effective,order)),legacy.map(row=>row.payload))
             }catch(error){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload,remotePayload:current?.payload||{}});continue}
@@ -909,6 +965,7 @@ const server = createServer(async (request, response) => {
               if (document.payload.kind === 'counter-order' && document.payload.status === 'collected' && !document.payload.tableService && !await operations.findOne({ businessId, entityType: 'sale', entityId: `counter-payment:${document.entityId}` })) throw new Error('Synchronize the order payment before handover.')
             } catch (error) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: error.message, localPayload: document.payload, remotePayload: current?.payload || {} }); continue }
           }
+          if(document.entityType==='customer' && document.payload.birthday!==undefined){try{birthdayValue(document.payload.birthday)}catch(error){conflicts.push({operationId:document.operationId,reason:error.message});continue}}
           if (document.entityType === 'product') {
             try { document.payload.customValues = { ...readCustomValues(current?.payload?.customValues), ...readCustomValues(document.payload.customValues) } }
             catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid custom product details.' }); continue }
@@ -964,16 +1021,20 @@ const server = createServer(async (request, response) => {
       const includeOwn = query.get('includeOwn') === '1'
       const filter = { businessId, ...(!includeOwn ? { deviceId: { $ne: deviceId } } : {}), ...(ObjectId.isValid(cursor) ? { _id: { $gt: new ObjectId(cursor) } } : {}) }
       const rows = await operations.find(filter).sort({ _id: 1 }).limit(500).toArray()
+      if(query.get('retailOrderCapability')!=='retail-orders-v1' && rows.some(row=>row.payload?.retailOrder||row.payload?.paymentDetails?.counterOrder?.retailOrder))return send(response,426,{error:'Update this device to process retail online orders safely.'})
       if (query.get('customerOrderCapability') !== 'customer-orders-v1' && rows.some(row => row.payload?.source === 'customer-portal')) return send(response, 426, { error: 'Update this device to safely accept and process online customer orders.' })
       if (query.get('staffCapability') !== 'staff-removal-v1' && rows.some(row => row.entityType === 'staff_removal')) return send(response, 426, { error: 'Update this device to apply staff access removals.' })
       if(query.get('churchCapability')!=='church-collections-v1' && rows.some(requiresChurchSync))return send(response,426,{error:'Update this device to synchronize funds, donors and contributions.'})
       if(query.get('reservationCapability')!=='restaurant-reservations-v1' && rows.some(requiresReservationSync))return send(response,426,{error:'Update this device to synchronize restaurant reservations and their bills.'})
       if(query.get('stockWorkCapability')!=='stock-work-v1' && rows.some(row=>row.entityType==='pos_record' && isStockWork(row.payload)))return send(response,426,{error:'Update this device to synchronize material use and food production batches.'})
+      if(query.get('serviceJobWalletCapability')!=='service-jobs-wallet-v1'&&rows.some(row=>row.payload?.kind==='service-job'&&row.payload.payments?.some(entry=>entry.sale.paymentMethod==='wallet')))return send(response,426,{error:'Update this device to apply wallet invoice payments.'})
       if(query.get('serviceJobCapability')!=='service-jobs-v1' && rows.some(requiresServiceJobSync)) return send(response,426,{error:'Update this device to synchronize service jobs and invoice payments.'})
       if (query.get('restaurantCapability') !== 'restaurant-v2' && rows.some(row=>['restaurant-layout','restaurant-tab','restaurant-ledger','restaurant-floor'].includes(row.payload?.kind) || row.payload?.restaurantOrder || row.payload?.paymentDetails?.restaurantBill || row.payload?.id === 'restaurant-menu' || row.payload?.tableService || row.payload?.paymentDetails?.counterOrder?.tableService || row.payload?.shopProfile?.restaurant || row.payload?.shopProfile?.workflows === 'restaurant')) return send(response,426,{error:'Update this device to synchronize Restaurant & bar tables, bills and orders.'})
       if (query.get('capabilities') !== 'counter-v3' && rows.some(row => ['counter-menu', 'counter-order', 'counter-consumption'].includes(row.payload?.kind) || row.payload?.paymentDetails?.counterOrder || row.payload?.shopProfile?.fastFood || row.payload?.shopProfile?.workflows === 'fast-food')) return send(response, 426, { error: 'Update this device to synchronize Fast food orders and payments.' })
       if (!['retail-v3', 'business-v4'].includes(query.get('protocol')) && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
-      return send(response, 200, { operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })
+      const staffAccess=await accounts.find({businessId,role:{$in:['admin','cashier']},removedAt:{$exists:false}}).toArray()
+      if(staffAccess.some(account=>account.permissions)&&query.get('staffPermissionsCapability')!=='staff-permissions-v1')return send(response,426,{error:'Update this device to apply individual staff permissions.'})
+      return send(response, 200, { staffAccess:staffAccess.map(account=>({id:account._id.toString(),role:account.role,permissions:parsePermissions(account.permissions),operationalAccess:Boolean(account.operationalAccess)})), operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })
     }
     return send(response, 404, { error: 'Not found.' })
   } catch (error) {

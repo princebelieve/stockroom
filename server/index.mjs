@@ -1,3 +1,6 @@
+import { canRequest, hasPermission } from './staff-permissions.mjs'
+import { updateCustomerBirthday, setStaffPermissions } from './db.mjs'
+import { cloudSetStaffPermissions } from './cloud-auth.mjs'
 import { backupSnapshot, encryptBackup, decryptBackup, restoreSnapshot } from './business-backup.mjs'
 import { salesHistory } from './sales-history.mjs'
 import { database } from './db.mjs'
@@ -79,6 +82,8 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET') return forward({})
     return readJson(request, response, forward)
   }
+  const accessUser=sessionUser(request)
+  if(accessUser && (request.url!=='/api/sales' || request.method!=='POST') && !canRequest(accessUser,request.url||'',request.method))return sendJson(response,403,{error:'The owner has not granted access to this operation.'})
   if (request.url?.startsWith('/api/pos')) {
     const user = sessionUser(request)
     if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
@@ -179,6 +184,8 @@ const server = createServer(async (request, response) => {
     return sendJson(response, 200, await getOwnerMetrics(requestBranch(request)))
   }
 
+  const birthdayRoute=request.url?.match(/^\/api\/customers\/([^/]+)\/birthday$/)
+  if(birthdayRoute && request.method==='PUT')return readJson(request,response,async input=>{if(!canOperate(sessionUser(request)))return sendJson(response,403,{error:'Customer account access is required.'});try{return sendJson(response,200,updateCustomerBirthday(decodeURIComponent(birthdayRoute[1]),input))}catch(error){return sendJson(response,400,{error:error.message})}})
   if (request.method === 'GET' && request.url === '/api/customers') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
     return sendJson(response, 200, { customers: await listCustomers() })
@@ -310,19 +317,19 @@ const server = createServer(async (request, response) => {
   }
   if (request.method === 'GET' && request.url === '/api/reports') {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    if (!user || !(user.permissions?canRequest(user,request.url||'',request.method):['owner','admin'].includes(user.role))) return sendJson(response, 403, { error: 'Access required.' })
     return sendJson(response, 200, await getReports(requestBranch(request)))
   }
   if (request.method === 'GET' && request.url?.startsWith('/api/staff/activity')) {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    if (!user || !(user.permissions?canRequest(user,request.url||'',request.method):['owner','admin'].includes(user.role))) return sendJson(response, 403, { error: 'Access required.' })
     const from = String(request.headers['x-activity-from'] || ''), to = String(request.headers['x-activity-to'] || '')
     if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) return sendJson(response, 400, { error: 'A valid start and end date are required.' })
     return sendJson(response, 200, getStaffActivity(requestBranch(request), new Date(from).toISOString(), new Date(to).toISOString()))
   }
   if (request.method === 'GET' && request.url === '/api/reports/sales.csv') {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    if (!user || !(user.permissions?canRequest(user,request.url||'',request.method):['owner','admin'].includes(user.role))) return sendJson(response, 403, { error: 'Access required.' })
     response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="stockroom-sales.csv"' })
     return response.end(await exportSalesCsv(requestBranch(request)))
   }
@@ -398,6 +405,8 @@ const server = createServer(async (request, response) => {
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }
+  const staffPermissionsMatch=request.url?.match(/^\/api\/users\/([^/]+)\/permissions$/)
+  if(request.method==='PUT'&&staffPermissionsMatch){const user=sessionUser(request);if(user?.role!=='owner')return sendJson(response,403,{error:'Owner access required.'});return readJson(request,response,async input=>{try{const token=String(request.headers['x-cloud-access-token']||input.cloudAccessToken||'');const configured=await getCloudConfiguration();await cloudOwnerForBusiness(token,configured.businessId);const result=await cloudSetStaffPermissions(token,staffPermissionsMatch[1],input.permissions,String(input.ownerPassword||''));return sendJson(response,200,setStaffPermissions(staffPermissionsMatch[1],result.account.permissions))}catch(error){return sendJson(response,400,{error:error.message})}})}
   const cashierAccessMatch = request.url?.match(/^\/api\/users\/([^/]+)\/operational-access$/)
   if (request.method === 'PUT' && cashierAccessMatch) {
     const user = sessionUser(request)
@@ -451,13 +460,13 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/sync/status') return sendJson(response, 200, await syncConfigurationStatus())
   if (request.method === 'GET' && ['/api/sync/conflicts','/api/sync/conflicts/reviews'].includes(request.url)) {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    if (!user || !(user.permissions?canRequest(user,request.url||'',request.method):['owner','admin'].includes(user.role))) return sendJson(response, 403, { error: 'Access required.' })
     return sendJson(response, 200, { conflicts: listSyncConflicts(request.url.endsWith('/reviews')) })
   }
   const conflictMatch = request.url?.match(/^\/api\/sync\/conflicts\/([^/]+)\/resolve$/)
   if (request.method === 'POST' && conflictMatch) {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
+    if (!user || !(user.permissions?canRequest(user,request.url||'',request.method):['owner','admin'].includes(user.role))) return sendJson(response, 403, { error: 'Access required.' })
     return readJson(request, response, input => { resolveSyncConflict(conflictMatch[1], input, user); return sendJson(response, 200, { ok: true }) })
   }
   if (request.method === 'POST' && request.url === '/api/sync/now') {
@@ -682,7 +691,7 @@ function readJson(request, response, callback) {
   request.on('end', () => {
     if (tooLarge) return
     try {
-      Promise.resolve(callback(JSON.parse(body))).catch((error) => sendJson(response, 400, { error: error.message }))
+      const input=JSON.parse(body);const user=sessionUser(request);if(user&&!canRequest(user,request.url||'',request.method,input))return sendJson(response,403,{error:'The owner has not granted access to this operation.'});Promise.resolve(callback(input)).catch((error) => sendJson(response, 400, { error: error.message }))
     } catch {
       sendJson(response, 400, { error: 'Request body must be valid JSON.' })
     }

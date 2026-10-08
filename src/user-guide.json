@@ -7,7 +7,8 @@
       "For a new business, use the registration request on the welcome/sign-in journey. Enter your business details and owner email. Check that email for the registration key and its expiry instructions.",
       "Choose New business with a key. Use the issued key and matching owner email, create your owner password, and complete registration while connected to the internet. Choose your business type; its preset opens the matching selling workspace.",
       "For a business already registered, choose Existing business and enter the existing owner email and password. Give the device a recognisable label. Do not create a second business just to add a device.",
-      "Sign in. The owner configures the business; cashiers use the sales screens. Keep your owner password private."
+      "Sign in. The owner configures the business; cashiers use the sales screens. Keep your owner password private.",
+      "Owners can open How to use the app > Set up your business for a saved checklist linking to workspace, catalogue, staff and device tools. Contact support to arrange setup, stock entry, training or troubleshooting; availability and any charge are confirmed by support."
     ],
     "note": "The developer installation tools are a separate legacy installation route, not the normal owner setup. Initial registration and device connection need the existing online service."
   },
@@ -185,7 +186,7 @@
     "steps": [
       "Open the catalogue link, commonly Inventory. Search for the product before creating a duplicate.",
       "Add or edit its name, SKU/barcode, category, selling unit, price, cost, current stock and reorder level as appropriate.",
-      "Use the supplied import or completed-form tools for larger catalogues. Preview and review recognized values before saving.",
+      "Use Preloaded catalogue starters for workspace-specific names, or import/completed-form tools for larger catalogues. Saved catalogue entries remain. Enter actual prices, costs and stock before saving; starters do not supply manufacturer barcodes or assumed prices.",
       "Configure Product variants and extras here when required: choose the product, group/variant labels and extra names/prices, then save product options.",
       "Return to Product sales and confirm scanning, item selection and price."
     ],
@@ -218,17 +219,17 @@
   },
   {
     "id": "section-oil-pricing",
-    "title": "Oil sales: retail, bulk and customer prices",
+    "title": "Product and oil sales: retail, bulk and customer prices",
     "steps": [
-      "Choose the wholesale/retail oil business setup. Add oil stock in a consistent base unit, such as litres, with its retail selling price and purchase cost.",
-      "In Purchasing and receiving > Pack / receiving conversions, add a named container and its base-unit factor. Enable Offer this container in oil sales and enter its retail container price.",
-      "Owners/admins open Inventory > Oil price tiers, choose an oil, and add bulk minimum quantities and prices per base stock unit. The highest qualifying threshold applies to the combined quantity of that oil across loose units and configured containers in the basket.",
-      "Add customer rates by selecting existing customer accounts. Select that customer in the oil basket to apply its rate. Customer rate takes priority over bulk; otherwise retail/product or retail/container prices apply. Explicit manual prices and custom extra lines retain their separate prices.",
+      "Use Product sales for ordinary stocked goods, or the wholesale/retail oil setup for measured oils. Add each product in a consistent base unit with its retail selling price and purchase cost.",
+      "Open Purchasing and receiving > Pack / receiving conversions, add a named pack and its base-unit factor, enable its checkout offering and enter its selling price. Selling packs work in Product sales and containers work in Oil sales. Loose-unit tiers do not require packs.",
+      "Owners/admins open Inventory > Product price tiers (Oil price tiers for oil businesses), choose a product, and add bulk minimum quantities and prices per base stock unit. The highest qualifying threshold applies to the combined quantity of that product in Product sales or Oil sales; configured selling packs and oil containers contribute their base-unit quantity.",
+      "Add customer rates by selecting existing customer accounts. Select that customer in the checkout basket to apply its rate. Customer rate takes priority over bulk; otherwise retail/product or retail/container prices apply. Explicit manual prices and custom extra lines retain their separate prices.",
       "Review rate labels, quantities and total before taking payment. Quantity or customer changes can change the applicable price. Saved receipts retain the selected price and label; refunds use those saved amounts.",
       "Example: retail 10 per litre, bulk 8 from 20 litres and 7 from 100 litres, customer rate 6. One 25-litre can costs 200 under bulk pricing; one can plus 75 loose litres costs 700, or 600 with that customer selected. Stock consumption is 100 litres.",
       "Save tiers with the existing sync workflow and update participating apps. Refresh before shared checkout to load changed rates. A stale settings save requires review; drafts preserve command IDs for retrying interrupted saves. Old app versions do not calculate these rates."
     ],
-    "note": "Rates are per base stock unit, not per container. Bulk rates apply to the entire qualifying quantity, not only units above the threshold. Different oils do not combine. Product sales continues to use its existing pricing; these automatic rates apply in Oil sales."
+    "note": "Rates are per base stock unit, not per container. Bulk rates apply to the entire qualifying quantity, not only units above the threshold. Different products do not combine. The same saved product rules apply in Product sales and Oil sales. Service descriptions and prepared-food menus retain their own prices; these rules do not reprice those workflows."
   },
   {
     "id": "section-18",
@@ -251,7 +252,7 @@
     "steps": [
       "Select New job / estimate. Enter the work description, customer, item descriptions, quantities and prices. Add an optional due date or instructions.",
       "Save as a job, or start as an estimate. Select Accept estimate / issue invoice before collecting money for an estimate.",
-      "Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal, Bank Transfer or Split payment; confirm external payments and their references before saving.",
+      "Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal, Bank Transfer or Split payment; confirm external payments and their references before saving. Owner-enabled Customer wallet is available for jobs linked to a customer account with sufficient wallet funds.",
       "Print the saved payment receipt. It shows the amount received and remaining invoice balance. For a 100 invoice paid 30 then 70, there are two receipts and a zero balance.",
       "Use Job details and actions to mark In progress and Ready. Collect the balance before marking Completed.",
       "Choose Print estimate, Print job ticket or Print invoice for the document needed. These use the existing receipt printer. An invoice shows what is owed; a job ticket shows work instructions.",
@@ -412,7 +413,8 @@
       "Review their balance and recorded account activity.",
       "Use the available account controls to record funds or repayments with the correct amount and reference.",
       "When wallet payments are enabled, choose the customer wallet during checkout and review the available balance.",
-      "Only the owner may approve a purchase that creates debt when credit is enabled."
+      "Only the owner may approve a purchase that creates debt when credit is enabled.",
+      "Open Birthday reminder on a customer account, enter MM-DD and enable the reminder. Save locally, then sync to receive cloud notifications. Staff with Customer accounts access receive a reminder once per customer/date in the business timezone; greetings are sent manually."
     ],
     "note": "Customer balances are separate from owner referral rewards. Account entries record business transactions; they are not a bank transfer initiated by the app."
   },
@@ -432,7 +434,7 @@
     "id": "section-31",
     "title": "Staff & access and Staff activity",
     "steps": [
-      "As owner, open Staff & access > Team members to review names, usernames, roles and operational access.",
+      "As owner, open Staff & access > Team members, select Choose staff access and tick the selling workspaces and operations the staff member needs. Save staff access using your owner password. New staff cannot operate until access is granted. Existing access remains until you save a selection; offline devices receive changes on their next sync.",
       "Choose Add staff, enter the requested details and temporary password, then confirm the username and owner credentials when prompted.",
       "Give the staff member their username and temporary password securely. Grant only the access their job needs.",
       "Use Staff passwords for recovery/reset. To revoke access, choose Remove staff beside an admin or cashier, read the warning, and enter your owner password. Cancel makes no change; the red Confirm staff removal button submits the request. Synchronize other devices afterward.",
@@ -500,5 +502,18 @@
       "Choose Add selected items to menu draft, review stock links, availability and stations, then Save menu. Cancel preview changes no menu; Discard menu changes removes unsaved additions."
     ],
     "note": "Existing items stay unchanged. Same-name and previously copied source items are blocked. Copies have fresh identities and independent future edits; submitted orders retain their snapshots."
+  },
+  {
+    "id": "retail-online-orders",
+    "title": "Online retail ordering and delivery",
+    "steps": [
+      "As owner, open Business settings > Business. Enable online retail ordering and choose the products to publish. Save business settings and synchronize. Only selected products with positive selling prices are published; costs and stock counts stay private.",
+      "Share the retail customer link under Business sign-in links, or its QR code. Mixed food/retail businesses use the retail link for stock products and the existing food link for menus.",
+      "Configure published bank details and optional fixed delivery charge. Customers can order as guests, request delivery and submit transfer references without Paystack verification. A transfer reference is a claim; staff must verify receipt of money.",
+      "Open Online retail orders on the fulfilment branch (currently Main branch). Sign in as staff granted Product sales access, or Oil sales for an oil order. Accept the order while connected and sync it to this till.",
+      "Use the Picking queue to start picking and mark ready. Take payment on the accepted till, then hand over or complete delivery. Payment uses existing cash, transfer, terminal, split and owner-enabled wallet controls; stock is deducted once when payment is recorded.",
+      "After acceptance and sync, picking and payment save locally through an outage. Sync when connected to update customer tracking. Online requests do not reserve stock; check actual availability before confirming payment."
+    ],
+    "note": "Retail online prices are the published product retail prices in base units. Walk-in pack, bulk and customer pricing remain in the selling workspaces. Online ordering and remote notifications need an internet connection; ordinary checkout remains offline first."
   }
 ]

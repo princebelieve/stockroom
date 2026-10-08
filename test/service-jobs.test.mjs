@@ -93,3 +93,27 @@ test('failed payment persistence rolls back receipt and job, and saved tax alloc
  assert.equal(serviceJobBalance(job).due,0)
  }finally{f.sql.close()}
 })
+
+
+test('wallet invoice deposits are linked, atomic, idempotent, replay-safe and refundable',async()=>{
+ const f=fixture();try{
+ f.sql.exec("INSERT INTO customers(id,name,phone,balance) VALUES('ada','Ada','555',150); UPDATE app_settings SET payment_policy='{\"allowWallet\":true}';")
+ const {job}=await f.call('',{...f.create,customerId:'ada'})
+ const request={id:job.id,commandId:'wallet-deposit',expectedUpdatedAt:job.updatedAt,amount:'30',method:'wallet',customerId:'ada'}
+ await assert.rejects(f.call('/pay',{...request,customerId:'other'}),/invoice-linked/)
+ f.setFail(true);await assert.rejects(f.call('/pay',request),/outbox failed/);f.setFail(false)
+ assert.equal(f.sql.prepare("SELECT balance FROM customers WHERE id='ada'").get().balance,150)
+ assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM sales').get().n,0)
+ const result=await f.call('/pay',request);assert.equal(result.sale.paymentMethod,'wallet');assert.equal(serviceJobBalance(result.job).due,70)
+ await f.call('/pay',request);await applyPosRecord(f.db,'business',result.job)
+ assert.equal(f.sql.prepare("SELECT balance FROM customers WHERE id='ada'").get().balance,120)
+ assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM wallet_transactions').get().n,1)
+ f.sql.exec("UPDATE customers SET balance=5 WHERE id='ada'")
+ await assert.rejects(f.call('/pay',{...request,commandId:'too-poor',expectedUpdatedAt:result.job.updatedAt}),/insufficient/)
+ assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM sales').get().n,1)
+ const refund=await f.pos('/api/pos/returns',{id:'wallet-invoice-refund',saleId:result.sale.id,reason:'Deposit returned',method:'wallet',items:[{lineIndex:0,quantity:1,restock:false}]})
+ assert.equal(refund.total,30);assert.equal(f.sql.prepare("SELECT balance FROM customers WHERE id='ada'").get().balance,35)
+ await f.pos('/api/pos/returns',{id:'wallet-invoice-refund',saleId:result.sale.id,reason:'Deposit returned',method:'wallet',items:[{lineIndex:0,quantity:1,restock:false}]})
+ assert.equal(f.sql.prepare("SELECT balance FROM customers WHERE id='ada'").get().balance,35)
+ }finally{f.sql.close()}
+})

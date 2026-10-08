@@ -22,7 +22,7 @@ This guide follows the current app screens. Availability depends on your workspa
 16. Product management: catalogue and opening stock
 17. Product management: purchasing, receiving, batches and wastage
 18. Product sales: basket to receipt
-19. Oil sales: retail, bulk and customer prices
+19. Product and oil sales: retail, bulk and customer prices
 20. Payments & receipts: manually entered payment
 21. Payments & receipts > Jobs & invoices
 22. Payments & receipts > Church collections
@@ -201,7 +201,7 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 
 1. Open the catalogue link, commonly Inventory. Search for the product before creating a duplicate.
 2. Add or edit its name, SKU/barcode, category, selling unit, price, cost, current stock and reorder level as appropriate.
-3. Use the supplied import or completed-form tools for larger catalogues. Preview and review recognized values before saving.
+3. Use Preloaded catalogue starters for workspace-specific names, or import/completed-form tools for larger catalogues. Saved catalogue entries remain. Enter actual prices, costs and stock before saving; starters do not supply manufacturer barcodes or assumed prices.
 4. Configure Product variants and extras here when required: choose the product, group/variant labels and extra names/prices, then save product options.
 5. Return to Product sales and confirm scanning, item selection and price.
 
@@ -228,17 +228,17 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 
 **Remember:** Use Back to products to change the unpaid basket. Hold sale saves a basket for later; Resume sale restores it. Clear basket clears an unpaid draft. A connected POS request must be resolved before altering its locked basket.
 
-## Oil sales: retail, bulk and customer prices
+## Product and oil sales: retail, bulk and customer prices
 
-1. Choose the wholesale/retail oil business setup. Add oil stock in a consistent base unit, such as litres, with its retail selling price and purchase cost.
-2. In Purchasing and receiving > Pack / receiving conversions, add a named container and its base-unit factor. Enable Offer this container in oil sales and enter its retail container price.
-3. Owners/admins open Inventory > Oil price tiers, choose an oil, and add bulk minimum quantities and prices per base stock unit. The highest qualifying threshold applies to the combined quantity of that oil across loose units and configured containers in the basket.
-4. Add customer rates by selecting existing customer accounts. Select that customer in the oil basket to apply its rate. Customer rate takes priority over bulk; otherwise retail/product or retail/container prices apply. Explicit manual prices and custom extra lines retain their separate prices.
+1. Use Product sales for ordinary stocked goods, or the wholesale/retail oil setup for measured oils. Add each product in a consistent base unit with its retail selling price and purchase cost.
+2. Open Purchasing and receiving > Pack / receiving conversions, add a named pack and its base-unit factor, enable its checkout offering and enter its selling price. Selling packs work in Product sales and containers work in Oil sales. Loose-unit tiers do not require packs.
+3. Owners/admins open Inventory > Product price tiers (Oil price tiers for oil businesses), choose a product, and add bulk minimum quantities and prices per base stock unit. The highest qualifying threshold applies to the combined quantity of that product in Product sales or Oil sales; configured selling packs and oil containers contribute their base-unit quantity.
+4. Add customer rates by selecting existing customer accounts. Select that customer in the checkout basket to apply its rate. Customer rate takes priority over bulk; otherwise retail/product or retail/container prices apply. Explicit manual prices and custom extra lines retain their separate prices.
 5. Review rate labels, quantities and total before taking payment. Quantity or customer changes can change the applicable price. Saved receipts retain the selected price and label; refunds use those saved amounts.
 6. Example: retail 10 per litre, bulk 8 from 20 litres and 7 from 100 litres, customer rate 6. One 25-litre can costs 200 under bulk pricing; one can plus 75 loose litres costs 700, or 600 with that customer selected. Stock consumption is 100 litres.
 7. Save tiers with the existing sync workflow and update participating apps. Refresh before shared checkout to load changed rates. A stale settings save requires review; drafts preserve command IDs for retrying interrupted saves. Old app versions do not calculate these rates.
 
-**Remember:** Rates are per base stock unit, not per container. Bulk rates apply to the entire qualifying quantity, not only units above the threshold. Different oils do not combine. Product sales continues to use its existing pricing; these automatic rates apply in Oil sales.
+**Remember:** Rates are per base stock unit, not per container. Bulk rates apply to the entire qualifying quantity, not only units above the threshold. Different products do not combine. The same saved product rules apply in Product sales and Oil sales. Service descriptions and prepared-food menus retain their own prices; these rules do not reprice those workflows.
 
 ## Payments & receipts: manually entered payment
 
@@ -257,7 +257,7 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 
 1. Select New job / estimate. Enter the work description, customer, item descriptions, quantities and prices. Add an optional due date or instructions.
 2. Save as a job, or start as an estimate. Select Accept estimate / issue invoice before collecting money for an estimate.
-3. Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal, Bank Transfer or Split payment; confirm external payments and their references before saving.
+3. Choose Take payment and enter a deposit or full balance. Select Cash, POS Terminal, Bank Transfer or Split payment; confirm external payments and their references before saving. Owner-enabled Customer wallet is available for jobs linked to a customer account with sufficient wallet funds.
 4. Print the saved payment receipt. It shows the amount received and remaining invoice balance. For a 100 invoice paid 30 then 70, there are two receipts and a zero balance.
 5. Use Job details and actions to mark In progress and Ready. Collect the balance before marking Completed.
 6. Choose Print estimate, Print job ticket or Print invoice for the document needed. These use the existing receipt printer. An invoice shows what is owed; a job ticket shows work instructions.
@@ -397,6 +397,7 @@ Shared reservations require updated apps and a sync backend supporting `restaura
 3. Use the available account controls to record funds or repayments with the correct amount and reference.
 4. When wallet payments are enabled, choose the customer wallet during checkout and review the available balance.
 5. Only the owner may approve a purchase that creates debt when credit is enabled.
+6. Open Birthday reminder, enter MM-DD and enable the reminder. Save locally, then sync for remote notifications. Daily reminders use the business timezone; staff send greetings themselves.
 
 **Remember:** Customer balances are separate from owner referral rewards. Account entries record business transactions; they are not a bank transfer initiated by the app.
 
@@ -414,7 +415,7 @@ If Profit estimate has incomplete costs appears, review the named prepared items
 
 ## Staff & access and Staff activity
 
-1. As owner, open Staff & access > Team members to review names, usernames, roles and operational access.
+1. As owner, open Staff & access > Team members, select Choose staff access and tick the selling workspaces and operations the staff member needs. Save staff access using your owner password. New staff cannot operate until access is granted. Existing access remains until you save a selection; offline devices receive changes on their next sync.
 2. Choose Add staff, enter the requested details and temporary password, then confirm the username and owner credentials when prompted.
 3. Give the staff member their username and temporary password securely. Grant only the access their job needs.
 4. Use Staff passwords for recovery/reset. To revoke access, choose Remove staff beside an admin or cashier, read the warning, and enter your owner password. Cancel makes no change; the red Confirm staff removal button submits the request. Synchronize other devices afterward.
@@ -475,3 +476,16 @@ New Windows backups support compatible additive database updates. Older archives
 3. Choose Add selected items to menu draft, review stock links, availability and stations, then Save menu. Cancel preview changes no menu; Discard menu changes removes unsaved additions.
 
 **Remember:** Existing items stay unchanged. Same-name and previously copied source items are blocked. Copies have fresh identities and independent future edits; submitted orders retain their snapshots.
+
+## Online retail ordering and delivery
+
+1. As owner, open Business settings > Business. Enable online retail ordering and choose the products to publish. Save business settings and synchronize. Only selected products with positive selling prices are published; costs and stock counts stay private.
+2. Share the retail customer link under Business sign-in links, or its QR code. Mixed food/retail businesses use the retail link for stock products and the existing food link for menus.
+3. Configure published bank details and optional fixed delivery charge. Customers can order as guests, request delivery and submit transfer references without Paystack verification. A transfer reference is a claim; staff must verify receipt of money.
+4. Open Online retail orders on the fulfilment branch (currently Main branch). Sign in as staff granted Product sales access, or Oil sales for an oil order. Accept the order while connected and sync it to this till.
+5. Use the Picking queue to start picking and mark ready. Take payment on the accepted till, then hand over or complete delivery. Payment uses existing cash, transfer, terminal, split and owner-enabled wallet controls; stock is deducted once when payment is recorded.
+6. After acceptance and sync, picking and payment save locally through an outage. Sync when connected to update customer tracking. Online requests do not reserve stock; check actual availability before confirming payment.
+
+**Remember:** Retail online prices are the published product retail prices in base units. Walk-in pack, bulk and customer pricing remain in the selling workspaces. Online ordering and remote notifications need an internet connection; ordinary checkout remains offline first.
+
+Owners can use How to use the app > Set up your business for a saved checklist that links to the existing workspace, staff and device tools. Setup, catalogue entry, training and troubleshooting assistance is available to request through the existing support contacts; support confirms availability and any charge.

@@ -40,6 +40,7 @@ export async function createNotifications({ database, accounts, visitors, verify
   const fcmSubscriptions = database.collection('fcm_push_subscriptions')
   await Promise.all([
     notifications.createIndex({ recipientKey: 1, createdAt: -1 }),
+    notifications.createIndex({ recipientKey:1,dedupeKey:1 },{unique:true,partialFilterExpression:{dedupeKey:{$type:'string'}}}),
     notifications.createIndex({ recipientKey: 1, readAt: 1, createdAt: -1 }),
     subscriptions.createIndex({ endpointHash: 1 }, { unique: true }),
     subscriptions.createIndex({ recipientKey: 1, updatedAt: -1 }),
@@ -126,7 +127,10 @@ export async function createNotifications({ database, accounts, visitors, verify
 
   async function pushRecipient(recipientKey, message) {
     const saved = { _id: new ObjectId(), recipientKey, businessId: message.businessId || null, title: String(message.title || 'Stockroom update').slice(0, 100), body: String(message.body || '').slice(0, 300), url: String(message.url || '/').slice(0, 300), type: String(message.type || 'general').slice(0, 40), createdAt: new Date(), readAt: null }
-    await notifications.insertOne(saved)
+    if(message.dedupeKey){
+      saved.dedupeKey=String(message.dedupeKey).slice(0,200)
+      try{const result=await notifications.updateOne({recipientKey,dedupeKey:saved.dedupeKey},{$setOnInsert:saved},{upsert:true});if(!result.upsertedCount)return null}catch(error){if(error.code===11000)return null;throw error}
+    }else await notifications.insertOne(saved)
     const targets = await subscriptions.find({ recipientKey }).limit(20).toArray()
     const fcmTargets = await fcmSubscriptions.find({ recipientKey }).limit(20).toArray()
     const payload = { title: saved.title, body: saved.body, url: saved.url, id: saved._id.toString(), type: saved.type }

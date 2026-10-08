@@ -1,7 +1,7 @@
 export function customerOrderSettings(value = {}) {
   const text = (key, max) => String(value?.[key] || '').trim().slice(0, max)
   const fee = Number(value?.deliveryFee || 0)
-  return { bankName: text('bankName', 100), accountName: text('accountName', 120), accountNumber: text('accountNumber', 40), transferInstructions: text('transferInstructions', 300), deliveryEnabled: value?.deliveryEnabled === true, deliveryFee: Number.isFinite(fee) && fee >= 0 && fee <= 1000000 ? Math.round(fee * 100) / 100 : 0 }
+  return { retailEnabled: value?.retailEnabled === true, retailProductIds: [...new Set((Array.isArray(value?.retailProductIds) ? value.retailProductIds : []).filter(id=>typeof id==='string' && id.length<=100))].slice(0,2000), bankName: text('bankName', 100), accountName: text('accountName', 120), accountNumber: text('accountNumber', 40), transferInstructions: text('transferInstructions', 300), deliveryEnabled: value?.deliveryEnabled === true, deliveryFee: Number.isFinite(fee) && fee >= 0 && fee <= 1000000 ? Math.round(fee * 100) / 100 : 0 }
 }
 export function customerHandoff(settings, input, restaurant = false) {
   const config = customerOrderSettings(settings)

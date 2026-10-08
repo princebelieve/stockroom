@@ -27,6 +27,7 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
   for (const entry of job.payments) {
     const sale = entry.sale
     validateServiceJobPayment(sale)
+    if(sale.paymentMethod==='wallet'&&(!job.customerId||sale.paymentDetails.customerId!==job.customerId))throw new Error('Wallet payment must match the invoice-linked customer.')
     if (seen.has(sale.id) || sale.paymentDetails.serviceJob.id!==job.id || sale.branchId!==job.branchId || sale.currency!==job.currency || sale.businessName!==job.businessName) throw new Error('Invalid invoice payment link.')
     if(!same(sale.paymentDetails.serviceJob.church,job.church))throw new Error('Preserve the contribution fund and donor.');
     seen.add(sale.id)
@@ -55,7 +56,7 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
   return job
 }
 export function validateServiceJobPayment(sale) {
-  if (!['cash','external-pos','bank-transfer','multiple'].includes(sale.paymentMethod)) throw new Error('Choose a supported invoice payment method.')
+  if (!['cash','external-pos','bank-transfer','multiple','wallet'].includes(sale.paymentMethod)) throw new Error('Choose a supported invoice payment method.')
   if (sale.paymentMethod === 'multiple') paymentResult(sale, sale.paymentDetails?.policy)
   const link=sale.paymentDetails?.serviceJob
   if (!link || !String(sale.id).startsWith('service-payment:') || !String(link.id).startsWith('service-job:') || !Number.isFinite(link.invoiceTotal) || link.invoiceTotal<=0 || !Number.isFinite(link.balanceDue) || link.balanceDue<0 || sale.items?.length!==1 || !sale.items[0].productId.startsWith('service:') || sale.items[0].quantity!==1 || cents(sale.items[0].price)!==cents(sale.total) || !Number.isFinite(sale.total) || sale.total<=0) throw new Error('Invalid job payment.')
@@ -74,7 +75,7 @@ export const requiresServiceJobSync = operation => operation.payload?.kind==='se
 export async function handleServiceJobs({db,scope,organizationId,branchId,user,path,method,input,tillId,sales,publish,saveRecord}) {
   const rows=()=>db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='service-job' AND branch_id=? ORDER BY updated_at DESC",[scope,branchId])
   const returns=async()=> (await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='return' AND branch_id=?",[scope,branchId])).values.map(row=>JSON.parse(row.payload))
-  if (method==='GET') { const jobs=(await rows()).values.map(row=>JSON.parse(row.payload)); const refunds=await returns(); return {jobs:jobs.filter(job=>!job.church).map(job=>({...job,balance:serviceJobBalance(job,refunds)})),customers:(await db.query(`SELECT id,name,phone FROM customers ${organizationId?'WHERE organization_id=?':''}`,organizationId?[organizationId]:[])).values} }
+  if (method==='GET') { const jobs=(await rows()).values.map(row=>JSON.parse(row.payload)); const refunds=await returns(); return {jobs:jobs.filter(job=>!job.church).map(job=>({...job,balance:serviceJobBalance(job,refunds)})),customers:(await db.query(`SELECT id,name,phone,balance FROM customers ${organizationId?'WHERE organization_id=?':''}`,organizationId?[organizationId]:[])).values} }
   if (!tillId || !String(input.id).startsWith('service-job:') || typeof input.commandId!=='string' || !input.commandId) throw new Error('A registered till and job command are required.')
   const previousRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,input.id])).values[0]
   const previous=previousRow ? JSON.parse(previousRow.payload) : null
@@ -106,7 +107,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
     }
     const lines=input.lines.map(line=>({id:text(line.id,100),description:text(line.description,150),quantity:Number(line.quantity),price:Number(line.price)}))
     if(input.customerId) {
-      const customer=(await db.query(`SELECT id,name,phone FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[input.customerId,...(organizationId?[organizationId]:[])])).values[0]
+      const customer=(await db.query(`SELECT id,name,phone,balance FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[input.customerId,...(organizationId?[organizationId]:[])])).values[0]
       if(!customer || customer.name.trim()!==String(input.customerName||'').trim() || String(customer.phone||'').trim()!==String(input.customerPhone||'').trim())throw new Error('Choose the matching customer account or enter this customer manually.')
     }
     job={...stamp,...(church?{church}:{}),...(input.customerId?{customerId:text(input.customerId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
@@ -121,12 +122,13 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       if(['estimate','cancelled'].includes(job.status))throw new Error('Issue the invoice before recording payment.')
       const amount=Number(input.amount)
       if(!/^\d+(?:\.\d{1,2})?$/.test(String(input.amount)) || !Number.isFinite(amount) || amount<=0 || cents(amount)>cents(balance.due))throw new Error('Enter a payment up to the remaining balance.')
-      if(!['cash','external-pos','bank-transfer','multiple'].includes(input.method))throw new Error('Choose a supported Payment Method.')
+      if(!['cash','external-pos','bank-transfer','multiple','wallet'].includes(input.method))throw new Error('Choose a supported Payment Method.')
+      if(input.method==='wallet'&&(!job.customerId||input.customerId!==job.customerId))throw new Error('Use the invoice-linked customer wallet.')
       const id='service-payment:'+input.commandId
       if((await db.query('SELECT id FROM sales WHERE id=?',[id])).values[0])throw new Error('This payment ID is already used by another job.')
       const link={...(job.church?{church:job.church}:{}),id:job.id,number:job.id.slice(-8).toUpperCase(),title:job.title,invoiceTotal:job.pricing.total,balanceDue:(cents(balance.due)-cents(amount))/100}
       const policyRow=(await db.query(`SELECT payment_policy FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`,organizationId?[organizationId]:[])).values[0]
-      sale=recordPayment({id,branchId,organizationId,businessName:job.businessName,currency:job.currency,createdAt:updatedAt,staffId:user.id,staffName:user.name,items:[{productId:'service:'+job.id,productName:`${balance.netPaid===0 && amount<balance.due?'Deposit':'Payment'} - ${job.title}`.slice(0,200),quantity:1,price:amount}],total:amount,paymentMethod:input.method,paymentReference:text(input.reference||''),terminalProvider:text(input.provider||''),paymentDetails:{...(input.method==='multiple'?{allocations:input.parts?.map(part=>({...part,amount:Number(part.amount)})),cashReceived:input.cash||undefined}:{}),amountReceived:input.method==='cash'?(input.cash||amount):amount,serviceJob:link,servicePayment:{customerName:job.customerName,customerPhone:job.customerPhone}}},policyRow?.payment_policy)
+      sale=recordPayment({id,branchId,organizationId,businessName:job.businessName,currency:job.currency,createdAt:updatedAt,staffId:user.id,staffName:user.name,items:[{productId:'service:'+job.id,productName:`${balance.netPaid===0 && amount<balance.due?'Deposit':'Payment'} - ${job.title}`.slice(0,200),quantity:1,price:amount}],total:amount,paymentMethod:input.method,paymentReference:text(input.reference||''),terminalProvider:text(input.provider||''),paymentDetails:{...(input.method==='wallet'?{customerId:job.customerId}:{}),...(input.method==='multiple'?{allocations:input.parts?.map(part=>({...part,amount:Number(part.amount)})),cashReceived:input.cash||undefined}:{}),amountReceived:input.method==='cash'?(input.cash||amount):amount,serviceJob:link,servicePayment:{customerName:job.customerName,customerPhone:job.customerPhone}}},policyRow?.payment_policy)
       const tax=cents(job.pricing.tax)*(cents(balance.netPaid)+cents(amount))/cents(job.pricing.total)
       const allocatedTax=(Math.round(tax)-Math.round(cents(job.pricing.tax)*cents(balance.netPaid)/cents(job.pricing.total)))/100
       const subtotal=(cents(amount)-cents(allocatedTax))/100

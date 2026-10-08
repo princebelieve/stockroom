@@ -1,3 +1,4 @@
+import { canRequest, routePermission, hasPermission } from './staff-permissions.mjs'
 import { oilPricing } from './oil-pricing.mjs'
 import { handleChurch } from './church-service.mjs'
 import { validateChurchRecord } from './church-ledger.mjs'
@@ -58,6 +59,8 @@ export async function applyPosRecord(db, scope, record, organizationId) {
 }
 const amount = value => { const n = Number(value); if (!Number.isFinite(n) || n < 0 || Math.abs(Math.round(n * 100) - n * 100) > 0.000001) throw new Error('Enter a non-negative amount with at most two decimals.'); return n }
 export async function handlePos({ db, scope, branchId, user, path, method, input, sales, publish, organizationId, tillId }) {
+  if(!canRequest(user,path,method,input))throw new Error('The owner has not granted access to this operation.')
+  if(user.role==='cashier'&&user.permissions&&routePermission(path,method,input)&&routePermission(path,method,input)!=='register')user={...user,role:'admin'}
   // handlePos owns its transactions; native SQLite run() must not nest them.
   const connection = db
   db = {
@@ -73,7 +76,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   if(path==='/api/pos/stock-work')return handleStockWork({db,scope,organizationId,branchId,tillId,user,method,input,publish,saveRecord:savePosRecord})
   if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close','/api/pos/restaurant/settle','/api/pos/restaurant/arrange'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   if(path.startsWith('/api/pos/service-jobs')) return handleServiceJobs({db,scope,organizationId,branchId,user,path,method,input,tillId,sales,publish,saveRecord:savePosRecord})
-  if (path.startsWith('/api/pos/restaurant/counter') || path.startsWith('/api/pos/counter')) return handleCounter({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
+  if (path.startsWith('/api/pos/retail-orders') || path.startsWith('/api/pos/restaurant/counter') || path.startsWith('/api/pos/counter')) return handleCounter({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   const manager = ['owner', 'admin'].includes(user.role)
   const records = kind => posRecords(db, scope, kind, kind === 'settings' || kind === 'product' ? 'main' : branchId)
   const write = async record => { if(['basket','register'].includes(record.kind)){const previous=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.id])).values[0];record.expectedUpdatedAt=previous?JSON.parse(previous.payload).updatedAt:''} await db.beginTransaction(); try { await savePosRecord(db, scope, record); await publish(record); await db.commitTransaction() } catch(error) { await db.rollbackTransaction(); throw error } return record }
@@ -94,8 +97,8 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
     const hasProfile=(await db.query('PRAGMA table_info(app_settings)')).values.some(row=>row.name==='shop_profile')
     const profile = hasProfile ? (await db.query(`SELECT shop_profile AS shopProfile FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`, organizationId?[organizationId]:[])).values[0]?.shopProfile : null
     const oilBusiness = normalizeShopProfile(profile).industry === 'liquids'
-    const saleConversions = hasRetail && oilBusiness ? (await db.query("SELECT payload FROM retail_records WHERE scope=? AND kind='conversion'", [scope])).values.map(row => JSON.parse(row.payload)).filter(row => row.sellInPos === true) : []
-    return { settings: posSettings(settings[0]?.value), baskets: baskets.filter(record => !record.deleted), registers, returns, products, saleConversions, customerHistory, customers, loyaltyBalances: loyaltyBalances(loaded, returns) }
+    const saleConversions = hasRetail ? (await db.query("SELECT payload FROM retail_records WHERE scope=? AND kind='conversion'", [scope])).values.map(row => JSON.parse(row.payload)).filter(row => row.sellInPos === true) : []
+    return { settings: posSettings(settings[0]?.value), baskets: baskets.filter(record => !record.deleted && (!user.permissions||hasPermission(user,record.workspace==='oil'?'oilSales':'productSales'))), registers: !user.permissions||hasPermission(user,'register')?registers:[], returns:!user.permissions||hasPermission(user,'refunds')?returns:[], products, saleConversions, customerHistory:!user.permissions||['sales','customers','reports','refunds'].some(key=>hasPermission(user,key))?customerHistory:[], customers, loyaltyBalances: loyaltyBalances(loaded, returns) }
   }
   if (path === '/api/pos/settings') {
     if (user.role !== 'owner') throw new Error('Only the owner can change POS settings.')

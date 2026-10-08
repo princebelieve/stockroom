@@ -1,8 +1,9 @@
+import type { Product } from './types'
 import { customerOrderSettings } from '../server/customer-order-settings.mjs'
 import { WorkspaceHelp } from './WorkspaceHelp'
 import { useState } from 'react'
 import { extraReasons, type PaymentPolicy } from '../server/payment.mjs'
-export function PaymentPolicySettings({ value, onChange }: { value: PaymentPolicy; onChange: (policy: PaymentPolicy) => void }) {
+export function PaymentPolicySettings({ products = [], value, onChange }: { products?: Product[]; value: PaymentPolicy; onChange: (policy: PaymentPolicy) => void }) {
   const [newProvider, setNewProvider] = useState('')
   const defaults = ['OPay', 'PalmPay', 'Moniepoint', 'Paga', 'Kuda', 'Access Bank', 'FirstBank', 'GTBank', 'UBA', 'Zenith Bank']
   const providers = [...new Set([...defaults, ...value.providers])]
@@ -15,11 +16,11 @@ export function PaymentPolicySettings({ value, onChange }: { value: PaymentPolic
   const ordering = customerOrderSettings(value.customerOrdering)
   const setOrdering = (patch: Partial<typeof ordering>) => onChange({ ...value, customerOrdering: { ...ordering, ...patch } })
   return <section><h3>Customer ordering</h3><p>These details are displayed publicly on your QR ordering page. Save business settings, then synchronize to publish them.</p>
-    <label>Bank name<input maxLength={100} value={ordering.bankName} onChange={e => setOrdering({ bankName: e.target.value })} /></label>
+    <label><input type="checkbox" checked={ordering.retailEnabled} onChange={e=>setOrdering({retailEnabled:e.target.checked})}/>Enable online retail ordering</label>{ordering.retailEnabled && <details><summary>Choose products to publish ({ordering.retailProductIds.length})</summary><p>Choose up to 2,000 products. Only selected products appear publicly, at their current retail price. Stock availability is confirmed by staff; an online request does not reserve goods.</p>{products.map(product=><label key={product.id}><input type="checkbox" disabled={!ordering.retailProductIds.includes(product.id)&&ordering.retailProductIds.length>=2000} checked={ordering.retailProductIds.includes(product.id)} onChange={e=>setOrdering({retailProductIds:e.target.checked?[...ordering.retailProductIds,product.id]:ordering.retailProductIds.filter(id=>id!==product.id)})}/>{product.name}</label>)}</details>}<label>Bank name<input maxLength={100} value={ordering.bankName} onChange={e => setOrdering({ bankName: e.target.value })} /></label>
     <label>Account name<input maxLength={120} value={ordering.accountName} onChange={e => setOrdering({ accountName: e.target.value })} /></label>
     <label>Account number<input maxLength={40} value={ordering.accountNumber} onChange={e => setOrdering({ accountNumber: e.target.value })} /></label>
     <label>Transfer instructions<textarea maxLength={300} value={ordering.transferInstructions} onChange={e => setOrdering({ transferInstructions: e.target.value })} /></label>
-    <label><input type="checkbox" checked={ordering.deliveryEnabled} onChange={e => setOrdering({ deliveryEnabled: e.target.checked })} />Offer delivery on the takeaway QR menu</label>
+    <label><input type="checkbox" checked={ordering.deliveryEnabled} onChange={e => setOrdering({ deliveryEnabled: e.target.checked })} />Offer delivery on takeaway and retail QR orders</label>
     {ordering.deliveryEnabled && <label>Fixed delivery charge (before tax)<input type="number" min="0" max="1000000" step="0.01" value={ordering.deliveryFee} onChange={e => setOrdering({ deliveryFee: Number(e.target.value) })} /></label>}
     <h3>Wallet payments</h3>
     <label className="checkbox-label"><input type="checkbox" checked={value.allowWallet} onChange={e => onChange({ ...value, allowWallet: e.target.checked })} />Enable customer wallet payments</label>

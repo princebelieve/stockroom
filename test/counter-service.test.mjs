@@ -161,3 +161,24 @@ test('saved counter tax, discounts and rewards survive settings changes and full
     assert.equal((await f.pos('/api/pos/returns', { id: 'refund', reason: 'Retry' })).id, refund.id)
   } finally { f.sqlite.close() }
 })
+
+
+test('retail online orders reuse fulfilment without enabling the food workspace',async()=>{
+ const f=fixture()
+ try{
+  const menu=await f.call('/menu',{id:'counter-menu',commandId:'seed-menu',expectedUpdatedAt:'',items})
+  const original=await f.call('/orders',{id:'retail-order-test',commandId:'seed-order',expectedUpdatedAt:'',menuUpdatedAt:menu.updatedAt,customerName:'Ada',lines:[{id:'bottle-line',menuItemId:'drink',quantity:2,optionIds:[]}]})
+  const order={...original,retailOrder:true,source:'customer-portal',customerPortalId:'ada',acceptedTillId:'till'}
+  f.sqlite.prepare('UPDATE pos_records SET payload=? WHERE id=?').run(JSON.stringify(order),order.id)
+  f.sqlite.prepare('UPDATE app_settings SET shop_profile=?').run(JSON.stringify({workflows:'products',fastFood:false}))
+  const staff={id:'cashier',name:'Cashier',role:'cashier',permissions:{productSales:true}}
+  const common={db:f.db,scope:'business',branchId:'main',user:staff,tillId:'till',sales:()=>f.sales,publish:()=>{}}
+  const loaded=await handlePos({...common,path:'/api/pos/retail-orders',method:'GET',input:{}})
+  assert.equal(loaded.orders.length,1)
+  const picked=await handlePos({...common,path:'/api/pos/retail-orders/status',method:'POST',input:{id:order.id,commandId:'pick',expectedUpdatedAt:order.updatedAt,status:'preparing'}})
+  assert.equal(picked.retailOrder,true)
+  const payment=recordPayment({id:counterSaleId(order.id),branchId:'main',total:order.total,currency:order.currency,items:counterItems(order),paymentMethod:'cash',paymentDetails:{amountReceived:order.total,pos:order.pos,counterOrder:{id:order.id,tillId:'till',retailOrder:true}}})
+  validateCounterPayment(payment,order,'till')
+  assert.throws(()=>validateCounterPayment({...payment,paymentDetails:{...payment.paymentDetails,counterOrder:{id:order.id,tillId:'till'}}},order,'till'),/workspace/)
+ }finally{f.sqlite.close()}
+})

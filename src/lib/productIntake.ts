@@ -46,12 +46,13 @@ let lastLookup = 0
 export async function lookupFoodBarcode(barcode: string): Promise<ProductDraft | null> {
   if (!validGtin(barcode)) return null
   if (cache.has(barcode)) return cache.get(barcode)!
+  try { const saved=JSON.parse(localStorage.getItem('stockroom-barcode:'+barcode)||'null');if(saved?.barcode===barcode && typeof saved.name==='string' && saved.name && saved.savedAt>Date.now()-30*86400000){const draft={name:saved.name,barcode};cache.set(barcode,draft);return draft} } catch { /* Lookup still works when browser storage is unavailable. */ }
   if (Date.now() - lastLookup < 4500) throw new Error('Please wait a few seconds before another online lookup.')
   lastLookup = Date.now()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 10000)
   try {
-    const response = await fetch(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?fields=code,product_name,brands,quantity&app_name=StockroomBusiness`, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer' })
+    const response = await fetch(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?product_type=all&fields=code,product_name,brands,quantity&app_name=StockroomBusiness`, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer' })
     if (response.status === 404) { cache.set(barcode, null); return null }
     if (!response.ok) throw new Error('Online lookup is unavailable. You can still use a photo or fill the details yourself.')
     const data = await response.json()
@@ -60,6 +61,7 @@ export async function lookupFoodBarcode(barcode: string): Promise<ProductDraft |
     if (typeof product.code !== 'string' || product.code.padStart(14, '0') !== barcode.padStart(14, '0')) return null
     const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ').slice(0, 180)
     const draft = { name, barcode }
+    try {localStorage.setItem('stockroom-barcode:'+barcode,JSON.stringify({...draft,savedAt:Date.now()}))}catch { /* Cache is optional. */ }
     cache.set(barcode, draft)
     return draft
   } catch (error) {

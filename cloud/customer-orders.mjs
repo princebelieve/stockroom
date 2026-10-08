@@ -9,13 +9,13 @@ export function authorizeCustomerOrder(order, customerId) {
 }
 
 // Match counter-service recipe snapshots, including packaged restaurant drinks.
-export async function customerOrderLines(menu, requestedLines, restaurant, productFor) {
+export async function customerOrderLines(menu, requestedLines, restaurant, productFor, retail = false) {
   if (!Array.isArray(requestedLines) || !requestedLines.length || requestedLines.length > 50) throw new Error('Choose between 1 and 50 menu items.')
   return Promise.all(requestedLines.map(async requested => {
     const item = menu.items.find(row => row.id === requested.menuItemId && row.available)
     const quantity = Number(requested.quantity)
     const optionIds = Array.isArray(requested.optionIds) ? requested.optionIds.map(String) : []
-    if (!item || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99 || new Set(optionIds).size !== optionIds.length) throw new Error('A menu item or quantity is no longer available.')
+    if (!item || !(retail ? Number.isFinite(quantity) && Math.abs(quantity*1000-Math.round(quantity*1000))<0.000001 : Number.isSafeInteger(quantity)) || quantity < (retail ? 0.001 : 1) || quantity > 99 || new Set(optionIds).size !== optionIds.length) throw new Error('A menu item or quantity is no longer available.')
     const options = optionIds.map(id => {
       const option = item.options.find(row => row.id === id && row.available !== false)
       if (!option) throw new Error('A selected option is no longer available. Refresh the menu.')

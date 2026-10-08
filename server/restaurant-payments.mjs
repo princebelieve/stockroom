@@ -129,6 +129,15 @@ export async function saveRestaurantSale(db,sale,organizationId,consumeStock=fal
     await db.run(`INSERT INTO inventory_movements (${movementColumns}) VALUES (${movementColumns.split(',').map(()=>'?').join(',')})`,[`${sale.id}:movement:${index}`,...(organizationId?[organizationId]:[]),item.productId,-item.quantity,'sale',sale.createdAt,sale.branchId])
     await db.run('UPDATE branch_inventory SET stock=stock-? WHERE product_id=? AND branch_id=?',[item.quantity,item.productId,sale.branchId])
   }
+  if(sale.paymentMethod==='wallet'){
+    const customerId=sale.paymentDetails?.customerId;if(!customerId)throw new Error('Choose a linked customer wallet.')
+    const customer=(await db.query(`SELECT balance FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[customerId,...(organizationId?[organizationId]:[])])).values[0]
+    if(!customer||Number(customer.balance)<sale.total)throw new Error('Customer wallet has insufficient funds.')
+    await db.run('UPDATE customers SET balance=ROUND(balance-?,2) WHERE id=?',[sale.total,customerId])
+    const columns=organizationId?'id,organization_id,customer_id,amount,reason,created_at':'id,customer_id,amount,reason,created_at'
+    const values=[`wallet:${sale.id}`,...(organizationId?[organizationId]:[]),customerId,-sale.total,`Sale ${sale.id}`,sale.createdAt]
+    await db.run(`INSERT INTO wallet_transactions (${columns}) VALUES (${values.map(()=>'?').join(',')})`,values)
+  }
   for(const [sql,args] of restaurantSaleStatements(sale,organizationId)) await db.run(sql,args)
   for(const [index,item] of sale.items.entries()) if(item.batchAllocations) await db.run('UPDATE sale_items SET batch_allocations=? WHERE id=?',[JSON.stringify(item.batchAllocations),`${sale.id}:${index}`])
 }

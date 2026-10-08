@@ -80,6 +80,7 @@ export function recordPayment(sale, policyInput, legacy = false) {
     const details = validated.paymentDetails.counterOrder
     if (typeof details.id !== 'string' || !details.id || details.id.length > 150 || typeof details.tillId !== 'string' || !details.tillId || details.tillId.length > 100) throw new Error('Invalid counter order payment link.')
     result.paymentDetails.counterOrder = { id: details.id, tillId: details.tillId }
+    if(details.retailOrder===true)result.paymentDetails.counterOrder.retailOrder=true
     if(details.diningOption!==undefined) {if(!['Takeaway','Dine in','Delivery'].includes(details.diningOption))throw new Error('Choose a valid order type.');result.paymentDetails.counterOrder.diningOption=details.diningOption}
     if(details.tableService) { const t=details.tableService; if(typeof t.tabId !== 'string' || !t.tabId || t.tabId.length>150 || typeof t.sessionId !== 'string' || !t.sessionId || t.sessionId.length>100 || typeof t.name !== 'string' || !t.name || t.name.length>100 || !Number.isInteger(t.seat) || t.seat<0 || t.seat>100) throw new Error('Invalid table bill payment link.'); result.paymentDetails.counterOrder.tableService={tabId:t.tabId,sessionId:t.sessionId,name:t.name,seat:t.seat} }
   }

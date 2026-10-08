@@ -1,3 +1,5 @@
+import { birthdayValue } from './customer-birthdays.mjs'
+import { parsePermissions } from './staff-permissions.mjs'
 import { conflictReview, conflictReviewSchema } from './sync-conflict-review.mjs'
 import { oilPricing } from './oil-pricing.mjs'
 import { validateChurchRecord } from './church-ledger.mjs'
@@ -269,6 +271,8 @@ if (!database.prepare('PRAGMA table_info(stocktakes)').all().some(row => row.nam
 if (!database.prepare('PRAGMA table_info(products)').all().some(row => row.name === 'cost_price')) database.exec("ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DEFAULT 0")
 if (!database.prepare('PRAGMA table_info(sale_items)').all().some(row => row.name === 'unit_cost')) database.exec("ALTER TABLE sale_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0")
 database.exec('CREATE TABLE IF NOT EXISTS staff_removals (id TEXT PRIMARY KEY, removed_at TEXT NOT NULL)')
+if (!database.prepare('PRAGMA table_info(customers)').all().some(row=>row.name==='birthday'))database.exec("ALTER TABLE customers ADD COLUMN birthday TEXT DEFAULT ''; ALTER TABLE customers ADD COLUMN birthday_reminders INTEGER NOT NULL DEFAULT 0")
+if (!database.prepare('PRAGMA table_info(users)').all().some(row => row.name === 'permissions')) database.exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT NULL")
 if (!database.prepare('PRAGMA table_info(users)').all().some(row => row.name === 'operational_access')) database.exec("ALTER TABLE users ADD COLUMN operational_access INTEGER NOT NULL DEFAULT 0")
 if (!database.prepare('PRAGMA table_info(users)').all().some(row => row.name === 'username')) database.exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
 if (!database.prepare('PRAGMA table_info(branches)').all().some(row => row.name === 'is_active')) database.exec('ALTER TABLE branches ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1')
@@ -402,16 +406,16 @@ export async function createOwnerSetup(input) {
 
 export function authenticateUser(identifier, password) {
   const value = String(identifier || '').trim().toLowerCase()
-  const user = database.prepare("SELECT id, name, email, username, password_hash AS passwordHash, role, operational_access AS operationalAccess FROM users WHERE organization_id = ? AND id NOT IN (SELECT id FROM staff_removals) AND ((role = 'owner' AND email = ?) OR (role IN ('admin', 'cashier') AND username = ?))").get(organizationId, value, value)
+  const user = database.prepare("SELECT id, name, email, username, password_hash AS passwordHash, role, permissions, operational_access AS operationalAccess FROM users WHERE organization_id = ? AND id NOT IN (SELECT id FROM staff_removals) AND ((role = 'owner' AND email = ?) OR (role IN ('admin', 'cashier') AND username = ?))").get(organizationId, value, value)
   if (!user) return null
   if (!matchesPassword(password, user.passwordHash)) return null
   if (!String(user.passwordHash).includes(':')) database.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id)
-  return { id: user.id, name: user.name, email: user.email, username: user.username || '', role: user.role, operationalAccess: Boolean(user.operationalAccess), organizationId }
+  return { id: user.id, name: user.name, email: user.email, username: user.username || '', role: user.role, permissions: parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess), organizationId }
 }
 
 export function getUserById(id) {
-  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND id NOT IN (SELECT id FROM staff_removals)').get(id, organizationId)
-  return user ? { ...user, operationalAccess: Boolean(user.operationalAccess), organizationId } : null
+  const user = database.prepare('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND id NOT IN (SELECT id FROM staff_removals)').get(id, organizationId)
+  return user ? { ...user, permissions: parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess), organizationId } : null
 }
 
 export function createSession(userId) {
@@ -449,11 +453,11 @@ export function changePassword(userId, currentPassword, newPassword) {
 export function resetCashierPassword(userId, newPassword) {
   const password = String(newPassword || '').trim()
   if (password.length < 10) throw new Error('New password must be at least 10 characters long.')
-  const user = database.prepare("SELECT id, name, email, username, role, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND role IN ('admin', 'cashier')").get(userId, organizationId)
+  const user = database.prepare("SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND role IN ('admin', 'cashier')").get(userId, organizationId)
   if (!user) throw new Error('Staff account not found on this device.')
   database.prepare('UPDATE users SET password_hash = ? WHERE id = ? AND organization_id = ?').run(hashPassword(password), user.id, organizationId)
   database.prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(user.id)
-  return { ...user, operationalAccess: Boolean(user.operationalAccess) }
+  return { ...user, permissions: parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess) }
 }
 
 export function getOwnerMetrics(branchId = 'main') {
@@ -463,7 +467,7 @@ export function getOwnerMetrics(branchId = 'main') {
 }
 
 export function listCustomers() {
-  return database.prepare('SELECT id, name, phone, balance FROM customers WHERE organization_id = ? ORDER BY name').all(organizationId).map(customer => ({ ...customer, transactions: database.prepare('SELECT id, amount, reason, created_at AS createdAt FROM wallet_transactions WHERE customer_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT 50').all(customer.id, organizationId) }))
+  return database.prepare('SELECT id, name, phone, balance, birthday, birthday_reminders AS birthdayReminders FROM customers WHERE organization_id = ? ORDER BY name').all(organizationId).map(customer => ({ ...customer, transactions: database.prepare('SELECT id, amount, reason, created_at AS createdAt FROM wallet_transactions WHERE customer_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT 50').all(customer.id, organizationId) }))
 }
 
 export function getReports(branchId = 'main') {
@@ -497,7 +501,7 @@ function normalizeCreatedAt(value) {
 }
 
 export function listUsers() {
-  return database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? AND id NOT IN (SELECT id FROM staff_removals) ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }))
+  return database.prepare('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE organization_id = ? AND id NOT IN (SELECT id FROM staff_removals) ORDER BY CASE role WHEN \'owner\' THEN 0 WHEN \'admin\' THEN 1 ELSE 2 END, name').all(organizationId).map((user) => ({ ...user, permissions: parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }))
 }
 
 // Cloud staff details are cached so the Team screen remains useful offline. The
@@ -521,10 +525,10 @@ export function cacheCloudUsers(accounts) {
         LIMIT 1`).get(organizationId, remoteId, email)
       const id = String(existing?.id || remoteId)
       const storedEmail = email || `${id}@staff.local.invalid`
-      database.prepare(`INSERT INTO users (id, organization_id, name, email, username, password_hash, role, operational_access, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, role = excluded.role, operational_access = excluded.operational_access, created_at = excluded.created_at`)
-        .run(id, organizationId, name, storedEmail, username, hashPassword(crypto.randomUUID()), role, account.operationalAccess === true ? 1 : 0, normalizeCreatedAt(account.createdAt))
+      database.prepare(`INSERT INTO users (id, organization_id, name, email, username, password_hash, role, operational_access, permissions, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, role = excluded.role, operational_access = excluded.operational_access, permissions = excluded.permissions, created_at = excluded.created_at`)
+        .run(id, organizationId, name, storedEmail, username, hashPassword(crypto.randomUUID()), role, account.operationalAccess === true ? 1 : 0, JSON.stringify(parsePermissions(account.permissions)), normalizeCreatedAt(account.createdAt))
     }
     database.exec('COMMIT')
   } catch (error) { database.exec('ROLLBACK'); throw error }
@@ -549,13 +553,14 @@ export function createUser(input) {
   const storedEmail = email || `${id}@staff.local.invalid`
   try {
     database.prepare('INSERT INTO users (id, organization_id, name, email, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, storedEmail, username, hashPassword(password), role, createdAt)
+    database.prepare('UPDATE users SET permissions=? WHERE id=?').run(JSON.stringify(parsePermissions(input.permissions||{})),id)
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) throw new Error('That email address is already in use.')
     throw error
   }
-  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
+  const user = database.prepare('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
   queueSync('user', id, 'upsert', user)
-  return { ...user, email, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }
+  return { ...user, email, permissions: parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }
 }
 
 export function updateUserRole(id, role, operationalAccess = false) {
@@ -563,16 +568,16 @@ export function updateUserRole(id, role, operationalAccess = false) {
   if (!['admin', 'cashier'].includes(nextRole)) throw new Error('Only admin and cashier roles can be updated here.')
   const result = database.prepare("UPDATE users SET role = ?, operational_access = ? WHERE id = ? AND organization_id = ? AND role IN ('admin', 'cashier')").run(nextRole, operationalAccess ? 1 : 0, id, organizationId)
   if (!result.changes) throw new Error('Staff account not found.')
-  const user = database.prepare('SELECT id, name, email, username, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ? AND organization_id = ? AND id NOT IN (SELECT id FROM staff_removals)').get(id, organizationId)
+  const user = database.prepare('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ? AND organization_id = ? AND id NOT IN (SELECT id FROM staff_removals)').get(id, organizationId)
   queueSync('user', id, 'upsert', user)
-  return { ...user, operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }
+  return { ...user, permissions: parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess), createdAt: normalizeCreatedAt(user.createdAt) }
 }
 
 export function setCashierOperationalAccess(id, enabled) {
   const result = database.prepare("UPDATE users SET operational_access = ? WHERE id = ? AND organization_id = ? AND role = 'cashier'").run(enabled ? 1 : 0, id, organizationId)
   if (!result.changes) throw new Error('Cashier account not found.')
-  const user = database.prepare('SELECT id, name, email, role, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
-  return { ...user, operationalAccess: Boolean(user.operationalAccess) }
+  const user = database.prepare('SELECT id, name, email, role, permissions, operational_access AS operationalAccess, created_at AS createdAt FROM users WHERE id = ?').get(id)
+  return { ...user, permissions: parsePermissions(user.permissions), operationalAccess: Boolean(user.operationalAccess) }
 }
 
 export function provisionCloudUser(input) {
@@ -592,8 +597,8 @@ export function provisionCloudUser(input) {
   const id = String(existing?.id || input.id || crypto.randomUUID())
   const operationalAccess = input.operationalAccess === true ? 1 : 0
   const storedEmail = email || `${id}@staff.local.invalid`
-  database.prepare(`INSERT INTO users (id, organization_id, name, email, username, password_hash, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, password_hash = excluded.password_hash, role = excluded.role, operational_access = excluded.operational_access`).run(id, organizationId, name, storedEmail, username, hashPassword(password), role, operationalAccess, now())
+  database.prepare(`INSERT INTO users (id, organization_id, name, email, username, password_hash, role, operational_access, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, password_hash = excluded.password_hash, role = excluded.role, operational_access = excluded.operational_access, permissions = excluded.permissions`).run(id, organizationId, name, storedEmail, username, hashPassword(password), role, operationalAccess, JSON.stringify(parsePermissions(input.permissions)), now())
   return authenticateUser(role === 'owner' ? email : username, password)
 }
 
@@ -639,11 +644,22 @@ export function createCustomer(input) {
   const name = String(input.name || '').trim()
   const phone = String(input.phone || '').trim()
   if (!name || name.length > 100) throw new Error('Customer name is required and must be 100 characters or less.')
+  birthdayValue(input.birthday)
   const id = crypto.randomUUID()
   database.prepare('INSERT INTO customers (id, organization_id, name, phone, balance, created_at) VALUES (?, ?, ?, ?, 0, ?)').run(id, organizationId, name, phone, now())
-  const customer = database.prepare('SELECT id, name, phone, balance FROM customers WHERE id = ?').get(id)
+  const customer = database.prepare('SELECT id, name, phone, balance, birthday, birthday_reminders AS birthdayReminders FROM customers WHERE id = ?').get(id)
+  database.prepare('UPDATE customers SET birthday=?,birthday_reminders=? WHERE id=?').run(birthdayValue(input.birthday),input.birthdayReminders===true?1:0,id)
+  customer.birthday=birthdayValue(input.birthday);customer.birthdayReminders=input.birthdayReminders===true
   queueSync('customer', id, 'upsert', customer)
   return customer
+}
+
+export function updateCustomerBirthday(id,input){
+ const birthday=birthdayValue(input.birthday)
+ const result=database.prepare('UPDATE customers SET birthday=?,birthday_reminders=? WHERE id=? AND organization_id=?').run(birthday,input.birthdayReminders===true?1:0,id,organizationId)
+ if(!result.changes)throw new Error('Customer not found.')
+ const customer=database.prepare('SELECT id,name,phone,balance,birthday,birthday_reminders AS birthdayReminders FROM customers WHERE id=? AND organization_id=?').get(id,organizationId)
+ queueSync('customer',id,'upsert',customer);return customer
 }
 
 export function listSales(limit = 100, branchId = 'main') {
@@ -691,7 +707,7 @@ export async function createBackup() {
 }
 
 export function adjustCustomerWallet(customerId, amount, reason = 'manual-adjustment', shouldSync = true) {
-  const customer = database.prepare('SELECT id, name, phone, balance FROM customers WHERE id = ? AND organization_id = ?').get(customerId, organizationId)
+  const customer = database.prepare('SELECT id, name, phone, balance, birthday, birthday_reminders AS birthdayReminders FROM customers WHERE id = ? AND organization_id = ?').get(customerId, organizationId)
   if (!customer) throw new Error('Customer not found.')
   if (!Number.isSafeInteger(Math.round(amount * 100)) || amount === 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) throw new Error('Enter a non-zero amount with at most two decimals.')
   if (amount < 0 && customer.balance + amount < 0) throw new Error('Wallet balance cannot go below zero.')
@@ -702,7 +718,7 @@ export function adjustCustomerWallet(customerId, amount, reason = 'manual-adjust
     database.prepare('INSERT INTO wallet_transactions (id, organization_id, customer_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, customerId, amount, reason, createdAt)
     database.exec('COMMIT')
   } catch (error) { database.exec('ROLLBACK'); throw error }
-  const updatedCustomer = database.prepare('SELECT id, name, phone, balance FROM customers WHERE id = ?').get(customerId)
+  const updatedCustomer = database.prepare('SELECT id, name, phone, balance, birthday, birthday_reminders AS birthdayReminders FROM customers WHERE id = ?').get(customerId)
   if (shouldSync) queueSync('wallet', customerId, 'adjust', { customerId, amount, reason, createdAt })
   return updatedCustomer
 }
@@ -735,7 +751,10 @@ export function applyRemoteOperations(operations) {
           if(payload.kind?.startsWith('church-'))validateChurchRecord(payload,undefined,true)
           if(payload.kind==='restaurant-reservations')validateReservationBook(payload,undefined,true)
           if(payload.kind==='service-job') validateServiceJob(payload,undefined,true)
-          if(payload.kind==='service-job') for(const entry of payload.payments) if(!database.prepare('SELECT id FROM sales WHERE id=?').get(entry.sale.id)) for(const [sql,args] of restaurantSaleStatements(entry.sale,organizationId)) database.prepare(sql).run(...args)
+          if(payload.kind==='service-job') for(const entry of payload.payments) if(!database.prepare('SELECT id FROM sales WHERE id=?').get(entry.sale.id)) {
+            if(entry.sale.paymentMethod==='wallet'){const customerId=entry.sale.paymentDetails.customerId;const changed=database.prepare('UPDATE customers SET balance=ROUND(balance-?,2) WHERE id=? AND organization_id=? AND balance>=?').run(entry.sale.total,customerId,organizationId,entry.sale.total);if(!changed.changes)throw new Error('Customer wallet does not exist or has insufficient funds.');database.prepare('INSERT INTO wallet_transactions (id,organization_id,customer_id,amount,reason,created_at) VALUES (?,?,?,?,?,?)').run(`wallet:${entry.sale.id}`,organizationId,customerId,-entry.sale.total,`Sale ${entry.sale.id}`,entry.sale.createdAt)}
+            for(const [sql,args] of restaurantSaleStatements(entry.sale,organizationId))database.prepare(sql).run(...args)
+          }
           if(payload.kind==='restaurant-ledger' && !database.prepare('SELECT id FROM sales WHERE id=?').get(payload.latestSale.id)) {
             const sale=payload.latestSale
             for(const [index,item] of sale.items.entries()) if(!item.productId.startsWith('service:')) {
@@ -798,6 +817,7 @@ export function applyRemoteOperations(operations) {
       } else if (operation.entityType === 'customer' && operation.action === 'upsert') {
         database.prepare('INSERT INTO customers (id, organization_id, name, phone, balance, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, phone = excluded.phone')
           .run(payload.id, organizationId, payload.name, payload.phone || '', Number(payload.balance) || 0, now())
+        if(payload.birthday!==undefined)database.prepare('UPDATE customers SET birthday=?,birthday_reminders=? WHERE id=? AND organization_id=?').run(birthdayValue(payload.birthday),payload.birthdayReminders===true||payload.birthdayReminders===1?1:0,payload.id,organizationId)
       } else if (operation.entityType === 'wallet' && operation.action === 'adjust') {
         adjustCustomerWallet(payload.customerId, Number(payload.amount), payload.reason || 'remote-wallet', false)
       } else if (operation.entityType === 'expense' && operation.action === 'create') {
@@ -1164,3 +1184,5 @@ export function recordStaffRemovalLocal(id, removedAt) {
  database.prepare('DELETE FROM auth_sessions WHERE user_id=?').run(id)
  return { id, removedAt, removed: true }
 }
+
+export function setStaffPermissions(id,permissions){const value=parsePermissions(permissions);if(!value)throw new Error("Choose staff permissions.");const result=database.prepare("UPDATE users SET permissions=?, operational_access=? WHERE id=? AND organization_id=? AND role IN ('admin','cashier')").run(JSON.stringify(value),Object.values(value).some(Boolean)?1:0,id,organizationId);if(!result.changes)throw new Error("Staff account not found.");return listUsers().find(user=>user.id===id)}

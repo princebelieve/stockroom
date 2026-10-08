@@ -1,0 +1,5 @@
+import { catalogueStarters, missingStarters, type CatalogueStarter } from '../server/catalogue-starters.mjs'
+export function CatalogueStarters({kind,industry='general',existing,add}:{kind:string;industry?:string;existing:Array<{name:string}>;add:(item:CatalogueStarter)=>void}){
+ const choices=missingStarters(catalogueStarters(kind,industry),existing)
+ return <details className="panel"><summary>Preloaded catalogue starters</summary><p>Choose a starter to review and save. Your saved catalogue stays intact. Enter your actual prices, product specifications and stock; starters have no manufacturer barcodes or assumed costs.</p><label>Add catalogue starter<select value="" disabled={!choices.length} onChange={event=>{const item=choices.find(row=>row.id===event.target.value);if(item)add(item)}}><option value="">{choices.length?'Choose an item':'These starters are already in your catalogue'}</option>{choices.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label></details>
+}

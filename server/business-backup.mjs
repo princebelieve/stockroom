@@ -8,9 +8,10 @@ const fingerprint = tables => createHash('sha256').update(JSON.stringify(tables)
 // Only additions already made by the app are eligible for legacy recovery.
 const legacyAdditions = {
   app_settings: ['currency','pos_provider','pos_terminal_id','pos_connection','logo_data','payment_policy','shop_profile'],
+  customers: ['birthday','birthday_reminders'],
   products: ['barcode','custom_values','cost_price'],
   sales: ['payment_method','payment_reference','terminal_provider','payment_details','cash_received','change_given','staff_id','staff_name'],
-  sale_items: ['unit_cost'], stocktakes: ['approval_reason'], users: ['operational_access','username'],
+  sale_items: ['unit_cost'], stocktakes: ['approval_reason'], users: ['operational_access','username','permissions'],
   branches: ['is_active','assigned_user_ids'], expenses: ['staff_id','staff_name'],
 }
 function removeAddedColumns(sql, missing) {

@@ -55,6 +55,8 @@ export function withBrowserDatabase(action: () => Promise<Response>): Promise<Re
       const expenseColumnsAfter = current.exec('PRAGMA table_info(expenses)')[0]?.values || []
       if (!expenseColumnsAfter.some(row => row[1] === 'staff_name')) current.run("ALTER TABLE expenses ADD COLUMN staff_name TEXT NOT NULL DEFAULT ''")
       if (!current.exec('PRAGMA table_info(app_settings)')[0]?.values.some(row => row[1] === 'logo_data')) current.run("ALTER TABLE app_settings ADD COLUMN logo_data TEXT NOT NULL DEFAULT ''")
+      if (!current.exec('PRAGMA table_info(customers)')[0].values.some(row=>row[1]==='birthday'))current.run("ALTER TABLE customers ADD COLUMN birthday TEXT DEFAULT ''; ALTER TABLE customers ADD COLUMN birthday_reminders INTEGER NOT NULL DEFAULT 0")
+      if (!current.exec('PRAGMA table_info(users)')[0].values.some(row => row[1] === 'permissions')) current.run('ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT NULL')
       if (!current.exec('PRAGMA table_info(users)')[0].values.some(row => row[1] === 'username')) current.run("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
       if (!current.exec('PRAGMA table_info(products)')[0]?.values.some(row => row[1] === 'custom_values')) current.run("ALTER TABLE products ADD COLUMN custom_values TEXT NOT NULL DEFAULT '{}'")
       if (!current.exec('PRAGMA table_info(products)')[0]?.values.some(row => row[1] === 'barcode')) current.run("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''")
