@@ -6,6 +6,10 @@ The workspace also includes Inventory, Purchasing, Stock count, Stock movements 
 
 ## Setup
 
+First-time sign-in opens a short, skippable introduction to sales, inventory, orders and team workflows. Select **Explore what Stockroom can do** on the sign-in screen to replay it. The setup checklist groups tasks into business and catalogue, team and devices, and readiness for daily work.
+
+Select **Quick guide** on workspace screens to open contextual instructions in a popup without leaving your work. Close it with **Got it**, **Close**, or Escape. Transaction errors, payment confirmations and recovery instructions remain alongside their actions.
+
 Open **Business settings > Workspaces**:
 
 - Choose **Order counter only** under **Payment screens** for a dedicated workspace.
