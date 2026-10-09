@@ -8,12 +8,16 @@ export function validGtin(value: string) {
 }
 
 export function labelSuggestion(text: string): ProductDraft {
-  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const lines = text.split(/\r?\n/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean)
   const barcodes = [...new Set((text.match(/\b\d{8,14}\b/g) || []).filter(validGtin))]
   const size = text.match(/\b\d+(?:[.,]\d+)?\s*(?:ml|cl|litres?|liters?|kg|mg|g|oz|lb)\b/i)?.[0]
-  const candidates = lines.filter(line => /[a-z]/i.test(line) && line.length <= 100
-    && !/\b(ingredients?|nutrition|energy|protein|carbohydrate|sodium|fat|sugars?|manufactur|distribut|expiry|expires|best before|batch|lot|barcode|www\.|https?:|storage|keep out|customer care|address|tel:|net weight|net content)\b/i.test(line)
-    && !/^\d+(?:[.,]\d+)?\s*(?:ml|cl|litres?|liters?|kg|mg|g|oz|lb)\b/i.test(line))
+  const candidates = lines.filter(line => /[a-z]{2}/i.test(line) && line.length <= 70
+    && !/\b(ingredients?|nutrition|energy|protein|carbohydrate|sodium|fat|sugars?|manufactur|distribut|expiry|expires|best before|batch|lot|barcode|www\.|https?:|storage|keep out|customer care|address|tel:|net weight|net content|serving size|per serving|allergen|warning|directions|imported by|made in|country of origin|customer service|email|phone)\b/i.test(line)
+    && !/^\d+(?:[.,]\d+)?\s*(?:ml|cl|litres?|liters?|kg|mg|g|oz|lb)\b/i.test(line)
+    && !/^\d+[\s./-]*\d+[\s./-]*\d+$/.test(line)
+    && !/^[^a-z]*$/.test(line))
+  // OCR often emits a short brand line followed by the larger product name. Keep
+  // those two useful lines, while avoiding the full label text as a product name.
   const name = candidates.slice(0, 2).join(' ')
   return { name: name ? `${name}${size && !name.toLowerCase().includes(size.toLowerCase()) ? ` ${size}` : ''}`.slice(0, 180) : '', barcode: barcodes.length === 1 ? barcodes[0] : undefined }
 }
