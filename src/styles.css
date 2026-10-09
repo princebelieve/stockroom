@@ -51,6 +51,14 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 @media (max-width: 650px) { .app-shell { display: block; }.sidebar { width: 100%; padding: 15px 15px 12px; }.brand { padding: 0 5px 15px; }.workspace { margin-bottom: 12px; }.sidebar nav { display: flex; overflow-x: auto; gap: 4px; }.nav-item { flex: 0 0 auto; padding: 9px 10px; font-size: 12px; }.nav-item b, .sidebar-foot { display: none; }.main-content { padding: 25px 16px 40px; }.topbar h1 { font-size: 23px; }.hero-row { margin-top: 33px; align-items: flex-end; gap: 10px; }.hero-row h2 { font-size: 19px; }.hero-row p { max-width: 210px; line-height: 1.4; }.hero-row .primary-button { padding: 9px; font-size: 0; }.hero-row .primary-button svg { margin: 0; }.metric-grid { grid-template-columns: 1fr; gap: 9px; }.metric-card { min-height: auto; padding: 16px 18px; }.metric-card strong { font-size: 26px; margin: 8px 0 4px; }.content-grid { margin-top: 9px; }.panel { padding: 17px 14px; }.panel-heading h3 { font-size: 16px; }.full-panel { margin-top: 24px; }.full-panel .panel-heading { align-items: flex-start; gap: 10px; }.full-panel .primary-button { font-size: 0; padding: 10px; }.full-panel .primary-button svg { margin: 0; }.form-grid { grid-template-columns: 1fr; gap: 12px; } }
 
 .top-actions { flex-wrap: wrap; }
+.app-shell .topbar .top-actions { min-width: 0; max-width: min(100%, 520px); justify-content: flex-end; gap: 8px; }
+.app-shell .branch-switcher { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.app-shell .branch-switcher select { max-width: min(220px, 42vw); text-overflow: ellipsis; }
+.sidebar-subscription-status { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 10px; width: 100%; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); text-align: left; cursor: pointer; }
+.sidebar-subscription-status span { color: var(--muted); font-size: 12px; }
+.sidebar-subscription-status strong { color: var(--brand-primary); font-size: 12px; }
+.sidebar-subscription-status small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+.sidebar-subscription-status:hover { border-color: var(--brand-primary); background: var(--mint); }
 .page-options { position: relative; flex-shrink: 0; }
 .page-refresh-status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; }
 .page-refresh-status:empty { display: none; }
@@ -89,6 +97,9 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .settings-form .primary-button { min-height: 48px; }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .top-actions { margin-left: auto; gap: 8px; }
+  .app-shell .topbar .top-actions { width: 100%; max-width: none; flex-wrap: nowrap; justify-content: flex-end; }
+  .app-shell .branch-switcher { margin-right: auto; }
+  .app-shell .branch-switcher select { max-width: min(190px, 48vw); }
   .page-options summary { width: 44px; height: 44px; }
   .modal-backdrop { padding: 12px; }
   .modal { padding: 18px; max-height: calc(100dvh - 24px); }

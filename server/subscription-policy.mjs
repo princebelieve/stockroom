@@ -19,6 +19,11 @@ export function graceDaysEndsAt(expiresAt, days = 30) {
   return date.toISOString()
 }
 
+function utcDateLabel(value) {
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : 'an unknown date'
+}
+
 export function subscriptionAccess(snapshot, now = Date.now()) {
   if (!snapshot) return { blocked: true, reason: 'Connect to the internet to check subscription access.', status: 'unknown' }
   if (snapshot.suspended === true) return { ...snapshot, blocked: true, status: 'suspended', reason: snapshot.suspensionReason || 'This business has been suspended by the developer.' }
@@ -26,7 +31,7 @@ export function subscriptionAccess(snapshot, now = Date.now()) {
   if (!snapshot.expiresAt) return { ...snapshot, blocked: true, status: 'unpaid', reason: 'A subscription is required. Ask the owner to renew.' }
   if (snapshot.isTrial === true) {
     const active = now < +new Date(snapshot.expiresAt)
-    return { ...snapshot, blocked: !active, graceEndsAt: snapshot.expiresAt, status: active ? 'trial' : 'trial-expired', reason: active ? `Free trial ends ${snapshot.expiresAt.slice(0, 10)} (UTC).` : 'Your free trial has ended. Please subscribe to continue using the POS.' }
+    return { ...snapshot, blocked: !active, graceEndsAt: snapshot.expiresAt, status: active ? 'trial' : 'trial-expired', reason: active ? `Free trial ends ${utcDateLabel(snapshot.expiresAt)} (UTC).` : 'Your free trial has ended. Please subscribe to continue using the POS.' }
   }
   const monthly = snapshot.planId === 'monthly' && snapshot.graceDays !== undefined && snapshot.graceDays !== null && Number.isInteger(Number(snapshot.graceDays))
   const days = monthly ? Number(snapshot.graceDays) : null
@@ -36,7 +41,7 @@ export function subscriptionAccess(snapshot, now = Date.now()) {
   const active = now < +new Date(snapshot.expiresAt)
   const blocked = now >= +new Date(end)
   const graceLabel = monthly ? days === 0 ? 'No grace period' : `${days} day${days === 1 ? '' : 's'} of grace` : months === 0 ? 'No grace period' : `${months} calendar month${months === 1 ? '' : 's'} of grace`
-  return { ...snapshot, graceEndsAt: end, blocked, status: active ? 'active' : blocked ? 'expired' : 'grace', reason: active ? 'Subscription active.' : blocked ? `${graceLabel} has ended. Ask the owner to renew to use POS.` : `Subscription expired. POS remains available until ${end.slice(0, 10)} (UTC).` }
+  return { ...snapshot, graceEndsAt: end, blocked, status: active ? 'active' : blocked ? 'expired' : 'grace', reason: active ? 'Subscription active.' : blocked ? `${graceLabel} has ended. Ask the owner to renew to use POS.` : `Subscription expired. POS remains available until ${utcDateLabel(end)} (UTC).` }
 }
 
 export function referralPercentages(input) {

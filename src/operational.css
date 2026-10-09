@@ -85,7 +85,7 @@
   .app-shell .topbar > div:first-child { width:auto; text-align:left; }
   .app-shell .topbar .eyebrow { display:block; }
   .app-shell .top-actions { justify-content:flex-end; }
-  .app-shell .help-menu { top:auto; bottom:16px; left:16px; z-index:25; }
+  .app-shell .help-menu { top:auto; bottom:16px; left:296px; z-index:25; }
   .app-shell .help-menu-panel { top:auto; bottom:52px; }
   .app-shell .screen-picker { margin-left:0; }
   .app-shell .pos-layout { grid-template-columns:minmax(0,1.5fr) minmax(300px,.8fr); }
@@ -129,7 +129,16 @@
 .app-shell .filter-button:hover,.app-shell .text-button:not(.logout-button):hover { color:var(--ink); background:var(--mint); }
 .app-shell button:disabled,.login-card button:disabled { opacity:1; cursor:not-allowed; color:var(--muted); background:#edf0f4; border-color:var(--line); box-shadow:none; }
 @media screen and (min-width:1024px) {
-  .app-shell .sidebar .logout-button { position:fixed; left:172px; bottom:16px; z-index:26; width:92px; margin:0; padding:12px; min-height:44px; border:1px solid var(--line); border-radius:8px; color:var(--ink); background:white; }
+  .app-shell .sidebar .logout-button { position:static; align-self:stretch; width:auto; margin:12px 0 0; padding:12px; min-height:44px; border:1px solid var(--line); border-radius:8px; color:var(--ink); background:white; }
+}
+
+@media screen and (max-width:650px) {
+  .app-shell .mobile-nav-toggle { left:14px; right:auto; }
+  .app-shell .help-menu { top:auto; bottom:calc(72px + env(safe-area-inset-bottom)); left:max(12px,env(safe-area-inset-left)); }
+  .app-shell .sidebar .pwa-sync-controls { display:none; }
+  .app-shell .mobile-pwa-sync { position:fixed; right:max(12px,env(safe-area-inset-right)); bottom:max(12px,env(safe-area-inset-bottom)); z-index:21; display:grid; justify-items:end; gap:6px; }
+  .app-shell .reading-controls { right:max(12px,env(safe-area-inset-right)); bottom:calc(72px + env(safe-area-inset-bottom)); z-index:22; }
+  .app-shell .main-content { padding-bottom:calc(140px + env(safe-area-inset-bottom)); }
 }
 
 .app-shell .modal-backdrop { z-index:150; }
