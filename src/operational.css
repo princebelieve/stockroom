@@ -27,11 +27,11 @@
   .app-shell .mobile-nav-backdrop { display:block; position:fixed; inset:var(--mobile-app-header-height) 0 0; z-index:100; background:#0007; border:0; }
   .app-shell .mobile-app-header { display:block; position:fixed; inset:0 0 auto; z-index:145; height:var(--mobile-app-header-height); box-sizing:border-box; overflow:visible; padding:calc(env(safe-area-inset-top,0px) + 6px) 12px 6px; background:var(--brand-dark,var(--ink)); border-bottom:1px solid #ffffff30; color:white; }
   .app-shell .mobile-app-topline { display:flex; height:48px; align-items:center; }
-  .app-shell .mobile-app-brand { display:flex; min-width:0; max-width:calc(100% - 112px); height:48px; margin-left:2px; align-items:center; gap:9px; color:white; }
+  .app-shell .mobile-app-brand { display:flex; flex:1 1 auto; width:0; min-width:0; max-width:calc(100% - 112px); height:48px; margin-left:2px; align-items:center; gap:9px; color:white; overflow:hidden; }
   .app-shell .mobile-app-brand .brand-mark { display:grid; place-items:center; flex:0 0 36px; width:36px; height:36px; padding:0; background:var(--brand-accent,var(--lime)); color:var(--ink); border:0; border-radius:10px; }
   .app-shell .mobile-app-brand .brand-logo { display:block; width:100%; height:100%; object-fit:contain; }
-  .app-shell .mobile-app-brand-copy { display:flex; min-width:0; flex-direction:column; justify-content:center; }
-  .app-shell .mobile-app-brand strong { display:-webkit-box; overflow:hidden; color:white; font:700 15px/1.1 'Space Grotesk',sans-serif; letter-spacing:0; text-overflow:ellipsis; white-space:normal; overflow-wrap:anywhere; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .app-shell .mobile-app-brand-copy { display:flex; flex:1 1 0; width:0; max-width:100%; min-width:0; flex-direction:column; justify-content:center; overflow:hidden; }
+  .app-shell .mobile-app-brand strong { display:-webkit-box; width:100%; max-width:100%; overflow:hidden; color:white; font:700 15px/1.1 'Space Grotesk',sans-serif; letter-spacing:0; text-overflow:ellipsis; white-space:normal; overflow-wrap:anywhere; word-break:normal; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
   .app-shell .mobile-app-brand span { overflow:hidden; margin-top:2px; color:#ffffffb8; font-size:10px; line-height:1.1; text-overflow:ellipsis; white-space:nowrap; }
   .app-shell .mobile-app-header .notification-center { position:absolute; top:calc(env(safe-area-inset-top,0px) + 6px); right:58px; z-index:146; }
   .app-shell .mobile-app-header .notification-center button { color:white; border-color:#ffffff55; background:transparent; }
@@ -45,10 +45,10 @@
   .app-shell .mobile-header-help .help-menu-panel { top:calc(100% + 8px); right:0; bottom:auto; left:auto; z-index:155; }
   .app-shell .mobile-header-sync-feedback { position:absolute; top:calc(100% + 5px); right:12px; max-width:min(360px,calc(100vw - 24px)); padding:7px 10px; border-radius:8px; background:white; color:var(--ink); box-shadow:0 3px 12px #0003; font-size:12px; }
   .app-shell .mobile-header-sync-feedback:empty { display:none; }
-  .app-shell .main-content { padding-top:calc(var(--mobile-app-header-height) + 16px); }
+  .app-shell .main-content { padding-top:calc(var(--mobile-app-header-height) + 28px); }
   .app-shell .topbar { margin:0 0 24px; padding:0 0 20px; background:white; border-bottom:1px solid var(--line); box-shadow:none; flex-wrap:wrap; justify-content:flex-start; gap:14px; }
   .app-shell .topbar > div:first-child { width:100%; text-align:left; }
-  .app-shell .topbar h1 { margin:0; color:var(--ink); font:700 28px/1.15 'Space Grotesk',sans-serif; letter-spacing:-.02em; overflow-wrap:anywhere; }
+  .app-shell .topbar h1 { margin:0; color:var(--ink); font:700 30px/1.15 'Space Grotesk',sans-serif; letter-spacing:-.02em; overflow-wrap:anywhere; }
   .app-shell .topbar .eyebrow { display:none; }
   .app-shell .top-actions { flex-wrap:wrap; justify-content:center; gap:10px; }
   .app-shell .top-actions .avatar { display:none; }
@@ -91,7 +91,8 @@
 @media screen and (max-width:650px) {
   .app-shell .main-content { padding:calc(var(--mobile-app-header-height) + 16px) 20px 88px; }
   .app-shell .topbar { margin-inline:0; padding:0 0 18px; }
-  .app-shell .topbar h1 { font-size:26px; }
+  .app-shell .main-content { padding-top:calc(var(--mobile-app-header-height) + 32px); }
+  .app-shell .topbar h1 { font-size:29px; }
   .app-shell .sidebar { width:100%; }
   .app-shell .sidebar { padding-inline:16px; }
   .app-shell .panel { padding:16px; }
@@ -232,6 +233,14 @@
 .app-shell .sidebar .sync-button { color:var(--brand-on-primary,#fff); background:var(--brand-primary); font-size:14px; }
 .app-shell .sidebar .sync-feedback { color:#f2f5fa; font-size:13px; line-height:1.5; }
 .app-shell .sidebar .sidebar-foot small { color:#c2ccd7; font-size:12px; line-height:1.5; }
+.app-shell .sidebar .sync-issue-link { display:flex; width:100%; align-items:flex-start; gap:8px; margin-top:9px; padding:9px 10px; border:1px solid #ffcb8a70; border-radius:9px; background:#a84d1830; color:#ffe0b7; text-align:left; font-size:12px; line-height:1.4; cursor:pointer; }
+.app-shell .sidebar .sync-issue-link svg { flex:0 0 auto; margin-top:1px; }
+.app-shell .sidebar .sync-issue-link:hover { background:#a84d1855; }
+.app-shell .sidebar .sync-issue-link:focus-visible { outline:2px solid var(--brand-accent); outline-offset:2px; }
+.app-shell.sidebar-collapsed .sidebar .sidebar-foot .sync-issue-link { width:54px; height:40px; justify-content:center; padding:10px; }
+.app-shell.sidebar-collapsed .sidebar .sidebar-foot .sync-issue-link span { display:none; }
+.app-shell .customer-account-actions { display:flex; flex-wrap:wrap; gap:9px; margin:14px 0; }
+.app-shell .customer-account-actions button { min-height:42px; }
 .app-shell .primary-button,.login-card .primary-button { color:var(--brand-on-primary,#fff); }
 .app-shell .filter-button,.app-shell .text-button:not(.logout-button) { color:var(--ink); background:var(--mint); }
 .app-shell .filter-button:hover,.app-shell .text-button:not(.logout-button):hover { color:var(--ink); background:var(--mint); }

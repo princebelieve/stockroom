@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { Customer } from './types'
 import { AsyncForm, SubmitButton } from './AsyncControls'
 
-export function WalletCustomer({ customer, money, adjust }: { customer: Customer; money: (amount: number) => string; adjust: (id: string, amount: number, reason: string) => Promise<void> }) {
+export function WalletCustomer({ customer, money, adjust, startOrder }: { customer: Customer; money: (amount: number) => string; adjust: (id: string, amount: number, reason: string) => Promise<void>; startOrder?: () => void }) {
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const [direction, setDirection] = useState('credit')
+  const amountInput = useRef<HTMLInputElement>(null)
   return <section className="panel">
     <h3>{customer.name}</h3><p>{customer.phone}</p>
     <p>{customer.balance < 0 ? `Amount owed: ${money(-customer.balance)}` : `Prepaid balance: ${money(customer.balance)}`}</p>
+    <div className="customer-account-actions"><button type="button" className="filter-button" onClick={() => { setDirection('credit'); amountInput.current?.focus() }}>Top up / record payment</button>{startOrder && <button type="button" className="primary-button" onClick={startOrder}>Start order</button>}</div>
     <AsyncForm className="payment-options" busyLabel="Recording..." onSubmit={async event => {
       event.preventDefault()
       if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0 || !reason.trim()) throw new Error('Enter a positive amount with at most two decimals and a reason.')
@@ -16,7 +18,7 @@ export function WalletCustomer({ customer, money, adjust }: { customer: Customer
       setAmount(''); setReason('')
     }}>
       <label>Transaction<select value={direction} onChange={e => setDirection(e.target.value)}><option value="credit">Deposit / debt repayment</option><option value="debit">Withdraw prepaid funds</option></select></label>
-      <label>Amount<input type="number" min="0.01" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} /></label>
+      <label>Amount<input ref={amountInput} type="number" min="0.01" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} /></label>
       <label>Reason / payment reference<input required maxLength={200} value={reason} onChange={e => setReason(e.target.value)} /></label>
       <SubmitButton className="primary-button">Record transaction</SubmitButton>
     </AsyncForm>

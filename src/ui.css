@@ -53,7 +53,7 @@
 .tool-search label { display:flex; align-items:center; gap:8px; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:white; color:var(--muted); }
 .tool-search input { border:0; background:transparent; width:100%; outline:none; padding:0; font-size:14px; }
 .tool-search label:focus-within { outline:2px solid var(--brand-primary); outline-offset:2px; }
-.tool-search-results { position:absolute; top:calc(100% + 6px); right:0; z-index:30; width:min(340px,85vw); max-height:360px; overflow:auto; padding:8px; background:white; border:1px solid var(--line); box-shadow:0 12px 32px #192e4929; border-radius:12px; }
+.tool-search-results { position:fixed; z-index:300; box-sizing:border-box; max-width:calc(100vw - 24px); max-height:min(360px,calc(100dvh - 24px)); overflow:auto; padding:8px; background:white; border:1px solid var(--line); box-shadow:0 12px 32px #192e4929; border-radius:12px; }
 .tool-search-results p { padding:6px; margin:0; font-size:13px; color:var(--muted); }
 .tool-search-results button { display:block; width:100%; padding:12px; text-align:left; border-radius:8px; color:#213247; background:white; }
 .tool-search-results button:hover { background:var(--mint); }
