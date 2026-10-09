@@ -1,6 +1,6 @@
 /* Business colour leads actions and selection; warm paper surfaces keep screens readable. */
-:root { --brand-primary:#176b73; --brand-dark:#17352d; --brand-on-primary:#ffffff; --brand-on-hover:#ffffff; --brand-secondary:#8257b7; --ink:#192e49; --paper:#fffdf8; --muted:#536374; --line:#e3e2d8; --mint:#e7f2e8; --lime:#d5e95c; --brand-hover:#24516b; --brand-accent:#f0a34a; }
-.app-shell,.portal { background:#f4f1e8; color:#213247; }
+:root { --brand-primary:#176b73; --brand-dark:#17352d; --brand-on-primary:#ffffff; --brand-on-hover:#ffffff; --brand-secondary:#8257b7; --brand-wash:#edf5ef; --brand-wash-alt:#f2f1f5; --ink:#192e49; --paper:#fffdf8; --muted:#536374; --line:#e3e2d8; --mint:#e7f2e8; --lime:#d5e95c; --brand-hover:#24516b; --brand-accent:#f0a34a; }
+.app-shell,.portal { color:#213247; }
 .app-shell .main-content { padding:24px clamp(16px,3vw,40px) 72px; }
 .app-shell .hero-row { margin:24px 0 18px; }
 .app-shell .panel,.portal .portal-panel { border:1px solid var(--line); border-radius:14px; box-shadow:0 5px 20px #172b4510; }

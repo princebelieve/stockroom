@@ -1,4 +1,4 @@
-const themeProperties = ['--ink', '--mint', '--lime', '--brand-hover', '--brand-accent', '--brand-primary', '--brand-secondary', '--brand-dark', '--brand-on-primary', '--brand-on-hover'] as const
+const themeProperties = ['--ink', '--mint', '--lime', '--brand-hover', '--brand-accent', '--brand-primary', '--brand-secondary', '--brand-dark', '--brand-on-primary', '--brand-on-hover', '--brand-wash', '--brand-wash-alt'] as const
 
 function resetTheme() {
   for (const property of themeProperties) document.documentElement.style.removeProperty(property)
@@ -78,6 +78,8 @@ export async function applyLogoTheme(logoData: string, brandColor = '') {
     root.style.setProperty('--brand-primary', `hsl(${hue} ${vividness}% ${brandLightness}%)`)
     root.style.setProperty('--brand-secondary', `hsl(${(hue+150)%360} ${Math.max(54, Math.min(76, vividness))}% 50%)`)
     root.style.setProperty('--brand-dark', `hsl(${hue} ${Math.min(58, vividness)}% 21%)`)
+    root.style.setProperty('--brand-wash', `hsl(${hue} ${Math.min(34, vividness)}% 96%)`)
+    root.style.setProperty('--brand-wash-alt', `hsl(${(hue+150)%360} 24% 97%)`)
     root.style.setProperty('--brand-on-primary', whiteContrast >= darkContrast ? '#ffffff' : '#17352d')
     root.style.setProperty('--brand-on-hover', whiteHoverContrast >= darkHoverContrast ? '#ffffff' : '#17352d')
     root.style.setProperty('--ink', `hsl(${hue} ${Math.min(52, vividness)}% 20%)`)
