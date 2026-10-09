@@ -47,7 +47,7 @@ This guide follows the current app screens. Availability depends on your workspa
 
 1. Open Download / install Stockroom from the app or its welcome page. Choose the available Windows, Android or browser installation option for your device. A disabled download means that release is not available yet.
 2. For a new business, use the registration request on the welcome/sign-in journey. Enter your business details and owner email. Check that email for the registration key and its expiry instructions.
-3. Choose New business with a key. Use the issued key and matching owner email, create your owner password, and complete registration while connected to the internet. Choose your business type; its preset opens the matching selling workspace.
+3. Choose New business with a key. Use the issued key and matching owner email, create your owner password, and complete registration while connected to the internet. In workspace setup, choose a business type and selling workspace separately. Then select, review and confirm the starter products, services or menu items that match what you sell. Product starters begin with zero price, cost and stock; menu items begin unavailable. Set actual details before selling. You can skip the starter list and edit entries later.
 4. For a business already registered, choose Existing business and enter the existing owner email and password. Give the device a recognisable label. Do not create a second business just to add a device.
 5. Sign in. The owner configures the business; cashiers use the sales screens. Keep your owner password private.
 

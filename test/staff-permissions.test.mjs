@@ -28,5 +28,7 @@ test('catalogue starters cover every stock industry and never replace saved name
  const saved=[{id:'existing',name:'  RICE ',price:99,stock:20}];const original=structuredClone(saved)
  assert.ok(!missingStarters(catalogueStarters('stock'),saved).some(row=>row.name==='Rice'))
  assert.deepEqual(saved,original)
- assert.ok(catalogueStarters('stock','liquids').every(row=>row.unit==='litre'))
+ const oilStarters=catalogueStarters('stock','liquids')
+ assert.ok(oilStarters.some(row=>row.unit==='litre'))
+ assert.ok(oilStarters.filter(row=>/container|bottle|jerrycan|drum|jug|funnel|tap/i.test(row.name)).every(row=>row.unit==='piece'))
 })

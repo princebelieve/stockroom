@@ -1,5 +1,7 @@
 # Payments & receipts
 
+In receipt settings, **Preloaded catalogue starters** provides generic, editable service-description ideas. Add the descriptions that apply and enter your own prices; no fees or business transactions are created automatically.
+
 Use this workspace for payments described by the cashier, without automatic product stock or ingredient deduction on payment. Issued jobs can separately record materials actually used. It has three tabs: **New payment**, **Jobs & invoices**, and **Payment history**.
 
 ## Start using it

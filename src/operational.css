@@ -139,6 +139,10 @@
 .app-introduction .intro-illustration { width:100%; height:auto; min-height:240px; margin:28px auto 40px; background:transparent; color:var(--brand-primary); border-radius:0; }
 .intro-illustration > svg { width:100%; height:auto; }
 .workspace-onboarding .checkbox-label { display:flex; flex-direction:row; align-items:center; gap:12px; margin:24px 0; }
+.workspace-onboarding .onboarding-starter-list { max-height:52vh; overflow:auto; margin:12px 0; padding:8px 12px; }
+.workspace-onboarding .onboarding-starter-list .checkbox-label { align-items:flex-start; margin:8px 0; padding:8px 0; border-bottom:1px solid var(--line); }
+.workspace-onboarding .onboarding-starter-list .checkbox-label small { margin-left:auto; color:var(--muted); }
+.workspace-onboarding .onboarding-selected-list { max-height:42vh; overflow:auto; padding-left:24px; }
 .workspace-onboarding input[type=checkbox] { width:20px; height:20px; min-height:20px; padding:0; margin:0; accent-color:var(--brand-primary); }
 .workspace-onboarding .text-button { display:block; margin:8px auto; min-height:44px; padding:8px 16px; background:none; border:0; box-shadow:none; color:var(--muted); }
 .workspace-onboarding .primary-button,.app-introduction .primary-button,.login-card .login-button { border-radius:28px; box-shadow:none; background:var(--brand-primary); color:var(--brand-on-primary,#fff); }

@@ -1,5 +1,7 @@
 # Tables & tabs workspace
 
+In menu setup, **Preloaded catalogue starters** provides editable restaurant or bar menu ideas. Review and price each item, and link stock where needed; starters do not contain prices, stock, barcodes, or verified supplier data.
+
 In **Business settings > Workspaces > Payment screens**, choose **Tables & tabs only**. For a mixed business, keep your existing payment-screen choice and check **Enable separate Tables & tabs workspace**, then **Save workspaces**.
 
 Inventory, Purchasing, Stock count, Stock movements and stock reports are available for ingredients and drinks. Owners and administrators can receive supplier deliveries, track batch costs and expiry dates, and record wastage without enabling Product sales.

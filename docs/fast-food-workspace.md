@@ -14,7 +14,7 @@ The workspace also includes Inventory, Purchasing, Stock count, Stock movements 
 
 First-time sign-in opens a skippable introduction with seven illustrated benefits: offline trading after setup; retail, oil, services, counter and table workspaces; payments/receipts; stock/purchasing; preparation; customer/supplier balances; and sales/cost/staff visibility. Each screen has one caption. Select **Explore what Stockroom can do** on the sign-in screen to replay it. The full capability and expectation review is in [Product capabilities and user expectations](product-capabilities-and-expectations.md).
 
-Owner registration progresses through business details, account details and review; Back retains entered values. After branch selection, new owners choose their business type, currency/timezone and payment provider on three short setup screens. Each step saves real configuration. Setup resumes after reload and can be postponed. Existing businesses enter their saved workspace directly. Reopen setup through **Help > Open the user guide > Set up my workspace**. Add products, a menu, staff and devices as needed.
+Owner registration progresses through business details, account details and review; Back retains entered values. After branch selection, new owners choose the business type and selling workspace separately, then search and select matching starter products, services or menu items before reviewing and confirming. Oil sales is available for the oil business type and remains enabled alongside the selected workspace. Product starters are saved with generated SKUs, no barcode, and zero price, cost and opening stock; update these before trading. Service and menu starters use zero prices; menu items start unavailable. Owners can skip this step or edit entries later. Currency, timezone and payment provider are configured alongside setup. Setup can be postponed. Existing businesses enter their saved workspace directly. Reopen setup through **Help > Open the user guide > Set up my workspace**. Add products, a menu, staff and devices as needed.
 
 Desktop keeps a persistent sidebar and a workspace that uses the available width. Phones and smaller tablets use the Menu drawer. Operational screens use a white canvas; **Choose screen**, **Order screen** or **Restaurant screen** selects one task within that area. Inventory opens the product list, while supply records, new supply, suppliers, transfers, imports and stock costs have separate screens. Customer and staff creation, expenses and receipt tasks are also separate from their lists.
 
@@ -35,7 +35,7 @@ Open **Business settings > Workspaces**:
 - To combine Order counter and Tables & tabs, choose the appropriate **Payment screens** selection and enable both separate workspace checkboxes. For oil businesses, Oil sales remains available while Product sales and Payments & receipts can be enabled in **Customise workspaces (optional)**.
 - Click **Save workspaces**. Use **Sync now** to share the setting with other devices.
 
-Open **Business settings > Food menu & recipes > Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.
+Open **Business settings > Food menu & recipes > Menu**. Owners and admins can search workspace-specific starter menu ideas, then add and edit menu items, prices and optional priced extras. Starters are suggestions only: new entries begin unavailable and at zero price until reviewed. Turn off **Available to order** when an item is unavailable.
 
 ## Customer portal orders
 

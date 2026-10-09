@@ -33,7 +33,7 @@ const WeighedCheckout=lazy(()=>import('./WeighedGoods').then(module=>({default:m
 import { WorkspaceHelp, WorkspaceHelpProvider } from './WorkspaceHelp'
 import { BookOpen } from 'lucide-react'
 import { WorkspaceOverview } from './WorkspaceOverview'
-import { WorkspaceOnboarding, workspaceSetupKey } from './WorkspaceOnboarding'
+import { WorkspaceOnboarding, workspaceSetupKey, type SetupWorkspace } from './WorkspaceOnboarding'
 import { ProductSearch } from './ProductSearch'
 import { screenSection, initialScreenSections } from './lib/screenSections'
 import { screenHelpFor } from './lib/screenHelp'
@@ -92,7 +92,8 @@ import type { ProductDraft } from './lib/productIntake'
 import { BlankProductForm } from './BlankProductForm'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
-import { normalizeShopProfile, businessPresets, applyBusinessPreset, type ShopProfile } from '../server/shop-profile.mjs'
+import { normalizeShopProfile, businessPresets, applyBusinessPreset, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
+import type { CatalogueStarter } from '../server/catalogue-starters.mjs'
 import { ShopSetup } from './ShopSetup'
 import { ShopProductFields, collectCustomValues } from './ShopProductFields'
 import { readCustomValues, validateCustomValues } from '../server/shop-fields.mjs'
@@ -881,6 +882,39 @@ function App() {
     if(!response.ok)throw new Error(saved.error||'Could not save business settings.')
     setCurrency(saved.currency);setExtraPaymentPolicy(paymentPolicy(saved.paymentPolicy));setPosProvider(saved.posProvider||'')
     localStorage.setItem('stockroom-currency',saved.currency)
+  }
+  async function saveOnboardingStarters(screen:SetupWorkspace,industry:BusinessMode,items:CatalogueStarter[]) {
+    if (!items.length) return
+    if (screen==='POS'||screen==='Oil') {
+      const response=await fetch('/api/products',{headers:authHeaders})
+      const result=await response.json() as {products?:Product[];error?:string}
+      if(!response.ok)throw new Error(result.error||'Could not load the product catalogue.')
+      const names=new Set((result.products||[]).map(product=>product.name.trim().toLocaleLowerCase()))
+      for(const item of items) {
+        if(names.has(item.name.trim().toLocaleLowerCase()))continue
+        await posRequest('/api/products',authHeaders,{name:item.name,barcode:'',category:item.category,unit:item.unit,stock:0,reorder:0,price:0,cost:0})
+        names.add(item.name.trim().toLocaleLowerCase())
+      }
+      const loaded=await fetch('/api/products',{headers:authHeaders})
+      if(loaded.ok){const data=await loaded.json() as {products:Product[]};setProducts(data.products);await upsertCachedProducts(data.products)}
+      return
+    }
+    if(screen==='Payments') {
+      const current=await posRequest('/api/pos/receipt-settings',authHeaders) as {serviceItems?:Array<{id:string;name:string;price:number}>;[key:string]:unknown}
+      const serviceItems=[...(current.serviceItems||[])]
+      const names=new Set(serviceItems.map(item=>item.name.trim().toLocaleLowerCase()))
+      for(const item of items)if(!names.has(item.name.trim().toLocaleLowerCase())){serviceItems.push({id:crypto.randomUUID(),name:item.name.slice(0,150),price:0});names.add(item.name.trim().toLocaleLowerCase())}
+      if(serviceItems.length>200)throw new Error('Select up to 200 saved services. Remove some selections and try again.')
+      await posRequest('/api/pos/receipt-settings',authHeaders,{...current,serviceItems})
+      return
+    }
+    const api=screen==='Counter'?'/api/pos/counter':'/api/pos/restaurant/counter'
+    const current=await posRequest(api,authHeaders) as {menu:{id:string;updatedAt:string;items:Array<Record<string,any>>}}
+    const menu=current.menu
+    const names=new Set(menu.items.map(item=>String(item.name||'').trim().toLocaleLowerCase()))
+    const additions=items.filter(item=>!names.has(item.name.trim().toLocaleLowerCase())).map(item=>({id:crypto.randomUUID(),name:item.name.slice(0,100),price:0,type:'prepared',productId:'',available:false,options:[],...(screen==='Restaurant'?{station:industry==='drinks'?'bar' as const:'kitchen' as const}:{})}))
+    if(menu.items.length+additions.length>200)throw new Error('Select fewer items. This workspace can save up to 200 menu items.')
+    if(additions.length)await posRequest(`${api}/menu`,authHeaders,{id:menu.id,commandId:crypto.randomUUID(),expectedUpdatedAt:menu.updatedAt||'',items:[...menu.items,...additions]})
   }
   async function refreshSyncStatus() {
     const response = await fetch('/api/sync/status').catch(() => null)
@@ -2008,7 +2042,7 @@ function App() {
     : installerRequired ? <InstallerScreen onActivate={activateInstallation} message={installerMessage} onRegister={registrationAvailable ? () => { setRegistrationRequested(true); setRegistrationStage('request') } : undefined} /> : setupRequired ? <SetupScreen onCreate={completeSetup} error={authError} setError={setAuthError} /> : <LoginScreen onLogin={login} error={authError} setError={setAuthError} onRegister={registrationAvailable ? () => { setRegistrationRequested(true); setRegistrationStage('request') } : undefined} />}</>
 
   if(chooseBranch) return <main className="login-screen"><section className="login-card"><div className="brand-mark"><Store size={21}/></div><h1>Choose your branch</h1><p>You can switch branches later from the app header.</p>{branches.length?branches.filter(branch=>branch.isActive!==false).map(branch=><button type="button" key={branch.id} className={activeBranchId===branch.id?'branch-choice selected':'branch-choice'} aria-pressed={activeBranchId===branch.id} onClick={()=>setActiveBranchId(branch.id)}><Store size={18}/><span><strong>{branch.name}</strong>{branch.address&&<small>{branch.address}</small>}</span></button>):!branchError&&<p role="status">Loading your branches...</p>}{branchError&&<div role="alert"><p>{branchError}</p><button type="button" className="filter-button" onClick={()=>setBranchRetry(value=>value+1)}>Retry loading branches</button><button type="button" className="text-button" onClick={()=>void logout()}>Back to sign in</button></div>}<button type="button" className="primary-button login-button" disabled={Boolean(branchError)||!branches.some(branch=>branch.id===activeBranchId&&branch.isActive!==false)} onClick={()=>setChooseBranch(false)}>Continue to your business</button></section></main>
-  if(user.role==='owner'&&(workspaceSetupRequested||localStorage.getItem(workspaceSetupKey(user.organizationId))!==null&&localStorage.getItem(workspaceSetupKey(user.organizationId))!=='complete')) return <><HelpMenu screenHelpTopic={{title:'Workspace setup',description:'Follow the current step to choose your business type, enabled workspaces and payment options. Review each choice before saving; setup can be reopened from Business settings.'}}/><WorkspaceOnboarding businessId={user.organizationId} profile={shopProfile} currency={currency} policy={extraPaymentPolicy} saveProfile={saveShopProfile} savePreferences={saveWorkspacePreferences} finish={()=>{localStorage.setItem(workspaceSetupKey(user.organizationId),'complete');setWorkspaceSetupRequested(false);setActive('Overview')}}/></>
+  if(user.role==='owner'&&(workspaceSetupRequested||localStorage.getItem(workspaceSetupKey(user.organizationId))!==null&&localStorage.getItem(workspaceSetupKey(user.organizationId))!=='complete')) return <><HelpMenu screenHelpTopic={{title:'Workspace setup',description:'Choose a business type and selling workspace separately, select matching starter items, and confirm them. You can edit catalogue entries later or skip this step.'}}/><WorkspaceOnboarding profile={shopProfile} currency={currency} policy={extraPaymentPolicy} saveProfile={saveShopProfile} savePreferences={saveWorkspacePreferences} saveStarters={saveOnboardingStarters} finish={screen=>{localStorage.setItem(workspaceSetupKey(user.organizationId),'complete');setWorkspaceSetupRequested(false);setActive(screen||'Overview')}}/></>
   return <div className={`app-shell${desktopLayout&&desktopSidebarCollapsed?' sidebar-collapsed':''}`}>{!desktopLayout&&<div className="mobile-app-header"><div className="mobile-app-topline"><div className="mobile-app-brand"><div className="brand-mark">{logoData?<img src={logoData} alt="" className="brand-logo"/>:<Boxes size={24}/>}</div><div className="mobile-app-brand-copy"><strong title={appName}>{appName}</strong><span>Business operations</span></div></div><NotificationCenter apiUrl={subscriptionApiUrl} token={cloudAccessToken} onToken={(nextToken,refreshToken)=>{setCloudAccessToken(nextToken);localStorage.setItem('stockroom-cloud-access-token',nextToken);localStorage.setItem('stockroom-cloud-refresh-token',refreshToken)}} allowPush={isBrowserPwa()}/></div><div className="mobile-app-actions"><button className="mobile-header-sync" type="button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} aria-label="Sync business data" title={syncFeedback || 'Upload local changes and download business updates'}><RefreshCw size={16} className={syncing?'spin':''}/><span>{syncing?'Syncing':'Sync'}</span></button><HelpMenu guide={()=>setActive('Guide')} headers={authHeaders} scope={`${user.organizationId}:${user.id}`} screenHelpTopic={{...screenHelpFor(active,section,settingsTab,paymentTab),title:'What this screen is for'}} className="mobile-header-help"/></div>{syncFeedback&&<div className="mobile-header-sync-feedback" role="status" aria-live="polite">{syncFeedback}</div>}</div>}<ReadingControls/>
     {(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
     <button ref={mobileMenuToggleRef} className="mobile-nav-toggle" type="button" aria-controls="business-navigation" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen?<X size={22}/>:<Menu size={22}/>}</button>
