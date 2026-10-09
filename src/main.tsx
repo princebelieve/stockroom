@@ -258,15 +258,6 @@ function PublicLandingLink() {
 function App() {
   const [desktopLayout,setDesktopLayout]=useState(()=>window.matchMedia('(min-width:1024px)').matches)
   const [desktopSidebarCollapsed,setDesktopSidebarCollapsed]=useState(()=>localStorage.getItem('stockroom-sidebar-collapsed')==='true')
-  useEffect(()=>{
-    const nav=document.querySelector('#business-navigation nav')
-    if(!nav)return
-    nav.querySelectorAll<HTMLElement>('.nav-item').forEach(item=>{
-      const label=(item.getAttribute('aria-label')||Array.from(item.childNodes).filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join(' ').trim()||item.textContent||'Navigation').replace(/[+−-]/g,'').trim()
-      item.dataset.compactLabel=label.slice(0,2).toUpperCase()
-      if(!item.title)item.title=label
-    })
-  },[active,desktopLayout,desktopSidebarCollapsed,expandedSidebarGroup])
   const [chooseBranch,setChooseBranch]=useState(false)
   const [workspaceSetupRequested,setWorkspaceSetupRequested]=useState(false)
   const [branchError,setBranchError]=useState('')
@@ -293,6 +284,15 @@ function App() {
   }
 
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<'Sales' | 'Team' | null>(null)
+  useEffect(()=>{
+    const nav=document.querySelector('#business-navigation nav')
+    if(!nav)return
+    nav.querySelectorAll<HTMLElement>('.nav-item').forEach(item=>{
+      const label=(item.getAttribute('aria-label')||Array.from(item.childNodes).filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join(' ').trim()||item.textContent||'Navigation').replace(/[+−-]/g,'').trim()
+      item.dataset.compactLabel=label.slice(0,2).toUpperCase()
+      if(!item.title)item.title=label
+    })
+  },[active,desktopLayout,desktopSidebarCollapsed,expandedSidebarGroup])
   useEffect(() => { if (user && screenAllowedForUser(active, user)) localStorage.setItem(navigationKey(user), active) }, [active])
   const navigateToSection = (screen: 'Sales' | 'Team' | 'Settings' | 'Inventory' | 'Wallet' | 'Reports', sectionId: string) => {
     if (sectionId === 'team-cashier-activity') { setActive('Activity'); return }
