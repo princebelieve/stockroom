@@ -34,6 +34,10 @@ Choose a table or open a named tab, then add orders to its bill. Take payment op
 
 Owners configure Business, Workspaces and Sales. Owners and admins configure Receipts, Devices and enabled menus/recipes/tables where existing permissions allow it. Product variants and extras are under product management. Cash register has its own daily-work screen for opening cash, movements and closing counts. Sales history contains receipt records, customer history and authorised returns.
 
+### Configure category and unit dropdowns
+
+Owners open **Business settings > Workspaces > Workspace catalogues**, choose Product sales, Oil sales, Order counter or Tables & tabs, and edit category and unit choices one per line. Each stock-selling workspace saves its own lists. When staff add a product from Oil sales or Product sales, the form uses that workspace's list; inventory entry uses the primary available stock workspace. Payments & receipts records described service items and does not use product catalogue categories. **Other (please specify)** remains available; after the product or ingredient is saved, its new category or unit is added to that workspace's dropdown for future entries. Existing choices are not duplicated. Business type provides starting suggestions and does not decide which saved workspace list is used. Product form custom dropdown fields have their own choices under **Product form**.
+
 These names describe workflows, not full industry packages. Order counter still uses the existing menu/preparation model; Tables & tabs manages open bills, not hotel reservations or club memberships. Oil sales handles oil quantities, containers and pricing; it does not integrate with pumps or meters. Validate the five selling workspaces with real staff and hardware before adding another sector.
 
 ## Visual guidance

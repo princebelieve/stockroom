@@ -19,7 +19,7 @@ import { buildReports } from './reports.mjs'
 import { handlePos, posSchema } from './pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from './shop-fields.mjs'
 import { paymentPolicy, recordPayment } from './payment.mjs'
-import { normalizeShopProfile, validateShopProfile } from './shop-profile.mjs'
+import { normalizeShopProfile, validateShopProfile, workspaceCatalogueOptions, catalogueWorkspaces } from './shop-profile.mjs'
 import { normalizeCashSale } from './cash.mjs'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -977,6 +977,20 @@ export async function updateShopProfile(input) {
   const settings = await getSettings()
   queueSync('settings', organizationId, 'upsert', settings)
   return profile
+}
+
+export async function addShopProfileCatalogueOption(workspace, field, input) {
+  if (!Object.hasOwn(catalogueWorkspaces, workspace) || !['categories', 'units'].includes(field)) throw new Error('Choose a valid workspace category or unit list.')
+  const value = typeof input === 'string' ? input.trim().replace(/\s+/g, ' ') : ''
+  if (!value || value.length > (field === 'units' ? 30 : 80)) throw new Error('Enter a shorter category or unit name.')
+  const current = await getSettings()
+  const profile = normalizeShopProfile(current.shopProfile)
+  const options = workspaceCatalogueOptions(profile, workspace)
+  const list = options[field]
+  if (list.some(item => item.toLocaleLowerCase() === value.toLocaleLowerCase())) return profile
+  if (list.length >= 30) throw new Error('This workspace already has 30 choices. Remove one in Workspace catalogues before adding another.')
+  const next = { ...profile, workspaceCatalogues: { ...profile.workspaceCatalogues, [workspace]: { ...options, [field]: [...list, value] } } }
+  return updateShopProfile(next)
 }
 
 export function listBranches() {

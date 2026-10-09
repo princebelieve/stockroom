@@ -9,7 +9,7 @@ import { validQuantity } from './quantities.mjs'
 import { retailAction } from './db.mjs'
 import { posAction } from './db.mjs'
 import { createServer } from 'node:http'
-import { updateShopProfile, updateProductCustomValues } from './db.mjs'
+import { updateShopProfile, updateProductCustomValues, addShopProfileCatalogueOption } from './db.mjs'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
@@ -603,6 +603,13 @@ const server = createServer(async (request, response) => {
     if (!user || user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner can customize the shop.' })
     return readJson(request, response, async input => {
       try { return sendJson(response, 200, await updateShopProfile(input)) }
+      catch (error) { return sendJson(response, 400, { error: error.message }) }
+    })
+  }
+  if (request.method === 'POST' && request.url === '/api/settings/shop-profile/options') {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return readJson(request, response, async input => {
+      try { return sendJson(response, 200, await addShopProfileCatalogueOption(input.workspace, input.field, input.value)) }
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }

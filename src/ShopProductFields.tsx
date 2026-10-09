@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import type { ShopProfile } from '../server/shop-profile.mjs'
+import { catalogueWorkspaces, workspaceCatalogueOptions, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { readCustomValues, validateCustomValues } from '../server/shop-fields.mjs'
 import type { ProductDraft } from './lib/productIntake'
-
-const commonUnits = ['piece', 'item', 'pack', 'box', 'carton', 'bottle', 'can', 'bag', 'kg', 'g', 'litre', 'ml', 'metre', 'set', 'portion', 'service']
 
 function fieldHint(id: string, label: string, type: string) {
   if (id.startsWith('custom_')) return type === 'select' ? `Choose the closest value for ${label}. Add or change choices in Business settings > Workspaces > Product form.` : `Enter the ${label.toLowerCase()} for this product. Leave it blank when it does not apply.`
@@ -25,10 +23,11 @@ function FieldInfo({ label, description }: { label: string; description: string 
   return <details className="product-field-info"><summary aria-label={`What to enter for ${label}`} title={`What to enter for ${label}`}>(i)</summary><div className="product-field-info-copy" role="note">{description}</div></details>
 }
 
-export function ShopProductFields({ profile, customOnly = false, values, initialDraft, scanBarcode }: { profile: ShopProfile; customOnly?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: () => Promise<string | undefined> }) {
+export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales', customOnly = false, values, initialDraft, scanBarcode }: { profile: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; customOnly?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: () => Promise<string | undefined> }) {
   const saved = readCustomValues(values)
-  const categories = profile.categories || []
-  const units = [...new Set([profile.unit, ...commonUnits].map(unit => String(unit || '').trim()).filter(Boolean))]
+  const catalogue = workspaceCatalogueOptions(profile, catalogueWorkspace)
+  const categories = catalogue.categories
+  const units = [...new Set([profile.unit, ...catalogue.units].map(unit => String(unit || '').trim()).filter(Boolean))]
   const initialCategory = initialDraft?.category || ''
   const initialUnit = initialDraft?.unit || profile.unit
   const [categoryChoice, setCategoryChoice] = useState(() => categories.includes(initialCategory) ? initialCategory : initialCategory ? '__custom__' : '')
@@ -49,13 +48,13 @@ export function ShopProductFields({ profile, customOnly = false, values, initial
     const control = categoryField ? <>
       <select id={inputId} name="category" defaultValue={categoryChoice} onChange={event => setCategoryChoice(event.target.value)}>
         <option value="">Choose a category</option>
-        {categories.map(category => <option key={category} value={category}>{category}</option>)}
+        <optgroup label={`${catalogueWorkspaces[catalogueWorkspace]} categories`}>{categories.map(category => <option key={category} value={category}>{category}</option>)}</optgroup>
         <option value="__custom__">Other (please specify)</option>
       </select>
       {customCategory && <input aria-label="Specify product category" name="customCategory" required maxLength={80} defaultValue={initialCategory && !categories.includes(initialCategory) ? initialCategory : ''} placeholder="Enter category" />}
     </> : unitField ? <>
       <select id={inputId} name="unit" defaultValue={unitChoice} onChange={event => setUnitChoice(event.target.value)}>
-        {units.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+        <optgroup label={`${catalogueWorkspaces[catalogueWorkspace]} units`}>{units.map(unit => <option key={unit} value={unit}>{unit}</option>)}</optgroup>
         <option value="__custom__">Other (please specify)</option>
       </select>
       {customUnit && <input aria-label="Specify product unit" name="customUnit" required maxLength={30} defaultValue={initialUnit && !units.includes(initialUnit) ? initialUnit : ''} placeholder="Enter unit, such as roll or hour" />}

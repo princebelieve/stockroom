@@ -29,22 +29,93 @@ export const businessModes = {
   services: { label: 'Services and non-stock items', unit: 'service', note: 'For services or fees tracked as saleable items.' },
 }
 
+export const catalogueWorkspaces = {
+  'product-sales': 'Product sales',
+  'oil-sales': 'Oil sales',
+  'order-counter': 'Order counter',
+  'tables-tabs': 'Tables & tabs',
+}
+
 const suggestions = {
-  general: { itemLabel: 'Product', inventoryLabel: 'Inventory', categories: ['General goods', 'Supplies', 'Other'] },
-  printing: { itemLabel: 'Print item', inventoryLabel: 'Print catalogue', categories: ['Photocopying', 'Document printing', 'Business cards', 'Flyers', 'Banners', 'Binding and finishing', 'Paper and supplies'] },
-  'food-service': { itemLabel: 'Menu item', inventoryLabel: 'Menu and stock', categories: ['Main meals', 'Sides', 'Snacks', 'Drinks', 'Desserts', 'Ingredients'] },
-  bakery: { itemLabel: 'Bakery item', inventoryLabel: 'Bakery catalogue', categories: ['Bread', 'Cakes', 'Pastries', 'Ingredients', 'Packaging'] },
-  clothing: { itemLabel: 'Clothing item', inventoryLabel: 'Clothing catalogue', categories: ['Clothing', 'Footwear', 'Accessories'] },
-  services: { itemLabel: 'Item', inventoryLabel: 'Services and items', categories: ['Services', 'Materials', 'Other'] },
-  grocery: { categories: ['Food', 'Drinks', 'Household goods', 'Fresh produce'] },
-  supermarket: { categories: ['Groceries', 'Drinks', 'Household goods', 'Personal care'] },
-  wholesale: { categories: ['Packaged goods', 'Beverages', 'Bulk supplies'] },
-  liquids: { itemLabel: 'Oil product', inventoryLabel: 'Oil inventory', categories: ['Palm oil', 'Groundnut oil', 'Other oils', 'Containers and supplies'] },
-  pharmacy: { categories: ['Medicines', 'Health supplies', 'Personal care'] },
-  electronics: { categories: ['Phones', 'Computers', 'Accessories', 'Appliances', 'Parts'] },
-  drinks: { categories: ['Water', 'Soft drinks', 'Juices', 'Alcoholic beverages'] },
-  building: { categories: ['Cement', 'Timber', 'Roofing', 'Plumbing', 'Electrical', 'Tools'] },
-  agriculture: { categories: ['Produce', 'Seeds', 'Feed', 'Equipment', 'Farm supplies'] },
+  general: { itemLabel: 'Product', inventoryLabel: 'Inventory' },
+  printing: { itemLabel: 'Print item', inventoryLabel: 'Print catalogue' },
+  'food-service': { itemLabel: 'Menu item', inventoryLabel: 'Menu and stock' },
+  bakery: { itemLabel: 'Bakery item', inventoryLabel: 'Bakery catalogue' },
+  clothing: { itemLabel: 'Clothing item', inventoryLabel: 'Clothing catalogue' },
+  services: { itemLabel: 'Item', inventoryLabel: 'Services and items' },
+  liquids: { itemLabel: 'Oil product', inventoryLabel: 'Oil inventory' },
+}
+
+const categoriesByIndustry = {
+  general: ['General goods', 'Food and groceries', 'Drinks', 'Household goods', 'Personal care', 'Clothing and footwear', 'Electronics', 'Office supplies', 'Building materials', 'Tools and hardware', 'Automotive', 'Agriculture', 'Furniture and home', 'Books and media', 'Packaging', 'Services and fees'],
+  printing: ['Black and white copies', 'Colour copies', 'Document printing', 'Large format printing', 'Business cards', 'Flyers and brochures', 'Posters and banners', 'Books and booklets', 'Binding', 'Lamination', 'Finishing', 'Design services', 'Paper', 'Ink and toner', 'Print materials', 'Packaging'],
+  grocery: ['Fresh produce', 'Fruit', 'Vegetables', 'Grains and cereals', 'Rice and pasta', 'Beans and pulses', 'Flour and baking', 'Cooking oils', 'Spices and seasonings', 'Canned food', 'Dairy and eggs', 'Meat and seafood', 'Bread and bakery', 'Snacks and confectionery', 'Water', 'Soft drinks and juice', 'Tea and coffee', 'Frozen food', 'Household cleaning', 'Personal care', 'Baby products', 'Pet supplies'],
+  supermarket: ['Fresh produce', 'Fruit and vegetables', 'Meat and seafood', 'Dairy and eggs', 'Bakery', 'Grains and cereals', 'Canned and packaged food', 'Cooking ingredients', 'Frozen food', 'Snacks and confectionery', 'Water and beverages', 'Alcoholic beverages', 'Household cleaning', 'Laundry', 'Paper goods', 'Personal care', 'Baby care', 'Health supplies', 'Pet supplies', 'Kitchen and home', 'Stationery'],
+  wholesale: ['Food and groceries', 'Beverages', 'Household goods', 'Cleaning supplies', 'Personal care', 'Paper and packaging', 'Office supplies', 'Clothing and textiles', 'Electronics', 'Building materials', 'Tools and hardware', 'Automotive supplies', 'Agricultural supplies', 'Bulk ingredients', 'Cartons and cases', 'Food service supplies'],
+  liquids: ['Palm oil', 'Groundnut oil', 'Vegetable oil', 'Coconut oil', 'Soybean oil', 'Sunflower oil', 'Other edible oils', 'Cooking fats', 'Bulk oil', 'Bottled oil', 'Oil containers', 'Container deposits', 'Measuring and dispensing supplies'],
+  'food-service': ['Rice meals', 'Other main meals', 'Breakfast', 'Soups and stews', 'Sides and accompaniments', 'Grilled food', 'Snacks and starters', 'Sandwiches and wraps', 'Pizza and pasta', 'Salads', 'Desserts', 'Hot drinks', 'Cold drinks', 'Bottled drinks', 'Ingredients', 'Prepared ingredients', 'Meal deals', 'Packaging and disposables'],
+  'food-manufacturing': ['Grains and flour', 'Sugar and sweeteners', 'Oils and fats', 'Dairy ingredients', 'Meat and seafood', 'Fruit and vegetables', 'Spices and seasonings', 'Additives and preservatives', 'Dry ingredients', 'Liquid ingredients', 'Packaging materials', 'Work in progress', 'Finished food', 'Baked goods', 'Beverages', 'By-products'],
+  bakery: ['Bread', 'Rolls and buns', 'Cakes', 'Cupcakes', 'Pastries', 'Pies and savouries', 'Biscuits and cookies', 'Confectionery', 'Desserts', 'Flour and grains', 'Sugar and sweeteners', 'Yeast and raising agents', 'Dairy and eggs', 'Fillings and toppings', 'Oils and fats', 'Packaging'],
+  drinks: ['Bottled water', 'Soft drinks', 'Juice and smoothies', 'Energy drinks', 'Sports drinks', 'Tea and coffee', 'Milk and dairy drinks', 'Beer', 'Wine', 'Spirits', 'Mixers', 'Non-alcoholic drinks', 'Drink concentrates', 'Ice', 'Snacks', 'Bar supplies'],
+  hotel: ['Guest room amenities', 'Cleaning supplies', 'Laundry and linen', 'Towels and bedding', 'Food and ingredients', 'Beverages', 'Kitchen supplies', 'Bathroom supplies', 'Furniture and fittings', 'Maintenance supplies', 'Office supplies', 'Guest stationery', 'Safety supplies', 'Event supplies', 'Packaging and disposables'],
+  pharmacy: ['Prescription medicines', 'Over-the-counter medicines', 'Pain relief', 'Cold and allergy', 'Vitamins and supplements', 'First aid', 'Wound care', 'Medical devices', 'Diagnostic supplies', 'Personal care', 'Baby and maternity', 'Oral care', 'Skin care', 'Hygiene and sanitation', 'Medical consumables', 'Protective equipment'],
+  'health-beauty': ['Skin care', 'Face care', 'Hair care', 'Body care', 'Makeup', 'Fragrance', 'Oral care', 'Bath and shower', 'Deodorants', 'Shaving and grooming', 'Nail care', 'Sun care', 'Baby care', 'Health and wellness', 'Beauty tools', 'Accessories'],
+  clothing: ['Women clothing', 'Men clothing', 'Children clothing', 'Baby clothing', 'Uniforms', 'Traditional wear', 'Sportswear', 'Underwear and sleepwear', 'Shoes and footwear', 'Bags and purses', 'Jewellery', 'Belts and accessories', 'Fabric and textiles', 'Sewing supplies', 'Seasonal wear'],
+  electronics: ['Mobile phones', 'Phone accessories', 'Computers and laptops', 'Computer accessories', 'Tablets', 'Audio and headphones', 'Televisions and video', 'Cameras', 'Home appliances', 'Kitchen appliances', 'Power and charging', 'Cables and adapters', 'Networking', 'Storage media', 'Components and parts', 'Gaming', 'Smart home', 'Batteries'],
+  building: ['Cement and binders', 'Aggregates and sand', 'Bricks and blocks', 'Timber and boards', 'Roofing', 'Steel and reinforcement', 'Plumbing', 'Electrical', 'Paint and coatings', 'Doors and windows', 'Tiles and flooring', 'Ceiling and insulation', 'Fasteners', 'Hand tools', 'Power tools', 'Safety equipment', 'Adhesives and sealants', 'Hardware and fittings'],
+  cement: ['Cement', 'Concrete products', 'Sand', 'Gravel and aggregate', 'Blocks and bricks', 'Steel and reinforcement', 'Timber', 'Roofing materials', 'Plumbing supplies', 'Electrical supplies', 'Paint and coatings', 'Bagged materials', 'Bulk materials', 'Tools and equipment', 'Delivery and handling'],
+  automotive: ['Engine and transmission parts', 'Filters', 'Brakes', 'Suspension and steering', 'Electrical and ignition', 'Batteries', 'Tyres and tubes', 'Wheels and rims', 'Engine oils', 'Fluids and lubricants', 'Body and lighting', 'Interior accessories', 'Tools and workshop supplies', 'Safety and cleaning', 'Motorcycle parts', 'Vehicle accessories', 'Belts and hoses', 'Fasteners'],
+  agriculture: ['Seeds and seedlings', 'Fertilizers', 'Crop protection', 'Animal feed', 'Livestock supplies', 'Veterinary supplies', 'Farm tools', 'Irrigation', 'Pots and growing media', 'Harvested produce', 'Grains and pulses', 'Fencing', 'Protective equipment', 'Storage and packaging', 'Machinery parts', 'Water and supplements'],
+  furniture: ['Living room furniture', 'Bedroom furniture', 'Dining furniture', 'Office furniture', 'Outdoor furniture', 'Mattresses and bedding', 'Seating', 'Tables and desks', 'Storage and cabinets', 'Shelving', 'Lighting', 'Home décor', 'Kitchen fittings', 'Bathroom fittings', 'Furniture hardware'],
+  office: ['Writing supplies', 'Paper and notebooks', 'Filing and organization', 'Office machines', 'Printer supplies', 'Computer accessories', 'School supplies', 'Art supplies', 'Presentation supplies', 'Mailing and packaging', 'Desk accessories', 'Cleaning supplies', 'Furniture', 'Books and learning materials'],
+  books: ['Fiction', 'Non-fiction', 'Children books', 'Textbooks', 'Workbooks', 'Reference books', 'Religious books', 'Local language books', 'Magazines and journals', 'Newspapers', 'Stationery', 'Learning materials', 'Digital media', 'Maps and charts'],
+  hardware: ['Hand tools', 'Power tools', 'Fasteners', 'Locks and security', 'Plumbing', 'Electrical', 'Paint and decorating', 'Adhesives and sealants', 'Building materials', 'Garden tools', 'Safety equipment', 'Storage and organization', 'Fittings and fixtures', 'Machinery parts', 'Workshop supplies', 'Ladders and access'],
+  hospitality: ['Tableware', 'Glassware', 'Kitchen equipment', 'Food service disposables', 'Cleaning supplies', 'Linen and textiles', 'Guest amenities', 'Bar supplies', 'Catering equipment', 'Event décor', 'Serving equipment', 'Safety supplies', 'Packaging', 'Furniture and fittings'],
+  bulk: ['Grains and cereals', 'Rice', 'Beans and pulses', 'Flour', 'Sugar and salt', 'Spices', 'Nuts and seeds', 'Dried produce', 'Fresh produce', 'Animal feed', 'Fertilizer', 'Construction aggregates', 'Cooking oils', 'Bulk liquids', 'Packaging and sacks'],
+  services: ['Consulting', 'Labour and repairs', 'Installation', 'Delivery and transport', 'Professional fees', 'Administrative fees', 'Training and lessons', 'Rent and hire', 'Maintenance', 'Cleaning', 'Design and creative', 'Digital services', 'Materials', 'Travel and call-out', 'Other services'],
+}
+
+const unitSuggestionsByIndustry = {
+  general: ['piece', 'item', 'pack', 'packet', 'box', 'carton', 'case', 'bottle', 'can', 'jar', 'bag', 'pair', 'set', 'dozen', 'kilogram', 'gram', 'litre', 'millilitre', 'metre', 'roll'],
+  printing: ['copy', 'page', 'sheet', 'ream', 'booklet', 'poster', 'banner', 'card', 'set', 'job', 'service', 'piece', 'pack', 'roll', 'square metre'],
+  grocery: ['piece', 'pack', 'packet', 'box', 'carton', 'bottle', 'can', 'jar', 'bag', 'sack', 'tray', 'crate', 'kilogram', 'gram', 'litre', 'millilitre', 'dozen'],
+  supermarket: ['piece', 'pack', 'packet', 'box', 'carton', 'case', 'bottle', 'can', 'jar', 'sachet', 'bag', 'tray', 'crate', 'kilogram', 'gram', 'litre', 'millilitre', 'pair'],
+  wholesale: ['piece', 'pack', 'box', 'carton', 'case', 'crate', 'pallet', 'bag', 'sack', 'bundle', 'dozen', 'kilogram', 'tonne', 'litre', 'bottle', 'can'],
+  liquids: ['litre', 'millilitre', 'gallon', 'bottle', 'can', 'jar', 'tin', 'drum', 'container', 'kilogram', 'gram', 'piece'],
+  'food-service': ['portion', 'serving', 'meal', 'plate', 'bowl', 'piece', 'pack', 'box', 'tray', 'kilogram', 'gram', 'litre', 'millilitre', 'bottle', 'can', 'order'],
+  'food-manufacturing': ['kilogram', 'gram', 'tonne', 'litre', 'millilitre', 'piece', 'batch', 'pack', 'box', 'carton', 'sack', 'bag', 'bottle', 'can', 'tray'],
+  bakery: ['piece', 'loaf', 'roll', 'slice', 'cake', 'box', 'pack', 'tray', 'kilogram', 'gram', 'litre', 'millilitre', 'bag', 'batch', 'dozen'],
+  drinks: ['bottle', 'can', 'crate', 'case', 'carton', 'pack', 'cup', 'glass', 'keg', 'litre', 'millilitre', 'gallon', 'piece', 'dozen'],
+  hotel: ['piece', 'set', 'pair', 'pack', 'box', 'carton', 'bottle', 'case', 'kilogram', 'litre', 'service', 'room set'],
+  pharmacy: ['pack', 'tablet', 'capsule', 'bottle', 'vial', 'ampoule', 'tube', 'sachet', 'box', 'carton', 'piece', 'pair', 'millilitre', 'gram', 'dose'],
+  'health-beauty': ['piece', 'bottle', 'jar', 'tube', 'tub', 'bar', 'pack', 'set', 'box', 'sachet', 'millilitre', 'gram', 'pair'],
+  clothing: ['piece', 'pair', 'set', 'pack', 'dozen', 'size run', 'metre', 'yard', 'roll', 'bundle', 'box', 'carton'],
+  electronics: ['piece', 'unit', 'set', 'pair', 'pack', 'box', 'carton', 'kit', 'metre', 'roll', 'battery', 'service'],
+  building: ['piece', 'bag', 'sack', 'pack', 'box', 'carton', 'bundle', 'length', 'board', 'sheet', 'roll', 'metre', 'square metre', 'kilogram', 'tonne', 'litre'],
+  cement: ['bag', 'kilogram', 'tonne', 'cubic metre', 'piece', 'block', 'brick', 'length', 'bundle', 'sheet', 'load', 'delivery'],
+  automotive: ['piece', 'pair', 'set', 'kit', 'pack', 'box', 'carton', 'litre', 'millilitre', 'kilogram', 'tyre', 'battery'],
+  agriculture: ['kilogram', 'gram', 'tonne', 'bag', 'sack', 'pack', 'packet', 'seedling', 'tray', 'crate', 'litre', 'millilitre', 'piece', 'bale', 'bundle'],
+  furniture: ['piece', 'set', 'pair', 'unit', 'box', 'carton', 'pack', 'metre', 'square metre', 'kit'],
+  office: ['piece', 'pack', 'box', 'ream', 'sheet', 'set', 'carton', 'roll', 'pair', 'bottle', 'cartridge', 'service'],
+  books: ['piece', 'copy', 'volume', 'set', 'pack', 'box', 'carton', 'subscription'],
+  hardware: ['piece', 'pair', 'set', 'pack', 'box', 'carton', 'bag', 'length', 'metre', 'roll', 'litre', 'kilogram', 'kit'],
+  hospitality: ['piece', 'set', 'pair', 'pack', 'box', 'carton', 'case', 'roll', 'dozen', 'service', 'hire'],
+  bulk: ['kilogram', 'gram', 'tonne', 'bag', 'sack', 'crate', 'cubic metre', 'litre', 'millilitre', 'bundle', 'piece', 'load'],
+  services: ['service', 'job', 'hour', 'day', 'visit', 'session', 'consultation', 'delivery', 'trip', 'project', 'item'],
+}
+
+export function productCatalogueOptions(industry = 'general') {
+  return {
+    categories: [...(categoriesByIndustry[industry] || categoriesByIndustry.general)],
+    units: [...(unitSuggestionsByIndustry[industry] || unitSuggestionsByIndustry.general)],
+  }
+}
+
+export function workspaceCatalogueOptions(profile, workspace = 'product-sales') {
+  const value = normalizeShopProfile(profile)
+  const saved = value.workspaceCatalogues?.[workspace]
+  if (saved) return { categories: [...saved.categories], units: [...saved.units] }
+  return productCatalogueOptions(value.industry)
 }
 
 export function normalizeShopProfile(input) {
@@ -52,7 +123,7 @@ export function normalizeShopProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) input = {}
   const mode = ['general', 'suggested', 'custom'].includes(input.mode) ? input.mode : 'general'
   const industry = mode === 'general' || !Object.hasOwn(businessModes, input.industry) ? 'general' : input.industry
-  const preset = { ...suggestions.general, categories: [businessModes[industry].label, 'Supplies', 'Other'], ...suggestions[industry], unit: businessModes[industry].unit }
+  const preset = { ...suggestions.general, ...suggestions[industry], categories: categoriesByIndustry[industry] || categoriesByIndustry.general, unit: businessModes[industry].unit }
   const value = { version: 1, mode, industry, ...preset }
   if (mode === 'custom') {
     for (const key of ['itemLabel', 'inventoryLabel', 'unit']) {
@@ -60,6 +131,21 @@ export function normalizeShopProfile(input) {
       if (text) value[key] = text.slice(0, key === 'unit' ? 30 : 40)
     }
     if (Array.isArray(input.categories)) value.categories = [...new Set(input.categories.filter(item => typeof item === 'string').map(item => item.trim().slice(0, 80)).filter(Boolean))].slice(0, 30)
+  }
+  value.workspaceCatalogues = {}
+  if (input.workspaceCatalogues && typeof input.workspaceCatalogues === 'object') {
+    for (const key of Object.keys(catalogueWorkspaces)) {
+      const list = input.workspaceCatalogues[key]
+      if (!list || typeof list !== 'object') continue
+      const clean = field => Array.isArray(list[field]) ? [...new Set(list[field].filter(item => typeof item === 'string').map(item => item.trim().slice(0, 80)).filter(Boolean))].slice(0, 30) : []
+      const categories = clean('categories')
+      const units = clean('units')
+      if (categories.length || units.length) value.workspaceCatalogues[key] = { categories, units }
+    }
+  }
+  if (input.workspaceCatalogues === undefined && input.categories?.length) {
+    const legacyWorkspace = industry === 'liquids' ? 'oil-sales' : 'product-sales'
+    value.workspaceCatalogues[legacyWorkspace] = { categories: [...value.categories], units: productCatalogueOptions(industry).units }
   }
   value.fields = normalizeFields(input.fields, industry, value.itemLabel)
   value.features = {
@@ -108,6 +194,13 @@ export function validateShopProfile(input) {
     }
     if (!Array.isArray(input.categories) || input.categories.length > 30 || input.categories.some(item => typeof item !== 'string' || item.trim().length > 80)) throw new Error('Use up to 30 categories, with at most 80 characters each.')
   }
+  if (input.workspaceCatalogues !== undefined) {
+    if (!input.workspaceCatalogues || typeof input.workspaceCatalogues !== 'object' || Array.isArray(input.workspaceCatalogues)) throw new Error('Check the workspace catalogue choices.')
+    for (const [key, list] of Object.entries(input.workspaceCatalogues)) {
+      if (!Object.hasOwn(catalogueWorkspaces, key) || !list || typeof list !== 'object' || Array.isArray(list)) throw new Error('Check the workspace catalogue choices.')
+      for (const field of ['categories', 'units']) if (list[field] !== undefined && (!Array.isArray(list[field]) || list[field].length > 30 || list[field].some(item => typeof item !== 'string' || item.trim().length > 80))) throw new Error('Use up to 30 category or unit choices per workspace, with at most 80 characters each.')
+    }
+  }
   return normalizeShopProfile(input)
 }
 
@@ -127,7 +220,14 @@ export function applyBusinessPreset(profile, key) {
   const preset = businessPresets[key]
   const current = normalizeShopProfile(profile)
   const defaults = current.mode === 'custom' ? {} : Object.fromEntries(['unit', 'itemLabel', 'inventoryLabel', 'categories'].filter(name => preset[name] !== undefined).map(name => [name, preset[name]]))
+  const targetCatalogue = ({ Oil: 'oil-sales', POS: 'product-sales', Payments: undefined, Counter: 'order-counter', Restaurant: 'tables-tabs' })[preset.screen]
+  const workspaceCatalogues = { ...current.workspaceCatalogues }
+  if (current.mode !== 'custom' && targetCatalogue) workspaceCatalogues[targetCatalogue] = {
+    categories: [...(preset.categories || categoriesByIndustry[preset.industry] || categoriesByIndustry.general)],
+    units: [...(unitSuggestionsByIndustry[preset.industry] || unitSuggestionsByIndustry.general)],
+  }
   return validateShopProfile({ ...current, ...defaults, industry: preset.industry,
+    workspaceCatalogues,
     mode: current.mode === 'custom' ? 'custom' : 'suggested',
     features: { ...current.features, productSales: preset.industry !== 'liquids' },
     workflows: preset.workflow, fastFood: preset.workflow === 'fast-food', restaurant: preset.workflow === 'restaurant' })
