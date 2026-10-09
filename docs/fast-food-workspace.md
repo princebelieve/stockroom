@@ -32,6 +32,7 @@ Open **Business settings > Workspaces**:
 
 - Choose **Order counter only** under **Payment screens** for a dedicated workspace.
 - To keep stock checkout or payment entry as well, choose those screens and check **Enable separate Order counter**.
+- To combine Order counter and Tables & tabs, choose the appropriate **Payment screens** selection and enable both separate workspace checkboxes. For oil businesses, Oil sales remains available while Product sales and Payments & receipts can be enabled in **Customise workspaces (optional)**.
 - Click **Save workspaces**. Use **Sync now** to share the setting with other devices.
 
 Open **Business settings > Food menu & recipes > Menu**. Owners and admins can add menu items, prices and optional priced extras. Turn off **Available to order** when an item is unavailable.

@@ -10,13 +10,14 @@ The original audit identified a real issue: changing product labels and template
 
 ## What the app supports now
 
-Owners can choose **Product sales**, **Payments & receipts**, or **Both** in **Business settings > Workspaces > Payment screens**.
+Owners can choose **Product sales**, **Payments & receipts**, or **Both** in **Business settings > Workspaces > Payment screens**. Oil businesses have a separate Oil sales screen and can add Product sales and/or Payments & receipts under **Customise workspaces (optional)**.
 
 Owners can also choose **Order counter only**, or enable Fast food alongside their existing screens. Its menu, orders, preparation queue and packaged-stock tools stay in a separate workspace. Supermarkets receive no Fast food screens unless the owner enables it. **Tables & tabs only**, or its separate enable checkbox, adds its own menu, tables, seats, named tabs and open bills.
 
 | Workflow | Behavior |
 | --- | --- |
 | Product sales | Select stocked products, take payment, save a receipt and deduct stock. |
+| Oil sales | Sell configured oil products by measured quantity or container using saved customer and bulk pricing; no pump/meter integration is provided. |
 | Payments & receipts | Enter what the customer is paying for, optional customer name/phone, amount and payment method; save and print/share a receipt without changing stock. |
 | Tables & tabs | Open table or named bar bills, add rounds with seats and quantities, print kitchen/bar tickets, serve before payment, settle remaining rounds or individual orders, and close fully resolved bills. Restaurant ingredients and linked drinks leave stock at preparation; later payment does not deduct them again. |
 | Both | Staff switch between two separate screens. The payment form and product basket keep their own drafts. |

@@ -75,7 +75,7 @@
     "id": "section-7",
     "title": "Business settings > Workspaces",
     "steps": [
-      "Open Workspaces and choose the Payment screens selection.",
+      "Open Workspaces. Oil businesses keep Oil sales as their dedicated screen; use Customise workspaces (optional) to add Product sales and/or Payments & receipts. Other business types choose the Payment screens selection.",
       "Choose Product sales for stocked goods, Payments & receipts for manually described non-stock payments, or the combined option for both.",
       "Choose Order counter only or Tables & tabs only when that is your main workflow. The separate enable checkboxes can add these workflows to another screen selection.",
       "Select Save workspaces. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.",

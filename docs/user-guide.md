@@ -106,7 +106,7 @@ Owners can publish QR bank details and enable takeaway delivery with a fixed cha
 
 ## Business settings > Workspaces
 
-1. Open Workspaces and choose the Payment screens selection.
+1. Open Workspaces. Oil businesses keep Oil sales as their dedicated screen; use **Customise workspaces (optional)** to add Product sales and/or Payments & receipts. Other business types choose the Payment screens selection.
 2. Choose Product sales for stocked goods, Payments & receipts for manually described non-stock payments, or the combined option for both.
 3. Choose Order counter only or Tables & tabs only when that is your main workflow. The separate enable checkboxes can add these workflows to another screen selection.
 4. Select Save workspaces. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.

@@ -24,7 +24,7 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 
 | Document | Areas checked |
 | --- | --- |
-| `README.md` | Product purpose, four workspaces, platforms, roles, registration, reports and build commands. |
+| `README.md` | Product purpose, five selling workspaces, platforms, roles, registration, reports and build commands. |
 | `PWA-DEPLOYMENT.md` | Browser adapter, enrollment, cached offline session, sync/refresh, printing and release compatibility. |
 | `cloud/README.md` | Authentication/enrollment endpoints, mail configuration, sync, subscription enforcement and capabilities. |
 | `docs/app-updates.md` | Installed-client version notices and PWA service-worker updates. |

@@ -6,7 +6,7 @@ Review date: 2026-10-06. This is the original audit snapshot; the implementation
 
 Stockroom Business is an offline-first sales and stock operations product for small businesses. Its strongest scope is retail/supermarket operations, service payment collection, takeaway preparation, and restaurant/table billing. It is not a complete ERP, accounting package, hotel system or payment processor.
 
-The four workspaces represent different transaction lifecycles and should remain. The useful improvements are clearer capability documentation, consistent reporting periods, easier recovery across devices, less repeated menu administration, and stronger release verification. Copying every competitor feature would add complexity without establishing product fit.
+The five selling workspaces represent different transaction lifecycles and should remain distinct. The useful improvements are clearer capability documentation, consistent reporting periods, easier recovery across devices, less repeated menu administration, and stronger release verification. Copying every competitor feature would add complexity without establishing product fit.
 
 ## Evidence and limits
 
@@ -28,8 +28,8 @@ Presets should choose appropriate workflows and labels. They should never imply 
 
 ## Duplication: keep, consolidate or investigate
 
-1. **Keep the four selling screens.** Combining them would burden a supermarket cashier with preparation/table controls and a restaurant with stock-checkout assumptions. Square's modes and Loyverse's open-ticket approach also illustrate legitimate workflow variation.
-2. **Keep one shared stock/payment foundation.** The repository already routes restaurant, counter and service jobs through shared POS modules; `CounterService` also serves restaurant menu configuration. Do not describe these as four independently implemented POS engines.
+1. **Keep the five selling screens distinct.** Combining them would burden a supermarket cashier with preparation/table controls and a restaurant with stock-checkout assumptions. Square's modes and Loyverse's open-ticket approach also illustrate legitimate workflow variation.
+2. **Keep one shared stock/payment foundation.** The repository already routes restaurant, counter and service jobs through shared POS modules; `CounterService` also serves restaurant menu configuration. Do not describe the five selling workspaces as independently implemented POS engines.
 3. **Reuse food offerings explicitly.** Counter and restaurant menus remain separate. Owners/admins can now preview and copy selected offerings, extras and recipes into the destination draft, then save through the existing menu workflow. Same-name and previously copied source items are blocked; independent edits and submitted-order snapshots are preserved. Automatic linked updates are not implemented.
 4. **Reduce platform adapter repetition incrementally.** Browser and Android have separate API, sync and persistence orchestration, despite sharing business modules. Extract common sync command/capability handling and define adapter contracts when changing these areas. Retain native storage, session and printing differences. Do not undertake a wholesale rewrite solely to reduce line count.
 5. **Keep distinct printed documents.** A preparation ticket, unpaid bill, invoice and payment receipt have different meanings. Reuse rendering/layout primitives while preserving document identity and financial content rules.

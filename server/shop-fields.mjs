@@ -34,12 +34,12 @@ export function normalizeFields(fields, industry, itemLabel) {
     result.push({ id: field.id, label: String(field.label || core?.label || 'Custom field').trim().slice(0, 80),
       type: core?.type || (['text', 'number', 'date', 'select'].includes(field.type) ? field.type : 'text'),
       placeholder: String(field.placeholder || '').slice(0, 120), locked: Boolean(core?.locked),
-      visible: core?.locked ? true : field.visible !== false, required: core?.locked ? true : Boolean(field.required),
+      visible: core?.locked || core?.id === 'category' ? true : field.visible !== false, required: core?.locked ? true : Boolean(field.required),
       options: Array.isArray(field.options) ? [...new Set(field.options.filter(option => typeof option === 'string').map(option => option.trim()).filter(Boolean))].slice(0, 40) : [],
     })
   }
   // Missing essential fields cannot disable inventory accounting.
-  for (const core of coreFields) if (!seen.has(core.id)) result.push({ ...core, visible: core.locked })
+  for (const core of coreFields) if (!seen.has(core.id)) result.push({ ...core, visible: core.locked || core.id === 'category' })
   return result
 }
 

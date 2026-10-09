@@ -1,10 +1,11 @@
 # Choosing and using a workspace
 
-Workspace selection and Overview include familiar examples: Product sales for supermarkets, mini-marts and retail shops; Payments & receipts for printing presses, church offices and service businesses; Order counter for fast food, cafes and takeaways; Tables & tabs for restaurants, bars and lounges. These are examples, not restrictions. Daily transaction screens retain the short workflow names. Choose by the way the business takes a sale, rather than its industry. Owners enable the required screens under Business settings > Workspaces. A business can enable more than one. Configuration stays in Business settings and product management; cashiers use the transaction screens.
+Stockroom has five selling workspaces: Product sales, Oil sales, Payments & receipts, Order counter, and Tables & tabs. Product sales is for supermarkets, mini-marts and retail shops; Oil sales is a separate measured and container sales screen for oil businesses; Payments & receipts is for printing presses and other service businesses; Order counter is for fast food, cafes and takeaways; Tables & tabs is for restaurants, bars and lounges. These are examples, not restrictions. Choose by the way the business takes a sale. Owners configure available screens under Business settings > Workspaces; the available combinations depend on the selected business type. Configuration stays in Business settings and product management; cashiers use the transaction screens.
 
 | Workspace | Use it when | Everyday flow |
 | --- | --- | --- |
 | Product sales | You sell stocked products | Scan or choose products, review the basket, take payment, print the receipt. |
+| Oil sales | You sell oil by measured quantity or configured container | Choose or scan oil products, enter quantity, apply configured customer or bulk rates, and complete the sale. |
 | Payments & receipts | You record payment for descriptions entered by staff, without changing stock | Enter descriptions, quantities and unit prices, choose payment method, save and print. |
 | Order counter | You sell from a configured menu and track preparation and collection | Build an order, send and take payment (or collect payment later), follow preparation and hand over. |
 | Tables & tabs | Customers have open bills with repeated orders | Choose a table or named tab, add rounds, take payment, close the bill when items are served and paid. |
@@ -12,6 +13,10 @@ Workspace selection and Overview include familiar examples: Product sales for su
 ## Product sales
 
 Open Product sales in Daily work. Scan or tap products to add them to the basket. Change quantities in the basket and select Take payment. Customer selection, discounts and notes are under Customer, discount and note (optional); applied amounts remain visible in the totals. Choose Cash, POS, Transfer or another owner-enabled method. Manual POS payment keeps the provider, receipt reference, reference scanner and receipt photo controls. The connected Paystack POS has its own send/verification controls. Complete sale records the sale and issues its receipt. The existing customer display follows this basket.
+
+## Oil sales
+
+Oil sales is a standalone screen enabled for the wholesale/retail oil business type. It supports measured quantities and configured containers, with the saved bulk and customer pricing rules. It can be enabled alongside standard Product sales and Payments & receipts. For oil businesses, open Business settings > Workspaces > Customise workspaces (optional) and choose the separate Product sales and Payments & receipts options as needed. Other business types do not show Oil sales as a separate screen.
 
 ## Payments & receipts
 
@@ -29,7 +34,7 @@ Choose a table or open a named tab, then add orders to its bill. Take payment op
 
 Owners configure Business, Workspaces and Sales. Owners and admins configure Receipts, Devices and enabled menus/recipes/tables where existing permissions allow it. Product variants and extras are under product management. Cash register has its own daily-work screen for opening cash, movements and closing counts. Sales history contains receipt records, customer history and authorised returns.
 
-These names describe workflows, not full industry packages. Order counter still uses the existing menu/preparation model; Tables & tabs manages open bills, not hotel reservations or club memberships. Validate the four workflows with real staff and hardware before adding another sector.
+These names describe workflows, not full industry packages. Order counter still uses the existing menu/preparation model; Tables & tabs manages open bills, not hotel reservations or club memberships. Oil sales handles oil quantities, containers and pricing; it does not integrate with pumps or meters. Validate the five selling workspaces with real staff and hardware before adding another sector.
 
 ## Visual guidance
 
@@ -37,9 +42,9 @@ Product sales uses green, Payments & receipts blue, Order counter orange and Tab
 
 ## Business presets
 
-Owners can open Business settings > Workspaces > Start with your business, choose a preset and preview it. Apply preset and start selling saves the workspace choice and opens its selling screen. Retail/supermarket uses Product sales; printing/services uses Payments & receipts; takeaway uses Order counter; restaurant/bar uses Tables & tabs.
+Owners can open Business settings > Workspaces > Start with your business, choose a preset and preview it. Apply preset and start selling saves the workspace choice and opens its selling screen. Retail/supermarket uses Product sales; wholesale/retail oil uses Oil sales; printing/services uses Payments & receipts; takeaway uses Order counter; restaurant/bar uses Tables & tabs.
 
-Applying a preset hides other selling screens without deleting their records. Existing product fields and custom catalogue configuration are retained. Menu items, recipes, tables, receipts, payment settings, devices and branding are not replaced. Add actual menu items/prices or tables in the relevant settings tab. Extra workspaces can be enabled below the preset chooser. Sharing settings with other devices still uses Sync now. Presets do not implement hotel bookings or other sector-specific operations.
+Applying a preset hides other selling screens without deleting their records. Existing product fields and custom catalogue configuration are retained. Menu items, recipes, tables, receipts, payment settings, devices and branding are not replaced. Add actual menu items/prices or tables in the relevant settings tab. To combine workflows, scroll to **Customise workspaces (optional)**. For non-oil business types, choose Product sales, Payments & receipts, or both in **Payment screens**, then use the separate Order counter and Tables & tabs checkboxes. For oil businesses, Oil sales stays available; check the separate Product sales and Payments & receipts options to add those screens. Select **Save workspaces** and use **Sync now** to share settings. Presets do not implement hotel bookings or other sector-specific operations.
 
 ## Payments and data updates
 
