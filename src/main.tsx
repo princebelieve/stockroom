@@ -689,10 +689,19 @@ function App() {
   const subscriptionApiUrl = !isBrowserPwa() && !isNativeMobile() ? '/api/cloud' : __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
   const linkedBusinessId = businessIdFromAccessToken(cloudAccessToken) || user?.organizationId || ''
   useEffect(() => {
-    const linkedScreen=new URLSearchParams(window.location.search).get('screen');const targetScreen=({ 'retail-orders':'RetailOrders',customers:'Wallet',counter:'Counter',restaurant:'Restaurant' } as const)[linkedScreen as 'retail-orders'|'customers'|'counter'|'restaurant'];if(targetScreen&&user&&screenAllowedForUser(targetScreen,user))setActive(targetScreen)
-    if (new URLSearchParams(window.location.search).get('screen') === 'subscription' && user?.role === 'owner') setActive('Subscription')
-    if (new URLSearchParams(window.location.search).get('screen') === 'account-deletion' && user?.role === 'owner') setActive('Account')
-  }, [user?.role])
+    if (!user) return
+    const url = new URL(window.location.href)
+    const linkedScreen = url.searchParams.get('screen')
+    const targetScreen = ({ 'retail-orders':'RetailOrders', customers:'Wallet', counter:'Counter', restaurant:'Restaurant' } as const)[linkedScreen as 'retail-orders'|'customers'|'counter'|'restaurant']
+    let handled = false
+    if (targetScreen && screenAllowedForUser(targetScreen, user)) { setActive(targetScreen); handled = true }
+    else if (linkedScreen === 'subscription' && user.role === 'owner') { setActive('Subscription'); handled = true }
+    else if (linkedScreen === 'account-deletion' && user.role === 'owner') { setActive('Account'); handled = true }
+    if (handled) {
+      url.searchParams.delete('screen')
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+  }, [user?.id, user?.role])
 
   useEffect(() => {
     // Restore cloud identity once per locally restored session. This is not a

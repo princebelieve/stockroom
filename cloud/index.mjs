@@ -618,9 +618,10 @@ const server = createServer(async (request, response) => {
       const businessId = query.get('businessId') || ''
       if (!businessId || claims.businessId !== businessId) return send(response, 403, { error: 'Token does not authorize this business.' })
       const current = await businessSettings.findOne({ businessId })
-      if (current?.settings) return send(response, 200, { settings: current.settings })
+      if (current?.settings) return send(response, 200, { settings: current.settings, hasHistory: true })
       const latest = await operations.find({ businessId, entityType: 'settings', action: 'upsert' }).sort({ createdAt: -1, _id: -1 }).limit(1).next()
-      return send(response, 200, { settings: latest?.payload || null })
+      const hasHistory = Boolean(latest || await operations.findOne({ businessId }, { projection: { _id: 1 } }))
+      return send(response, 200, { settings: latest?.payload || null, hasHistory })
     }
     if (request.method === 'POST' && request.url === '/v1/devices/enroll') {
       if (!isAccess(claims)) return send(response, 403, { error: 'Sign-in required.' })

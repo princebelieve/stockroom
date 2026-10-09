@@ -85,6 +85,31 @@ test('sync identifies queued setup changes separately from business activity', a
   assert.ok(activity.pending>activity.pendingSettings)
 })
 
+test('a deployment recovery does not queue default settings over existing cloud history', async () => {
+  let checkedCloudState = false
+  const cloud = createServer((request, response) => {
+    response.setHeader('Content-Type', 'application/json')
+    if (request.url.startsWith('/v1/business/settings')) {
+      checkedCloudState = true
+      return response.end(JSON.stringify({ settings: null, hasHistory: true }))
+    }
+    if (request.url.startsWith('/v1/sync/pull')) return response.end(JSON.stringify({ operations: [], cursor: '' }))
+    if (request.url.startsWith('/v1/till-recovery/bind')) { response.writeHead(404); return response.end('{}') }
+    response.writeHead(404); response.end('{}')
+  })
+  cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening'); subscriptionClouds.push(cloud)
+  const { baseUrl } = await startBusiness({ syncApiUrl: `http://127.0.0.1:${cloud.address().port}` })
+  let status
+  for (let attempt = 0; attempt < 40; attempt++) {
+    status = (await json(`${baseUrl}/api/sync/status`)).body
+    if (checkedCloudState) break
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  assert.equal(checkedCloudState, true)
+  assert.equal(status.pendingSettings, 0)
+  assert.equal(status.pending, 0)
+})
+
 test('saving a setup step preserves previously configured business and device settings', async () => {
   const { baseUrl,dataDirectory }=await startBusiness()
   const token=await createOwner(baseUrl)

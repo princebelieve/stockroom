@@ -92,11 +92,11 @@ async function pullRemoteChanges({ url, token, businessId, deviceId }) {
 // Never let that empty database publish a default settings snapshot over an
 // established cloud business. A snapshot is created only after the cloud
 // positively confirms that this is a brand-new business.
-async function cloudHasBusinessSettings({ url, token, businessId }) {
+async function cloudHasBusinessState({ url, token, businessId }) {
   const response = await fetch(`${url}/v1/business/settings?businessId=${encodeURIComponent(businessId)}`, { headers: { Authorization: `Bearer ${token}` } })
   if (!response.ok) throw new Error(`Cloud settings check failed (${response.status}).`)
   const result = await response.json()
-  return Boolean(result?.settings)
+  return Boolean(result?.settings || result?.hasHistory)
 }
 
 export async function pullLatest() {
@@ -116,7 +116,7 @@ export async function syncNow(tillId) {
   try {
     await registerCheckoutTill({ url, token }, tillId)
     const headers = { 'Content-Type': 'application/json', 'X-Stockroom-Staff-Permissions':'staff-permissions-v1', Authorization: `Bearer ${token}` }
-    if (!existingBusiness && !(await cloudHasBusinessSettings({ url, token, businessId }))) await queueInitialSettingsSnapshot()
+    if (!existingBusiness && !(await cloudHasBusinessState({ url, token, businessId }))) await queueInitialSettingsSnapshot()
     while (true) {
     const pending = getPendingSyncOperations()
     if (!pending.length) break
