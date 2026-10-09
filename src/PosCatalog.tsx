@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Search, ScanLine, Plus } from 'lucide-react'
+import { Search, ScanLine, Plus, PackagePlus } from 'lucide-react'
 import type { Product } from './types'
+import type { ProductDraft } from './lib/productIntake'
 
-export function PosCatalog({ products, matches, query, setQuery, cart, add, scan, scanKey, acceptBarcode, money, options = [], oilMode = false }: {
+export function PosCatalog({ products, matches, query, setQuery, cart, add, scan, scanKey, acceptBarcode, money, options = [], oilMode = false, canAddProduct = false, addMissing }: {
   products: Product[]; matches: Product[]; query: string; setQuery: (value: string) => void; cart: Record<string, number>;
   add: (product: Product) => void; scan: () => void; scanKey: string; acceptBarcode: (code: string) => void; money: (amount: number) => string;
-  options?: Array<{ productId: string; variantGroup?: string; variantLabel?: string }>; oilMode?: boolean
+  options?: Array<{ productId: string; variantGroup?: string; variantLabel?: string }>; oilMode?: boolean; canAddProduct?: boolean; addMissing?: (draft: ProductDraft) => void
 }) {
   const [category, setCategory] = useState('')
   const [variantGroup, setVariantGroup] = useState('')
@@ -29,6 +30,6 @@ export function PosCatalog({ products, matches, query, setQuery, cart, add, scan
         <span className="pos-product-bottom"><b>{money(product.price)}{factor > 1 ? ` / ${product.saleUnit}` : ''}</b><Plus size={18} /></span>
       </button>
     })}</div>
-    {!visible.length && <div className="empty-state"><strong>{products.length ? 'No matching products' : 'No products yet'}</strong><p>{products.length ? 'Try another name, barcode or category.' : 'Add products in Inventory to start selling.'}</p>{products.length > 0 && <button type="button" className="filter-button" onClick={() => { setQuery(''); setCategory('') }}>Show all products</button>}</div>}
+    {!visible.length && <div className="empty-state pos-catalog-empty"><PackagePlus size={38} aria-hidden="true"/><strong>{products.length ? query.trim() ? 'New product?' : 'No matching products' : 'No products yet'}</strong><p>{products.length ? query.trim() ? 'Save this item once, then return to the sale with it ready.' : 'Try another name, barcode or category.' : 'Add products in Inventory to start selling.'}</p>{products.length > 0 && query.trim() && canAddProduct && <button type="button" className="primary-button" onClick={() => addMissing?.({ name: '', barcode: query.trim() })}>Add this product <Plus size={17}/></button>}{products.length > 0 && <button type="button" className="filter-button" onClick={() => { setQuery(''); setCategory('') }}>Show all products</button>}{products.length === 0 && canAddProduct && <button type="button" className="primary-button" onClick={() => addMissing?.({name:'',barcode:query.trim()})}>Add product <Plus size={17}/></button>}</div>}
   </div>
 }
