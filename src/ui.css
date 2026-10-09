@@ -1,16 +1,16 @@
-/* Shared visual language: owner colours are accents, not every surface. */
-:root { --brand-primary:#176b73; --brand-secondary:#8257b7; --ink:#192e49; --paper:#ffffff; --muted:#536374; --line:#dce3eb; --mint:#e7f2f1; --lime:#9ddbcc; --brand-hover:#24516b; --brand-accent:#78b7cb; }
-.app-shell,.portal { background:#f5f7fa; color:#213247; }
+/* Business colour leads actions and selection; warm paper surfaces keep screens readable. */
+:root { --brand-primary:#176b73; --brand-dark:#17352d; --brand-on-primary:#ffffff; --brand-on-hover:#ffffff; --brand-secondary:#8257b7; --ink:#192e49; --paper:#fffdf8; --muted:#536374; --line:#e3e2d8; --mint:#e7f2e8; --lime:#d5e95c; --brand-hover:#24516b; --brand-accent:#f0a34a; }
+.app-shell,.portal { background:#f4f1e8; color:#213247; }
 .app-shell .main-content { padding:24px clamp(16px,3vw,40px) 72px; }
 .app-shell .hero-row { margin:24px 0 18px; }
-.app-shell .panel,.portal .portal-panel { border:1px solid var(--line); background:var(--paper); border-radius:14px; box-shadow:0 3px 12px #172b4505; }
+.app-shell .panel,.portal .portal-panel { border:1px solid var(--line); border-radius:14px; box-shadow:0 5px 20px #172b4510; }
 .app-shell .panel { padding:22px; }
 .app-shell .metric-card { min-height:112px; padding:18px; border-top:3px solid var(--brand-primary); }
 .app-shell .metric-card:nth-child(3n+2) { border-top-color:var(--brand-secondary); }
-.app-shell .metric-card:nth-child(3n) { border-top-color:#d68130; }
+.app-shell .metric-card:nth-child(3n) { border-top-color:var(--brand-accent); }
 .app-shell .metric-card strong { margin:10px 0 6px; }
-.app-shell .primary-button,.portal .portal-btn:not(.secondary) { background:var(--brand-primary); color:white; }
-.app-shell .primary-button:hover,.portal .portal-btn:not(.secondary):hover { background:var(--brand-hover); }
+.app-shell .primary-button,.portal .portal-btn:not(.secondary) { background:var(--brand-primary); color:var(--brand-on-primary,#fff); }
+.app-shell .primary-button:hover,.portal .portal-btn:not(.secondary):hover { background:var(--brand-hover); color:var(--brand-on-hover,var(--brand-on-primary,#fff)); }
 .app-shell .primary-button:disabled { opacity:.55; }
 .app-shell .subscription-cta,.app-shell .subscription-referral-button { animation:none; }
 .app-shell .sidebar { background:var(--ink); padding:22px 14px; width:246px; }
@@ -19,8 +19,8 @@
 .sidebar .navigation-parent span { margin-left:auto; }
 .sidebar .sidebar-subnav { padding:4px 0 8px 12px; margin:0; border-left:1px solid #ffffff25; }
 .sidebar .sidebar-subnav .nav-item,.sidebar .sidebar-subnav a { width:100%; padding:10px; font-size:13px; min-height:40px; }
-.sidebar .nav-item:hover { background:#ffffff15; color:white; }
-.sidebar .nav-item.active,.sidebar .nav-item.active:hover { background:var(--mint); color:var(--ink); font-weight:700; box-shadow:inset 4px 0 var(--brand-primary); }
+.sidebar .nav-item:hover { background:var(--brand-hover); color:var(--brand-on-hover,var(--brand-on-primary,#fff)); }
+.sidebar .nav-item.active,.sidebar .nav-item.active:hover { background:var(--brand-primary); color:var(--brand-on-primary,#fff); font-weight:700; box-shadow:inset 4px 0 var(--brand-dark,var(--ink)); }
 .sidebar .nav-item.active b { background:var(--ink); color:var(--mint); }
 .sidebar .nav-item:focus-visible { outline:2px solid var(--brand-accent); outline-offset:2px; }
 .sidebar .sidebar-subnav a:hover { background:#ffffff15; }

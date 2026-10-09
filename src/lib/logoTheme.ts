@@ -1,4 +1,4 @@
-const themeProperties = ['--ink', '--mint', '--lime', '--brand-hover', '--brand-accent', '--brand-primary', '--brand-secondary'] as const
+const themeProperties = ['--ink', '--mint', '--lime', '--brand-hover', '--brand-accent', '--brand-primary', '--brand-secondary', '--brand-dark', '--brand-on-primary', '--brand-on-hover'] as const
 
 function resetTheme() {
   for (const property of themeProperties) document.documentElement.style.removeProperty(property)
@@ -14,6 +14,21 @@ function rgbToHsl(red: number, green: number, blue: number) {
   const lightness = (max + min) / 2
   const saturation = delta ? delta / (1 - Math.abs(2 * lightness - 1)) : 0
   return { hue, saturation: Math.round(saturation * 100), lightness: Math.round(lightness * 100) }
+}
+
+function hslToRgb(hue: number, saturation: number, lightness: number) {
+  const s = saturation / 100; const l = lightness / 100
+  const chroma = (1 - Math.abs(2 * l - 1)) * s
+  const segment = hue / 60
+  const x = chroma * (1 - Math.abs(segment % 2 - 1))
+  const [red, green, blue] = segment < 1 ? [chroma, x, 0] : segment < 2 ? [x, chroma, 0] : segment < 3 ? [0, chroma, x] : segment < 4 ? [0, x, chroma] : segment < 5 ? [x, 0, chroma] : [chroma, 0, x]
+  const offset = l - chroma / 2
+  return [red, green, blue].map(channel => channel + offset)
+}
+
+function luminance(channels: number[]) {
+  const linear = channels.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
 }
 
 async function dominantLogoColor(source: string) {
@@ -46,17 +61,30 @@ export async function applyLogoTheme(logoData: string, brandColor = '') {
   resetTheme()
   if (!logoData && !brandColor) return
   try {
-    const { hue, saturation } = /^#[a-f0-9]{6}$/i.test(brandColor) ? rgbToHsl(parseInt(brandColor.slice(1,3),16),parseInt(brandColor.slice(3,5),16),parseInt(brandColor.slice(5,7),16)) : await dominantLogoColor(logoData)
+    const hasExplicitBrandColor = /^#[a-f0-9]{6}$/i.test(brandColor)
+    const { hue, saturation, lightness } = hasExplicitBrandColor ? rgbToHsl(parseInt(brandColor.slice(1,3),16),parseInt(brandColor.slice(3,5),16),parseInt(brandColor.slice(5,7),16)) : await dominantLogoColor(logoData)
     if (revision !== themeRevision) return
-    const vividness = Math.max(42, Math.min(78, saturation))
+    const vividness = saturation < 18 ? saturation : Math.max(58, Math.min(88, saturation))
+    const brandLightness = Math.max(42, Math.min(54, lightness))
+    const hoverLightness = Math.max(36, brandLightness - 6)
+    const brandRgb = hslToRgb(hue, vividness, brandLightness)
+    const brandLuminance = luminance(brandRgb)
+    const whiteContrast = 1.05 / (brandLuminance + 0.05)
+    const darkContrast = (brandLuminance + 0.05) / (luminance([23 / 255, 53 / 255, 45 / 255]) + 0.05)
+    const hoverLuminance = luminance(hslToRgb(hue, vividness, hoverLightness))
+    const whiteHoverContrast = 1.05 / (hoverLuminance + 0.05)
+    const darkHoverContrast = (hoverLuminance + 0.05) / (luminance([23 / 255, 53 / 255, 45 / 255]) + 0.05)
     const root = document.documentElement
-    root.style.setProperty('--brand-primary', `hsl(${hue} ${Math.min(65, vividness)}% 27%)`)
-    root.style.setProperty('--brand-secondary', `hsl(${(hue+150)%360} 48% 42%)`)
+    root.style.setProperty('--brand-primary', `hsl(${hue} ${vividness}% ${brandLightness}%)`)
+    root.style.setProperty('--brand-secondary', `hsl(${(hue+150)%360} ${Math.max(54, Math.min(76, vividness))}% 50%)`)
+    root.style.setProperty('--brand-dark', `hsl(${hue} ${Math.min(58, vividness)}% 21%)`)
+    root.style.setProperty('--brand-on-primary', whiteContrast >= darkContrast ? '#ffffff' : '#17352d')
+    root.style.setProperty('--brand-on-hover', whiteHoverContrast >= darkHoverContrast ? '#ffffff' : '#17352d')
     root.style.setProperty('--ink', `hsl(${hue} ${Math.min(52, vividness)}% 20%)`)
-    root.style.setProperty('--brand-hover', `hsl(${hue} ${Math.min(58, vividness)}% 29%)`)
-    root.style.setProperty('--brand-accent', `hsl(${hue} ${vividness}% 62%)`)
-    root.style.setProperty('--mint', `hsl(${hue} ${Math.min(48, vividness)}% 91%)`)
-    root.style.setProperty('--lime', `hsl(${hue} ${Math.min(65, vividness)}% 72%)`)
+    root.style.setProperty('--brand-hover', `hsl(${hue} ${vividness}% ${hoverLightness}%)`)
+    root.style.setProperty('--brand-accent', `hsl(${hue} ${vividness}% 66%)`)
+    root.style.setProperty('--mint', `hsl(${hue} ${Math.min(58, vividness)}% 92%)`)
+    root.style.setProperty('--lime', `hsl(${hue} ${Math.min(78, vividness)}% 74%)`)
     root.dataset.logoTheme = 'active'
   } catch {
     if (revision === themeRevision) resetTheme()

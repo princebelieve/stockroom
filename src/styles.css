@@ -291,8 +291,8 @@ body { background: #dfece5; }
 .login-screen { background: #f5f7fa; }
 .login-card { border: 1px solid var(--line); background: var(--paper); box-shadow: 0 12px 36px rgba(25, 46, 73, .08); }
 .login-card .brand-mark { background: var(--brand-primary); color: #fff; }
-.login-card .primary-button { justify-content: center; border: 1px solid var(--brand-primary); border-radius: 8px; background: var(--brand-primary); box-shadow: none; }
-.login-card .primary-button:hover { background: var(--brand-hover); box-shadow: none; }
+.login-card .primary-button { justify-content: center; border: 1px solid var(--brand-primary); border-radius: 8px; background: var(--brand-primary); color:var(--brand-on-primary,#fff); box-shadow: none; }
+.login-card .primary-button:hover { background: var(--brand-hover); color:var(--brand-on-hover,var(--brand-on-primary,#fff)); box-shadow: none; }
 .registration-card { width: min(440px, 100%); }
 .registration-card .settings-form { margin-top: 22px; }
 .registration-card .auth-error { padding: 13px 14px; border: 1px solid #f1c7bb; background: #fff4f0; line-height: 1.5; }
