@@ -394,6 +394,9 @@ test('custom product values validate, persist, synchronize and survive field rem
   assert.equal((await request('/api/products', input, 'POST')).response.status, 400)
   const created = await request('/api/products', { ...input, customValues: { [field.id]: 'Gloss' } }, 'POST')
   assert.equal(created.response.status, 201)
+  const generated = await request('/api/products', { ...input, name: 'Nigerian Indomie Noodles Chicken Flavor 70g Pack of 40', sku: '', customValues: { [field.id]: 'Gloss' } }, 'POST')
+  assert.equal(generated.response.status, 201)
+  assert.match(generated.body.sku, /^SKU-[A-F0-9]{12}$/)
   const id = created.body.id
   let rows = (await json(`${baseUrl}/api/products`, { headers })).body.products
   assert.equal(JSON.parse(rows.find(row => row.id === id).customValues)[field.id], 'Gloss')

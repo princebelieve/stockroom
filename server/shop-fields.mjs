@@ -35,6 +35,12 @@ export function templateFields(industry = 'general', itemLabel = 'Product') {
   }[industry] || [lookupField('brand', 'Brand', 'brand'), lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('package_size', 'Package size', 'quantity'), lookupField('product_description', 'Product description', 'description'), lookupField('product_image', 'Product image URL', 'imageUrl')]
   return [...coreFields.map(field => ({ ...field, label: field.id === 'name' ? `${itemLabel} name` : field.label })),
     ...lookupFields,
+    // EcomSource and other product catalogues can return measurable product
+    // details and feature bullets. Keep these editable, separate from the
+    // owner's inventory cost, selling price, and stock fields.
+    lookupField('product_weight', 'Product weight', 'weight'),
+    lookupField('product_dimensions', 'Product dimensions', 'dimensions'),
+    lookupField('product_features', 'Product features', 'features'),
     ...extras.map(([id, label, type = 'text', lookupKey]) => ({ id: `custom_${industry.replaceAll('-', '_')}_${id}`, label, type, placeholder: '', required: false, visible: true, locked: false, options: [], ...(lookupKey ? { lookupKey } : {}) }))]
 }
 
@@ -78,7 +84,7 @@ export function validateFields(fields) {
     if (typeof field.label !== 'string' || !field.label.trim() || field.label.length > 80 || typeof field.placeholder !== 'string' || field.placeholder.length > 120) throw new Error('Use a label up to 80 characters and a placeholder up to 120 characters.')
     if (!['text', 'number', 'date', 'select'].includes(field.type) || (core && field.type !== core.type)) throw new Error('Choose a valid field type. Built-in field types cannot change.')
     if (core?.locked && (field.visible === false || !field.required)) throw new Error(`${core.label} is needed for stock and sales.`)
-    if (field.lookupKey !== undefined && (typeof field.lookupKey !== 'string' || !['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass'].includes(field.lookupKey))) throw new Error('Choose a supported product lookup field.')
+    if (field.lookupKey !== undefined && (typeof field.lookupKey !== 'string' || !['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass','weight','dimensions','features'].includes(field.lookupKey))) throw new Error('Choose a supported product lookup field.')
     if (!Array.isArray(field.options) || field.options.length > 40 || field.options.some(option => typeof option !== 'string' || !option.trim() || option.length > 80)) throw new Error('Use up to 40 short dropdown choices.')
     if (field.type === 'select' && !field.options.length) throw new Error(`Add dropdown choices for ${field.label}.`)
   }

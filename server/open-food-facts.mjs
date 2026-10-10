@@ -30,8 +30,10 @@ export async function lookupOpenFoodFacts(barcode, industry = 'general') {
   const timer = setTimeout(() => controller.abort(), 12000)
   try {
     const result = await lookupCatalogues(barcode, controller.signal, industry)
-    if (result.status === 200) {
-      responseCache.set(cacheKey, { result, expiresAt: Date.now() + 60_000 })
+    if (result.status === 200 || result.status === 404) {
+      // Cache both matches and confirmed misses briefly. Repeated scans of an
+      // uncatalogued barcode should not spend provider quota over and over.
+      responseCache.set(cacheKey, { result, expiresAt: Date.now() + (result.status === 200 ? 60_000 : 5 * 60_000) })
       if (responseCache.size > 5000) for (const [key, value] of responseCache) if (value.expiresAt <= Date.now()) responseCache.delete(key)
     }
     return result
@@ -43,6 +45,10 @@ export async function lookupOpenFoodFacts(barcode, industry = 'general') {
 }
 
 async function getJson(url, signal) {
+  const provider = new AbortController()
+  const timeout = setTimeout(() => provider.abort(), 5000)
+  const abortFromParent = () => provider.abort()
+  signal.addEventListener('abort', abortFromParent, { once: true })
   try {
     if (new URL(url).hostname === 'world.openfoodfacts.org') {
       const minuteAgo = Date.now() - 60_000
@@ -51,13 +57,27 @@ async function getJson(url, signal) {
       if (recentFoodFactsReads.length >= 12) return { __lookupUnavailable: true }
       recentFoodFactsReads.push(Date.now())
     }
-    const response = await fetch(url, { headers: { 'User-Agent': userAgent, Accept: 'application/json' }, signal })
+    const response = await fetch(url, { headers: { 'User-Agent': userAgent, Accept: 'application/json' }, signal: provider.signal })
     if (!response.ok) return { __lookupUnavailable: response.status !== 404 }
     const body = await response.json().catch(() => null)
     return body || { __lookupUnavailable: true }
   } catch (error) {
     if (signal.aborted) throw error
     return { __lookupUnavailable: true }
+  } finally {
+    clearTimeout(timeout)
+    signal.removeEventListener('abort', abortFromParent)
+  }
+}
+
+function providerRequestSignal(parent, timeoutMs = 5000) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const abortFromParent = () => controller.abort()
+  parent.addEventListener('abort', abortFromParent, { once: true })
+  return {
+    signal: controller.signal,
+    close() { clearTimeout(timeout); parent.removeEventListener('abort', abortFromParent) },
   }
 }
 
@@ -82,12 +102,15 @@ async function lookupUpcItemDb(barcode, signal) {
     : undefined
   let data
   let httpStatus = 0
+  const provider = providerRequestSignal(signal)
   try {
-    const response = await fetch(url, { headers: { 'User-Agent': userAgent, Accept: 'application/json', ...headers }, signal })
+    const response = await fetch(url, { headers: { 'User-Agent': userAgent, Accept: 'application/json', ...headers }, signal: provider.signal })
     httpStatus = response.status
     data = await response.json().catch(() => null)
   } catch (error) {
     if (signal.aborted) throw error
+  } finally {
+    provider.close()
   }
   const item = data?.code === 'OK' && Array.isArray(data.items)
     ? data.items.find(candidate => [candidate.upc, candidate.ean, candidate.gtin].some(code => sameBarcode(code, barcode)))
@@ -134,6 +157,7 @@ async function lookupEcomSource(barcode, signal) {
   lastEcomSourceRead = Date.now()
   let data
   let httpStatus = 0
+  const provider = providerRequestSignal(signal)
   try {
     const response = await fetch('https://api.ecomsource.ai/api/v1/search/product', {
       method: 'POST',
@@ -144,18 +168,21 @@ async function lookupEcomSource(barcode, signal) {
         Accept: 'application/json',
       },
       body: JSON.stringify({ identifier: barcode, identifierType: ecomSourceIdentifierType(barcode), refresh: false }),
-      signal,
+      signal: provider.signal,
     })
     httpStatus = response.status
     data = await response.json().catch(() => null)
   } catch (error) {
     if (signal.aborted) throw error
+  } finally {
+    provider.close()
   }
   const records = Array.isArray(data?.data) ? data.data : data?.data ? [data.data] : []
   const record = records.find(candidate => Array.isArray(candidate.identifiers)
     && candidate.identifiers.some(identifier => sameBarcode(String(identifier?.identifier || ''), barcode)))
   const summary = Array.isArray(record?.summary) ? record.summary[0] : record?.summary
   const title = summary?.itemName || summary?.brand || summary?.modelNumber
+  const packageSize = extractPackageSize(title)
   const product = record && title ? {
     name: String(title).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(),
     attributes: {
@@ -165,6 +192,8 @@ async function lookupEcomSource(barcode, signal) {
       category: summary?.category,
       description: summary?.htmlDescription,
       imageUrl: Array.isArray(record.images) ? record.images[0]?.link : undefined,
+      ...(packageSize ? { packageSize, quantity: packageSize } : {}),
+      ...ecomPhysicalAttributes(record),
     },
   } : null
   const limited = httpStatus === 429
@@ -178,12 +207,37 @@ async function lookupEcomSource(barcode, signal) {
 }
 
 function lookupAttributes(values) {
-  const allowed = ['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass','category']
+  const allowed = ['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass','category','weight','dimensions','features']
   return Object.fromEntries(allowed.flatMap(key => {
     const value = values?.[key]
     const text = Array.isArray(value) ? value.filter(Boolean).join(', ') : String(value || '').replace(/\s+/g, ' ').trim()
     return text ? [[key, text.slice(0, 2000)]] : []
   }))
+}
+
+function ecomPhysicalAttributes(record) {
+  const dimensions = Array.isArray(record?.dimensions) ? record.dimensions : []
+  const dimensionText = dimensions.map(item => {
+    const parts = [
+      item?.height != null ? `height ${item.height}` : '',
+      item?.width != null ? `width ${item.width}` : '',
+      item?.length != null ? `length ${item.length}` : '',
+    ].filter(Boolean)
+    return parts.length ? `${item?.type ? `${item.type}: ` : ''}${parts.join(', ')} (unit not supplied)` : ''
+  }).filter(Boolean).join('; ')
+  const weights = dimensions.filter(item => item?.weight != null).map(item => `${item.type ? `${item.type}: ` : ''}${item.weight} (unit not supplied)`)
+  const bulletPoints = record?.attributes?.bulletPoint
+  const features = Array.isArray(bulletPoints) ? bulletPoints.map(item => item?.value).filter(value => typeof value === 'string' && value.trim()).join('; ') : ''
+  return {
+    ...(dimensionText ? { dimensions: dimensionText } : {}),
+    ...(weights.length ? { weight: weights.join('; ') } : {}),
+    ...(features ? { features } : {}),
+  }
+}
+
+function extractPackageSize(title) {
+  const matches = String(title || '').match(/\b\d+(?:[.,]\d+)?\s*(?:x|×)\s*\d+(?:[.,]\d+)?\s*(?:kg|g|mg|µg|mcg|lb|lbs|oz|l|litres?|liters?|ml|cl)\b|\b\d+(?:[.,]\d+)?\s*(?:kg|g|mg|µg|mcg|lb|lbs|oz|litres?|liters?|ml|cl|l)\b|\b(?:pack|case|box|set)\s+of\s+\d+\b/gi) || []
+  return [...new Set(matches.map(value => value.replace(/\s+/g, ' ').trim()))].join(', ')
 }
 
 function suggestion(code, name, source, attributes = {}) {
@@ -229,9 +283,22 @@ function catalogueRank(industry, type) {
       ? ['product', 'food', 'beauty', 'petfood']
       : industry === 'drinks' || industry === 'grocery' || industry === 'supermarket' || industry === 'food-service' || industry === 'bakery' || industry === 'food-manufacturing'
         ? ['food', 'product', 'beauty', 'petfood']
-        : ['product', 'food', 'beauty', 'petfood']
+        : ['product', 'beauty', 'food', 'petfood']
   const index = preference.indexOf(typeName.replace('open ', '').replace(' facts', '').replace(' facts', ''))
   return index < 0 ? 5 : index
+}
+
+function providerProductType(attributes, name) {
+  const category = String(attributes?.category || '').toLowerCase()
+  if (/beauty|personal care|cosmetic|oral care|skin care|skincare/.test(category)) return 'beauty'
+  if (/food|grocery|beverage|noodle|snack|drink|juice|milk|cereal|confectionery/.test(category)) return 'food'
+  if (/pet food|petcare|pet care/.test(category)) return 'petfood'
+  if (/electronics|device|medical equipment/.test(category)) return 'product'
+  const text = String(name || '').toLowerCase()
+  if (/beauty|personal care|cosmetic|toothpaste|tooth.?paste|oral care|soap|shampoo|cream|lotion|deodorant|skin care|skincare/.test(text)) return 'beauty'
+  if (/food|grocery|beverage|noodle|snack|drink|juice|milk|cereal|confectionery/.test(text)) return 'food'
+  if (/pet food|petcare|pet care/.test(text)) return 'petfood'
+  return ''
 }
 
 async function lookupCatalogues(barcode, signal, industry = 'general') {
@@ -250,10 +317,10 @@ async function lookupCatalogues(barcode, signal, industry = 'general') {
   providerResponded ||= universal?.__lookupUnavailable !== true
   const universalProduct = productRecord(universal, barcode)
 
-  // Query all catalogues even when the universal endpoint found a name. The
-  // first named record can be stale or from the wrong product category.
+  // The universal product_type=all request already covers Open Food Facts and
+  // redirects across the four product databases. Do not request the food
+  // database a second time; query the other databases to catch category clashes.
   const catalogs = [
-    ['https://world.openfoodfacts.org', 'Open Food Facts'],
     ['https://world.openproductsfacts.org', 'Open Products Facts'],
     ['https://world.openbeautyfacts.org', 'Open Beauty Facts'],
     ['https://world.openpetfoodfacts.org', 'Open Pet Food Facts'],
@@ -267,11 +334,11 @@ async function lookupCatalogues(barcode, signal, industry = 'general') {
   const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
   if (ecomProduct) {
     const found = suggestion(barcode, ecomProduct.name, 'EcomSource', ecomProduct.attributes)
-    if (found) candidates.push({ found, rank: -2, richness: Object.keys(found.body.product.attributes).length })
+    if (found) candidates.push({ found, rank: catalogueRank(industry, providerProductType(ecomProduct.attributes, ecomProduct.name)), richness: Object.keys(found.body.product.attributes).length })
   }
   if (broadProduct) {
     const found = suggestion(barcode, broadProduct.name, 'UPCitemdb', broadProduct.attributes)
-    if (found) candidates.push({ found, rank: -1, richness: Object.keys(found.body.product.attributes).length })
+    if (found) candidates.push({ found, rank: catalogueRank(industry, providerProductType(broadProduct.attributes, broadProduct.name)), richness: Object.keys(found.body.product.attributes).length })
   }
   if (universalProduct) {
     const found = catalogueSuggestion(universalProduct, barcode, sourceByType[universalProduct.product_type] || 'Open product catalogues')

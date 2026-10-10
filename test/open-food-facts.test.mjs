@@ -10,7 +10,7 @@ async function withCatalogueResponses(respond, run) {
   try { await run() } finally { globalThis.fetch = originalFetch }
 }
 
-test('uses an exact EcomSource record ahead of conflicting catalogue results', async () => {
+test('uses EcomSource exact match and keeps its separate product attributes available', async () => {
   const barcode = '8001090583420'
   const previousAccessKey = process.env.ECOMSOURCE_ACCESS_KEY
   const previousSecretKey = process.env.ECOMSOURCE_SECRET_KEY
@@ -22,7 +22,7 @@ test('uses an exact EcomSource record ahead of conflicting catalogue results', a
       assert.equal(init.headers['X-Access-Key'], 'test-access-key')
       assert.equal(init.headers['X-Secret-Key'], 'test-secret-key')
       assert.deepEqual(JSON.parse(init.body), { identifier: barcode, identifierType: 'ean', refresh: false })
-      return json({ success: true, data: [{ identifiers: [{ type: 'ean', identifier: barcode }], summary: [{ itemName: 'Oral-B Strong Teeth Toothpaste 130g', brand: 'Oral-B', manufacturer: 'Procter & Gamble', category: 'Health & Beauty' }], images: [{ link: 'https://images.example/oralb.jpg' }] }] })
+      return json({ success: true, data: [{ identifiers: [{ type: 'ean', identifier: barcode }], summary: [{ itemName: 'Oral-B Strong Teeth Toothpaste 130 g', brand: 'Oral-B', manufacturer: 'Procter & Gamble', modelNumber: 'Family size', category: 'Health & Beauty', htmlDescription: '<p>Fluoride toothpaste</p>' }], dimensions: [{ type: 'ITEM', height: 4, width: 5, length: 6, weight: 130 }], attributes: { bulletPoint: [{ value: 'Helps protect teeth' }, { value: 'Mint flavour' }] }, images: [{ link: 'https://images.example/oralb.jpg' }] }] })
     }
     if (url.startsWith('https://api.upcitemdb.com/')) return json({ code: 'OK', total: 1, items: [{ ean: barcode, title: 'Wrong provider title', brand: 'Other' }] })
     if (url.includes('world.openfoodfacts.org') && url.includes('product_type=all')) return json({ status: 'success', product: { code: barcode, product_name: 'Unrelated food label', brands: 'Unrelated brand', product_type: 'food' } })
@@ -31,12 +31,16 @@ test('uses an exact EcomSource record ahead of conflicting catalogue results', a
     try {
       const result = await lookupOpenFoodFacts(barcode, 'general')
       assert.equal(result.status, 200)
-      assert.equal(result.body.product.product_name, 'Oral-B Strong Teeth Toothpaste 130g')
+      assert.equal(result.body.product.product_name, 'Oral-B Strong Teeth Toothpaste 130 g')
       assert.equal(result.body.product.source, 'EcomSource')
       assert.equal(result.body.product.attributes.brand, 'Oral-B')
       assert.equal(result.body.product.attributes.manufacturer, 'Procter & Gamble')
       assert.equal(result.body.product.attributes.category, 'Health & Beauty')
       assert.equal(result.body.product.attributes.imageUrl, 'https://images.example/oralb.jpg')
+      assert.equal(result.body.product.attributes.packageSize, '130 g')
+      assert.equal(result.body.product.attributes.dimensions, 'ITEM: height 4, width 5, length 6 (unit not supplied)')
+      assert.equal(result.body.product.attributes.weight, 'ITEM: 130 (unit not supplied)')
+      assert.equal(result.body.product.attributes.features, 'Helps protect teeth; Mint flavour')
     } finally {
       if (previousAccessKey === undefined) delete process.env.ECOMSOURCE_ACCESS_KEY
       else process.env.ECOMSOURCE_ACCESS_KEY = previousAccessKey
@@ -135,6 +139,34 @@ test('industry preference chooses a category-specific catalogue record over a co
     assert.equal(result.body.product.product_name, 'Strong Teeth Toothpaste')
     assert.equal(result.body.product.source, 'Open Beauty Facts')
     assert.equal(result.body.product.attributes.brand, 'Oral-B')
+  })
+})
+
+test('does not let a food-category EcomSource title override a matching beauty catalogue record', async () => {
+  const barcode = '8001090583437'
+  const previousAccessKey = process.env.ECOMSOURCE_ACCESS_KEY
+  const previousSecretKey = process.env.ECOMSOURCE_SECRET_KEY
+  process.env.ECOMSOURCE_ACCESS_KEY = 'test-access-key'
+  process.env.ECOMSOURCE_SECRET_KEY = 'test-secret-key'
+  // EcomSource applies a shared one-request-per-second throttle.
+  await new Promise(resolve => setTimeout(resolve, 1_050))
+  await withCatalogueResponses((url) => {
+    if (url === 'https://api.ecomsource.ai/api/v1/search/product') return json({ success: true, data: [{ identifiers: [{ identifier: barcode }], summary: [{ itemName: 'Closeup Toothpaste 130 g', brand: 'Closeup', category: 'Grocery' }] }] })
+    if (url.includes('world.openfoodfacts.org') && url.includes('product_type=all')) return json({ status: 'success', product: { code: barcode, product_name: 'Closeup', brands: 'Closeup', product_type: 'food' } })
+    if (url.includes('world.openbeautyfacts.org')) return json({ status: 'success', product: { code: barcode, product_name: 'Oral-B Strong Teeth Toothpaste', brands: 'Oral-B', quantity: '130 g', product_type: 'beauty' } })
+    return json({}, 404)
+  }, async () => {
+    try {
+      const result = await lookupOpenFoodFacts(barcode, 'pharmacy')
+      assert.equal(result.status, 200)
+      assert.match(result.body.product.product_name, /^Oral-B Strong Teeth Toothpaste/)
+      assert.equal(result.body.product.source, 'Open Beauty Facts')
+    } finally {
+      if (previousAccessKey === undefined) delete process.env.ECOMSOURCE_ACCESS_KEY
+      else process.env.ECOMSOURCE_ACCESS_KEY = previousAccessKey
+      if (previousSecretKey === undefined) delete process.env.ECOMSOURCE_SECRET_KEY
+      else process.env.ECOMSOURCE_SECRET_KEY = previousSecretKey
+    }
   })
 })
 

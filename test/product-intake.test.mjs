@@ -72,7 +72,7 @@ test('barcode metadata fills only matching business fields and workspace categor
   const original = globalThis.fetch
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ product: {
     code: '8001090583420', product_name: 'Strong Teeth Toothpaste', source: 'Open Beauty Facts',
-    attributes: { brand: 'Oral-B', packageSize: '130 g', ingredients: 'Active ingredient list', allergens: 'None declared', category: 'Oral care' },
+    attributes: { brand: 'Oral-B', packageSize: '130 g', ingredients: 'Active ingredient list', allergens: 'None declared', category: 'Oral care', weight: '130 (unit not supplied)', dimensions: 'ITEM: height 4, width 5, length 6 (unit not supplied)', features: 'Helps protect teeth; Mint flavour' },
   } }) })
   try {
     const profile = normalizeShopProfile({ mode: 'suggested', industry: 'pharmacy' })
@@ -83,6 +83,9 @@ test('barcode metadata fills only matching business fields and workspace categor
     assert.equal(draft.category, 'Oral care')
     assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'brand').id], 'Oral-B')
     assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'packageSize').id], '130 g')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'weight').id], '130 (unit not supplied)')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'dimensions').id], 'ITEM: height 4, width 5, length 6 (unit not supplied)')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'features').id], 'Helps protect teeth; Mint flavour')
     assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'activeIngredients')?.id], undefined)
     assert.equal(draft.price, undefined)
     assert.equal(draft.stock, undefined)
