@@ -52,8 +52,19 @@ function suggestion(code, name, source, details = '') {
 }
 
 async function lookupCatalogues(barcode, signal) {
-  // Community catalogues are attempted first because they cover products sold
-  // internationally; specialist regulatory sources are fallbacks by identifier.
+  // The universal endpoint follows Open Food Facts' cross-catalogue redirect
+  // for food, beauty, pet-food and other products in one request.
+  const universal = await getJson(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?product_type=all&fields=code,product_name,brands,quantity,product_type`, signal)
+  const universalProduct = universal?.product
+  if (universal?.status === 1 && universalProduct?.code?.padStart(14, '0') === barcode.padStart(14, '0')) {
+    const name = [universalProduct.brands, universalProduct.product_name, universalProduct.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ')
+    const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
+    const found = suggestion(barcode, name, sourceByType[universalProduct.product_type] || 'Open product catalogues', universalProduct.quantity || '')
+    if (found) return found
+  }
+
+  // Keep the category endpoints as fallback if the universal lookup is
+  // unavailable or that catalogue does not have a usable record.
   const catalogs = [
     ['https://world.openfoodfacts.org', 'Open Food Facts'],
     ['https://world.openproductsfacts.org', 'Open Products Facts'],
