@@ -57,9 +57,10 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
   const timer = setTimeout(() => controller.abort(), 14000)
   try {
     const base = apiUrl.replace(/\/$/, '')
+    const query = `barcode=${encodeURIComponent(barcode)}&industry=${encodeURIComponent(profile?.industry || 'general')}`
     const endpoint = base && base !== '/api/cloud'
-      ? `${base}/v1/public/product-lookup?barcode=${encodeURIComponent(barcode)}`
-      : `/api/product-lookup?barcode=${encodeURIComponent(barcode)}`
+      ? `${base}/v1/public/product-lookup?${query}`
+      : `/api/product-lookup?${query}`
     const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin', cache: 'no-store' })
     if (response.status === 404) return null
     if (!response.ok) { const failure = await response.json().catch(() => ({})); throw new Error(failure.error || 'Online lookup is unavailable. You can still use a photo or fill the details yourself.') }
@@ -67,7 +68,9 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
     const product = data.product
     if (!product || typeof product.product_name !== 'string' || !product.product_name.trim()) return null
     if (typeof product.code !== 'string' || product.code.padStart(14, '0') !== barcode.padStart(14, '0')) return null
-    const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ').slice(0, 180)
+    // Keep the source's product name as the editable product name. Brand and
+    // package quantity belong in their own business fields when available.
+    const name = product.product_name.trim().slice(0, 180)
     const attributes = product.attributes && typeof product.attributes === 'object' && !Array.isArray(product.attributes) ? product.attributes as Record<string, unknown> : {}
     const customValues: Record<string, string> = {}
     if (profile) for (const field of profile.fields) {

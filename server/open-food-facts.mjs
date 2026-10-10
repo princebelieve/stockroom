@@ -11,9 +11,10 @@ export function validProductBarcode(value) {
   return (10 - digits.reverse().reduce((sum, digit, index) => sum + digit * (index % 2 ? 1 : 3), 0) % 10) % 10 === check
 }
 
-export async function lookupOpenFoodFacts(barcode) {
+export async function lookupOpenFoodFacts(barcode, industry = 'general') {
   if (!validProductBarcode(barcode)) return { status: 400, body: { error: 'Enter a valid product barcode.' } }
-  const cached = responseCache.get(barcode)
+  const cacheKey = `${industry}:${barcode}`
+  const cached = responseCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.result
   const minuteAgo = Date.now() - 60_000
   while (recentUpstreamReads.length && recentUpstreamReads[0] <= minuteAgo) recentUpstreamReads.shift()
@@ -24,9 +25,9 @@ export async function lookupOpenFoodFacts(barcode) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 12000)
   try {
-    const result = await lookupCatalogues(barcode, controller.signal)
+    const result = await lookupCatalogues(barcode, controller.signal, industry)
     if (result.status === 200) {
-      responseCache.set(barcode, { result, expiresAt: Date.now() + 6 * 60 * 60 * 1000 })
+      responseCache.set(cacheKey, { result, expiresAt: Date.now() + 60_000 })
       if (responseCache.size > 5000) for (const [key, value] of responseCache) if (value.expiresAt <= Date.now()) responseCache.delete(key)
     }
     return result
@@ -82,11 +83,11 @@ function productRecord(data, barcode) {
 function catalogueSuggestion(product, barcode, source) {
   // Catalogue data is a starting point for an editable product upload. Even a
   // sparse name can help the owner, so it should not block name prefill.
-  const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ')
-  return suggestion(barcode, name, source, {
+  return suggestion(barcode, product.product_name, source, {
     brand: product.brands,
     manufacturer: product.brand_owner,
     quantity: product.quantity,
+    packageSize: product.quantity,
     description: product.generic_name,
     ingredients: product.ingredients_text,
     allergens: product.allergens,
@@ -96,7 +97,20 @@ function catalogueSuggestion(product, barcode, source) {
   })
 }
 
-async function lookupCatalogues(barcode, signal) {
+function catalogueRank(industry, type) {
+  const typeName = String(type || '').toLowerCase()
+  const preference = industry === 'pharmacy' || industry === 'health-beauty'
+    ? ['beauty', 'product', 'food', 'petfood']
+    : industry === 'electronics' || industry === 'automotive'
+      ? ['product', 'food', 'beauty', 'petfood']
+      : industry === 'drinks' || industry === 'grocery' || industry === 'supermarket' || industry === 'food-service' || industry === 'bakery' || industry === 'food-manufacturing'
+        ? ['food', 'product', 'beauty', 'petfood']
+        : ['product', 'food', 'beauty', 'petfood']
+  const index = preference.indexOf(typeName.replace('open ', '').replace(' facts', '').replace(' facts', ''))
+  return index < 0 ? 5 : index
+}
+
+async function lookupCatalogues(barcode, signal, industry = 'general') {
   let providerResponded = false
   // The universal endpoint follows Open Food Facts' cross-catalogue redirect
   // for food, beauty, pet-food and other products in one request.
@@ -104,34 +118,33 @@ async function lookupCatalogues(barcode, signal) {
   const universal = await getJson(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?product_type=all&fields=${fields}`, signal)
   providerResponded ||= universal?.__lookupUnavailable !== true
   const universalProduct = productRecord(universal, barcode)
-  if (universalProduct) {
-    const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
-    const found = catalogueSuggestion(universalProduct, barcode, sourceByType[universalProduct.product_type] || 'Open product catalogues')
-    if (found) return found
-  }
 
-  // Check category-specific catalogues and regulated registries in parallel
-  // when the universal catalogue has no usable name. This keeps sparse records
-  // from masking a better match and keeps mobile scans within the timeout.
+  // Query all catalogues even when the universal endpoint found a name. The
+  // first named record can be stale or from the wrong product category.
   const catalogs = [
     ['https://world.openfoodfacts.org', 'Open Food Facts'],
     ['https://world.openproductsfacts.org', 'Open Products Facts'],
     ['https://world.openbeautyfacts.org', 'Open Beauty Facts'],
     ['https://world.openpetfoodfacts.org', 'Open Pet Food Facts'],
-  ].filter(([base]) => !(universalProduct && base === 'https://world.openfoodfacts.org'))
+  ]
   const [catalogueResults, drug, device] = await Promise.all([
     Promise.all(catalogs.map(([base]) => getJson(`${base}/api/v3/product/${encodeURIComponent(barcode)}?fields=${fields}`, signal))),
     getJson(`https://api.fda.gov/drug/ndc.json?search=openfda.upc:${encodeURIComponent(barcode)}&limit=1`, signal),
     getJson(`https://accessgudid.nlm.nih.gov/api/v3/devices/lookup.json?di=${encodeURIComponent(barcode)}`, signal),
   ])
+  const candidates = []
+  const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
+  if (universalProduct) {
+    const found = catalogueSuggestion(universalProduct, barcode, sourceByType[universalProduct.product_type] || 'Open product catalogues')
+    if (found) candidates.push({ found, rank: catalogueRank(industry, universalProduct.product_type), richness: Object.keys(found.body.product.attributes).length })
+  }
   for (let index = 0; index < catalogs.length; index++) {
     const data = catalogueResults[index]
     providerResponded ||= data?.__lookupUnavailable !== true
     const product = productRecord(data, barcode)
     if (product) {
-      const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
       const found = catalogueSuggestion(product, barcode, sourceByType[product.product_type] || catalogs[index][1])
-      if (found) return found
+      if (found) candidates.push({ found, rank: catalogueRank(industry, product.product_type || catalogs[index][1]), richness: Object.keys(found.body.product.attributes).length })
     }
   }
 
@@ -154,7 +167,7 @@ async function lookupCatalogues(barcode, signal) {
       packageSize: packaging,
       registrationNumber: drugRecord.product_ndc,
     })
-    if (found) return found
+    if (found) candidates.push({ found, rank: industry === 'pharmacy' ? 0 : 3, richness: Object.keys(found.body.product.attributes).length })
   }
 
   // A GTIN can also be the device identifier (DI) in a UDI. Registry coverage
@@ -171,7 +184,11 @@ async function lookupCatalogues(barcode, signal) {
       description: deviceRecord.deviceDescription,
       deviceClass,
     })
-    if (found) return found
+    if (found) candidates.push({ found, rank: industry === 'electronics' || industry === 'medical' || industry === 'healthcare' ? 0 : 4, richness: Object.keys(found.body.product.attributes).length })
+  }
+  if (candidates.length) {
+    candidates.sort((a, b) => a.rank - b.rank || b.richness - a.richness)
+    return candidates[0].found
   }
   return !providerResponded
     ? { status: 503, body: { error: 'Product catalogues are temporarily unreachable. The barcode is saved in the product form, and you can still enter the product details.' } }

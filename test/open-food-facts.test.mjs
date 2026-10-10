@@ -17,7 +17,7 @@ test('accepts the live Open Food Facts success status and verifies the exact bar
     : json({}, 404), async () => {
     const result = await lookupOpenFoodFacts(barcode)
     assert.equal(result.status, 200)
-    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Acme Juice 500 ml', source: 'Open Food Facts', attributes: { brand: 'Acme', quantity: '500 ml' } })
+    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Juice', source: 'Open Food Facts', attributes: { brand: 'Acme', quantity: '500 ml', packageSize: '500 ml' } })
   })
 })
 
@@ -27,7 +27,7 @@ test('normalizes an Open Products Facts suggestion into the shared product draft
     ? json({ status: 'success', product: { code: barcode, product_name: 'Phone case', brands: 'Acme', product_type: 'product' } })
     : json({}, 404), async () => {
     const result = await lookupOpenFoodFacts(barcode)
-    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Acme Phone case', source: 'Open Products Facts', attributes: { brand: 'Acme' } })
+    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Phone case', source: 'Open Products Facts', attributes: { brand: 'Acme' } })
   })
 })
 
@@ -43,14 +43,30 @@ test('prefills a sparse catalogue name so the owner can edit it during upload', 
 })
 
 test('normalizes openFDA drug results for non-food barcode suggestions', async () => {
-  const barcode = '8001090583420'
+  const barcode = '4006381333931'
   await withCatalogueResponses(url => {
     if (url.includes('/api/v3/product/')) return json({ status: 0 })
     if (url.includes('api.fda.gov/drug/ndc.json')) return json({ results: [{ brand_name: 'Example OTC', generic_name: 'Example medicine', dosage_form: 'tablet', route: ['ORAL'], labeler_name: 'Acme Labs', product_ndc: '12345-678', active_ingredients: [{ name: 'Example medicine', strength: '10 mg' }], packaging: [{ description: '100 tablets' }] }] })
     return json({}, 404)
   }, async () => {
-    const result = await lookupOpenFoodFacts(barcode)
+    const result = await lookupOpenFoodFacts(barcode, 'pharmacy')
     assert.deepEqual(result.body.product, { code: barcode, product_name: 'Example OTC Example medicine tablet', source: 'openFDA Drug NDC Directory', attributes: { brand: 'Example OTC', manufacturer: 'Acme Labs', activeIngredients: 'Example medicine 10 mg', strength: '10 mg', dosageForm: 'tablet', route: 'ORAL', packageSize: '100 tablets', registrationNumber: '12345-678' } })
+  })
+})
+
+test('industry preference chooses a category-specific catalogue record over a conflicting universal record', async () => {
+  const barcode = '8001090583420'
+  await withCatalogueResponses(url => {
+    if (url.includes('world.openfoodfacts.org') && url.includes('product_type=all')) return json({ status: 'success', product: { code: barcode, product_name: 'Closeup', brands: 'Closeup', product_type: 'food' } })
+    if (url.includes('world.openfoodfacts.org')) return json({ status: 0 })
+    if (url.includes('world.openbeautyfacts.org')) return json({ status: 'success', product: { code: barcode, product_name: 'Strong Teeth Toothpaste', brands: 'Oral-B', quantity: '130 g', product_type: 'beauty' } })
+    return json({}, 404)
+  }, async () => {
+    const result = await lookupOpenFoodFacts(barcode, 'pharmacy')
+    assert.equal(result.status, 200)
+    assert.equal(result.body.product.product_name, 'Strong Teeth Toothpaste')
+    assert.equal(result.body.product.source, 'Open Beauty Facts')
+    assert.equal(result.body.product.attributes.brand, 'Oral-B')
   })
 })
 

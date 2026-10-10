@@ -61,7 +61,7 @@ test('online lookup verifies barcode and returns fresh catalogue suggestions wit
   }
   try {
     const draft = await lookupFoodBarcode('4006381333931')
-    assert.deepEqual(draft, { name: 'Acme Juice 500 ml', barcode: '4006381333931', catalogueSource: 'Product catalogue' })
+    assert.deepEqual(draft, { name: 'Juice', barcode: '4006381333931', catalogueSource: 'Product catalogue' })
     await lookupFoodBarcode('4006381333931')
     assert.equal(calls, 2)
     assert.equal(await lookupFoodBarcode('bad'), null)
@@ -71,18 +71,18 @@ test('online lookup verifies barcode and returns fresh catalogue suggestions wit
 test('barcode metadata fills only matching business fields and workspace categories', async () => {
   const original = globalThis.fetch
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ product: {
-    code: '8001090583420', product_name: 'Oral care', source: 'Open Food Facts',
-    attributes: { brand: 'Example Care', packageSize: '100 ml', ingredients: 'Active ingredient list', allergens: 'None declared', category: 'Oral care' },
+    code: '8001090583420', product_name: 'Strong Teeth Toothpaste', source: 'Open Beauty Facts',
+    attributes: { brand: 'Oral-B', packageSize: '130 g', ingredients: 'Active ingredient list', allergens: 'None declared', category: 'Oral care' },
   } }) })
   try {
     const profile = normalizeShopProfile({ mode: 'suggested', industry: 'pharmacy' })
     profile.workspaceCatalogues['product-sales'] = { categories: ['Oral care'], units: ['tube'] }
     const draft = await lookupFoodBarcode('8001090583420', '', profile, 'product-sales')
-    assert.equal(draft.name, 'Oral care')
+    assert.equal(draft.name, 'Strong Teeth Toothpaste')
     assert.equal(draft.barcode, '8001090583420')
     assert.equal(draft.category, 'Oral care')
-    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'brand').id], 'Example Care')
-    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'packageSize').id], '100 ml')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'brand').id], 'Oral-B')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'packageSize').id], '130 g')
     assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'activeIngredients')?.id], undefined)
     assert.equal(draft.price, undefined)
     assert.equal(draft.stock, undefined)

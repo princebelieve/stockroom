@@ -18,7 +18,7 @@ try {
       return barcode === '4006381333931'
         ? route.fulfill({ json: { status: 1, product: { code: barcode, product_name: 'Acme Juice 500 ml', source: 'Open Food Facts' } } })
         : barcode === '8001090583420'
-          ? route.fulfill({ json: { status: 1, product: { code: barcode, product_name: 'closeup', source: 'Open Food Facts', attributes: { brand: 'Oral B', manufacturer: 'P&G', packageSize: '100 ml', activeIngredients: 'Fluoride', strength: '1450 ppm', dosageForm: 'Toothpaste', route: 'Oral care', registrationNumber: 'NDC-123', category: 'Oral care' } } } })
+          ? route.fulfill({ json: { status: 1, product: { code: barcode, product_name: 'Strong Teeth Toothpaste', source: 'Open Beauty Facts', attributes: { brand: 'Oral-B', manufacturer: 'Procter & Gamble', packageSize: '130 g', category: 'Oral care' } } } })
           : route.fulfill({ status: 404, json: { status: 0, error: 'No reliable product details found.' } })
     }
     return url.startsWith(base) ? route.continue() : route.abort()
@@ -55,16 +55,18 @@ try {
   })
 
   await page.evaluate(() => { window.scanCode = '8001090583420' })
+  const oralBLookup = page.waitForResponse(response => response.url().includes('/api/product-lookup?barcode=8001090583420'))
   await page.getByRole('button', { name: /Scan barcode/ }).click()
-  await page.getByText(/suggests closeup/).waitFor()
+  const oralBResponse = await oralBLookup
+  assert.equal(new URL(oralBResponse.url()).searchParams.get('industry'), 'pharmacy')
+  await page.getByText(/suggests Strong Teeth Toothpaste/).waitFor()
   await page.getByRole('button', { name: 'Review product details' }).click()
   await page.waitForFunction(() => window.addedDrafts.length === 2)
   assert.deepEqual(await page.evaluate(() => window.addedDrafts[1]), {
-    name: 'closeup', barcode: '8001090583420', category: 'Oral care', catalogueSource: 'Open Food Facts',
+    name: 'Strong Teeth Toothpaste', barcode: '8001090583420', category: 'Oral care', catalogueSource: 'Open Beauty Facts',
     customValues: {
-      custom_pharmacy_brand: 'Oral B', custom_pharmacy_manufacturer: 'P&G', custom_pharmacy_active_ingredients: 'Fluoride',
-      custom_pharmacy_strength: '1450 ppm', custom_pharmacy_dosage_form: 'Toothpaste', custom_pharmacy_route: 'Oral care',
-      custom_pharmacy_package_size: '100 ml', custom_pharmacy_registration_number: 'NDC-123',
+      custom_pharmacy_brand: 'Oral-B', custom_pharmacy_manufacturer: 'Procter & Gamble',
+      custom_pharmacy_package_size: '130 g',
     },
   })
   await page.evaluate(async () => {
@@ -74,10 +76,10 @@ try {
       profile: window.shopProfile, initialDraft: window.addedDrafts[1], catalogueWorkspace: 'product-sales',
     }))
   })
-  assert.equal(await page.locator('input[name="name"]').inputValue(), 'closeup')
+  assert.equal(await page.locator('input[name="name"]').inputValue(), 'Strong Teeth Toothpaste')
   assert.equal(await page.locator('input[name="barcode"]').inputValue(), '8001090583420')
-  assert.equal(await page.locator('input[name="custom:custom_pharmacy_active_ingredients"]').inputValue(), 'Fluoride')
-  assert.equal(await page.locator('input[name="custom:custom_pharmacy_package_size"]').inputValue(), '100 ml')
+  assert.equal(await page.locator('input[name="custom:custom_pharmacy_brand"]').inputValue(), 'Oral-B')
+  assert.equal(await page.locator('input[name="custom:custom_pharmacy_package_size"]').inputValue(), '130 g')
 
   await page.evaluate(async () => {
     const { React, createRoot } = await import('/test/shop-setup-harness.ts')
