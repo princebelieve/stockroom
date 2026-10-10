@@ -1,3 +1,5 @@
+import type { ShopProfile, CatalogueWorkspace } from '../../server/shop-profile.mjs'
+
 export type ProductDraft = { customValues?: Record<string, string>; name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number; catalogueSource?: string }
 
 export function validGtin(value: string) {
@@ -45,22 +47,20 @@ export function documentSuggestions(text: string): Array<{ draft: ProductDraft; 
   return result.slice(0, 300)
 }
 
-const cache = new Map<string, ProductDraft | null>()
-let lastLookup = 0
-export async function lookupProductBarcode(barcode: string, apiUrl = ''): Promise<ProductDraft | null> {
+export async function lookupProductBarcode(barcode: string, apiUrl = '', profile?: ShopProfile, workspace: CatalogueWorkspace = 'product-sales'): Promise<ProductDraft | null> {
   if (!validGtin(barcode)) return null
-  if (cache.has(barcode)) return cache.get(barcode)!
-    try { const saved=JSON.parse(localStorage.getItem('stockroom-barcode:'+barcode)||'null');if(saved?.barcode===barcode && typeof saved.name==='string' && saved.name && saved.savedAt>Date.now()-30*86400000){const draft={name:saved.name,barcode,catalogueSource:saved.catalogueSource || 'Product catalogue'};cache.set(barcode,draft);return draft} } catch { /* Lookup still works when browser storage is unavailable. */ }
-  if (Date.now() - lastLookup < 4500) throw new Error('Please wait a few seconds before another online lookup.')
-  lastLookup = Date.now()
+  // Product suggestions are mutable and may be corrected upstream. Let the
+  // server own its short cache and rate limit; a browser cache could preserve
+  // a wrong catalogue name for weeks or block a legitimate follow-up scan.
+  try { localStorage.removeItem(`stockroom-barcode:${barcode}`) } catch { /* Storage is optional. */ }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 10000)
+  const timer = setTimeout(() => controller.abort(), 14000)
   try {
     const base = apiUrl.replace(/\/$/, '')
     const endpoint = base && base !== '/api/cloud'
       ? `${base}/v1/public/product-lookup?barcode=${encodeURIComponent(barcode)}`
       : `/api/product-lookup?barcode=${encodeURIComponent(barcode)}`
-    const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin' })
+    const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin', cache: 'no-store' })
     if (response.status === 404) return null
     if (!response.ok) { const failure = await response.json().catch(() => ({})); throw new Error(failure.error || 'Online lookup is unavailable. You can still use a photo or fill the details yourself.') }
     const data = await response.json()
@@ -68,9 +68,19 @@ export async function lookupProductBarcode(barcode: string, apiUrl = ''): Promis
     if (!product || typeof product.product_name !== 'string' || !product.product_name.trim()) return null
     if (typeof product.code !== 'string' || product.code.padStart(14, '0') !== barcode.padStart(14, '0')) return null
     const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ').slice(0, 180)
-    const draft = { name, barcode, catalogueSource: typeof product.source === 'string' ? product.source : 'Open Food Facts' }
-    try {localStorage.setItem('stockroom-barcode:'+barcode,JSON.stringify({...draft,savedAt:Date.now()}))}catch { /* Cache is optional. */ }
-    cache.set(barcode, draft)
+    const attributes = product.attributes && typeof product.attributes === 'object' && !Array.isArray(product.attributes) ? product.attributes as Record<string, unknown> : {}
+    const customValues: Record<string, string> = {}
+    if (profile) for (const field of profile.fields) {
+      const value = field.lookupKey ? attributes[field.lookupKey] : undefined
+      const text = Array.isArray(value) ? value.filter(Boolean).join(', ') : String(value || '').trim()
+      if (field.id.startsWith('custom_') && field.visible && text) customValues[field.id] = text.slice(0, 2000)
+    }
+    const categoryNames = String(attributes.category || '').split(/[,;>]/).map(value => value.trim()).filter(Boolean)
+    const categorySettings = profile?.workspaceCatalogues?.[workspace]
+    const configuredCategories = (categorySettings?.categories || profile?.categories || []).filter(category => !categorySettings?.disabledCategories?.includes(category))
+    const fold = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+    const matchedCategory = [...configuredCategories].reverse().find(category => categoryNames.some(name => fold(name) === fold(category) || fold(name).includes(fold(category)) || fold(category).includes(fold(name))))
+    const draft = { name, barcode, ...(matchedCategory || categoryNames.length ? { category: matchedCategory || categoryNames[categoryNames.length - 1] } : {}), ...(Object.keys(customValues).length ? { customValues } : {}), catalogueSource: typeof product.source === 'string' ? product.source : 'Product catalogue' }
     return draft
   } catch (error) {
     if (controller.signal.aborted) throw new Error('Online lookup timed out. Use a photo or complete the details yourself.')

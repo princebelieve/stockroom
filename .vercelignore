@@ -1,0 +1,17 @@
+# Local test and build output
+*.log
+.audit/
+.gradle/
+.gradle-user/
+android/.gradle/
+android/.gradle-user/
+android/app/build/
+android/app/src/
+release/
+backups/
+dist/
+node_modules/
+
+# Local Android credentials and machine-specific paths
+android/local.properties
+android/app/google-services.json

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
+import { normalizeShopProfile } from '../server/shop-profile.mjs'
 
 const source = await readFile(new URL('../src/lib/productIntake.ts', import.meta.url), 'utf8')
 const { labelSuggestion, documentSuggestions, validGtin, draftProblem, lookupFoodBarcode } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`)
@@ -50,7 +51,7 @@ test('review requires explicit price and stock, rejects duplicates and invalid a
   assert.match(draftProblem({ ...draft, stock: -1 }, [], []), /valid/)
 })
 
-test('online lookup verifies barcode and caches a successful suggestion without financial fields', async () => {
+test('online lookup verifies barcode and returns fresh catalogue suggestions without financial fields', async () => {
   const original = globalThis.fetch
   let calls = 0
   globalThis.fetch = async url => {
@@ -60,9 +61,30 @@ test('online lookup verifies barcode and caches a successful suggestion without 
   }
   try {
     const draft = await lookupFoodBarcode('4006381333931')
-    assert.deepEqual(draft, { name: 'Acme Juice 500 ml', barcode: '4006381333931', catalogueSource: 'Open Food Facts' })
+    assert.deepEqual(draft, { name: 'Acme Juice 500 ml', barcode: '4006381333931', catalogueSource: 'Product catalogue' })
     await lookupFoodBarcode('4006381333931')
-    assert.equal(calls, 1)
+    assert.equal(calls, 2)
     assert.equal(await lookupFoodBarcode('bad'), null)
+  } finally { globalThis.fetch = original }
+})
+
+test('barcode metadata fills only matching business fields and workspace categories', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ product: {
+    code: '8001090583420', product_name: 'Oral care', source: 'Open Food Facts',
+    attributes: { brand: 'Example Care', packageSize: '100 ml', ingredients: 'Active ingredient list', allergens: 'None declared', category: 'Oral care' },
+  } }) })
+  try {
+    const profile = normalizeShopProfile({ mode: 'suggested', industry: 'pharmacy' })
+    profile.workspaceCatalogues['product-sales'] = { categories: ['Oral care'], units: ['tube'] }
+    const draft = await lookupFoodBarcode('8001090583420', '', profile, 'product-sales')
+    assert.equal(draft.name, 'Oral care')
+    assert.equal(draft.barcode, '8001090583420')
+    assert.equal(draft.category, 'Oral care')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'brand').id], 'Example Care')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'packageSize').id], '100 ml')
+    assert.equal(draft.customValues[profile.fields.find(field => field.lookupKey === 'activeIngredients')?.id], undefined)
+    assert.equal(draft.price, undefined)
+    assert.equal(draft.stock, undefined)
   } finally { globalThis.fetch = original }
 })

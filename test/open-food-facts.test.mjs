@@ -17,7 +17,7 @@ test('accepts the live Open Food Facts success status and verifies the exact bar
     : json({}, 404), async () => {
     const result = await lookupOpenFoodFacts(barcode)
     assert.equal(result.status, 200)
-    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Acme Juice 500 ml', source: 'Open Food Facts', details: '500 ml' })
+    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Acme Juice 500 ml', source: 'Open Food Facts', attributes: { brand: 'Acme', quantity: '500 ml' } })
   })
 })
 
@@ -27,18 +27,18 @@ test('normalizes an Open Products Facts suggestion into the shared product draft
     ? json({ status: 'success', product: { code: barcode, product_name: 'Phone case', brands: 'Acme', product_type: 'product' } })
     : json({}, 404), async () => {
     const result = await lookupOpenFoodFacts(barcode)
-    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Acme Phone case', source: 'Open Products Facts', details: '' })
+    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Acme Phone case', source: 'Open Products Facts', attributes: { brand: 'Acme' } })
   })
 })
 
-test('does not prefill a sparse catalogue record that only provides a possibly misleading name', async () => {
+test('prefills a sparse catalogue name so the owner can edit it during upload', async () => {
   const barcode = '0123456789012'
   await withCatalogueResponses(url => url.includes('/api/v3/product/')
     ? json({ status: 'success', product: { code: barcode, product_name: 'closeup', product_type: 'food' } })
     : json({}, 404), async () => {
     const result = await lookupOpenFoodFacts(barcode)
-    assert.equal(result.status, 404)
-    assert.match(result.body.error, /barcode is still valid/i)
+    assert.equal(result.status, 200)
+    assert.deepEqual(result.body.product, { code: barcode, product_name: 'closeup', source: 'Open Food Facts', attributes: {} })
   })
 })
 
@@ -46,11 +46,11 @@ test('normalizes openFDA drug results for non-food barcode suggestions', async (
   const barcode = '8001090583420'
   await withCatalogueResponses(url => {
     if (url.includes('/api/v3/product/')) return json({ status: 0 })
-    if (url.includes('api.fda.gov/drug/ndc.json')) return json({ results: [{ brand_name: 'Example OTC', generic_name: 'Example medicine', dosage_form: 'tablet', product_ndc: '12345-678' }] })
+    if (url.includes('api.fda.gov/drug/ndc.json')) return json({ results: [{ brand_name: 'Example OTC', generic_name: 'Example medicine', dosage_form: 'tablet', route: ['ORAL'], labeler_name: 'Acme Labs', product_ndc: '12345-678', active_ingredients: [{ name: 'Example medicine', strength: '10 mg' }], packaging: [{ description: '100 tablets' }] }] })
     return json({}, 404)
   }, async () => {
     const result = await lookupOpenFoodFacts(barcode)
-    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Example OTC Example medicine tablet', source: 'openFDA Drug NDC Directory', details: '12345-678' })
+    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Example OTC Example medicine tablet', source: 'openFDA Drug NDC Directory', attributes: { brand: 'Example OTC', manufacturer: 'Acme Labs', activeIngredients: 'Example medicine 10 mg', strength: '10 mg', dosageForm: 'tablet', route: 'ORAL', packageSize: '100 tablets', registrationNumber: '12345-678' } })
   })
 })
 
@@ -59,10 +59,10 @@ test('normalizes AccessGUDID device records for non-food barcode suggestions', a
   await withCatalogueResponses(url => {
     if (url.includes('/api/v3/product/')) return json({ status: 0 })
     if (url.includes('api.fda.gov/drug/ndc.json')) return json({}, 404)
-    if (url.includes('accessgudid.nlm.nih.gov')) return json({ gudid: { device: { brandName: 'Example Monitor', deviceDescription: 'Patient monitor', companyName: 'Acme Medical' } } })
+    if (url.includes('accessgudid.nlm.nih.gov')) return json({ gudid: { device: { brandName: 'Example Monitor', versionModelNumber: 'Model 1', deviceDescription: 'Patient monitor', companyName: 'Acme Medical' } } })
     return json({}, 404)
   }, async () => {
     const result = await lookupOpenFoodFacts(barcode)
-    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Example Monitor Patient monitor', source: 'AccessGUDID medical device registry', details: 'Acme Medical' })
+    assert.deepEqual(result.body.product, { code: barcode, product_name: 'Example Monitor Patient monitor', source: 'AccessGUDID medical device registry', attributes: { brand: 'Example Monitor', manufacturer: 'Acme Medical', model: 'Model 1', description: 'Patient monitor' } })
   })
 })

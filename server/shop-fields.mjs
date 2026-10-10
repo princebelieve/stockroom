@@ -11,18 +11,34 @@ export const coreFields = [
 ].map(field => ({ required: false, locked: false, visible: true, options: [], ...field }))
 
 export function templateFields(industry = 'general', itemLabel = 'Product') {
+  const lookupField = (key, label, lookupKey, type = 'text') => ({ id: `custom_${industry.replaceAll('-', '_')}_${key}`, label, type, placeholder: '', required: false, visible: true, locked: false, options: [], lookupKey })
   const extras = {
     printing: [['paper_size', 'Paper size'], ['finish', 'Finish'], ['colour', 'Colour']],
-    'food-service': [['allergens', 'Allergens'], ['portion_size', 'Portion size']],
+    'food-service': [['allergens', 'Allergens', undefined, 'allergens'], ['portion_size', 'Portion size']],
     clothing: [['size', 'Size'], ['colour', 'Colour'], ['material', 'Material']],
     pharmacy: [['batch', 'Batch number'], ['expiry', 'Expiry date', 'date']],
-    electronics: [['brand', 'Brand'], ['model', 'Model'], ['warranty', 'Warranty']],
+    electronics: [['brand', 'Brand', undefined, 'brand'], ['model', 'Model', undefined, 'model'], ['warranty', 'Warranty']],
   }[industry] || []
+  const lookupFields = {
+    pharmacy: [lookupField('brand', 'Brand', 'brand'), lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('active_ingredients', 'Active ingredient(s)', 'activeIngredients'), lookupField('strength', 'Strength', 'strength'), lookupField('dosage_form', 'Dosage form', 'dosageForm'), lookupField('route', 'Route', 'route'), lookupField('package_size', 'Package size', 'packageSize'), lookupField('registration_number', 'NDC / registration number', 'registrationNumber')],
+    electronics: [lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('product_description', 'Product description', 'description'), lookupField('device_class', 'Device category', 'deviceClass')],
+    automotive: [lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('model', 'Model', 'model'), lookupField('product_description', 'Product description', 'description')],
+    clothing: [lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('product_description', 'Product description', 'description')],
+    grocery: [lookupField('brand', 'Brand', 'brand'), lookupField('package_size', 'Package size', 'quantity'), lookupField('ingredients', 'Ingredients', 'ingredients'), lookupField('allergens', 'Allergens', 'allergens'), lookupField('traces', 'May contain / traces', 'traces'), lookupField('product_image', 'Product image URL', 'imageUrl')],
+    supermarket: [lookupField('brand', 'Brand', 'brand'), lookupField('package_size', 'Package size', 'quantity'), lookupField('ingredients', 'Ingredients', 'ingredients'), lookupField('allergens', 'Allergens', 'allergens'), lookupField('traces', 'May contain / traces', 'traces'), lookupField('product_image', 'Product image URL', 'imageUrl')],
+    drinks: [lookupField('brand', 'Brand', 'brand'), lookupField('package_size', 'Package size', 'quantity'), lookupField('ingredients', 'Ingredients', 'ingredients'), lookupField('product_image', 'Product image URL', 'imageUrl')],
+    'food-manufacturing': [lookupField('brand', 'Brand', 'brand'), lookupField('package_size', 'Package size', 'quantity'), lookupField('ingredients', 'Ingredients', 'ingredients'), lookupField('allergens', 'Allergens', 'allergens'), lookupField('traces', 'May contain / traces', 'traces'), lookupField('product_image', 'Product image URL', 'imageUrl')],
+    bakery: [lookupField('brand', 'Brand', 'brand'), lookupField('package_size', 'Package size', 'quantity'), lookupField('ingredients', 'Ingredients', 'ingredients'), lookupField('allergens', 'Allergens', 'allergens'), lookupField('traces', 'May contain / traces', 'traces'), lookupField('product_image', 'Product image URL', 'imageUrl')],
+    'food-service': [lookupField('brand', 'Brand', 'brand'), lookupField('ingredients', 'Ingredients', 'ingredients'), lookupField('traces', 'May contain / traces', 'traces')],
+    'health-beauty': [lookupField('brand', 'Brand', 'brand'), lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('package_size', 'Package size', 'quantity'), lookupField('ingredients', 'Ingredients', 'ingredients'), lookupField('product_image', 'Product image URL', 'imageUrl')],
+    hotel: [lookupField('brand', 'Brand', 'brand'), lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('package_size', 'Package size', 'quantity'), lookupField('product_description', 'Product description', 'description')],
+  }[industry] || [lookupField('brand', 'Brand', 'brand'), lookupField('manufacturer', 'Manufacturer', 'manufacturer'), lookupField('package_size', 'Package size', 'quantity'), lookupField('product_description', 'Product description', 'description'), lookupField('product_image', 'Product image URL', 'imageUrl')]
   return [...coreFields.map(field => ({ ...field, label: field.id === 'name' ? `${itemLabel} name` : field.label })),
-    ...extras.map(([id, label, type = 'text']) => ({ id: `custom_${industry.replaceAll('-', '_')}_${id}`, label, type, placeholder: '', required: false, visible: true, locked: false, options: [] }))]
+    ...lookupFields,
+    ...extras.map(([id, label, type = 'text', lookupKey]) => ({ id: `custom_${industry.replaceAll('-', '_')}_${id}`, label, type, placeholder: '', required: false, visible: true, locked: false, options: [], ...(lookupKey ? { lookupKey } : {}) }))]
 }
 
-export function normalizeFields(fields, industry, itemLabel) {
+export function normalizeFields(fields, industry, itemLabel, addLookupFields = true) {
   if (!Array.isArray(fields)) return templateFields(industry, itemLabel)
   const seen = new Set()
   const result = []
@@ -36,10 +52,17 @@ export function normalizeFields(fields, industry, itemLabel) {
       placeholder: String(field.placeholder || '').slice(0, 120), locked: Boolean(core?.locked),
       visible: core?.locked || core?.id === 'category' ? true : field.visible !== false, required: core?.locked ? true : Boolean(field.required),
       options: Array.isArray(field.options) ? [...new Set(field.options.filter(option => typeof option === 'string').map(option => option.trim()).filter(Boolean))].slice(0, 40) : [],
+      ...(typeof field.lookupKey === 'string' && /^[a-zA-Z][a-zA-Z0-9]{0,39}$/.test(field.lookupKey) ? { lookupKey: field.lookupKey } : {}),
     })
   }
   // Missing essential fields cannot disable inventory accounting.
   for (const core of coreFields) if (!seen.has(core.id)) result.push({ ...core, visible: core.locked || core.id === 'category' })
+  // Add newly supported lookup fields to saved profiles without replacing the
+  // owner's existing labels, visibility choices, or custom fields.
+  const industryFieldPrefix = `custom_${industry.replaceAll('-', '_')}_`
+  for (const field of (addLookupFields ? templateFields(industry, itemLabel) : []).filter(field => field.lookupKey && field.id.startsWith(industryFieldPrefix))) {
+    if (!seen.has(field.id) && result.length < 49) { result.push(field); seen.add(field.id) }
+  }
   return result
 }
 
@@ -55,6 +78,7 @@ export function validateFields(fields) {
     if (typeof field.label !== 'string' || !field.label.trim() || field.label.length > 80 || typeof field.placeholder !== 'string' || field.placeholder.length > 120) throw new Error('Use a label up to 80 characters and a placeholder up to 120 characters.')
     if (!['text', 'number', 'date', 'select'].includes(field.type) || (core && field.type !== core.type)) throw new Error('Choose a valid field type. Built-in field types cannot change.')
     if (core?.locked && (field.visible === false || !field.required)) throw new Error(`${core.label} is needed for stock and sales.`)
+    if (field.lookupKey !== undefined && (typeof field.lookupKey !== 'string' || !['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass'].includes(field.lookupKey))) throw new Error('Choose a supported product lookup field.')
     if (!Array.isArray(field.options) || field.options.length > 40 || field.options.some(option => typeof option !== 'string' || !option.trim() || option.length > 80)) throw new Error('Use up to 40 short dropdown choices.')
     if (field.type === 'select' && !field.options.length) throw new Error(`Add dropdown choices for ${field.label}.`)
   }

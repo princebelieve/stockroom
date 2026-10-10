@@ -69,8 +69,8 @@ const server = createServer(async (request, response) => {
   }
   const requestUrl = new URL(request.url || '/', 'http://localhost')
   if (request.method === 'GET' && requestUrl.pathname === '/api/product-lookup') {
-    response.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
     const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim())
+    response.setHeader('Cache-Control', result.status === 200 ? 'public, max-age=300, stale-while-revalidate=3600' : 'no-store')
     return sendJson(response, result.status, result.body)
   }
 

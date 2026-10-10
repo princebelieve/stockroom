@@ -47,6 +47,17 @@ test('general setup and every suggestion have valid defaults', () => {
   assert.equal(normalizeShopProfile({ mode: 'suggested', industry: 'food-service' }).itemLabel, 'Menu item')
 })
 
+test('workspace-specific product templates provide source lookup fields and add them to existing profiles', () => {
+  const oldPharmacy = normalizeShopProfile({ mode: 'suggested', industry: 'pharmacy', fields: normalizeShopProfile({ mode: 'suggested', industry: 'pharmacy' }).fields.filter(field => !field.lookupKey) })
+  assert.ok(oldPharmacy.fields.some(field => field.lookupKey === 'activeIngredients'))
+  assert.ok(oldPharmacy.fields.some(field => field.id === 'custom_pharmacy_expiry'))
+  const electronics = normalizeShopProfile({ mode: 'suggested', industry: 'electronics' })
+  assert.ok(electronics.fields.some(field => field.lookupKey === 'model'))
+  const groceries = normalizeShopProfile({ mode: 'suggested', industry: 'grocery' })
+  assert.ok(groceries.fields.some(field => field.lookupKey === 'allergens'))
+  assert.ok(groceries.fields.some(field => field.lookupKey === 'imageUrl'))
+})
+
 test('editable fields retain identities, protect accounting fields and validate custom types', () => {
   const profile = normalizeShopProfile({ mode: 'suggested', industry: 'printing' })
   const field = profile.fields.find(field => field.id === 'custom_printing_finish')
@@ -87,7 +98,8 @@ test('explicit business presets activate only their operational workspace and pr
     assert.equal(workspace.payments, preset.screen === 'Payments')
     assert.equal(workspace.fastFood, preset.screen === 'Counter')
     assert.equal(workspace.restaurant, preset.screen === 'Restaurant')
-    assert.deepEqual(result.fields, current.fields)
+    assert.deepEqual(result.fields.slice(0, current.fields.length), current.fields)
+    assert.ok(result.fields.some(field => field.lookupKey), preset.industry)
     assert.deepEqual(result.categories, current.categories)
     assert.equal(result.unit, 'sheet')
     assert.equal(result.itemLabel, 'Our item')

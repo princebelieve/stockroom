@@ -1,4 +1,4 @@
-import { normalizeFields, validateFields } from './shop-fields.mjs'
+import { normalizeFields, templateFields, validateFields } from './shop-fields.mjs'
 import { reportTimeZone } from './report-timezone.mjs'
 export const businessModes = {
   printing: { label: 'Printing and copy shop', unit: 'copy', note: 'Set up a catalogue of printed items, copying and finishing charges.' },
@@ -160,9 +160,9 @@ export function normalizeShopProfile(input) {
   }
   if (input.workspaceCatalogues === undefined && input.categories?.length) {
     const legacyWorkspace = industry === 'liquids' ? 'oil-sales' : 'product-sales'
-    value.workspaceCatalogues[legacyWorkspace] = { categories: [...value.categories], units: productCatalogueOptions(industry).units }
+    value.workspaceCatalogues[legacyWorkspace] = { categories: [...value.categories], units: productCatalogueOptions(industry).units, disabledCategories: [], disabledUnits: [] }
   }
-  value.fields = normalizeFields(input.fields, industry, value.itemLabel)
+  value.fields = normalizeFields(input.fields, industry, value.itemLabel, Number(input.version || 0) < 3 && input.industry === industry)
   value.features = {
     services: typeof input.features?.services === 'boolean' ? input.features.services : industry !== 'supermarket',
     productSales: typeof input.features?.productSales === 'boolean' ? input.features.productSales : industry !== 'liquids',
@@ -172,7 +172,7 @@ export function normalizeShopProfile(input) {
   value.restaurant = input.restaurant === true || value.workflows === 'restaurant'
   value.brandColor = /^#[a-f0-9]{6}$/i.test(input.brandColor || '') ? input.brandColor.toLowerCase() : ''
   try { value.reportingTimeZone = reportTimeZone(input.reportingTimeZone ?? 'UTC') } catch { value.reportingTimeZone = 'UTC' }
-  value.version = 2
+  value.version = 3
   return value
 }
 
@@ -237,12 +237,15 @@ export function applyBusinessPreset(profile, key) {
   const defaults = current.mode === 'custom' ? {} : Object.fromEntries(['unit', 'itemLabel', 'inventoryLabel', 'categories'].filter(name => preset[name] !== undefined).map(name => [name, preset[name]]))
   const targetCatalogue = ({ Oil: 'oil-sales', POS: 'product-sales', Payments: undefined, Counter: 'order-counter', Restaurant: 'tables-tabs' })[preset.screen]
   const workspaceCatalogues = { ...current.workspaceCatalogues }
+  const currentFieldIds = new Set(current.fields.map(field => field.id))
+  const customCount = current.fields.filter(field => field.id.startsWith('custom_')).length
+  const lookupFields = templateFields(preset.industry, preset.itemLabel || current.itemLabel).filter(field => field.lookupKey && !currentFieldIds.has(field.id)).slice(0, Math.max(0, 40 - customCount))
   if (current.mode !== 'custom' && targetCatalogue) workspaceCatalogues[targetCatalogue] = {
     categories: [...(preset.categories || categoriesByIndustry[preset.industry] || categoriesByIndustry.general)],
     units: [...(unitSuggestionsByIndustry[preset.industry] || unitSuggestionsByIndustry.general)],
     disabledCategories: [], disabledUnits: [],
   }
-  return validateShopProfile({ ...current, ...defaults, industry: preset.industry,
+  return validateShopProfile({ ...current, ...defaults, industry: preset.industry, fields: [...current.fields, ...lookupFields],
     workspaceCatalogues,
     mode: current.mode === 'custom' ? 'custom' : 'suggested',
     features: { ...current.features, productSales: preset.industry !== 'liquids' },

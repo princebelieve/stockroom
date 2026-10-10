@@ -284,8 +284,8 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   const requestUrl = new URL(request.url || '/', 'http://localhost')
   if (request.method === 'GET' && requestUrl.pathname === '/v1/public/product-lookup') {
-    response.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
     const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim())
+    response.setHeader('Cache-Control', result.status === 200 ? 'public, max-age=300, stale-while-revalidate=3600' : 'no-store')
     return send(response, result.status, result.body)
   }
   try {

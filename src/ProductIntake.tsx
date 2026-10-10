@@ -1,6 +1,7 @@
 import { saveReferenceCatalogue, findReferenceBarcode, searchReferenceCatalogue } from './lib/referenceCatalogue'
 import { importFields, mappedProducts, suggestImportMapping, importMatches } from '../server/product-import.mjs'
 import type { ShopProfile } from '../server/shop-profile.mjs'
+import type { CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { CustomFieldEditor, customFieldProblem } from './ShopProductFields'
 import { useRef, useState } from 'react'
 import { ScanLine } from 'lucide-react'
@@ -16,7 +17,7 @@ const fields = ['name', 'sku', 'barcode', 'category', 'unit', ...numericFields] 
 const labels = { name: 'Name', sku: 'SKU', barcode: 'Barcode', category: 'Category', unit: 'Sell by', price: 'Selling price', cost: 'Unit cost', stock: 'Current stock', reorder: 'Reorder point' }
 
 
-export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openProduct, shopProfile, create, products, defaultUnit, scan, screen, navigate }: { businessId?: string; lookupApiUrl?: string; openProduct?: (draft: ProductDraft, message?: string) => void; shopProfile?: ShopProfile; create: (product: ProductDraft) => Promise<void>; products: Product[]; defaultUnit: string; scan: () => Promise<string | undefined>; screen: string; navigate: (screen: string) => void }) {
+export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openProduct, shopProfile, catalogueWorkspace = 'product-sales', create, products, defaultUnit, scan, screen, navigate }: { businessId?: string; lookupApiUrl?: string; openProduct?: (draft: ProductDraft, message?: string) => void; shopProfile?: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; create: (product: ProductDraft) => Promise<void>; products: Product[]; defaultUnit: string; scan: () => Promise<string | undefined>; screen: string; navigate: (screen: string) => void }) {
   const [referenceQuery,setReferenceQuery]=useState('');const [referenceResults,setReferenceResults]=useState<ProductDraft[]>([])
   const [rows, setRows] = useState<Row[]>([])
   const [csvTable,setCsvTable]=useState<string[][]>([])
@@ -57,7 +58,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     if (validGtin(code)) {
       setMessage('Looking up barcode online...')
       try {
-        const match = await lookupProductBarcode(code, lookupApiUrl)
+        const match = await lookupProductBarcode(code, lookupApiUrl, shopProfile, catalogueWorkspace)
         if (match) { draft = match; source = `${match.catalogueSource || 'Online catalogue'} suggestion`; status = `${match.catalogueSource || 'Online catalogue'} suggested a name. Check the exact product and pack size, then complete your price and current stock.` }
       } catch (error) { status = `${error instanceof Error ? error.message : 'Online lookup failed.'} The barcode has been kept below.` }
     }
@@ -72,8 +73,8 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
       if (draft.barcode && !existingBarcodes.includes(draft.barcode)) {
         setMessage('Checking the barcode found on the package...')
         try {
-          const match = await lookupProductBarcode(draft.barcode, lookupApiUrl)
-          if (match) { draft.name = match.name; lookupSource = `${match.catalogueSource || 'Online catalogue'}; ` }
+          const match = await lookupProductBarcode(draft.barcode, lookupApiUrl, shopProfile, catalogueWorkspace)
+          if (match) { Object.assign(draft, match); lookupSource = `${match.catalogueSource || 'Online catalogue'}; ` }
         } catch { /* The image suggestion remains useful when lookup is unavailable. */ }
       }
       if (openProduct) { openProduct(draft, `${lookupSource ? 'Barcode catalogue suggestion added. ' : ''}Photo suggestions opened in Add Product. Check the name and barcode, then complete the business-specific fields before saving.`); return }
