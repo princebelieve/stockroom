@@ -1,5 +1,5 @@
 const sections: Record<string, readonly string[]> = {
-  Inventory: ['products','add-search','new-product','transfers','purchasing','expiry','pricing','import','starters','options','handwritten'],
+  Inventory: ['products','add-search','new-product','transfers','purchasing','expiry','pricing','import','import-csv','import-barcode','import-photo','import-reference','import-save-reference','import-review','starters','options','handwritten'],
   Sales: ['sales-receipt-history','sales-history','sales-void-history','sales-payment-evidence','sales-reconciliation','returns'],
   Team: ['team-members','team-add-staff','links','team-password-recovery'],
   Wallet: ['customers','new-customer','birthdays'],

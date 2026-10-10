@@ -19,7 +19,7 @@ import { buildReports } from './reports.mjs'
 import { handlePos, posSchema } from './pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from './shop-fields.mjs'
 import { paymentPolicy, recordPayment } from './payment.mjs'
-import { normalizeShopProfile, validateShopProfile, workspaceCatalogueOptions, catalogueWorkspaces } from './shop-profile.mjs'
+import { normalizeShopProfile, validateShopProfile, workspaceCatalogueSettings, catalogueWorkspaces } from './shop-profile.mjs'
 import { normalizeCashSale } from './cash.mjs'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -985,9 +985,15 @@ export async function addShopProfileCatalogueOption(workspace, field, input) {
   if (!value || value.length > (field === 'units' ? 30 : 80)) throw new Error('Enter a shorter category or unit name.')
   const current = await getSettings()
   const profile = normalizeShopProfile(current.shopProfile)
-  const options = workspaceCatalogueOptions(profile, workspace)
+  const options = workspaceCatalogueSettings(profile, workspace)
   const list = options[field]
-  if (list.some(item => item.toLocaleLowerCase() === value.toLocaleLowerCase())) return profile
+  const disabledKey = field === 'categories' ? 'disabledCategories' : 'disabledUnits'
+  const existing = list.find(item => item.toLocaleLowerCase() === value.toLocaleLowerCase())
+  if (existing) {
+    if (!options[disabledKey].includes(existing)) return profile
+    const next = { ...profile, workspaceCatalogues: { ...profile.workspaceCatalogues, [workspace]: { ...options, [disabledKey]: options[disabledKey].filter(item => item !== existing) } } }
+    return updateShopProfile(next)
+  }
   if (list.length >= 30) throw new Error('This workspace already has 30 choices. Remove one in Workspace catalogues before adding another.')
   const next = { ...profile, workspaceCatalogues: { ...profile.workspaceCatalogues, [workspace]: { ...options, [field]: [...list, value] } } }
   return updateShopProfile(next)

@@ -79,7 +79,7 @@ export function WorkspaceOnboarding({profile,currency,policy,saveProfile,savePre
         <label className="checkbox-label"><input type="checkbox" checked={usePos} onChange={event=>setUsePos(event.target.checked)}/>Add a POS payment method</label>{usePos&&<label>Provider name<input required value={provider} onChange={event=>setProvider(event.target.value)} placeholder="Bank or provider name" maxLength={100}/></label>}
       </details>
       <button type="button" className="primary-button login-button" onClick={()=>setStep('items')}>Choose starter items</button>
-      <button type="button" className="text-button" onClick={finish}>Set up later</button>
+      <button type="button" className="text-button" onClick={() => finish()}>Set up later</button>
     </>}
     {step==='items'&&<>
       <p><strong>{workspace.label}</strong>: choose the names that match what your business sells. Search the list and select as many as you need; you can add or edit entries later.</p>

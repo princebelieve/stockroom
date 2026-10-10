@@ -112,10 +112,23 @@ export function productCatalogueOptions(industry = 'general') {
 }
 
 export function workspaceCatalogueOptions(profile, workspace = 'product-sales') {
+  const settings = workspaceCatalogueSettings(profile, workspace)
+  return {
+    categories: settings.categories.filter(item => !settings.disabledCategories.includes(item)),
+    units: settings.units.filter(item => !settings.disabledUnits.includes(item)),
+  }
+}
+
+export function workspaceCatalogueSettings(profile, workspace = 'product-sales') {
   const value = normalizeShopProfile(profile)
   const saved = value.workspaceCatalogues?.[workspace]
-  if (saved) return { categories: [...saved.categories], units: [...saved.units] }
-  return productCatalogueOptions(value.industry)
+  const defaults = productCatalogueOptions(value.industry)
+  return {
+    categories: [...(saved ? saved.categories : defaults.categories)],
+    units: [...(saved ? saved.units : defaults.units)],
+    disabledCategories: [...(saved?.disabledCategories || [])],
+    disabledUnits: [...(saved?.disabledUnits || [])],
+  }
 }
 
 export function normalizeShopProfile(input) {
@@ -140,7 +153,9 @@ export function normalizeShopProfile(input) {
       const clean = field => Array.isArray(list[field]) ? [...new Set(list[field].filter(item => typeof item === 'string').map(item => item.trim().slice(0, 80)).filter(Boolean))].slice(0, 30) : []
       const categories = clean('categories')
       const units = clean('units')
-      if (categories.length || units.length) value.workspaceCatalogues[key] = { categories, units }
+      const disabledCategories = clean('disabledCategories').filter(item => categories.includes(item))
+      const disabledUnits = clean('disabledUnits').filter(item => units.includes(item))
+      value.workspaceCatalogues[key] = { categories, units, disabledCategories, disabledUnits }
     }
   }
   if (input.workspaceCatalogues === undefined && input.categories?.length) {
@@ -225,6 +240,7 @@ export function applyBusinessPreset(profile, key) {
   if (current.mode !== 'custom' && targetCatalogue) workspaceCatalogues[targetCatalogue] = {
     categories: [...(preset.categories || categoriesByIndustry[preset.industry] || categoriesByIndustry.general)],
     units: [...(unitSuggestionsByIndustry[preset.industry] || unitSuggestionsByIndustry.general)],
+    disabledCategories: [], disabledUnits: [],
   }
   return validateShopProfile({ ...current, ...defaults, industry: preset.industry,
     workspaceCatalogues,

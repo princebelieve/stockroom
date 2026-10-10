@@ -3,7 +3,7 @@ import { WorkspaceHelp } from './WorkspaceHelp'
 import { TimeZoneSelect } from './TimeZoneSelect'
 ﻿import { useEffect, useRef, useState } from 'react'
 import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
-import { businessModes, businessPresets, businessPresetGuidance, catalogueWorkspaces, workspaceCatalogueOptions, applyBusinessPreset, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode, type CatalogueWorkspace } from '../server/shop-profile.mjs'
+import { businessModes, businessPresets, businessPresetGuidance, catalogueWorkspaces, workspaceCatalogueSettings, applyBusinessPreset, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { coreFields, validateFields, type ShopField } from '../server/shop-fields.mjs'
 import { ShopProductFields } from './ShopProductFields'
 import { readReceiptPhoto } from './lib/receiptOcr'
@@ -21,6 +21,8 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   const [problem, setProblem] = useState('')
   const [industry, setIndustry] = useState<BusinessMode>(value.industry)
   const [catalogueWorkspace, setCatalogueWorkspace] = useState<CatalogueWorkspace>('product-sales')
+  const [newCategory, setNewCategory] = useState('')
+  const [newUnit, setNewUnit] = useState('')
   const [text, setText] = useState('')
   const [candidates, setCandidates] = useState<ShopField[]>([])
   const [selected, setSelected] = useState<number[]>([])
@@ -30,6 +32,19 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   useEffect(() => () => reading.current?.abort(), [])
   useEffect(() => { if (!dirty) { setDraft(value); setIndustry(value.industry) } }, [value, dirty])
   function change(next: ShopProfile) { setDraft(next); setDirty(true); setMessage(''); setProblem('') }
+  function changeCatalogueList(update: (settings: ReturnType<typeof workspaceCatalogueSettings>) => ReturnType<typeof workspaceCatalogueSettings>) {
+    const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
+    change({ ...draft, workspaceCatalogues: { ...draft.workspaceCatalogues, [catalogueWorkspace]: update(settings) } })
+  }
+  function addCatalogueChoice(field: 'categories' | 'units') {
+    const value = (field === 'categories' ? newCategory : newUnit).trim().replace(/\s+/g, ' ')
+    if (!value) return
+    const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
+    if (settings[field].some(item => item.toLocaleLowerCase() === value.toLocaleLowerCase())) { setProblem(`That ${field === 'categories' ? 'category' : 'unit'} is already listed.`); return }
+    if (settings[field].length >= 30) { setProblem('A workspace can have up to 30 category choices and 30 unit choices.'); return }
+    changeCatalogueList(current => ({ ...current, [field]: [...current[field], value] }))
+    if (field === 'categories') setNewCategory(''); else setNewUnit('')
+  }
   function updateField(id: string, changes: Partial<ShopField>) { change({ ...draft, mode: 'custom', fields: draft.fields.map(field => field.id === id ? { ...field, ...changes } : field) }) }
   function move(id: string, direction: number) {
     const fields = [...draft.fields]; const index = fields.findIndex(field => field.id === id); const next = index + direction
@@ -84,7 +99,36 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
       <label><input type="checkbox" checked={draft.restaurant === true || draft.workflows === 'restaurant'} disabled={draft.workflows === 'restaurant'} onChange={event => change({ ...draft, restaurant: event.target.checked })} />Enable separate Tables &amp; tabs workspace (restaurants, bars, lounges)</label>
     </>}
     <AsyncButton className="primary-button" busyLabel="Saving screens..." onClick={async () => { const otherChanges = JSON.stringify({ ...draft, workflows: value.workflows, fastFood: value.fastFood, restaurant: value.restaurant, features: { ...draft.features, productSales: value.features?.productSales } }) !== JSON.stringify(value); await save(validateShopProfile({ ...value, workflows: draft.workflows, fastFood: draft.fastFood || draft.workflows === 'fast-food', restaurant: draft.restaurant || draft.workflows === 'restaurant', features: { services: value.features?.services ?? true, productSales: draft.features?.productSales } })); setDirty(otherChanges); setMessage('Workspaces saved. Use Sync now to share this choice with your other devices.') }}>Save workspaces</AsyncButton>
-    </section><section hidden={view!=='catalogues'}><h2>Workspace catalogues</h2><WorkspaceHelp title="Workspace configuration"><p>Each stock-selling workspace has its own category and unit dropdown choices. Business type supplies starting suggestions only. Changes here are saved independently for the workspace you select.</p></WorkspaceHelp><label htmlFor="catalogue-workspace">Workspace</label><select id="catalogue-workspace" value={catalogueWorkspace} onChange={event=>setCatalogueWorkspace(event.target.value as CatalogueWorkspace)}>{Object.entries(catalogueWorkspaces).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select><div className="form-grid"><label>Category dropdown choices (one per line)<textarea rows={8} value={workspaceCatalogueOptions(draft,catalogueWorkspace).categories.join('\n')} onChange={event=>change({...draft,workspaceCatalogues:{...draft.workspaceCatalogues,[catalogueWorkspace]:{...workspaceCatalogueOptions(draft,catalogueWorkspace),categories:event.target.value.split('\n')}}})}/></label><label>Unit dropdown choices (one per line)<textarea rows={8} value={workspaceCatalogueOptions(draft,catalogueWorkspace).units.join('\n')} onChange={event=>change({...draft,workspaceCatalogues:{...draft.workspaceCatalogues,[catalogueWorkspace]:{...workspaceCatalogueOptions(draft,catalogueWorkspace),units:event.target.value.split('\n')}}})}/></label></div><WorkspaceHelp><p>Use one choice per line. “Other (please specify)” remains available for product categories and units. Product sales, Oil sales, Order counter and Tables &amp; tabs each keep separate lists.</p></WorkspaceHelp><AsyncForm onSubmit={async()=>{await save(validateShopProfile({...draft,fields:draft.fields.map(field=>({...field,options:field.options.map(item=>item.trim()).filter(Boolean)}))}));setDirty(false);setMessage(`${catalogueWorkspaces[catalogueWorkspace]} catalogue saved on this device. Use Sync now to share it with your other devices.`)}}><SubmitButton className="primary-button">Save {catalogueWorkspaces[catalogueWorkspace]} catalogue</SubmitButton></AsyncForm></section><section hidden={view!=='form'}>{!['fast-food','restaurant'].includes(draft.workflows || '') && <><h2>Product form (optional)</h2><WorkspaceHelp><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p></WorkspaceHelp>
+    </section><section hidden={view!=='catalogues'}>
+      <h2>Workspace catalogues</h2>
+      <WorkspaceHelp title="Workspace configuration"><p>Choose which category and unit choices appear in this workspace's product dropdowns. You can hide a choice without deleting it, or remove it from the list.</p></WorkspaceHelp>
+      <label htmlFor="catalogue-workspace">Workspace</label>
+      <select id="catalogue-workspace" value={catalogueWorkspace} onChange={event=>setCatalogueWorkspace(event.target.value as CatalogueWorkspace)}>{Object.entries(catalogueWorkspaces).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
+      {(['categories','units'] as const).map(field => {
+        const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
+        const disabled = field === 'categories' ? settings.disabledCategories : settings.disabledUnits
+        const title = field === 'categories' ? 'Product categories' : 'Product units'
+        const inputValue = field === 'categories' ? newCategory : newUnit
+        return <details key={field} className="catalogue-choice-list">
+          <summary>{title} <span>{settings[field].length - disabled.length} of {settings[field].length} enabled</span></summary>
+          <p className="catalogue-choice-hint">Checked choices appear in this workspace's dropdown. Uncheck to hide a choice. Delete removes it from this list.</p>
+          <div className="catalogue-choice-rows">{settings[field].map((choice,index) => <div className="catalogue-choice-row" key={`${choice}-${index}`}>
+            <button type="button" className="catalogue-choice-delete" aria-label={`Delete ${choice}`} title={`Delete ${choice}`} onClick={() => changeCatalogueList(current => {
+              const disabledKey = field === 'categories' ? 'disabledCategories' : 'disabledUnits'
+              return { ...current, [field]: current[field].filter((_,i)=>i!==index), [disabledKey]: current[disabledKey].filter(item=>item!==choice) }
+            })}>&times;</button>
+            <label><input type="checkbox" checked={!disabled.includes(choice)} onChange={event => changeCatalogueList(current => {
+              const disabledKey = field === 'categories' ? 'disabledCategories' : 'disabledUnits'
+              const next = event.target.checked ? current[disabledKey].filter(item=>item!==choice) : [...current[disabledKey],choice]
+              return { ...current, [disabledKey]: next }
+            })} />{choice}</label>
+          </div>)}</div>
+          <div className="catalogue-choice-add"><input aria-label={`New ${field === 'categories' ? 'category' : 'unit'}`} maxLength={field === 'units' ? 30 : 80} value={inputValue} onChange={event => field === 'categories' ? setNewCategory(event.target.value) : setNewUnit(event.target.value)} onKeyDown={event => { if(event.key==='Enter'){event.preventDefault();addCatalogueChoice(field)} }} placeholder={`Add a ${field === 'categories' ? 'category' : 'unit'}`} /><button type="button" className="filter-button" onClick={() => addCatalogueChoice(field)} disabled={!inputValue.trim()}>&#43; Add {field === 'categories' ? 'category' : 'unit'}</button></div>
+        </details>
+      })}
+      <WorkspaceHelp><p>'Other (please specify)' remains available in product entry. Product sales, Oil sales, Order counter and Tables &amp; tabs each keep separate lists.</p></WorkspaceHelp>
+      <AsyncForm onSubmit={async()=>{await save(validateShopProfile({...draft,fields:draft.fields.map(field=>({...field,options:field.options.map(item=>item.trim()).filter(Boolean)}))}));setDirty(false);setMessage(`${catalogueWorkspaces[catalogueWorkspace]} catalogue saved on this device. Use Sync now to share it with your other devices.`)}}><SubmitButton className="primary-button">Save {catalogueWorkspaces[catalogueWorkspace]} catalogue</SubmitButton></AsyncForm>
+    </section><section hidden={view!=='form'}>{!['fast-food','restaurant'].includes(draft.workflows || '') && <><h2>Product form (optional)</h2><WorkspaceHelp><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p></WorkspaceHelp>
     <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
     {step === 0 && <div className="shop-step">
       <h3>Product catalogue template</h3><WorkspaceHelp title="Workspace configuration"><p>Choose a business type to load starting product labels and form fields. Enable selling workspaces separately; this template does not create specialist business operations. Final category and unit dropdowns are configured separately for each workspace.</p></WorkspaceHelp><label>Starting suggestions from business type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>

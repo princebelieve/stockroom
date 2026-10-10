@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { catalogueWorkspaces, workspaceCatalogueOptions, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
+import { catalogueWorkspaces, workspaceCatalogueOptions, workspaceCatalogueSettings, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { readCustomValues, validateCustomValues } from '../server/shop-fields.mjs'
 import type { ProductDraft } from './lib/productIntake'
 
@@ -26,8 +26,9 @@ function FieldInfo({ label, description }: { label: string; description: string 
 export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales', customOnly = false, values, initialDraft, scanBarcode }: { profile: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; customOnly?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: () => Promise<string | undefined> }) {
   const saved = readCustomValues(values)
   const catalogue = workspaceCatalogueOptions(profile, catalogueWorkspace)
+  const catalogueSettings = workspaceCatalogueSettings(profile, catalogueWorkspace)
   const categories = catalogue.categories
-  const units = [...new Set([profile.unit, ...catalogue.units].map(unit => String(unit || '').trim()).filter(Boolean))]
+  const units = [...new Set([...(catalogueSettings.disabledUnits.includes(profile.unit) ? [] : [profile.unit]), ...catalogue.units].map(unit => String(unit || '').trim()).filter(Boolean))]
   const initialCategory = initialDraft?.category || ''
   const initialUnit = initialDraft?.unit || profile.unit
   const [categoryChoice, setCategoryChoice] = useState(() => categories.includes(initialCategory) ? initialCategory : initialCategory ? '__custom__' : '')

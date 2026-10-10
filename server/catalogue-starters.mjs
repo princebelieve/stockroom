@@ -63,10 +63,57 @@ const expanded = {
   },
 }
 
+// Brand names and pack sizes commonly stocked by Nigerian food retailers.
+// These appear only in food-related stock catalogues, never in unrelated
+// industries such as clothing, electronics, or building materials.
+const nigeriaFoodRetailIndustries = new Set([
+  'general', 'grocery', 'supermarket', 'wholesale', 'food-service',
+  'food-manufacturing', 'bakery', 'hotel',
+])
+const nigeriaBeverageStarters = [
+  'MILO Original 1.2 kg pack', 'MILO Original 800 g pack', 'MILO Original 400 g soft pack', 'MILO Original 20 g sachet',
+  'MILO 3 in 1', 'MILO Drink ready-to-drink', 'MILO Energy Cubes', 'MILO Enersnakz',
+  'GOLDEN MORN Maize and Soya', 'GOLDEN MORN Millet', 'GOLDEN MORN Puffs',
+  'NESCAFÉ Classic', 'NESCAFÉ Original 3 in 1', 'NIDO milk powder',
+]
+const nigeriaSeasoningStarters = [
+  'MAGGI Seasoning Cube 4 g', 'MAGGI Seasoning Tablet 10 g', 'MAGGI Chicken Cube', 'MAGGI Crayfish Cube', 'MAGGI Mix’py seasoning',
+]
+const nigeriaStapleStarters = [
+  'Dangote Sugar 250 g pack', 'Dangote Sugar 500 g pack', 'Dangote Sugar 1 kg pack', 'Dangote Sugar 50 kg bag', 'Dangote Industrial Sugar 50 kg bag', 'Dangote Industrial Sugar 1000 kg bag',
+  'Ayoola Poundo Yam 450 g pack', 'Ayoola Poundo Yam 900 g pack', 'Ayoola Poundo Yam 1.8 kg pack', 'Ayoola Poundo Yam 4.5 kg pack', 'Ayoola Poundo Yam 9.1 kg bag',
+  'Ayoola Plantain Flour 450 g pack', 'Ayoola Plantain Flour 900 g pack', 'Ayoola Plantain Flour 1.8 kg pack',
+  'Ayoola Beans Flour 900 g pack', 'Ayoola Cassava Fufu 900 g pack', 'Ayoola Cassava Fufu 1.8 kg pack',
+  'Ayoola Rice Flour 900 g pack', 'Ayoola Rice Flour 1.8 kg pack', 'Ayoola Yam Flour', 'Ayoola Potato Flour',
+]
+const okomuOilStarters = [
+  'Okomu Banga Red Palm Oil 2 L bottle', 'Okomu Banga Red Palm Oil 4 L bottle',
+  'Okomu Banga Red Palm Oil sachet', 'Okomu Crude Palm Oil', 'Okomu Palm Kernel Oil',
+]
+const nigeriaMenuStarters = ['MILO hot drink', 'MILO Drink ready-to-drink']
+
 function categoryFor(name, industry) {
   const categories = productCatalogueOptions(industry).categories
   const text = name.toLowerCase()
+  if (industry === 'liquids' && /palm oil/.test(text)) {
+    const preferred = categories.find(category => /palm oil/i.test(category) && !/kernel/i.test(category))
+    if (preferred) return preferred
+  }
+  if (industry === 'liquids' && /palm kernel oil/.test(text)) {
+    const preferred = categories.find(category => /other edible oils/i.test(category))
+    if (preferred) return preferred
+  }
+  if (/golden morn|cereal/.test(text)) {
+    const preferred = categories.find(category => /cereal|grain/.test(category.toLowerCase()))
+      || categories.find(category => /ingredient/i.test(category))
+      || categories.find(category => /\bfood\b/.test(category.toLowerCase()) && !/seafood/i.test(category))
+    if (preferred) return preferred
+  }
   const rules = [
+    [/milo|nescaf|nido|pure life/, ['beverage', 'drink', 'coffee', 'water', 'food']],
+    [/maggi|seasoning cube|seasoning tablet/, ['seasoning', 'cooking', 'ingredient', 'food']],
+    [/dangote sugar|sugar/, ['sugar', 'baking', 'ingredient', 'food', 'grocer', 'cooking']],
+    [/ayoola|plantain flour|poundo yam|cassava fufu|yam flour|rice flour|beans flour|potato flour/, ['flour', 'ingredient', 'grain', 'staple', 'food', 'grocer']],
     [/fruit|vegetable|tomato|onion|potato|plantain|banana|orange|apple|leafy|pepper|maize seed|rice seed|bean seed|seedling|harvested|produce/, ['fresh produce', 'fruit', 'vegetable']],
     [/rice|bean|garri|grain|maize|wheat|flour|pasta|noodle|oat|cereal|cassava|millet|sorghum|staple/, ['grain', 'cereal', 'staple', 'food staple']],
     [/drink|water|juice|beer|lager|stout|cider|wine|gin|vodka|rum|whisky|brandy|liqueur|coffee|tea|milk|malt|beverage/, ['beverage', 'drink', 'water']],
@@ -85,15 +132,30 @@ function categoryFor(name, industry) {
   ]
   for (const [pattern, hints] of rules) {
     if (!pattern.test(text)) continue
-    const match = categories.find(category => hints.some(hint => category.toLowerCase().includes(hint)))
-    if (match) return match
+    for (const hint of hints) {
+      const match = categories.find(category => {
+        const label = category.toLowerCase()
+        if (hint === 'food') return /\bfood\b/.test(label) && !/seafood/.test(label)
+        if (hint === 'drink') return /\bdrinks?\b/.test(label)
+        return label.includes(hint)
+      })
+      if (match) return match
+    }
   }
   return categories.includes('General goods') ? 'General goods' : 'Other'
 }
 
 function unitFor(name, kind, industry) {
   if (kind === 'service') return 'service'
-  if (industry === 'liquids') return /oil|fat|measured quantity|bulk edible/.test(name.toLowerCase()) ? 'litre' : 'piece'
+  if (/\bsachet\b/i.test(name)) return 'sachet'
+  if (/\bbag\b/i.test(name)) return 'bag'
+  if (/\bpack\b/i.test(name)) return 'pack'
+  if (industry === 'liquids') {
+    if (/sachet/i.test(name)) return 'sachet'
+    if (/bottle|\b\d+(?:\.\d+)?\s?l\b/i.test(name)) return 'bottle'
+    if (/container/i.test(name)) return 'container'
+    return /oil|fat|measured quantity|bulk edible/.test(name.toLowerCase()) ? 'litre' : 'piece'
+  }
   if (industry === 'bulk') return 'kg'
   const text = name.toLowerCase()
   if (/paper|fabric|cable|hose|wire|timber/.test(text)) return 'piece'
@@ -103,13 +165,24 @@ function unitFor(name, kind, industry) {
 
 export function catalogueStarters(kind, industry = 'general') {
   const base = kind === 'stock' ? (stock[industry] || stock.general) : kind === 'service' ? (services[industry] || services.general) : (food[kind] || food.counter)
-  const additions = kind === 'stock' ? [...expanded.stock.core, ...(expanded.stock[industry] || [])] : kind === 'service' ? (expanded.service[industry] || expanded.service.general) : (expanded.menu[kind] || expanded.menu.counter)
+  const regionalMenu = ['counter', 'restaurant', 'bar'].includes(kind) ? nigeriaMenuStarters : []
+  const regionalFoodBrands = industry === 'drinks'
+    ? nigeriaBeverageStarters.filter(name => /^(MILO|NESCAF|NIDO)/i.test(name))
+    : industry === 'bulk'
+      ? nigeriaStapleStarters
+      : nigeriaFoodRetailIndustries.has(industry)
+        ? [...nigeriaBeverageStarters, ...nigeriaSeasoningStarters, ...nigeriaStapleStarters]
+        : []
+  const regionalBrands = kind === 'stock'
+    ? industry === 'liquids' ? okomuOilStarters : regionalFoodBrands
+    : []
+  const additions = kind === 'stock' ? [...expanded.stock.core, ...(expanded.stock[industry] || []), ...regionalBrands] : kind === 'service' ? (expanded.service[industry] || expanded.service.general) : [...(expanded.menu[kind] || expanded.menu.counter), ...regionalMenu]
   const names = [...new Map([...base, ...additions].map(name => [name.toLocaleLowerCase(), name])).values()]
   return names.map((name, index) => ({
     id: `starter-${kind}-${industry}-${index}`,
     name,
     unit: unitFor(name, kind, industry),
-    stocked: kind === 'bar' || (['counter', 'restaurant'].includes(kind) && ['Bottled water', 'Soft drink', 'Fruit juice', 'Malt drink'].includes(name)),
+    stocked: kind === 'bar' ? name !== 'MILO hot drink' : ['counter', 'restaurant'].includes(kind) && ['Bottled water', 'Soft drink', 'Fruit juice', 'Malt drink', 'MILO Drink ready-to-drink'].includes(name),
     category: kind === 'stock' ? categoryFor(name, industry) : kind === 'service' ? 'Services' : 'Menu',
   }))
 }
