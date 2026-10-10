@@ -60,7 +60,7 @@ test('online lookup verifies barcode and caches a successful suggestion without 
   }
   try {
     const draft = await lookupFoodBarcode('4006381333931')
-    assert.deepEqual(draft, { name: 'Acme Juice 500 ml', barcode: '4006381333931' })
+    assert.deepEqual(draft, { name: 'Acme Juice 500 ml', barcode: '4006381333931', catalogueSource: 'Open Food Facts' })
     await lookupFoodBarcode('4006381333931')
     assert.equal(calls, 1)
     assert.equal(await lookupFoodBarcode('bad'), null)

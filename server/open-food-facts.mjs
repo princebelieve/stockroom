@@ -25,8 +25,10 @@ export async function lookupOpenFoodFacts(barcode) {
   const timer = setTimeout(() => controller.abort(), 8000)
   try {
     const result = await lookupCatalogues(barcode, controller.signal)
-    responseCache.set(barcode, { result, expiresAt: Date.now() + 6 * 60 * 60 * 1000 })
-    if (responseCache.size > 5000) for (const [key, value] of responseCache) if (value.expiresAt <= Date.now()) responseCache.delete(key)
+    if (result.status === 200) {
+      responseCache.set(barcode, { result, expiresAt: Date.now() + 6 * 60 * 60 * 1000 })
+      if (responseCache.size > 5000) for (const [key, value] of responseCache) if (value.expiresAt <= Date.now()) responseCache.delete(key)
+    }
     return result
   } catch {
     return { status: 503, body: { error: controller.signal.aborted ? 'Barcode lookup timed out. You can still enter the product details.' : 'Could not reach the barcode catalogue. Check your connection and enter the product details.' } }
@@ -38,11 +40,12 @@ export async function lookupOpenFoodFacts(barcode) {
 async function getJson(url, signal) {
   try {
     const response = await fetch(url, { headers: { 'User-Agent': userAgent, Accept: 'application/json' }, signal })
-    if (!response.ok) return null
-    return response.json().catch(() => null)
+    if (!response.ok) return { __lookupUnavailable: response.status !== 404 }
+    const body = await response.json().catch(() => null)
+    return body || { __lookupUnavailable: true }
   } catch (error) {
     if (signal.aborted) throw error
-    return null
+    return { __lookupUnavailable: true }
   }
 }
 
@@ -51,39 +54,65 @@ function suggestion(code, name, source, details = '') {
   return cleanName ? { status: 200, body: { status: 1, product: { code, product_name: cleanName, source, details } } } : null
 }
 
+function productRecord(data, barcode) {
+  const product = data?.product
+  const status = data?.status
+  const successful = status === 1 || status === 'success' || status === 'success_with_errors'
+  return successful && typeof product?.code === 'string' && product.code.padStart(14, '0') === barcode.padStart(14, '0')
+    ? product
+    : null
+}
+
+function catalogueSuggestion(product, barcode, source) {
+  // Open catalogues contain sparse and occasionally misclassified records.
+  // Do not prefill the owner's product name from a bare one-field record:
+  // require a brand or pack size so there is enough context to review it.
+  if (!(typeof product.brands === 'string' && product.brands.trim()) && !(typeof product.quantity === 'string' && product.quantity.trim())) return null
+  const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ')
+  return suggestion(barcode, name, source, product.quantity || '')
+}
+
 async function lookupCatalogues(barcode, signal) {
+  let providerUnavailable = false
   // The universal endpoint follows Open Food Facts' cross-catalogue redirect
   // for food, beauty, pet-food and other products in one request.
   const universal = await getJson(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?product_type=all&fields=code,product_name,brands,quantity,product_type`, signal)
-  const universalProduct = universal?.product
-  if (universal?.status === 1 && universalProduct?.code?.padStart(14, '0') === barcode.padStart(14, '0')) {
-    const name = [universalProduct.brands, universalProduct.product_name, universalProduct.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ')
+  providerUnavailable ||= universal?.__lookupUnavailable === true
+  const universalProduct = productRecord(universal, barcode)
+  if (universalProduct) {
     const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
-    const found = suggestion(barcode, name, sourceByType[universalProduct.product_type] || 'Open product catalogues', universalProduct.quantity || '')
+    const found = catalogueSuggestion(universalProduct, barcode, sourceByType[universalProduct.product_type] || 'Open product catalogues')
     if (found) return found
   }
 
-  // Keep the category endpoints as fallback if the universal lookup is
-  // unavailable or that catalogue does not have a usable record.
+  // Check category-specific catalogues and regulated registries in parallel
+  // when the universal catalogue has no usable name. This keeps sparse records
+  // from masking a better match and keeps mobile scans within the timeout.
   const catalogs = [
     ['https://world.openfoodfacts.org', 'Open Food Facts'],
     ['https://world.openproductsfacts.org', 'Open Products Facts'],
     ['https://world.openbeautyfacts.org', 'Open Beauty Facts'],
     ['https://world.openpetfoodfacts.org', 'Open Pet Food Facts'],
-  ]
-  for (const [base, source] of catalogs) {
-    const data = await getJson(`${base}/api/v3/product/${encodeURIComponent(barcode)}?fields=code,product_name,brands,quantity`, signal)
-    const product = data?.product
-    if (data?.status === 1 && product?.code?.padStart(14, '0') === barcode.padStart(14, '0')) {
-      const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ')
-      const found = suggestion(barcode, name, source, product.quantity || '')
+  ].filter(([base]) => !(universalProduct && base === 'https://world.openfoodfacts.org'))
+  const [catalogueResults, drug, device] = await Promise.all([
+    Promise.all(catalogs.map(([base]) => getJson(`${base}/api/v3/product/${encodeURIComponent(barcode)}?fields=code,product_name,brands,quantity,product_type`, signal))),
+    getJson(`https://api.fda.gov/drug/ndc.json?search=openfda.upc:${encodeURIComponent(barcode)}&limit=1`, signal),
+    getJson(`https://accessgudid.nlm.nih.gov/api/v3/devices/lookup.json?di=${encodeURIComponent(barcode)}`, signal),
+  ])
+  for (let index = 0; index < catalogs.length; index++) {
+    const data = catalogueResults[index]
+    providerUnavailable ||= data?.__lookupUnavailable === true
+    const product = productRecord(data, barcode)
+    if (product) {
+      const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
+      const found = catalogueSuggestion(product, barcode, sourceByType[product.product_type] || catalogs[index][1])
       if (found) return found
     }
   }
 
   // openFDA identifies OTC/marketed drugs by UPC when that identifier was
   // supplied in the listing. It is US data and is only a product suggestion.
-  const drug = await getJson(`https://api.fda.gov/drug/ndc.json?search=openfda.upc:${encodeURIComponent(barcode)}&limit=1`, signal)
+  providerUnavailable ||= drug?.__lookupUnavailable === true
   const drugRecord = drug?.results?.[0]
   if (drugRecord) {
     const name = [drugRecord.brand_name, drugRecord.generic_name, drugRecord.dosage_form].filter(Boolean).join(' ')
@@ -93,12 +122,14 @@ async function lookupCatalogues(barcode, signal) {
 
   // A GTIN can also be the device identifier (DI) in a UDI. Registry coverage
   // is FDA/US focused; never treat a failed match as proof a device is invalid.
-  const device = await getJson(`https://accessgudid.nlm.nih.gov/api/v3/devices/lookup.json?di=${encodeURIComponent(barcode)}`, signal)
+  providerUnavailable ||= device?.__lookupUnavailable === true
   const deviceRecord = device?.gudid?.device || device?.device || device
   if (deviceRecord && (deviceRecord.brandName || deviceRecord.deviceDescription || deviceRecord.companyName)) {
     const name = [deviceRecord.brandName, deviceRecord.deviceDescription || deviceRecord.versionModelNumber].filter(Boolean).join(' ')
     const found = suggestion(barcode, name, 'AccessGUDID medical device registry', deviceRecord.companyName || '')
     if (found) return found
   }
-  return { status: 404, body: { status: 0, error: 'No product name was found in the available catalogues. The barcode is still valid; enter or photograph the product details.' } }
+  return providerUnavailable
+    ? { status: 503, body: { error: 'Some product catalogues could not be reached. Try the lookup again; the scanned barcode is saved in the product form.' } }
+    : { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues. The barcode is still valid; enter or photograph the product details.' } }
 }

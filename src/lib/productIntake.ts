@@ -15,7 +15,7 @@ export function labelSuggestion(text: string): ProductDraft {
     && !/\b(ingredients?|nutrition|energy|protein|carbohydrate|sodium|fat|sugars?|manufactur|distribut|expiry|expires|best before|batch|lot|barcode|www\.|https?:|storage|keep out|customer care|address|tel:|net weight|net content|serving size|per serving|allergen|warning|directions|imported by|made in|country of origin|customer service|email|phone)\b/i.test(line)
     && !/^\d+(?:[.,]\d+)?\s*(?:ml|cl|litres?|liters?|kg|mg|g|oz|lb)\b/i.test(line)
     && !/^\d+[\s./-]*\d+[\s./-]*\d+$/.test(line)
-    && !/^[^a-z]*$/.test(line))
+    && !/^[^a-z]*$/i.test(line))
   // OCR often emits a short brand line followed by the larger product name. Keep
   // those two useful lines, while avoiding the full label text as a product name.
   const name = candidates.slice(0, 2).join(' ')
@@ -61,11 +61,11 @@ export async function lookupProductBarcode(barcode: string, apiUrl = ''): Promis
       ? `${base}/v1/public/product-lookup?barcode=${encodeURIComponent(barcode)}`
       : `/api/product-lookup?barcode=${encodeURIComponent(barcode)}`
     const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin' })
-    if (response.status === 404) { cache.set(barcode, null); return null }
+    if (response.status === 404) return null
     if (!response.ok) { const failure = await response.json().catch(() => ({})); throw new Error(failure.error || 'Online lookup is unavailable. You can still use a photo or fill the details yourself.') }
     const data = await response.json()
     const product = data.product
-    if (!product || typeof product.product_name !== 'string' || !product.product_name.trim()) { cache.set(barcode, null); return null }
+    if (!product || typeof product.product_name !== 'string' || !product.product_name.trim()) return null
     if (typeof product.code !== 'string' || product.code.padStart(14, '0') !== barcode.padStart(14, '0')) return null
     const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ').slice(0, 180)
     const draft = { name, barcode, catalogueSource: typeof product.source === 'string' ? product.source : 'Open Food Facts' }
