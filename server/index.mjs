@@ -19,6 +19,7 @@ import { recordStaffRemovalLocal, authenticateUser, adjustCustomerWallet, approv
 import { registerLocalCheckout, getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudRemoveStaff, cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { lookupOpenFoodFacts } from './open-food-facts.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
@@ -65,6 +66,12 @@ const server = createServer(async (request, response) => {
   if (request.method === 'OPTIONS') {
     response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Local-Session, X-Stockroom-Branch, X-Stockroom-Till' })
     return response.end()
+  }
+  const requestUrl = new URL(request.url || '/', 'http://localhost')
+  if (request.method === 'GET' && requestUrl.pathname === '/api/product-lookup') {
+    response.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+    const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim())
+    return sendJson(response, result.status, result.body)
   }
 
   if (request.url?.startsWith('/api/integrations/')) {

@@ -16,7 +16,7 @@ const fields = ['name', 'sku', 'barcode', 'category', 'unit', ...numericFields] 
 const labels = { name: 'Name', sku: 'SKU', barcode: 'Barcode', category: 'Category', unit: 'Sell by', price: 'Selling price', cost: 'Unit cost', stock: 'Current stock', reorder: 'Reorder point' }
 
 
-export function ProductIntake({ businessId = 'local', openProduct, shopProfile, create, products, defaultUnit, scan, screen, navigate }: { businessId?: string; openProduct?: (draft: ProductDraft) => void; shopProfile?: ShopProfile; create: (product: ProductDraft) => Promise<void>; products: Product[]; defaultUnit: string; scan: () => Promise<string | undefined>; screen: string; navigate: (screen: string) => void }) {
+export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openProduct, shopProfile, create, products, defaultUnit, scan, screen, navigate }: { businessId?: string; lookupApiUrl?: string; openProduct?: (draft: ProductDraft, message?: string) => void; shopProfile?: ShopProfile; create: (product: ProductDraft) => Promise<void>; products: Product[]; defaultUnit: string; scan: () => Promise<string | undefined>; screen: string; navigate: (screen: string) => void }) {
   const [referenceQuery,setReferenceQuery]=useState('');const [referenceResults,setReferenceResults]=useState<ProductDraft[]>([])
   const [rows, setRows] = useState<Row[]>([])
   const [csvTable,setCsvTable]=useState<string[][]>([])
@@ -57,11 +57,11 @@ export function ProductIntake({ businessId = 'local', openProduct, shopProfile, 
     if (validGtin(code)) {
       setMessage('Looking up barcode online...')
       try {
-        const match = await lookupFoodBarcode(code)
+        const match = await lookupFoodBarcode(code, lookupApiUrl)
         if (match) { draft = match; source = 'Open Facts barcode catalogue'; status = 'Online suggestion added. Check the exact product and pack size, then complete price and current stock.' }
       } catch (error) { status = `${error instanceof Error ? error.message : 'Online lookup failed.'} The barcode has been kept below.` }
     }
-    if (openProduct) { openProduct(draft); setMessage('Complete the Add Product form to save.'); return }
+    if (openProduct) { openProduct(draft, `${status} Complete the Add Product form and save when ready.`); return }
     add(draft, source); navigate('import-review'); setMessage(status)
   }
   async function suggest(content = text, source = sourceName) {
@@ -72,11 +72,11 @@ export function ProductIntake({ businessId = 'local', openProduct, shopProfile, 
       if (draft.barcode && !existingBarcodes.includes(draft.barcode)) {
         setMessage('Checking the barcode found on the package...')
         try {
-          const match = await lookupFoodBarcode(draft.barcode)
+          const match = await lookupFoodBarcode(draft.barcode, lookupApiUrl)
           if (match) { draft.name = match.name; lookupSource = 'Open Facts (food, beauty, pet food and products); ' }
         } catch { /* The image suggestion remains useful when lookup is unavailable. */ }
       }
-      if (openProduct) { openProduct(draft); setMessage('Details opened in Add Product. Check and save the form.'); return }
+      if (openProduct) { openProduct(draft, `${lookupSource ? 'Barcode catalogue suggestion added. ' : ''}Photo suggestions opened in Add Product. Check the name and barcode, then complete the business-specific fields before saving.`); return }
       const pending = draft.barcode ? rows.find(row => !row.draft.name.trim() && row.draft.barcode === draft.barcode) : undefined
       if (pending) setRows(current => current.map(row => row.id === pending.id ? { ...row, draft: { ...row.draft, ...draft, barcode: draft.barcode || row.draft.barcode }, source: `${lookupSource}${source}: ${content}` } : row))
       else add(draft, `${lookupSource}${source}: ${content}`)

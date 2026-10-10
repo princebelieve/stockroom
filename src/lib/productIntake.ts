@@ -47,7 +47,7 @@ export function documentSuggestions(text: string): Array<{ draft: ProductDraft; 
 
 const cache = new Map<string, ProductDraft | null>()
 let lastLookup = 0
-export async function lookupFoodBarcode(barcode: string): Promise<ProductDraft | null> {
+export async function lookupFoodBarcode(barcode: string, apiUrl = ''): Promise<ProductDraft | null> {
   if (!validGtin(barcode)) return null
   if (cache.has(barcode)) return cache.get(barcode)!
   try { const saved=JSON.parse(localStorage.getItem('stockroom-barcode:'+barcode)||'null');if(saved?.barcode===barcode && typeof saved.name==='string' && saved.name && saved.savedAt>Date.now()-30*86400000){const draft={name:saved.name,barcode};cache.set(barcode,draft);return draft} } catch { /* Lookup still works when browser storage is unavailable. */ }
@@ -56,9 +56,13 @@ export async function lookupFoodBarcode(barcode: string): Promise<ProductDraft |
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 10000)
   try {
-    const response = await fetch(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?product_type=all&fields=code,product_name,brands,quantity&app_name=StockroomBusiness`, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer' })
+    const base = apiUrl.replace(/\/$/, '')
+    const endpoint = base && base !== '/api/cloud'
+      ? `${base}/v1/public/product-lookup?barcode=${encodeURIComponent(barcode)}`
+      : `/api/product-lookup?barcode=${encodeURIComponent(barcode)}`
+    const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin' })
     if (response.status === 404) { cache.set(barcode, null); return null }
-    if (!response.ok) throw new Error('Online lookup is unavailable. You can still use a photo or fill the details yourself.')
+    if (!response.ok) { const failure = await response.json().catch(() => ({})); throw new Error(failure.error || 'Online lookup is unavailable. You can still use a photo or fill the details yourself.') }
     const data = await response.json()
     const product = data.product
     if (!product || typeof product.product_name !== 'string' || !product.product_name.trim()) { cache.set(barcode, null); return null }

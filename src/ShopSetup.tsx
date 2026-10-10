@@ -28,6 +28,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   const [selected, setSelected] = useState<number[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [progress, setProgress] = useState('')
+  const [readingTemplate, setReadingTemplate] = useState(false)
   const reading = useRef<AbortController | null>(null)
   useEffect(() => () => reading.current?.abort(), [])
   useEffect(() => { if (!dirty) { setDraft(value); setIndustry(value.industry) } }, [value, dirty])
@@ -134,15 +135,18 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
       <h3>Product catalogue template</h3><WorkspaceHelp title="Workspace configuration"><p>Choose a business type to load starting product labels and form fields. Enable selling workspaces separately; this template does not create specialist business operations. Final category and unit dropdowns are configured separately for each workspace.</p></WorkspaceHelp><label>Starting suggestions from business type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
       <WorkspaceHelp title="Catalogue template"><p>{businessModes[industry].note} This business type supplies starting suggestions. Configure the final category and unit choices separately under each workspace in Workspace catalogues.</p></WorkspaceHelp><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
       <WorkspaceHelp><p>Loading a template replaces this draft's visible fields. Previous custom fields stay in Removed fields so their saved values can be restored.</p></WorkspaceHelp>
-      <details><summary>Start from a printed form or screenshot</summary><WorkspaceHelp><p>Upload a JPG, PNG or WebP image, or paste headings from your old app. Text is read on this device without a paid recognition service. Clear printed text works best; write in BLOCK / CAPITAL LETTERS for handwritten labels.</p></WorkspaceHelp>
-        <label>Template image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { reading.current?.abort(); setFile(event.target.files?.[0] || null); setCandidates([]); setProgress('') }} /></label>
-        <AsyncButton className="filter-button" disabled={!file} busyLabel="Reading image..." onClick={async () => {
+      <details><summary>Copy field names from a printed form or screenshot</summary><WorkspaceHelp><p>This reads field labels to help customize your product entry form. It does not add a product or fill in product details. To import products from a photo, use Inventory &gt; Import products &gt; Read product photo.</p><p>Upload a JPG, PNG or WebP image, or paste headings from your old app. Text is read on this device without a paid recognition service. Clear printed text works best; write in BLOCK / CAPITAL LETTERS for handwritten labels.</p></WorkspaceHelp>
+        <label>Photo of a form whose field names you want to copy<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { reading.current?.abort(); setFile(event.target.files?.[0] || null); setCandidates([]); setProgress(event.target.files?.[0] ? 'Image selected. Read it to extract the field names.' : '') }} /></label>
+        <AsyncButton className="filter-button" disabled={!file || readingTemplate} busyLabel="Reading image..." onClick={async () => {
           if (!file) return
           const controller = new AbortController(); reading.current = controller
-          try { const result = await readReceiptPhoto(file, controller.signal, setProgress, true); if (!controller.signal.aborted) { setText(result); setProgress('Text read. Check it, then suggest fields.') } } finally { if (reading.current === controller) reading.current = null }
-        }}>Read template image</AsyncButton><button type="button" className="filter-button" onClick={() => { reading.current?.abort(); setProgress('Reading cancelled. You can enter labels manually.') }}>Cancel reading</button>
-        <label>Template text<textarea rows={6} value={text} onChange={event => setText(event.target.value)} placeholder="Product name&#10;Paper size&#10;Finish&#10;Selling price" /></label>
-        <button type="button" className="filter-button" disabled={!text.trim()} onClick={suggest}>Suggest fields from text</button>
+          setReadingTemplate(true)
+          try { const result = await readReceiptPhoto(file, controller.signal, setProgress, true); if (!controller.signal.aborted) { setText(result); setProgress('Text read. Review the labels, then suggest product form fields.') } }
+          catch (error) { if (!controller.signal.aborted) setProgress(error instanceof Error ? error.message : 'Could not read the image. Enter the labels manually.') }
+          finally { if (reading.current === controller) reading.current = null; setReadingTemplate(false) }
+        }}>Read text from image</AsyncButton>{readingTemplate && <button type="button" className="filter-button" onClick={() => { reading.current?.abort(); setProgress('Reading cancelled. You can enter labels manually.') }}>Cancel reading</button>}
+        <label>Recognized text / field names<textarea rows={6} value={text} onChange={event => setText(event.target.value)} placeholder="Product name&#10;Paper size&#10;Finish&#10;Selling price" /></label>
+        <button type="button" className="filter-button" disabled={!text.trim()} onClick={suggest}>Suggest product form fields</button>
         {progress && <p role="status">{progress}</p>}
         {candidates.length > 0 && <fieldset><legend>Review suggested fields</legend>{candidates.map((field, index) => <div key={index} className="shop-candidate"><label><input type="checkbox" checked={selected.includes(index)} onChange={event => setSelected(event.target.checked ? [...selected, index] : selected.filter(item => item !== index))} />Use label {index + 1}</label><input aria-label={`Suggested label ${index + 1}`} maxLength={80} value={field.label} onChange={event => setCandidates(candidates.map((item, i) => i === index ? { ...item, label: event.target.value } : item))} /><label>Connect to<select value={coreFields.some(core => core.id === field.id) ? field.id : 'custom'} onChange={event => {
           const core = coreFields.find(item => item.id === event.target.value)

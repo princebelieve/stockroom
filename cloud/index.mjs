@@ -40,6 +40,7 @@ import { createProductFormReader } from './product-form.mjs'
 import { normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
 import { readCustomValues } from '../server/shop-fields.mjs'
 import { posSettings, priceOrder } from '../server/pos-pricing.mjs'
+import { lookupOpenFoodFacts } from '../server/open-food-facts.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -281,6 +282,12 @@ const server = createServer(async (request, response) => {
   for (const [name, value] of Object.entries(corsHeaders)) response.setHeader(name, value)
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
+  const requestUrl = new URL(request.url || '/', 'http://localhost')
+  if (request.method === 'GET' && requestUrl.pathname === '/v1/public/product-lookup') {
+    response.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+    const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim())
+    return send(response, result.status, result.body)
+  }
   try {
     if (await staffRemoval.blocked(request)) return send(response, 403, { error: 'Your staff access has been removed by the owner.' })
     if (await staffRemoval.handle(request, response)) return
