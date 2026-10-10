@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { readReceiptPhoto } from './lib/receiptOcr'
-import { labelSuggestion, lookupFoodBarcode } from './lib/productIntake'
+import { labelSuggestion, lookupProductBarcode } from './lib/productIntake'
 
 export function PackageProductPhoto({ lookupApiUrl = '' }: { lookupApiUrl?: string }) {
   const [busy, setBusy] = useState(false)
@@ -22,7 +22,7 @@ export function PackageProductPhoto({ lookupApiUrl = '' }: { lookupApiUrl?: stri
       if (draft.barcode) {
         setMessage('Reading the package and checking its barcode...')
         try {
-          const match = await lookupFoodBarcode(draft.barcode, lookupApiUrl)
+          const match = await lookupProductBarcode(draft.barcode, lookupApiUrl)
           if (match?.name) { draft.name = match.name; lookupNote = ' Barcode catalogue suggestion added.' }
         } catch {
           lookupNote = ' Online barcode lookup was unavailable; photo text was used.'

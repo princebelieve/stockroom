@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { catalogueWorkspaces, workspaceCatalogueOptions, workspaceCatalogueSettings, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { readCustomValues, validateCustomValues } from '../server/shop-fields.mjs'
 import type { ProductDraft } from './lib/productIntake'
+import { lookupProductBarcode, validGtin } from './lib/productIntake'
 
 function fieldHint(id: string, label: string, type: string) {
   if (id.startsWith('custom_')) return type === 'select' ? `Choose the closest value for ${label}. Add or change choices in Business settings > Workspaces > Product form.` : `Enter the ${label.toLowerCase()} for this product. Leave it blank when it does not apply.`
@@ -23,7 +24,7 @@ function FieldInfo({ label, description }: { label: string; description: string 
   return <details className="product-field-info"><summary aria-label={`What to enter for ${label}`} title={`What to enter for ${label}`}>(i)</summary><div className="product-field-info-copy" role="note">{description}</div></details>
 }
 
-export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales', customOnly = false, values, initialDraft, scanBarcode }: { profile: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; customOnly?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: () => Promise<string | undefined> }) {
+export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales', customOnly = false, values, initialDraft, scanBarcode, lookupApiUrl = '' }: { profile: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; customOnly?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: () => Promise<string | undefined>; lookupApiUrl?: string }) {
   const saved = readCustomValues(values)
   const catalogue = workspaceCatalogueOptions(profile, catalogueWorkspace)
   const catalogueSettings = workspaceCatalogueSettings(profile, catalogueWorkspace)
@@ -33,6 +34,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
   const initialUnit = initialDraft?.unit || profile.unit
   const [categoryChoice, setCategoryChoice] = useState(() => categories.includes(initialCategory) ? initialCategory : initialCategory ? '__custom__' : '')
   const [unitChoice, setUnitChoice] = useState(() => units.includes(initialUnit) ? initialUnit : '__custom__')
+  const [barcodeLookupMessage,setBarcodeLookupMessage]=useState('')
   const nameFor = (field: string) => field.startsWith('custom_') ? `custom:${field}` : field
   const idFor = (field: string) => `product-entry-${field}`
 
@@ -60,11 +62,11 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
       </select>
       {customUnit && <input aria-label="Specify product unit" name="customUnit" required maxLength={30} defaultValue={initialUnit && !units.includes(initialUnit) ? initialUnit : ''} placeholder="Enter unit, such as roll or hour" />}
     </> : field.type === 'select' ? <select id={inputId} name={name} required={field.required} defaultValue={saved[field.id] || ''}><option value="">{field.placeholder || 'Choose an option'}</option>{field.options.map(option => <option key={option}>{option}</option>)}</select>
-      : <><input id={inputId} name={name} type={field.type} required={field.required} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} />{field.id === 'barcode' && scanBarcode && <button type="button" className="filter-button" onClick={async event => { const input = event.currentTarget.parentElement?.querySelector('input'); const code = await scanBarcode(); if (code && input?.isConnected) { input.value = code; input.dispatchEvent(new Event('input', { bubbles: true })) } }}>Scan product barcode</button>}</>
+      : <><input id={inputId} name={name} type={field.type} required={field.required} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} />{field.id === 'barcode' && scanBarcode && <button type="button" className="filter-button" onClick={async event => { const button=event.currentTarget; const codeInput = button.parentElement?.querySelector('input'); const formGrid=button.closest('.form-grid'); const code = await scanBarcode(); if (code && codeInput?.isConnected) { codeInput.value = code; codeInput.dispatchEvent(new Event('input', { bubbles: true })); setBarcodeLookupMessage('Checking barcode catalogue...'); try { const match = validGtin(code) ? await lookupProductBarcode(code,lookupApiUrl) : null; if (match?.name) { const nameInput=formGrid?.querySelector<HTMLInputElement>('input[name="name"]'); if(nameInput){nameInput.value=match.name;nameInput.dispatchEvent(new Event('input',{bubbles:true}))} setBarcodeLookupMessage(`Catalogue match: ${match.name}. Check the exact pack, then enter your price and stock.`) } else setBarcodeLookupMessage('No catalogue match. Barcode filled; enter the product name and store details.') } catch(error) { setBarcodeLookupMessage(`${error instanceof Error?error.message:'Barcode lookup failed.'} Barcode filled; enter the product details.`) } } }}>Scan product barcode</button>}</> 
 
     return <div className="shop-product-field" key={field.id}>
       <div className="shop-product-field-label"><label htmlFor={inputId}>{field.label}{field.required ? ' *' : ''}</label><FieldInfo label={field.label} description={hint} /></div>
-      {control}
+      {control}{field.id==='barcode'&&barcodeLookupMessage&&<p className="settings-message" role="status">{barcodeLookupMessage}</p>}
     </div>
   })}</div>
 }

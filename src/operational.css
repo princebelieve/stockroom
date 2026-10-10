@@ -136,6 +136,10 @@
 .overview-side-panels { display:grid; gap:14px; min-width:0; }
 .overview-shortcuts { display:grid; gap:9px; margin:0; padding:14px; border:1px solid var(--line); border-radius:18px; background:#fff; box-shadow:0 4px 0 #172b450d,0 12px 24px #172b450a; }
 .overview-shortcuts .filter-button { display:flex; min-height:48px; align-items:center; justify-content:space-between; gap:12px; border-radius:11px; text-align:left; }
+.app-shell .overview-shortcuts .filter-button { color:#fff; background:var(--brand-dark,var(--ink)); border-color:color-mix(in srgb,var(--brand-dark,var(--ink)) 82%,white); }
+.app-shell .overview-shortcuts .filter-button:hover { color:#fff; background:color-mix(in srgb,var(--brand-dark,var(--ink)) 90%,white); }
+.app-shell .overview-today .overview-start-button { color:#fff; background:color-mix(in srgb,var(--brand-dark,var(--ink)) 78%,#7896bd); border-color:color-mix(in srgb,var(--brand-dark,var(--ink)) 82%,black); box-shadow:0 3px 0 color-mix(in srgb,var(--brand-dark,var(--ink)) 84%,black),0 8px 16px #172b4520; }
+.app-shell .overview-today .overview-start-button:hover { color:#fff; background:color-mix(in srgb,var(--brand-dark,var(--ink)) 70%,#7896bd); }
 .overview-start-options { margin:0; padding:20px; }
 .overview-start-options h2 { margin:7px 0 0; color:var(--ink); font:700 20px/1.2 'Space Grotesk',sans-serif; }
 .overview-start-options p { margin:9px 0 14px; color:var(--muted); font-size:13px; line-height:1.55; }
@@ -319,6 +323,7 @@
   .app-shell .mobile-app-brand-copy { overflow:visible; transform:translateY(20px); }
   .app-shell .mobile-app-brand { max-width:calc(100% - 100px); gap:9px; }
   .app-shell .mobile-app-brand .brand-mark { flex-basis:38px; width:38px; height:38px; border-radius:11px; }
+  .app-shell .mobile-app-brand .brand-mark { align-self:flex-start; margin-top:22px; }
   .app-shell .mobile-app-brand .brand-mark svg { width:24px; height:24px; }
   .app-shell .mobile-app-brand strong { display:-webkit-box; max-width:195px; overflow:hidden; font-size:22px; line-height:1.02; white-space:normal; overflow-wrap:normal; word-break:normal; text-overflow:clip; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
   .app-shell .mobile-app-brand span { display:block; font-size:10px; line-height:1.1; }

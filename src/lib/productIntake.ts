@@ -1,4 +1,4 @@
-export type ProductDraft = { customValues?: Record<string, string>; name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number }
+export type ProductDraft = { customValues?: Record<string, string>; name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number; catalogueSource?: string }
 
 export function validGtin(value: string) {
   if (!/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(value)) return false
@@ -47,10 +47,10 @@ export function documentSuggestions(text: string): Array<{ draft: ProductDraft; 
 
 const cache = new Map<string, ProductDraft | null>()
 let lastLookup = 0
-export async function lookupFoodBarcode(barcode: string, apiUrl = ''): Promise<ProductDraft | null> {
+export async function lookupProductBarcode(barcode: string, apiUrl = ''): Promise<ProductDraft | null> {
   if (!validGtin(barcode)) return null
   if (cache.has(barcode)) return cache.get(barcode)!
-  try { const saved=JSON.parse(localStorage.getItem('stockroom-barcode:'+barcode)||'null');if(saved?.barcode===barcode && typeof saved.name==='string' && saved.name && saved.savedAt>Date.now()-30*86400000){const draft={name:saved.name,barcode};cache.set(barcode,draft);return draft} } catch { /* Lookup still works when browser storage is unavailable. */ }
+    try { const saved=JSON.parse(localStorage.getItem('stockroom-barcode:'+barcode)||'null');if(saved?.barcode===barcode && typeof saved.name==='string' && saved.name && saved.savedAt>Date.now()-30*86400000){const draft={name:saved.name,barcode,catalogueSource:saved.catalogueSource || 'Product catalogue'};cache.set(barcode,draft);return draft} } catch { /* Lookup still works when browser storage is unavailable. */ }
   if (Date.now() - lastLookup < 4500) throw new Error('Please wait a few seconds before another online lookup.')
   lastLookup = Date.now()
   const controller = new AbortController()
@@ -68,7 +68,7 @@ export async function lookupFoodBarcode(barcode: string, apiUrl = ''): Promise<P
     if (!product || typeof product.product_name !== 'string' || !product.product_name.trim()) { cache.set(barcode, null); return null }
     if (typeof product.code !== 'string' || product.code.padStart(14, '0') !== barcode.padStart(14, '0')) return null
     const name = [product.brands, product.product_name, product.quantity].filter(value => typeof value === 'string' && value.trim()).join(' ').slice(0, 180)
-    const draft = { name, barcode }
+    const draft = { name, barcode, catalogueSource: typeof product.source === 'string' ? product.source : 'Open Food Facts' }
     try {localStorage.setItem('stockroom-barcode:'+barcode,JSON.stringify({...draft,savedAt:Date.now()}))}catch { /* Cache is optional. */ }
     cache.set(barcode, draft)
     return draft
@@ -77,6 +77,9 @@ export async function lookupFoodBarcode(barcode: string, apiUrl = ''): Promise<P
     throw error
   } finally { clearTimeout(timer) }
 }
+
+// Kept as a compatibility alias for existing integrations/tests.
+export const lookupFoodBarcode = lookupProductBarcode
 
 export function draftProblem(draft: ProductDraft, existingBarcodes: string[], otherBarcodes: string[]) {
   if (!draft.name.trim()) return 'Enter a product name.'

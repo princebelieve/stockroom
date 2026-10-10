@@ -6,7 +6,7 @@ import { useRef, useState } from 'react'
 import { ScanLine } from 'lucide-react'
 import { readReceiptPhoto } from './lib/receiptOcr'
 import { parseReport } from './lib/reconciliation'
-import { documentSuggestions, draftProblem, labelSuggestion, lookupFoodBarcode, validGtin } from './lib/productIntake'
+import { documentSuggestions, draftProblem, labelSuggestion, lookupProductBarcode, validGtin } from './lib/productIntake'
 import type { ProductDraft } from './lib/productIntake'
 import type { Product } from './types'
 
@@ -57,8 +57,8 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     if (validGtin(code)) {
       setMessage('Looking up barcode online...')
       try {
-        const match = await lookupFoodBarcode(code, lookupApiUrl)
-        if (match) { draft = match; source = 'Open Facts barcode catalogue'; status = 'Online suggestion added. Check the exact product and pack size, then complete price and current stock.' }
+        const match = await lookupProductBarcode(code, lookupApiUrl)
+        if (match) { draft = match; source = `${match.catalogueSource || 'Online catalogue'} suggestion`; status = `${match.catalogueSource || 'Online catalogue'} suggested a name. Check the exact product and pack size, then complete your price and current stock.` }
       } catch (error) { status = `${error instanceof Error ? error.message : 'Online lookup failed.'} The barcode has been kept below.` }
     }
     if (openProduct) { openProduct(draft, `${status} Complete the Add Product form and save when ready.`); return }
@@ -72,8 +72,8 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
       if (draft.barcode && !existingBarcodes.includes(draft.barcode)) {
         setMessage('Checking the barcode found on the package...')
         try {
-          const match = await lookupFoodBarcode(draft.barcode, lookupApiUrl)
-          if (match) { draft.name = match.name; lookupSource = 'Open Facts (food, beauty, pet food and products); ' }
+          const match = await lookupProductBarcode(draft.barcode, lookupApiUrl)
+          if (match) { draft.name = match.name; lookupSource = `${match.catalogueSource || 'Online catalogue'}; ` }
         } catch { /* The image suggestion remains useful when lookup is unavailable. */ }
       }
       if (openProduct) { openProduct(draft, `${lookupSource ? 'Barcode catalogue suggestion added. ' : ''}Photo suggestions opened in Add Product. Check the name and barcode, then complete the business-specific fields before saving.`); return }
@@ -126,6 +126,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
         {page === 'barcode' && <>
         <label>Barcode<div className="barcode-field"><input value={barcode} onChange={event => setBarcode(event.target.value)} placeholder="Enter or scan barcode" /><button type="button" className="barcode-scan-button" aria-label="Scan barcode" onClick={() => void run(async () => { const code = await scan(); if (code) { setBarcode(code); await lookup(code) } })}><ScanLine size={19} /></button></div></label>
         <button type="button" className="filter-button" onClick={() => void run(() => lookup(barcode))}>Find product details</button>
+        <p>For medicines and regulated health products, you can also check the <a href="https://greenbook.nafdac.gov.ng/" target="_blank" rel="noreferrer">NAFDAC Greenbook</a>. To check who issued a GTIN, use <a href="https://www.gs1.org/services/verified-by-gs1" target="_blank" rel="noreferrer">Verified by GS1</a>. These checks may identify a product or registration, but do not fill your selling price or stock.</p>
         </>}
         {page === 'photo' && <>
         <label>What are you reading?<select value={mode} onChange={event => setMode(event.target.value as typeof mode)}><option value="package">One product package / carton</option><option value="document">Invoice / product-list screenshot</option></select></label>
