@@ -6,11 +6,47 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 
 async function withCatalogueResponses(respond, run) {
   const originalFetch = globalThis.fetch
-  globalThis.fetch = async (input) => respond(String(input))
+  globalThis.fetch = async (input, init) => respond(String(input), init)
   try { await run() } finally { globalThis.fetch = originalFetch }
 }
 
-test('accepts the live Open Food Facts success status and verifies the exact barcode', async () => {
+test('uses an exact EcomSource record ahead of conflicting catalogue results', async () => {
+  const barcode = '8001090583420'
+  const previousAccessKey = process.env.ECOMSOURCE_ACCESS_KEY
+  const previousSecretKey = process.env.ECOMSOURCE_SECRET_KEY
+  process.env.ECOMSOURCE_ACCESS_KEY = 'test-access-key'
+  process.env.ECOMSOURCE_SECRET_KEY = 'test-secret-key'
+  await withCatalogueResponses((url, init) => {
+    if (url === 'https://api.ecomsource.ai/api/v1/search/product') {
+      assert.equal(init.method, 'POST')
+      assert.equal(init.headers['X-Access-Key'], 'test-access-key')
+      assert.equal(init.headers['X-Secret-Key'], 'test-secret-key')
+      assert.deepEqual(JSON.parse(init.body), { identifier: barcode, identifierType: 'ean', refresh: false })
+      return json({ success: true, data: [{ identifiers: [{ type: 'ean', identifier: barcode }], summary: [{ itemName: 'Oral-B Strong Teeth Toothpaste 130g', brand: 'Oral-B', manufacturer: 'Procter & Gamble', category: 'Health & Beauty' }], images: [{ link: 'https://images.example/oralb.jpg' }] }] })
+    }
+    if (url.startsWith('https://api.upcitemdb.com/')) return json({ code: 'OK', total: 1, items: [{ ean: barcode, title: 'Wrong provider title', brand: 'Other' }] })
+    if (url.includes('world.openfoodfacts.org') && url.includes('product_type=all')) return json({ status: 'success', product: { code: barcode, product_name: 'Unrelated food label', brands: 'Unrelated brand', product_type: 'food' } })
+    return json({}, 404)
+  }, async () => {
+    try {
+      const result = await lookupOpenFoodFacts(barcode, 'general')
+      assert.equal(result.status, 200)
+      assert.equal(result.body.product.product_name, 'Oral-B Strong Teeth Toothpaste 130g')
+      assert.equal(result.body.product.source, 'EcomSource')
+      assert.equal(result.body.product.attributes.brand, 'Oral-B')
+      assert.equal(result.body.product.attributes.manufacturer, 'Procter & Gamble')
+      assert.equal(result.body.product.attributes.category, 'Health & Beauty')
+      assert.equal(result.body.product.attributes.imageUrl, 'https://images.example/oralb.jpg')
+    } finally {
+      if (previousAccessKey === undefined) delete process.env.ECOMSOURCE_ACCESS_KEY
+      else process.env.ECOMSOURCE_ACCESS_KEY = previousAccessKey
+      if (previousSecretKey === undefined) delete process.env.ECOMSOURCE_SECRET_KEY
+      else process.env.ECOMSOURCE_SECRET_KEY = previousSecretKey
+    }
+  })
+})
+
+test('parses the Open Food Facts v3 success status and verifies the exact barcode', async () => {
   const barcode = '4006381333931'
   await withCatalogueResponses(url => url.includes('/api/v3/product/')
     ? json({ status: 'success', product: { code: barcode, product_name: 'Juice', brands: 'Acme', quantity: '500 ml', product_type: 'food' } })
@@ -42,6 +78,38 @@ test('prefills a sparse catalogue name so the owner can edit it during upload', 
   })
 })
 
+test('uses a catalogue brand when a valid exact-barcode record has no product name', async () => {
+  const barcode = '6291003667367'
+  await withCatalogueResponses(url => url.includes('/api/v3/product/')
+    ? json({ status: 'success', product: { code: barcode, brands: 'Oral-B', product_type: 'beauty' } })
+    : json({}, 404), async () => {
+    const result = await lookupOpenFoodFacts(barcode, 'general')
+    assert.equal(result.status, 200)
+    assert.equal(result.body.product.product_name, 'Oral-B')
+    assert.equal(result.body.product.attributes.brand, 'Oral-B')
+  })
+})
+
+test('accepts Open Food Facts success_with_warnings when it normalizes the Indomie UPC with a leading zero', async () => {
+  const scannedBarcode = '089686130010'
+  await withCatalogueResponses(url => url.includes('/api/v3/product/')
+    ? json({
+      code: '0089686130010', status: 'success_with_warnings',
+      warnings: [{ message: 'different_normalized_product_code' }],
+      product: { code: '0089686130010', product_name: 'Instant Noodles Chicken', brands: 'indomie', quantity: '40 x 70 g', product_type: 'food' },
+    })
+    : json({}, 404), async () => {
+    const result = await lookupOpenFoodFacts(scannedBarcode, 'general')
+    assert.equal(result.status, 200)
+    assert.deepEqual(result.body.product, {
+      code: scannedBarcode,
+      product_name: 'Instant Noodles Chicken',
+      source: 'Open Food Facts',
+      attributes: { brand: 'indomie', quantity: '40 x 70 g', packageSize: '40 x 70 g' },
+    })
+  })
+})
+
 test('normalizes openFDA drug results for non-food barcode suggestions', async () => {
   const barcode = '4006381333931'
   await withCatalogueResponses(url => {
@@ -55,7 +123,7 @@ test('normalizes openFDA drug results for non-food barcode suggestions', async (
 })
 
 test('industry preference chooses a category-specific catalogue record over a conflicting universal record', async () => {
-  const barcode = '8001090583420'
+  const barcode = '123456789012'
   await withCatalogueResponses(url => {
     if (url.includes('world.openfoodfacts.org') && url.includes('product_type=all')) return json({ status: 'success', product: { code: barcode, product_name: 'Closeup', brands: 'Closeup', product_type: 'food' } })
     if (url.includes('world.openfoodfacts.org')) return json({ status: 0 })

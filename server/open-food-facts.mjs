@@ -1,8 +1,12 @@
 const appVersion = '1.0.10'
 const userAgent = `Stockroom Business/${appVersion} (https://stockroom.globalcreest.com; support@sbi.globalcreest.com)`
 const responseCache = new Map()
+const upcItemDbCache = new Map()
+const ecomSourceCache = new Map()
 const recentUpstreamReads = []
 const recentFoodFactsReads = []
+let lastUpcItemDbRead = 0
+let lastEcomSourceRead = 0
 
 export function validProductBarcode(value) {
   if (!/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(value)) return false
@@ -57,6 +61,122 @@ async function getJson(url, signal) {
   }
 }
 
+function sameBarcode(left, right) {
+  return typeof left === 'string' && left.replace(/\D/g, '').padStart(14, '0') === right.padStart(14, '0')
+}
+
+async function lookupUpcItemDb(barcode, signal) {
+  const cached = upcItemDbCache.get(barcode)
+  if (cached && cached.expiresAt > Date.now()) return cached
+  // UPCitemdb's no-key plan is shared per IP and documents one sustained
+  // request every ten seconds. Skip rather than queueing owners behind a
+  // provider throttle; cache both hits and misses to preserve the allowance.
+  if (Date.now() - lastUpcItemDbRead < 10_000) return { product: null, responded: false }
+  lastUpcItemDbRead = Date.now()
+  const hasKey = Boolean(process.env.UPCITEMDB_USER_KEY)
+  const url = hasKey
+    ? `https://api.upcitemdb.com/prod/v1/lookup?upc=${encodeURIComponent(barcode)}`
+    : `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(barcode)}`
+  const headers = hasKey
+    ? { 'user_key': process.env.UPCITEMDB_USER_KEY, 'key_type': process.env.UPCITEMDB_KEY_TYPE || '3scale' }
+    : undefined
+  let data
+  let httpStatus = 0
+  try {
+    const response = await fetch(url, { headers: { 'User-Agent': userAgent, Accept: 'application/json', ...headers }, signal })
+    httpStatus = response.status
+    data = await response.json().catch(() => null)
+  } catch (error) {
+    if (signal.aborted) throw error
+  }
+  const item = data?.code === 'OK' && Array.isArray(data.items)
+    ? data.items.find(candidate => [candidate.upc, candidate.ean, candidate.gtin].some(code => sameBarcode(code, barcode)))
+    : null
+  const name = item?.title || item?.description
+  const product = item && name ? {
+    name,
+    attributes: {
+      brand: item.brand,
+      manufacturer: item.manufacturer,
+      model: item.model,
+      quantity: item.size,
+      packageSize: item.size,
+      category: item.category,
+      description: item.description,
+      imageUrl: Array.isArray(item.images) ? item.images[0] : undefined,
+    },
+  } : null
+  // An upstream limit/error is retried after a minute; ordinary misses get a
+  // longer cache so repeated scans don't consume the shared daily allowance.
+  const limited = data?.code === 'EXCEED_LIMIT' || data?.code === 'TOO_FAST' || httpStatus === 429
+  const confirmedMiss = httpStatus === 404 || data?.code === 'OK'
+  const result = { product, responded: httpStatus > 0 && httpStatus < 500 && httpStatus !== 429 }
+  upcItemDbCache.set(barcode, { ...result, expiresAt: Date.now() + (limited || !confirmedMiss && !product ? 60_000 : product ? 7 * 24 * 60 * 60_000 : 6 * 60 * 60_000) })
+  return result
+}
+
+function ecomSourceIdentifierType(barcode) {
+  if (barcode.length === 12) return 'upc'
+  if (barcode.length === 13) return 'ean'
+  return 'gtin'
+}
+
+async function lookupEcomSource(barcode, signal) {
+  const cached = ecomSourceCache.get(barcode)
+  if (cached && cached.expiresAt > Date.now()) return cached
+  const accessKey = process.env.ECOMSOURCE_ACCESS_KEY?.trim()
+  const secretKey = process.env.ECOMSOURCE_SECRET_KEY?.trim()
+  if (!accessKey || !secretKey) return { product: null, responded: false }
+  // The free sandbox is limited to ten calls per day and asks clients to wait
+  // at least one second between calls. Skip a busy slot; UPCitemdb/Open Facts
+  // remain available as fallbacks instead of delaying product entry.
+  if (Date.now() - lastEcomSourceRead < 1_000) return { product: null, responded: false }
+  lastEcomSourceRead = Date.now()
+  let data
+  let httpStatus = 0
+  try {
+    const response = await fetch('https://api.ecomsource.ai/api/v1/search/product', {
+      method: 'POST',
+      headers: {
+        'X-Access-Key': accessKey,
+        'X-Secret-Key': secretKey,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ identifier: barcode, identifierType: ecomSourceIdentifierType(barcode), refresh: false }),
+      signal,
+    })
+    httpStatus = response.status
+    data = await response.json().catch(() => null)
+  } catch (error) {
+    if (signal.aborted) throw error
+  }
+  const records = Array.isArray(data?.data) ? data.data : data?.data ? [data.data] : []
+  const record = records.find(candidate => Array.isArray(candidate.identifiers)
+    && candidate.identifiers.some(identifier => sameBarcode(String(identifier?.identifier || ''), barcode)))
+  const summary = Array.isArray(record?.summary) ? record.summary[0] : record?.summary
+  const title = summary?.itemName || summary?.brand || summary?.modelNumber
+  const product = record && title ? {
+    name: String(title).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(),
+    attributes: {
+      brand: summary?.brand,
+      manufacturer: summary?.manufacturer,
+      model: summary?.modelNumber,
+      category: summary?.category,
+      description: summary?.htmlDescription,
+      imageUrl: Array.isArray(record.images) ? record.images[0]?.link : undefined,
+    },
+  } : null
+  const limited = httpStatus === 429
+  const confirmedMiss = data?.status === 'not_found' || httpStatus === 404
+  const result = { product, responded: httpStatus > 0 && httpStatus < 500 && !limited }
+  ecomSourceCache.set(barcode, {
+    ...result,
+    expiresAt: Date.now() + (limited ? 5 * 60_000 : product ? 7 * 24 * 60 * 60_000 : confirmedMiss ? 12 * 60 * 60_000 : 60_000),
+  })
+  return result
+}
+
 function lookupAttributes(values) {
   const allowed = ['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass','category']
   return Object.fromEntries(allowed.flatMap(key => {
@@ -74,16 +194,20 @@ function suggestion(code, name, source, attributes = {}) {
 function productRecord(data, barcode) {
   const product = data?.product
   const status = data?.status
-  const successful = status === 1 || status === 'success' || status === 'success_with_errors'
+  // OFF v3 legitimately returns success_with_warnings when it normalizes a
+  // barcode (for example, adding a leading zero). The product remains usable.
+  const successful = status === 1 || status === 'success' || status === 'success_with_errors' || status === 'success_with_warnings'
   return successful && typeof product?.code === 'string' && product.code.padStart(14, '0') === barcode.padStart(14, '0')
     ? product
     : null
 }
 
 function catalogueSuggestion(product, barcode, source) {
-  // Catalogue data is a starting point for an editable product upload. Even a
-  // sparse name can help the owner, so it should not block name prefill.
-  return suggestion(barcode, product.product_name, source, {
+  // Catalogue data is a starting point for an editable product upload. Use the
+  // most descriptive available label; many otherwise useful records have a
+  // brand but no product_name, so do not discard them as a no-match.
+  const name = product.product_name || product.generic_name || product.brands || product.brand_owner || product.quantity
+  return suggestion(barcode, name, source, {
     brand: product.brands,
     manufacturer: product.brand_owner,
     quantity: product.quantity,
@@ -115,7 +239,14 @@ async function lookupCatalogues(barcode, signal, industry = 'general') {
   // The universal endpoint follows Open Food Facts' cross-catalogue redirect
   // for food, beauty, pet-food and other products in one request.
   const fields = 'code,product_name,brands,brand_owner,quantity,generic_name,categories,categories_en,ingredients_text,allergens,traces,image_url,product_type'
-  const universal = await getJson(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?product_type=all&fields=${fields}`, signal)
+  const [universal, broadLookup, ecomLookup] = await Promise.all([
+    getJson(`https://world.openfoodfacts.org/api/v3/product/${encodeURIComponent(barcode)}?product_type=all&fields=${fields}`, signal),
+    lookupUpcItemDb(barcode, signal),
+    lookupEcomSource(barcode, signal),
+  ])
+  const broadProduct = broadLookup.product
+  const ecomProduct = ecomLookup.product
+  providerResponded ||= broadLookup.responded || ecomLookup.responded
   providerResponded ||= universal?.__lookupUnavailable !== true
   const universalProduct = productRecord(universal, barcode)
 
@@ -134,6 +265,14 @@ async function lookupCatalogues(barcode, signal, industry = 'general') {
   ])
   const candidates = []
   const sourceByType = { food: 'Open Food Facts', beauty: 'Open Beauty Facts', petfood: 'Open Pet Food Facts', product: 'Open Products Facts' }
+  if (ecomProduct) {
+    const found = suggestion(barcode, ecomProduct.name, 'EcomSource', ecomProduct.attributes)
+    if (found) candidates.push({ found, rank: -2, richness: Object.keys(found.body.product.attributes).length })
+  }
+  if (broadProduct) {
+    const found = suggestion(barcode, broadProduct.name, 'UPCitemdb', broadProduct.attributes)
+    if (found) candidates.push({ found, rank: -1, richness: Object.keys(found.body.product.attributes).length })
+  }
   if (universalProduct) {
     const found = catalogueSuggestion(universalProduct, barcode, sourceByType[universalProduct.product_type] || 'Open product catalogues')
     if (found) candidates.push({ found, rank: catalogueRank(industry, universalProduct.product_type), richness: Object.keys(found.body.product.attributes).length })
