@@ -157,6 +157,13 @@
 .overview-stat-grid strong { color:var(--ink); font:700 24px/1.1 'Space Grotesk',sans-serif; }
 @media screen and (max-width:900px) { .overview-work-area { grid-template-columns:minmax(0,1fr); gap:14px; }.overview-main-card { min-height:310px; padding:24px; }.overview-side-panels { grid-row:2; }.overview-shortcuts { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); } }
 @media screen and (max-width:600px) { .daily-screen .screen-picker { max-width:none; }.overview-main-card { min-height:0; padding:20px 16px; border-radius:17px; }.overview-empty-state { grid-template-columns:46px minmax(0,1fr); gap:12px; }.overview-empty-icon,.overview-today-icon { width:46px; height:46px; border-radius:14px; }.overview-empty-state h2,.overview-today h2 { font-size:23px; }.overview-empty-state p { font-size:14px; }.overview-empty-state .overview-start-button { grid-column:1/-1; width:100%; }.overview-start-button { min-height:48px; }.overview-side-panels { gap:12px; }.overview-shortcuts { grid-template-columns:1fr; padding:10px; }.overview-start-options { padding:16px; border-radius:17px; }.overview-start-options > div { grid-template-columns:1fr 1fr; }.overview-start-options .filter-button { justify-content:center; min-height:46px; text-align:center; }.overview-today-total { margin:16px 0; font-size:42px; } }
+
+/* Keep mobile form controls at the iOS Safari focus-zoom threshold. */
+@media screen and (max-width: 760px) {
+  .app-shell :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea) {
+    font-size: 16px !important;
+  }
+}
 .setup-fields { border:0; padding:0; margin:0; }
 .setup-fields[hidden] { display:none; }
 .setup-progress { color:var(--muted); font-size:13px; margin:16px 0; }
@@ -251,9 +258,6 @@
   .app-shell .pos-workspace .pos-layout { grid-template-columns:minmax(0,1fr); }
   .app-shell .pos-workspace .pos-layout .pos-catalog,.app-shell .pos-workspace .pos-layout .cart-panel,.app-shell .pos-workspace .pos-layout .pos-payment-panel { max-width:900px; margin-inline:auto; }
   .app-shell .pos-workspace .pos-catalog .pos-products { grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); max-height:calc(100dvh - 330px); }
-  .app-shell .pos-workspace .pos-stage-items.pos-has-cart-preview { grid-template-columns:minmax(0,1.5fr) minmax(250px,.75fr) !important; align-items:start; }
-  .app-shell .pos-workspace .pos-stage-items.pos-has-cart-preview .pos-catalog-slot { grid-column:1; max-width:none; margin:0; }
-  .app-shell .pos-workspace .pos-stage-items.pos-has-cart-preview .pos-basket-preview { grid-column:2; position:sticky; top:16px; }
 }
 @media screen and (max-width:1023px) {
   .app-shell .pos-flow-steps { position:sticky; top:var(--mobile-app-header-height); z-index:4; padding:6px 0; background:var(--brand-wash,#fffdf8); }
@@ -319,17 +323,17 @@
 .app-shell .pos-workspace .pos-basket-preview ul,.app-shell .pos-workspace .pos-basket-preview-more { display:none; }
 @media screen and (min-width:1024px) {
   .app-shell .pos-workspace .pos-flow-steps { display:none; }
-  .app-shell .pos-workspace .pos-layout { grid-template-columns:minmax(0,var(--pos-catalogue-share,64%)) 12px minmax(300px,1fr); align-items:start; }
+  .app-shell .pos-workspace .pos-layout { grid-template-columns:minmax(0,var(--pos-catalogue-share,64fr)) 14px minmax(300px,var(--pos-basket-share,36fr)); align-items:start; }
   .app-shell .pos-workspace .pos-stage-items .pos-catalog-slot,
   .app-shell .pos-workspace .pos-stage-basket .pos-catalog-slot { display:block !important; grid-column:1; max-width:none; width:auto; margin:0; }
   .app-shell .pos-workspace .pos-stage-items .pos-catalog-slot { display:block !important; grid-column:1; max-width:none; width:auto; margin:0; }
   .app-shell .pos-workspace .pos-stage-items .pos-split-divider,
-  .app-shell .pos-workspace .pos-stage-basket .pos-split-divider { grid-column:2; grid-row:1; min-height:100%; border-radius:999px; background:color-mix(in srgb,var(--brand-primary) 18%,var(--line)); cursor:col-resize; touch-action:none; transition:background .15s ease,box-shadow .15s ease; }
+  .app-shell .pos-workspace .pos-stage-basket .pos-split-divider { position:relative; grid-column:2; grid-row:1; justify-self:center; width:14px; min-width:14px; min-height:100%; border:0; border-radius:999px; background:transparent; cursor:col-resize; touch-action:none; }
+  .app-shell .pos-workspace .pos-split-divider::after { position:absolute; inset:0 5px; border-radius:999px; background:color-mix(in srgb,var(--brand-primary) 32%,var(--line)); content:""; transition:background .15s ease,box-shadow .15s ease; }
   .app-shell .pos-workspace .pos-stage-payment .pos-split-divider { display:none; }
-  .app-shell .pos-workspace .pos-stage-items .pos-split-divider:hover,
-  .app-shell .pos-workspace .pos-stage-basket .pos-split-divider:hover,
-  .app-shell .pos-workspace .pos-stage-items .pos-split-divider:focus-visible,
-  .app-shell .pos-workspace .pos-stage-basket .pos-split-divider:focus-visible { outline:0; background:var(--brand-primary); box-shadow:0 0 0 4px color-mix(in srgb,var(--brand-primary) 15%,transparent); }
+  .app-shell .pos-workspace .pos-stage-items .pos-split-divider:hover::after,
+  .app-shell .pos-workspace .pos-stage-basket .pos-split-divider:hover::after { background:var(--brand-primary); }
+  .app-shell .pos-workspace .pos-split-divider:focus-visible { outline:3px solid color-mix(in srgb,var(--brand-primary) 35%,transparent); outline-offset:2px; }
   .app-shell .pos-workspace .pos-stage-items .cart-panel,
   .app-shell .pos-workspace .pos-stage-basket .cart-panel { display:flex !important; grid-column:3; max-width:none; width:auto; margin:0; }
   .app-shell .pos-workspace .pos-stage-items .cart-panel { display:flex !important; grid-column:3; max-width:none; width:auto; margin:0; }
@@ -349,7 +353,12 @@
   .app-shell .pos-workspace .pos-payment-panel .panel-heading h2 { margin-bottom:4px; }
   .app-shell .pos-workspace .pos-payment-panel .payment-due { font-size:23px; }
   .app-shell .pos-workspace .payment-method-picker { grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
-  .app-shell .pos-workspace .payment-method-choice { min-height:50px; flex-direction:column; gap:3px; padding:6px 4px; font-size:11px; }
+  .app-shell .pos-workspace .payment-method-choice { min-height:54px; flex-direction:column; gap:4px; padding:6px 4px; font-size:14px; }
+  .app-shell .pos-workspace .pos-payment-panel .payment-options label { gap:7px; font-size:14px; line-height:1.4; }
+  .app-shell .pos-workspace .pos-payment-panel .payment-options small,
+  .app-shell .pos-workspace .pos-payment-panel .receipt-photo small { font-size:13px; line-height:1.4; }
+  .app-shell .pos-workspace .pos-payment-panel .panel-heading h2 { font-size:23px; }
+  .app-shell .pos-workspace .pos-payment-panel .panel-heading > button { min-height:44px; font-size:14px; }
   .app-shell .pos-workspace .pos-payment-panel .checkout-button { bottom:calc(8px + env(safe-area-inset-bottom)); }
   .app-shell .pos-workspace .pos-catalog .pos-products { max-height:none; }
   .app-shell .pos-workspace .pos-stage-items.pos-has-cart-preview { padding-bottom:92px; }
