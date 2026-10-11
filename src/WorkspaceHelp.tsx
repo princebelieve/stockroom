@@ -1,4 +1,4 @@
-import { CircleHelp } from 'lucide-react'
+import { CircleHelp, Info } from 'lucide-react'
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -26,14 +26,14 @@ export function WorkspaceHelpProvider({children}:{children:ReactNode}) {
 
 export function useScreenHelp(){return useContext(HelpContext)?.open}
 
-export function WorkspaceHelp({children,title='How this screen works'}:{children:ReactNode;title?:string}) {
+export function WorkspaceHelp({children,title='How this screen works',inline=false}:{children:ReactNode;title?:string;inline?:boolean}) {
   const context=useContext(HelpContext)
   const id=useId()
   const marker=useRef<HTMLSpanElement>(null)
   const topic=useRef<Topic>({title,children,marker:null})
   topic.current={title,children,marker:marker.current}
-  useEffect(()=>{topic.current.marker=marker.current;return context?.register(id,topic)},[context,id])
+  useEffect(()=>{if(context&&!inline){topic.current.marker=marker.current;return context.register(id,topic)}},[context,id,inline])
   const dialog=useRef<HTMLDialogElement>(null)
-  if(context)return <span hidden ref={marker}/>
-  return <div className="workspace-help"><button type="button" className="tutorial-trigger" aria-label={`Help: ${title}`} onClick={()=>dialog.current?.showModal()}><CircleHelp size={17}/></button>{createPortal(<dialog ref={dialog} className="workspace-tutorial" aria-label={title}><header><h2>{title}</h2><button type="button" onClick={()=>dialog.current?.close()}>Close</button></header>{children}</dialog>,document.body)}</div>
+  if(context&&!inline)return <span hidden ref={marker}/>
+  return <span className={inline?'inline-workspace-help':'workspace-help'}><button type="button" className={inline?'inline-info-trigger':'tutorial-trigger'} aria-label={`Help: ${title}`} title={title} onClick={()=>dialog.current?.showModal()}>{inline?<Info size={19}/>:<CircleHelp size={17}/>}</button>{createPortal(<dialog ref={dialog} className="workspace-tutorial" aria-label={title}><header><h2>{title}</h2><button type="button" onClick={()=>dialog.current?.close()}>Close</button></header>{children}</dialog>,document.body)}</span>
 }
