@@ -28,6 +28,7 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
   const [poolTill, setPoolTill] = useState(checkoutTillId())
   const [poolBranch, setPoolBranch] = useState('')
   const [productId, setProductId] = useState('')
+  const [modifierRows,setModifierRows]=useState<{name:string;price:string}[]>([])
   useEffect(() => setSettings(data.settings), [data.settings])
   const [managedRegisterId,setManagedRegisterId]=useState('')
   const registerCommand=(action:string)=>{try{return JSON.parse(localStorage.getItem('stockroom-register-command:'+user.id+':'+(headers['X-Stockroom-Branch']||'main')+':'+checkoutTillId()+':'+action)||'null')?.request||{}}catch{return {}}}
@@ -103,13 +104,15 @@ export function PosTools({ data, headers, reload, user, branches, products, cust
       </details>
       <SubmitButton className="filter-button">Save POS settings</SubmitButton>
     </AsyncForm></details>}
-    {mode==='products' && stockEnabled && (user.permissions?hasPermission(user,'inventory'):['owner','admin'].includes(user.role)) && <details><summary>Product variants and extras</summary><WorkspaceHelp><p>Each stock variant uses its own existing product/SKU. Group them here and optionally configure extras that add to its selling price.</p></WorkspaceHelp><label>Product<select value={productId} onChange={event => setProductId(event.target.value)}><option value="">Choose product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label>
-      {productId && <AsyncForm key={productId} busyLabel="Saving product options..." onSubmit={async event => {
+    {mode==='products' && stockEnabled && (user.permissions?hasPermission(user,'inventory'):['owner','admin'].includes(user.role)) && <section className="product-options-task"><header><h2>Product variants &amp; extras</h2><WorkspaceHelp inline title="About variants and extras"><p>Use variants for products with different SKUs. Add extras when they increase the sale price. A variant is still tracked as its own product in Inventory.</p></WorkspaceHelp></header><label>Product<select value={productId} onChange={event => { const id=event.target.value;setProductId(id);setModifierRows((data.products.find(record=>record.productId===id)?.modifiers||[]).map((row:any)=>({name:row.name,price:String(row.price)}))) }}><option value="">Choose product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label>
+      {productId && <AsyncForm key={productId} className="product-options-form" busyLabel="Saving product options..." onSubmit={async event => {
         const form = new FormData(event.currentTarget)
-        const modifiers = String(form.get('modifiers') || '').split('\n').filter(line => line.trim()).map(line => { const index = line.lastIndexOf('|'); if (index < 1) throw new Error('Use Extra name | price for each line.'); return { name: line.slice(0, index).trim(), price: Number(line.slice(index + 1).trim()) } })
+        const populated=modifierRows.filter(row=>row.name.trim()||row.price.trim())
+        if(populated.some(row=>!row.name.trim()||!row.price.trim()||!Number.isFinite(Number(row.price))||Number(row.price)<0))throw new Error('Enter a name and valid price for each extra.')
+        const modifiers=populated.map(row=>({name:row.name.trim(),price:Number(row.price)}))
         await act('/api/pos/products', { productId, variantGroup: form.get('group'), variantLabel: form.get('variant'), modifiers })
-      }}><label>Variant group<input name="group" defaultValue={data.products.find(record => record.productId === productId)?.variantGroup || ''} placeholder="e.g. T-shirt" /></label><label>Variant label<input name="variant" defaultValue={data.products.find(record => record.productId === productId)?.variantLabel || ''} placeholder="e.g. Blue / Medium" /></label><label>Extras, one per line: name | price<textarea name="modifiers" defaultValue={(data.products.find(record => record.productId === productId)?.modifiers || []).map((modifier: any) => `${modifier.name} | ${modifier.price}`).join('\n')} placeholder="Extra cheese | 1.50" /></label><SubmitButton className="filter-button">Save product options</SubmitButton></AsyncForm>}
-    </details>}
+      }}><label>Variant group<input name="group" defaultValue={data.products.find(record => record.productId === productId)?.variantGroup || ''} placeholder="For example, T-shirt" /></label><label>Variant label<input name="variant" defaultValue={data.products.find(record => record.productId === productId)?.variantLabel || ''} placeholder="For example, Blue / Medium" /></label><fieldset className="product-extra-fields"><legend>Sale extras</legend>{modifierRows.map((row,index)=><div className="product-extra-row" key={index}><label>Extra name<input value={row.name} maxLength={80} onChange={event=>setModifierRows(current=>current.map((item,i)=>i===index?{...item,name:event.target.value}:item))} placeholder="Extra cheese"/></label><label>Price<input type="number" min="0" step="0.01" value={row.price} onChange={event=>setModifierRows(current=>current.map((item,i)=>i===index?{...item,price:event.target.value}:item))}/></label><button type="button" className="filter-button" onClick={()=>setModifierRows(current=>current.filter((_,i)=>i!==index))}>Remove</button></div>)}<button type="button" className="filter-button" onClick={()=>setModifierRows(current=>[...current,{name:'',price:''}])}>Add extra</button></fieldset><SubmitButton className="primary-button">Save options</SubmitButton></AsyncForm>}
+    </section>}
   </details>
 }
 
