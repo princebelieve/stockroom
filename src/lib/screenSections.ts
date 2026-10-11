@@ -8,7 +8,7 @@ const sections: Record<string, readonly string[]> = {
 }
 
 export function screenSection(screen: string, requested?: string) {
-  const id=requested==='inventory-purchasing'?'purchasing':requested
+  const id=requested==='inventory-purchasing'?'purchasing':screen==='Inventory'&&requested==='add-search'?'products':requested
   return id && sections[screen]?.includes(id) ? id : sections[screen]?.[0] || ''
 }
 
