@@ -1,13 +1,11 @@
 import { ScreenPicker } from './EmptyScreen'
 import { WorkspaceHelp } from './WorkspaceHelp'
 import { TimeZoneSelect } from './TimeZoneSelect'
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
-import { businessModes, businessPresets, businessPresetGuidance, catalogueWorkspaces, workspaceCatalogueSettings, applyBusinessPreset, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode, type CatalogueWorkspace } from '../server/shop-profile.mjs'
-import { coreFields, validateFields, type ShopField } from '../server/shop-fields.mjs'
+import { businessModes, businessPresets, businessPresetGuidance, businessWorkspace, catalogueWorkspaces, workspaceCatalogueSettings, applyBusinessPreset, normalizeShopProfile, validateShopProfile, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
+import { validateFields, type ShopField } from '../server/shop-fields.mjs'
 import { ShopProductFields } from './ShopProductFields'
-import { readReceiptPhoto } from './lib/receiptOcr'
-import { suggestTemplateFields } from './lib/shopTemplate'
 import { BlankProductForm } from './BlankProductForm'
 
 export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', openWorkspace }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; openWorkspace?: (screen: 'Oil' | 'POS' | 'Payments' | 'Counter' | 'Restaurant') => void }) {
@@ -19,19 +17,10 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   const [dirty, setDirty] = useState(false)
   const [message, setMessage] = useState('')
   const [problem, setProblem] = useState('')
-  const [industry, setIndustry] = useState<BusinessMode>(value.industry)
   const [catalogueWorkspace, setCatalogueWorkspace] = useState<CatalogueWorkspace>('product-sales')
   const [newCategory, setNewCategory] = useState('')
   const [newUnit, setNewUnit] = useState('')
-  const [text, setText] = useState('')
-  const [candidates, setCandidates] = useState<ShopField[]>([])
-  const [selected, setSelected] = useState<number[]>([])
-  const [file, setFile] = useState<File | null>(null)
-  const [progress, setProgress] = useState('')
-  const [readingTemplate, setReadingTemplate] = useState(false)
-  const reading = useRef<AbortController | null>(null)
-  useEffect(() => () => reading.current?.abort(), [])
-  useEffect(() => { if (!dirty) { setDraft(value); setIndustry(value.industry) } }, [value, dirty])
+  useEffect(() => { if (!dirty) setDraft(value) }, [value, dirty])
   function change(next: ShopProfile) { setDraft(next); setDirty(true); setMessage(''); setProblem('') }
   function changeCatalogueList(update: (settings: ReturnType<typeof workspaceCatalogueSettings>) => ReturnType<typeof workspaceCatalogueSettings>) {
     const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
@@ -53,7 +42,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     ;[fields[index], fields[next]] = [fields[next], fields[index]]; change({ ...draft, fields })
   }
   function useTemplate() {
-    const next = normalizeShopProfile({ mode: industry === 'general' ? 'general' : 'suggested', industry })
+    const next = normalizeShopProfile({ mode: draft.industry === 'general' ? 'general' : 'suggested', industry: draft.industry })
     next.reportingTimeZone = draft.reportingTimeZone
     next.workflows = draft.workflows
     next.fastFood = draft.fastFood
@@ -63,55 +52,50 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     if (next.fields.length > 49) { setProblem('This template would exceed 40 custom fields. Customize your current fields instead.'); return }
     change(next); setMessage('Template loaded into your draft. Review fields before saving.')
   }
-  function suggest() { const fields = suggestTemplateFields(text, draft.fields); setCandidates(fields); setSelected(fields.map((_, index) => index)); setProgress(fields.length ? 'Review the detected labels below. Uncheck text that is not a field.' : 'No labels found. Type or add your fields manually.') }
-  function addSuggestions() {
-    const fields = [...draft.fields]
-    for (const index of selected) {
-      const candidate = candidates[index]
-      const position = fields.findIndex(field => field.id === candidate.id)
-      if (position >= 0) fields[position] = { ...fields[position], label: candidate.label, visible: true }
-      else fields.push(candidate)
+  function setWorkspaceEnabled(key: 'productSales'|'payments'|'fastFood'|'restaurant', enabled: boolean) {
+    const current = businessWorkspace(draft)
+    const next = { productSales: current.productSales, payments: current.payments, fastFood: current.fastFood, restaurant: current.restaurant, [key]: enabled }
+    if (draft.industry !== 'liquids' && !next.productSales && !next.payments && !next.fastFood && !next.restaurant) {
+      setProblem('Keep at least one workspace enabled.')
+      return
     }
-    if (fields.length > 49) { setProblem('Use up to 40 custom fields. Uncheck some suggestions.'); return }
-    change({ ...draft, mode: 'custom', fields }); setCandidates([]); setMessage('Selected labels added to your draft. Check their types and placeholders below.')
+    const workflows: ShopProfile['workflows'] = next.productSales && next.payments ? 'both' : next.productSales ? 'stock' : next.payments ? 'payments' : next.fastFood ? 'fast-food' : next.restaurant ? 'restaurant' : 'stock'
+    change({ ...draft, workflows, fastFood: next.fastFood, restaurant: next.restaurant, features: { ...draft.features, services: draft.features?.services ?? true, productSales: draft.industry === 'liquids' ? next.productSales : draft.features?.productSales } })
   }
   function go(next: number) {
     try { if (next > step) { const fields = draft.fields.map(field => ({ ...field, options: field.options.map(item => item.trim()).filter(Boolean) })); validateFields(fields); setDraft({ ...draft, fields }) }; setStep(next); setProblem('') }
     catch (error) { setProblem(error instanceof Error ? error.message : 'Check your fields.') }
   }
   return <section id="shop-setup" className="panel full-panel shop-wizard">
-    <ScreenPicker label="Workspace settings" value={view} change={setView} options={[{id:'type',label:'Business type'},{id:'workspaces',label:'Selling screens and timezone'},{id:'catalogues',label:'Workspace catalogues'},...(!['fast-food','restaurant'].includes(draft.workflows||'')?[{id:'form',label:'Product form'}]:[])]}/><section hidden={view!=='type'}>
+    <ScreenPicker buttons className="settings-task-navigation" label="Workspace settings tasks" value={view} change={setView} options={[{id:'type',label:'Business type'},{id:'workspaces',label:'Available workspaces'},{id:'catalogues',label:'Workspace catalogues'},{id:'timezone',label:'Reporting timezone'},...(!['fast-food','restaurant'].includes(draft.workflows||'')?[{id:'form',label:'Product form'}]:[])]}/><section hidden={view!=='type'}>
     <h2>Business type</h2>
     <label htmlFor="business-preset">Business preset</label>
     <select id="business-preset" value={presetKey} onChange={event => { setPresetKey(event.target.value); setPreviewPreset('') }}><option value="">Choose your business</option>{Object.entries(businessPresets).map(([key, preset]) => <option key={key} value={key}>{preset.label}</option>)}</select>
     <button type="button" className="filter-button" disabled={!presetKey || dirty} onClick={() => setPreviewPreset(presetKey)}>Preview preset</button>
     {dirty && <p>Save your current changes before applying a business preset.</p>}
     {previewPreset && <div className="panel" aria-label="Business preset preview"><h3>{businessPresets[previewPreset].workspace}</h3><p>{businessPresetGuidance[previewPreset]}</p><WorkspaceHelp title="Workspace configuration"><p>This will become your selling workspace. Other selling screens will be hidden; you can enable them again below.</p></WorkspaceHelp><WorkspaceHelp title="Workspace configuration"><p>Your products, menu, tables, receipts and saved configuration are kept. Add your items and prices in Business settings when needed.</p></WorkspaceHelp><AsyncButton className="primary-button" busyLabel="Applying preset..." disabled={dirty} onClick={async () => { await save(applyBusinessPreset(value, previewPreset)); setDirty(false); setPreviewPreset(''); openWorkspace?.(businessPresets[previewPreset].screen) }}>Apply preset and start selling</AsyncButton><button type="button" className="filter-button" onClick={() => setPreviewPreset('')}>Cancel</button></div>}
-    </section><section hidden={view!=='workspaces'}><h3>Reporting timezone</h3>
+    </section><section hidden={view!=='workspaces'} className="workspace-availability-task"><h2>Available workspaces</h2><p>Turn on the screens this business needs. Each appears as its own destination in the app.</p>
+    {draft.industry==='liquids'&&<label className="settings-workspace-option settings-workspace-fixed"><input type="checkbox" checked disabled/><span><strong>Oil sales</strong><small>Product selection, quantities and oil checkout.</small></span></label>}
+    {draft.industry==='liquids'&&<label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).productSales} onChange={event=>setWorkspaceEnabled('productSales',event.target.checked)}/><span><strong>Product sales</strong><small>Standard product checkout with its own basket and held sales.</small></span></label>}
+    {draft.industry!=='liquids'&&<label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).productSales} onChange={event=>setWorkspaceEnabled('productSales',event.target.checked)}/><span><strong>Product sales</strong><small>Sell stocked products and manage inventory.</small></span></label>}
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).payments} onChange={event=>setWorkspaceEnabled('payments',event.target.checked)}/><span><strong>Payments &amp; receipts</strong><small>Record service payments without changing stock.</small></span></label>
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).fastFood} onChange={event=>setWorkspaceEnabled('fastFood',event.target.checked)}/><span><strong>Order counter</strong><small>Take menu orders for a counter, cafe or takeaway.</small></span></label>
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).restaurant} onChange={event=>setWorkspaceEnabled('restaurant',event.target.checked)}/><span><strong>Tables &amp; tabs</strong><small>Manage table orders and customer tabs.</small></span></label>
+    <AsyncButton className="primary-button" busyLabel="Saving workspaces..." onClick={async()=>{const valid=validateShopProfile(draft);await save(valid);setDraft(valid);setDirty(false);setMessage('Workspaces saved.')}}>Save workspaces</AsyncButton>
+    </section><section hidden={view!=='timezone'}><h2>Reporting timezone</h2><p>Used to group sales and reports by business day.</p>
     <TimeZoneSelect value={draft.reportingTimeZone || 'UTC'} onChange={reportingTimeZone => change({ ...draft, reportingTimeZone })} />
-    <AsyncButton className="primary-button" busyLabel="Saving timezone..." onClick={async () => { const reportingTimeZone = validateShopProfile({ ...value, reportingTimeZone: draft.reportingTimeZone }).reportingTimeZone; const otherChanges = JSON.stringify({ ...draft, reportingTimeZone: value.reportingTimeZone }) !== JSON.stringify(value); await save({ ...value, reportingTimeZone }); setDraft(current => ({ ...current, reportingTimeZone })); setDirty(otherChanges); setMessage('Reporting timezone saved. Use Sync now to share it with other devices.') }}>Save reporting timezone</AsyncButton>
-    <h3>Customise workspaces (optional)</h3>
-    {draft.industry === 'liquids' ? <>
-      <label><input type="checkbox" checked={draft.features?.productSales === true} onChange={event => change({ ...draft, features: { services: draft.features?.services ?? true, productSales: event.target.checked } })} />Also enable the separate Product sales workspace</label><WorkspaceHelp><p>Wholesale oil sales remains its own workspace. Enable this only if the business also needs the standard retail checkout, with its own basket and held sales.</p></WorkspaceHelp>
-      <label><input type="checkbox" checked={draft.workflows === 'both' || draft.workflows === 'payments'} onChange={event => change({ ...draft, workflows: event.target.checked ? 'both' : 'stock' })} />Also enable Payments &amp; receipts</label><WorkspaceHelp><p>This is a separate screen for recording service payments that do not change oil stock.</p></WorkspaceHelp>
-    </> : <>
-      <label htmlFor="payment-screens">Payment screens</label><select id="payment-screens" value={draft.workflows || 'both'} onChange={event => change({ ...draft, workflows: event.target.value as ShopProfile['workflows'] })}><option value="payments">Payments &amp; receipts (printing presses, church offices, services)</option><option value="stock">Product sales (supermarkets, mini-marts, retail shops)</option><option value="both">Product sales + Payments &amp; receipts</option><option value="fast-food">Order counter only (fast food, cafes, takeaways)</option><option value="restaurant">Tables &amp; tabs only (restaurants, bars, lounges)</option></select><WorkspaceHelp title="Workspace configuration"><p>These business examples are a guide. Choose the workflow that fits how you sell. Order counter and Tables &amp; tabs also include inventory, purchasing, stock counts and stock movements for ingredients and drinks.</p></WorkspaceHelp><WorkspaceHelp><p>Payments &amp; receipts records a payment without changing stock. Both gives staff two separate screens.</p></WorkspaceHelp>
-      <label><input type="checkbox" checked={draft.fastFood === true || draft.workflows === 'fast-food'} disabled={draft.workflows === 'fast-food'} onChange={event => change({ ...draft, fastFood: event.target.checked })} />Enable separate Order counter (fast food, cafes, takeaways)</label><WorkspaceHelp><p>Use Order counter only for menu orders and preparation. Enable the checkbox with another screen choice for a mixed business.</p></WorkspaceHelp>
-      <label><input type="checkbox" checked={draft.restaurant === true || draft.workflows === 'restaurant'} disabled={draft.workflows === 'restaurant'} onChange={event => change({ ...draft, restaurant: event.target.checked })} />Enable separate Tables &amp; tabs workspace (restaurants, bars, lounges)</label>
-    </>}
-    <AsyncButton className="primary-button" busyLabel="Saving screens..." onClick={async () => { const otherChanges = JSON.stringify({ ...draft, workflows: value.workflows, fastFood: value.fastFood, restaurant: value.restaurant, features: { ...draft.features, productSales: value.features?.productSales } }) !== JSON.stringify(value); await save(validateShopProfile({ ...value, workflows: draft.workflows, fastFood: draft.fastFood || draft.workflows === 'fast-food', restaurant: draft.restaurant || draft.workflows === 'restaurant', features: { services: value.features?.services ?? true, productSales: draft.features?.productSales } })); setDirty(otherChanges); setMessage('Workspaces saved. Use Sync now to share this choice with your other devices.') }}>Save workspaces</AsyncButton>
+    <AsyncButton className="primary-button" busyLabel="Saving timezone..." onClick={async () => { const reportingTimeZone = validateShopProfile({ ...value, reportingTimeZone: draft.reportingTimeZone }).reportingTimeZone; const otherChanges = JSON.stringify({ ...draft, reportingTimeZone: value.reportingTimeZone }) !== JSON.stringify(value); await save({ ...value, reportingTimeZone }); setDraft(current => ({ ...current, reportingTimeZone })); setDirty(otherChanges); setMessage('Reporting timezone saved.') }}>Save reporting timezone</AsyncButton>
     </section><section hidden={view!=='catalogues'}>
       <h2>Workspace catalogues</h2>
       <WorkspaceHelp title="Workspace configuration"><p>Choose which category and unit choices appear in this workspace's product dropdowns. You can hide a choice without deleting it, or remove it from the list.</p></WorkspaceHelp>
-      <label htmlFor="catalogue-workspace">Workspace</label>
-      <select id="catalogue-workspace" value={catalogueWorkspace} onChange={event=>setCatalogueWorkspace(event.target.value as CatalogueWorkspace)}>{Object.entries(catalogueWorkspaces).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
+      <ScreenPicker buttons className="settings-task-navigation" label="Choose workspace catalogue" value={catalogueWorkspace} change={key=>setCatalogueWorkspace(key as CatalogueWorkspace)} options={Object.entries(catalogueWorkspaces).map(([id,label])=>{const enabled=businessWorkspace(draft);const available=id==='oil-sales'?enabled.oil:id==='product-sales'?enabled.productSales:id==='order-counter'?enabled.fastFood:enabled.restaurant;return{id,label:`${label} · ${available?'enabled':'off'}`}})}/>
       {(['categories','units'] as const).map(field => {
         const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
         const disabled = field === 'categories' ? settings.disabledCategories : settings.disabledUnits
         const title = field === 'categories' ? 'Product categories' : 'Product units'
         const inputValue = field === 'categories' ? newCategory : newUnit
-        return <details key={field} className="catalogue-choice-list">
-          <summary>{title} <span>{settings[field].length - disabled.length} of {settings[field].length} enabled</span></summary>
+        return <fieldset key={field} className="catalogue-choice-list">
+          <legend>{title} <span>{settings[field].length - disabled.length} of {settings[field].length} enabled</span></legend>
           <p className="catalogue-choice-hint">Checked choices appear in this workspace's dropdown. Uncheck to hide a choice. Delete removes it from this list.</p>
           <div className="catalogue-choice-rows">{settings[field].map((choice,index) => <div className="catalogue-choice-row" key={`${choice}-${index}`}>
             <button type="button" className="catalogue-choice-delete" aria-label={`Delete ${choice}`} title={`Delete ${choice}`} onClick={() => changeCatalogueList(current => {
@@ -125,34 +109,15 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
             })} />{choice}</label>
           </div>)}</div>
           <div className="catalogue-choice-add"><input aria-label={`New ${field === 'categories' ? 'category' : 'unit'}`} maxLength={field === 'units' ? 30 : 80} value={inputValue} onChange={event => field === 'categories' ? setNewCategory(event.target.value) : setNewUnit(event.target.value)} onKeyDown={event => { if(event.key==='Enter'){event.preventDefault();addCatalogueChoice(field)} }} placeholder={`Add a ${field === 'categories' ? 'category' : 'unit'}`} /><button type="button" className="filter-button" onClick={() => addCatalogueChoice(field)} disabled={!inputValue.trim()}>&#43; Add {field === 'categories' ? 'category' : 'unit'}</button></div>
-        </details>
+        </fieldset>
       })}
       <WorkspaceHelp><p>'Other (please specify)' remains available in product entry. Product sales, Oil sales, Order counter and Tables &amp; tabs each keep separate lists.</p></WorkspaceHelp>
       <AsyncForm onSubmit={async()=>{await save(validateShopProfile({...draft,fields:draft.fields.map(field=>({...field,options:field.options.map(item=>item.trim()).filter(Boolean)}))}));setDirty(false);setMessage(`${catalogueWorkspaces[catalogueWorkspace]} catalogue saved on this device. Use Sync now to share it with your other devices.`)}}><SubmitButton className="primary-button">Save {catalogueWorkspaces[catalogueWorkspace]} catalogue</SubmitButton></AsyncForm>
     </section><section hidden={view!=='form'}>{!['fast-food','restaurant'].includes(draft.workflows || '') && <><h2>Product form (optional)</h2><WorkspaceHelp><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p></WorkspaceHelp>
     <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
     {step === 0 && <div className="shop-step">
-      <h3>Product catalogue template</h3><WorkspaceHelp title="Workspace configuration"><p>Choose a business type to load starting product labels and form fields. Enable selling workspaces separately; this template does not create specialist business operations. Final category and unit dropdowns are configured separately for each workspace.</p></WorkspaceHelp><label>Starting suggestions from business type<select value={industry} onChange={event => setIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, profile]) => <option key={key} value={key}>{profile.label}</option>)}</select></label>
-      <WorkspaceHelp title="Catalogue template"><p>{businessModes[industry].note} This business type supplies starting suggestions. Configure the final category and unit choices separately under each workspace in Workspace catalogues.</p></WorkspaceHelp><button type="button" className="filter-button" onClick={useTemplate}>Use this template</button>
+      <h3>Product catalogue template</h3><WorkspaceHelp title="Workspace configuration"><p>Use your saved business type to load starting product labels and form fields. This does not enable selling workspaces or create business operations.</p></WorkspaceHelp><p>{businessModes[draft.industry].note}</p><button type="button" className="filter-button" onClick={useTemplate}>Load {businessModes[draft.industry].label} template</button>
       <WorkspaceHelp><p>Loading a template replaces this draft's visible fields. Previous custom fields stay in Removed fields so their saved values can be restored.</p></WorkspaceHelp>
-      <details><summary>Copy field names from a printed form or screenshot</summary><WorkspaceHelp><p>This reads field labels to help customize your product entry form. It does not add a product or fill in product details. To import products from a photo, use Inventory &gt; Import products &gt; Read product photo.</p><p>Upload a JPG, PNG or WebP image, or paste headings from your old app. Text is read on this device without a paid recognition service. Clear printed text works best; write in BLOCK / CAPITAL LETTERS for handwritten labels.</p></WorkspaceHelp>
-        <label>Photo of a form whose field names you want to copy<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { reading.current?.abort(); setFile(event.target.files?.[0] || null); setCandidates([]); setProgress(event.target.files?.[0] ? 'Image selected. Read it to extract the field names.' : '') }} /></label>
-        <AsyncButton className="filter-button" disabled={!file || readingTemplate} busyLabel="Reading image..." onClick={async () => {
-          if (!file) return
-          const controller = new AbortController(); reading.current = controller
-          setReadingTemplate(true)
-          try { const result = await readReceiptPhoto(file, controller.signal, setProgress, true); if (!controller.signal.aborted) { setText(result); setProgress('Text read. Review the labels, then suggest product form fields.') } }
-          catch (error) { if (!controller.signal.aborted) setProgress(error instanceof Error ? error.message : 'Could not read the image. Enter the labels manually.') }
-          finally { if (reading.current === controller) reading.current = null; setReadingTemplate(false) }
-        }}>Read text from image</AsyncButton>{readingTemplate && <button type="button" className="filter-button" onClick={() => { reading.current?.abort(); setProgress('Reading cancelled. You can enter labels manually.') }}>Cancel reading</button>}
-        <label>Recognized text / field names<textarea rows={6} value={text} onChange={event => setText(event.target.value)} placeholder="Product name&#10;Paper size&#10;Finish&#10;Selling price" /></label>
-        <button type="button" className="filter-button" disabled={!text.trim()} onClick={suggest}>Suggest product form fields</button>
-        {progress && <p role="status">{progress}</p>}
-        {candidates.length > 0 && <fieldset><legend>Review suggested fields</legend>{candidates.map((field, index) => <div key={index} className="shop-candidate"><label><input type="checkbox" checked={selected.includes(index)} onChange={event => setSelected(event.target.checked ? [...selected, index] : selected.filter(item => item !== index))} />Use label {index + 1}</label><input aria-label={`Suggested label ${index + 1}`} maxLength={80} value={field.label} onChange={event => setCandidates(candidates.map((item, i) => i === index ? { ...item, label: event.target.value } : item))} /><label>Connect to<select value={coreFields.some(core => core.id === field.id) ? field.id : 'custom'} onChange={event => {
-          const core = coreFields.find(item => item.id === event.target.value)
-          setCandidates(candidates.map((item, i) => i === index ? { ...(core || { ...item, id: `custom_${crypto.randomUUID().replaceAll('-', '_')}`, locked: false, required: false }), label: item.label } : item))
-        }}><option value="custom">New custom field</option>{coreFields.map(core => <option key={core.id} value={core.id}>{core.label}</option>)}</select></label></div>)}<button type="button" className="filter-button" disabled={!selected.length} onClick={addSuggestions}>Add selected fields to draft</button></fieldset>}
-      </details>
     </div>}
     {step === 1 && <div className="shop-step">
       <div className="form-grid"><label>Item name<input maxLength={40} value={draft.itemLabel} onChange={event => change({ ...draft, mode: 'custom', itemLabel: event.target.value })} /></label><label>Catalogue name<input maxLength={40} value={draft.inventoryLabel} onChange={event => change({ ...draft, mode: 'custom', inventoryLabel: event.target.value })} /></label><label>Usual unit<input maxLength={30} value={draft.unit} onChange={event => change({ ...draft, mode: 'custom', unit: event.target.value })} /></label></div>

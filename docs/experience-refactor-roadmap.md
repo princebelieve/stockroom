@@ -24,6 +24,7 @@ The attached DothPro photos are visual references. Even though the photos are fa
 - Use color, icons, charts, product images, status badges and small motion only when they make meaning or progress clearer.
 - Preserve existing routes, saved data, workspace separation, permissions, offline behavior, and sales, stock and payment calculations unless a separately reviewed change requires otherwise.
 - Do not treat visual polish as evidence that a workflow works. Check the screen's actual behavior and its connected data.
+- In Settings, make available workspaces explicit and show which are enabled. Give unrelated configuration tasks their own destinations; use sequential steps only inside one task. Keep unsupported device integrations out of selectable setup choices.
 
 ## Journey map
 
@@ -33,9 +34,9 @@ The attached DothPro photos are visual references. Even though the photos are fa
 | 1. Direction | Set shared visual and interaction principles using the attached desktop references and current app examples | A design language for spacious desktop panels, tactile surfaces, hierarchy, color, status, motion and phone behavior | Complete |
 | 2. Daily landing | Review Overview after baseline | Overview's own task and information are clear and well presented | Complete |
 | 3. Core work | Product sales / Oil sales / Payments & receipts / Order counter / Tables & tabs | Each screen supports its main task with clear state changes and immediate feedback | In progress |
-| 4. Stock work | Find or add product, receive/count/move stock, inspect result | Product and stock tasks remain distinct, navigable screens | Not started |
+| 4. Stock work | Find or add product, receive/count/move stock, inspect result | Product and stock tasks remain distinct, navigable screens | Closed at owner direction; revisit only if needed |
 | 5. Records and decisions | Sales history, customers, expenses, reports, staff activity | Lists and figures are scannable; alerts and next actions are easy to identify | Not started |
-| 6. Setup and recovery | Settings, help, sync, permissions, subscription and empty/error states | Configuration remains separate; recovery is understandable and actionable | Not started |
+| 6. Setup and recovery | Settings, help, sync, permissions, subscription and empty/error states | Configuration remains separate; recovery is understandable and actionable | In progress |
 | 7. Consistency pass | Check workspace variants, desktop compositions, phone layouts and key roles | Shared components behave consistently without erasing workspace-specific needs; desktop is independently reviewed, not merely scaled | Not started |
 | 8. Acceptance | Recheck real journeys, accessibility, responsive behavior and release build | Agreed acceptance list passes and this roadmap is marked complete | Not started |
 
@@ -77,7 +78,10 @@ This queue names destination screens rather than bundling tasks together. All ro
 | Supplier list | Supplier search, records and relevant actions | Not started |
 | Reports | Key business figures, time range, chart/table readability and follow-up actions | Not started |
 | Staff & access | Role clarity, permissions and staff activity | Not started |
-| Business settings | Separate settings destinations, selection controls and save feedback | Not started |
+| Business settings | Separate settings destinations, selection controls and save feedback | In progress |
+| Workspace availability | Existing business workspaces, enabled state, implications and save feedback | In progress |
+| Sales settings | Tax, product tax rates, customer rewards and offline till stock as distinct tasks | In progress |
+| Device setup | Realistic hardware integrations, platform limits and observed test result | Not started |
 | Main menu and menu groups | Navigation labels, group expansion, current screen, account/support and sign-out | Not started |
 | Notifications and feature notices | Relevant alert, one clear next action, dismissal and persistence choice | Not started |
 | Help & support | Screen-specific answers and direct links to the relevant next task | Not started |
@@ -179,9 +183,12 @@ The DothPro photos reinforce two different states. The sales-order screen is int
 
 ## Current stopping point
 
-**Active phase:** Phase 4 — Stock work (Inventory)
-**Last completed:** Inventory destinations have source-level task review and empty-state fixes. The Product list has a direct browse toolbar, one Add product action and no separate Product details row button. Import, Purchasing and product options stay in their task destinations. Pricing has distinct quantity/customer rate sections and inline information. Stock cost/expiry shows summary and batch table only when batch records exist. Empty product, supplier, supply-history, price and batch states avoid unnecessary vertical minimums or zero-value panels, while keeping readable copy and line spacing.
-**Next:** Inventory remains in progress. Render every destination on desktop and phone, including empty and populated product lists, no-supplier and no-batch states, actual customer/bulk rates, imports, transfers and owner/staff permissions. Confirm there is no avoidable empty-state scroll and that populated tables remain readable on phones. Charts currently belong to Reports, not Inventory; keep them only where their measures support a clear decision, and review those charts with the Reports screen. Do not close Inventory based on source/build review alone.
+| Inventory phase closed by owner direction | 2026-10-11 | Stopped Inventory work and moved to Settings as requested. This records a change of focus, not a claim that every Inventory destination received final desktop/phone acceptance review. | Reopen Inventory only if the owner requests it or later use identifies a specific issue. |
+| Settings and workspace setup started | 2026-10-11 | Replaced task selectors in workspace settings with visible destinations; separated workspace availability from reporting timezone; made enabled workspace choices explicit; split tax, product tax rates, rewards and offline till stock into separate sales-settings tasks; removed the product-form image-label OCR helper that duplicated no operational product-import task; removed unsupported direct USB/Bluetooth drawer and cutter choices and suppresses those hardware setup cards on platforms that cannot issue the commands. | Build passes. Interaction and layout verification remain. Review saved workspace mappings and Settings navigation on desktop and phone, then continue the remaining settings tasks. |
+
+**Active phase:** Phase 6 — Setup and recovery (Settings)
+**Last completed:** Inventory work is closed at owner direction, without claiming final acceptance of every destination. Initial Settings changes distinguish business/workspace tasks, separate workspace availability from reporting timezone, make enabled selling workspaces obvious, split sales configuration into tax, product tax rates, rewards and offline stock screens, remove a redundant form-image label helper, and remove device connection options known not to work.
+**Next:** Verify workspace toggles persist to the correct selling destinations, including the liquids preset and mixed workspaces. Check Settings navigation and empty states at desktop and phone sizes. Continue auditing each Settings task for duplicate controls, unsupported integrations, and save feedback.
 
 ## Definition of done
 
