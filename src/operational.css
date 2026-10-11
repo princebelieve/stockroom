@@ -416,6 +416,36 @@
 .product-list-summary dd { margin:6px 0 0; font-size:22px; font-weight:600; }
 .product-list-tabs { display:flex; gap:10px; flex-wrap:wrap; }
 
+/* Inventory destinations are the primary task switcher for this screen. */
+.inventory-action-cards { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:12px; margin:18px 0 22px; }
+.inventory-action-cards > button { display:flex; align-items:center; justify-content:center; min-width:0; min-height:66px; padding:12px 10px; border:1px solid #102b50; border-radius:8px; background:#17365d; color:#fff; box-shadow:0 5px 12px rgb(16 43 80 / 22%); font-weight:650; line-height:1.25; text-align:center; white-space:normal; }
+.inventory-action-cards > button:hover { background:#214b7c; box-shadow:0 7px 16px rgb(16 43 80 / 27%); transform:translateY(-1px); }
+.inventory-action-cards > button[aria-current="page"] { background:#0c2342; border-color:#071a34; box-shadow:inset 0 0 0 2px #8db7ee,0 5px 12px rgb(16 43 80 / 24%); }
+.inventory-action-cards > button:focus-visible { outline:3px solid #70a9f4; outline-offset:3px; }
+@media(max-width:900px) { .inventory-action-cards { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(max-width:650px) { .inventory-action-cards { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:12px 0 18px; } .inventory-action-cards > button { min-height:64px; padding:8px 5px; font-size:12px; } }
+.stock-cost-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:18px 0; }
+.stock-cost-metrics > div { display:grid; gap:7px; min-width:0; padding:15px 16px; border:1px solid #d5dfeb; border-radius:9px; background:#f6f8fb; }
+.stock-cost-metrics span { color:var(--muted); font-size:13px; }
+.stock-cost-metrics strong { color:#17365d; font-size:22px; }
+.stock-cost-metrics .attention { border-color:#efcf88; background:#fff9e9; }
+.stock-cost-metrics .danger { border-color:#e8b5b0; background:#fff4f2; }
+.stock-cost-alert { margin:10px 0; padding:11px 14px; border-radius:8px; background:#fff8e8; }
+.stock-cost-actions { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 22px; }
+.stock-cost-task { display:grid; gap:14px; margin:16px 0; padding:18px; border:1px solid #d5dfeb; border-radius:10px; background:#f8fafc; }
+.stock-cost-task h3,.stock-batch-list h3 { margin:0; }
+.stock-cost-task > label,.stock-cost-form label { display:grid; gap:6px; max-width:520px; }
+.stock-cost-task input,.stock-cost-task select { box-sizing:border-box; width:100%; min-height:42px; padding:9px 11px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); font:inherit; }
+.stock-cost-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.stock-cost-form button { justify-self:start; align-self:end; }
+.stock-batch-list { margin-top:24px; }
+.stock-batch-list > .table-wrap { margin-top:12px; }
+.stock-cost-history { margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
+.stock-cost-history summary { cursor:pointer; font-weight:650; }
+.stock-cost-history p { overflow-wrap:anywhere; color:var(--muted); }
+@media(max-width:800px) { .stock-cost-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:600px) { .stock-cost-form { grid-template-columns:1fr; } .stock-cost-metrics > div { padding:12px; } .stock-cost-metrics strong { font-size:19px; } .stock-cost-actions { display:grid; grid-template-columns:1fr; } }
+
 .sync-logo-preview { max-width:100px; max-height:100px; object-fit:contain; }
 
 /* Phone composition for the Overview; leave desktop and tablet layouts unchanged. */

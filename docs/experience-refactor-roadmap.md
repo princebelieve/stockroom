@@ -59,6 +59,7 @@ This queue names destination screens rather than bundling tasks together. All ro
 | Product catalogue | Search, add/edit product, starter catalogue and import entry points | Not started |
 | Add or search product | Product lookup/search, scan entry point and continue-to-add action | Not started |
 | Product list | Product totals, search, category/status filters, empty/populated list and product actions | Not started |
+| Stock costs and expiry | Batch cost, expiry alerts, correction tasks and audit history | In progress |
 | Purchasing and receiving | Supplier/delivery task, saved result and related next destination | Not started |
 | New supply | Product selection, supplier, quantities/costs, save and stock result | Not started |
 | Supply records | Supply history, find/inspect record and follow-up action | Not started |
@@ -174,9 +175,9 @@ The supplied ShopKite screenshots are examples of screen variety, navigation, an
 
 ## Current stopping point
 
-**Active phase:** Phase 3 — Core work (Sales task navigation / Product sales entry)
-**Last completed:** Overview accepted and closed by the owner. Its first-use state was recorded at 390 px phone and 1440 px desktop; desktop dimensions measured; visual direction documented; first-use refactor implemented.
-**Next:** Review the redesigned Product sales flow at desktop and phone, including fresh catalogue, populated basket, payment, empty stock, and cashier/manager access. Fix any viewport or interaction issues found, then mark the screen complete only after the rendered review and build verification.
+**Active phase:** Phase 4 — Stock work (Inventory)
+**Last completed:** Inventory navigation now uses tactile navy task cards, with a desktop row and a two-column phone layout. The stock-costs and expiry view has a compact status summary, direct correction actions, a visible batch list, and secondary correction history.
+**Next:** Review Inventory on desktop and phone with empty and populated catalogues, actual batch/expiry data, and owner/staff permissions. Confirm the cards fit at common desktop widths and the batch list remains readable on phone. Charts currently belong to Reports, not Inventory; keep them only where their measures support a clear decision, and review those charts with the Reports screen.
 
 ## Definition of done
 

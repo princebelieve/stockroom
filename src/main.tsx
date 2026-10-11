@@ -2088,7 +2088,7 @@ function App() {
 
       {salesBlocked && <section className="empty-screen subscription-block" aria-label="Sales access"><h2>{['expired','trial-expired'].includes(posAccess.status)?'Subscription expired':'Sales unavailable'}</h2><p>{['expired','trial-expired'].includes(posAccess.status)?'Renew your subscription to continue selling.':posAccess.reason}</p><button type="button" className="primary-button" onClick={()=>setActive('Subscription')}>Open subscription</button><AsyncButton className="text-button" busyLabel="Checking..." onClick={async()=>setPosAccess(await readPosAccess(authToken,user.organizationId,true))}>Check again</AsyncButton></section>}
       <div className="workspace-content" hidden={salesBlocked}>
-      {active==='Inventory' && <ScreenPicker buttons value={section} change={chooseSection} options={[
+      {active==='Inventory' && <ScreenPicker buttons className="inventory-action-cards" label="Inventory tasks" value={section} change={chooseSection} options={[
         ...(hasPermission(user,'inventory')?[{id:'products',label:'Products'}, {id:'transfers',label:'Move stock'}]:[]),
         ...(hasPermission(user,'purchasing')?[{id:'purchasing',label:'Supply & suppliers'}]:[]),
         ...(hasPermission(user,'inventory')?[{id:'expiry',label:'Stock costs & expiry'},{id:'pricing',label:'Prices'},{id:'import',label:'Import CSV'}]:[]),
