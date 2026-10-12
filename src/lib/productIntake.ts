@@ -62,7 +62,12 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
       ? `${base}/v1/public/product-lookup?${query}`
       : `/api/product-lookup?${query}`
     const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin', cache: 'no-store' })
-    if (response.status === 404) return null
+    if (response.status === 404) {
+      const failure = await response.json().catch(() => ({}))
+      if (failure?.status === 0) return null
+      if (typeof failure?.error === 'string') throw new Error(`Product lookup service returned 404: ${failure.error}`)
+      throw new Error('Product lookup endpoint returned 404. The lookup service route may be missing or out of date.')
+    }
     if (!response.ok) { const failure = await response.json().catch(() => ({})); throw new Error(failure.error || 'Online lookup is unavailable. You can still use a photo or fill the details yourself.') }
     const data = await response.json()
     const product = data.product

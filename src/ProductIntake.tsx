@@ -57,12 +57,12 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     const reference=await findReferenceBarcode(businessId,code).catch(()=>null)
     let draft: ProductDraft = { name: '', barcode: code }
     let state: BarcodeLookupReport['state'] = 'not-found'
-    let status = 'No catalogue match was returned. You can still add the product manually with this barcode.'
+    let status = lookupSource ? `No exact barcode match was found in ${lookupSource}. Try another source or enter the product details.` : 'No catalogue match was returned. You can still add the product manually with this barcode.'
     if(reference){draft=reference;state='saved-reference';status='Found on this device. Confirm that the name, barcode and pack match the product in your hand; enter your own price, cost and stock.'}
     else if (validGtin(code)) {
       setMessage('Looking up barcode online...')
       try {
-        const match = await lookupProductBarcode(code, lookupApiUrl, shopProfile, catalogueWorkspace)
+        const match = await lookupProductBarcode(code, lookupApiUrl, shopProfile, catalogueWorkspace, lookupSource)
         if (match) { draft = match; state = 'match'; status = `${match.catalogueSource || 'Online catalogue'} suggested this name. Confirm the exact product and pack; your business price, cost and stock are not supplied by the catalogue.` }
       } catch (error) { state = 'unavailable'; status = `${error instanceof Error ? error.message : 'Online lookup failed.'} The scanned barcode is preserved so you can continue manually.` }
     } else { state = 'invalid'; status = 'This code is not a supported product GTIN, so online catalogues could not verify it. You can still add it as your product barcode.' }
@@ -151,6 +151,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
         </>}
         {page === 'barcode' && !barcodeReport && <>
         <label>Barcode<div className="barcode-field"><input value={barcode} onChange={event => setBarcode(event.target.value)} onKeyDown={event => { if (event.key === scanKey && barcode.trim()) { event.preventDefault(); void run(() => lookup(barcode)) } }} placeholder="Enter or scan barcode" /><button type="button" className="barcode-scan-button" aria-label="Scan barcode" onClick={() => void run(async () => { const code = await scan(); if (code) { setBarcode(code); await lookup(code) } })}><ScanLine size={19} /></button></div></label>
+        <label>Online catalogue<select value={lookupSource} onChange={event=>setLookupSource(event.target.value)}><option value="">Automatic best match</option><option>Open Food Facts</option><option>Open Beauty Facts</option><option>Open Pet Food Facts</option><option>Open Products Facts</option><option>UPCitemdb</option><option>EcomSource</option><option>openFDA Drug NDC Directory</option><option>AccessGUDID medical device registry</option></select></label>
         <button type="button" className="filter-button" onClick={() => void run(() => lookup(barcode))}>Find product details</button>
         <p>For medicines and regulated health products, you can also check the <a href="https://greenbook.nafdac.gov.ng/" target="_blank" rel="noreferrer">NAFDAC Greenbook</a>. To check who issued a GTIN, use <a href="https://www.gs1.org/services/verified-by-gs1" target="_blank" rel="noreferrer">Verified by GS1</a>. These checks may identify a product or registration, but do not fill your selling price or stock.</p>
         </>}

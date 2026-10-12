@@ -36,6 +36,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
   const [categoryChoice, setCategoryChoice] = useState(() => categories.includes(initialCategory) ? initialCategory : initialCategory ? '__custom__' : '')
   const [unitChoice, setUnitChoice] = useState(() => units.includes(initialUnit) ? initialUnit : '__custom__')
   const [barcodeLookupMessage,setBarcodeLookupMessage]=useState('')
+  const [barcodeLookupSource,setBarcodeLookupSource]=useState('')
   const nameFor = (field: string) => field.startsWith('custom_') ? `custom:${field}` : field
   const idFor = (field: string) => `product-entry-${field}`
   async function lookupBarcode(code: string, codeInput: HTMLInputElement) {
@@ -44,7 +45,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
     const formGrid=codeInput.closest('.form-grid')
     setBarcodeLookupMessage('Checking barcode catalogue...')
     try {
-      const match=validGtin(value)?await lookupProductBarcode(value,lookupApiUrl,profile,catalogueWorkspace):null
+      const match=validGtin(value)?await lookupProductBarcode(value,lookupApiUrl,profile,catalogueWorkspace,barcodeLookupSource):null
       if(!validGtin(value)){setBarcodeLookupMessage('Barcode saved. This format cannot be checked in the online catalogue.');return}
       if(!match?.name){setBarcodeLookupMessage('No catalogue match. Barcode saved; enter the product name and store details.');return}
       const nameInput=formGrid?.querySelector<HTMLInputElement|HTMLTextAreaElement>('input[name="name"], textarea[name="name"]')
@@ -97,7 +98,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
 
     return <div className="shop-product-field" key={field.id}>
       <div className="shop-product-field-label"><label htmlFor={inputId}>{field.label}{field.required ? ' *' : ''}</label><FieldInfo label={field.label} description={hint} /></div>
-      {control}{field.id==='barcode'&&barcodeLookupMessage&&<p className="settings-message" role="status">{barcodeLookupMessage}</p>}
+      {control}{field.id==='barcode'&&<><label className="barcode-inline-source">Online catalogue<select value={barcodeLookupSource} onChange={event=>setBarcodeLookupSource(event.target.value)}><option value="">Automatic best match</option><option>Open Food Facts</option><option>Open Beauty Facts</option><option>Open Pet Food Facts</option><option>Open Products Facts</option><option>UPCitemdb</option><option>EcomSource</option><option>openFDA Drug NDC Directory</option><option>AccessGUDID medical device registry</option></select></label>{barcodeLookupMessage&&<p className="settings-message" role="status">{barcodeLookupMessage}</p>}</>}
     </div>
   })}</div>
 }
