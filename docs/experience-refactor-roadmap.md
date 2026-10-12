@@ -26,6 +26,7 @@ The attached DothPro photos are visual references. Even though the photos are fa
 - Do not treat visual polish as evidence that a workflow works. Check the screen's actual behavior and its connected data.
 - In Settings, make available workspaces explicit and show which are enabled. Give unrelated configuration tasks their own destinations; use sequential steps only inside one task. Keep unsupported device integrations out of selectable setup choices.
 - Use the existing-business Settings task picker as the default navigation pattern for complex management areas: one focused task view at a time, a searchable selector that jumps directly to a task, and concise task-specific content. Keep genuinely separate actions (such as staff accounts and permissions) on separate destinations. Preserve desktop tables where they suit management work and compose phone views deliberately.
+- Subscription value and charging rule: one business subscription covers all enabled selling workspaces. Payments & receipts is the sole subscription-free workspace. The first enabled selling workspace uses the base plan; every additional selling workspace adds the Developer-configured percentage (default 5%) to that plan. Inventory is a capability, not an additional workspace. Show the included workspaces and adjusted price before checkout; keep Paystack and Google Play checkout amounts aligned with the enabled workspace count.
 
 ## Journey map
 
@@ -53,16 +54,16 @@ This queue names destination screens rather than bundling tasks together. All ro
 | Workspace and business setup | Workspace selection, business type and each separate setup step | Not started |
 | Payment method list and add/edit | Existing methods, add method task, store selection and saved state | Not started |
 | Sales task navigation | Workspace-specific entry to new sale, sales records and customer balances | In progress |
-| Product sales | Catalogue search, basket, payment handoff and completion feedback | In progress |
+| Product sales | Catalogue search, basket, payment handoff and completion feedback | Accepted by owner; restored edits not reapplied |
 | Oil sales | Oil-specific product selection, quantities and checkout | Not started |
 | Payments & receipts | Payment tasks, jobs/invoices, payment completion and receipt access | Not started |
 | Order counter | Order entry, preparation/collection states, payment and active queue | Not started |
 | Tables & tabs | Table selection, adding rounds, bill state and settlement | Not started |
-| Product catalogue | Search, add/edit product, starter catalogue and import entry points | Not started |
-| Add or search product | Product lookup/search, scan entry point and continue-to-add action | Not started |
-| Product list | Product totals, search, category/status filters, empty/populated list and product actions | Not started |
-| Stock costs and expiry | Batch cost, expiry alerts, correction tasks and audit history | In progress |
-| Purchasing and receiving | Supplier/delivery task, saved result and related next destination | Not started |
+| Product catalogue | Search, add/edit product, starter catalogue and import entry points | Accepted by owner |
+| Add or search product | Product lookup/search, scan entry point and continue-to-add action | Accepted by owner |
+| Product list | Product totals, search, category/status filters, empty/populated list and product actions | Accepted by owner |
+| Stock costs and expiry | Batch cost, expiry alerts, correction tasks and audit history | Accepted by owner |
+| Purchasing and receiving | Supplier/delivery task, saved result and related next destination | Accepted by owner |
 | New supply | Product selection, supplier, quantities/costs, save and stock result | Not started |
 | Supply records | Supply history, find/inspect record and follow-up action | Not started |
 | Stock count | Count entry, discrepancy review and save result | Not started |
@@ -78,10 +79,11 @@ This queue names destination screens rather than bundling tasks together. All ro
 | New supplier | Single-purpose supplier entry, validation and saved result | Not started |
 | Supplier list | Supplier search, records and relevant actions | Not started |
 | Reports | Key business figures, time range, chart/table readability and follow-up actions | Not started |
-| Staff & access | Role clarity, permissions and staff activity | Not started |
-| Business settings | Separate settings destinations, selection controls and save feedback | In progress |
-| Workspace availability | Existing business workspaces, enabled state, implications and save feedback | In progress |
-| Sales settings | Tax, product tax rates, customer rewards and offline till stock as distinct tasks | In progress |
+| Staff & access | Role clarity, permissions and staff activity | Accepted by owner |
+| Subscription | Plan/access status, payment and renewal, referral rewards, export/exit, owner actions | In progress |
+| Business settings | Separate settings destinations, selection controls and save feedback | Accepted by owner |
+| Workspace availability | Existing business workspaces, enabled state, implications and save feedback | Accepted by owner |
+| Sales settings | Tax, product tax rates, customer rewards and offline till stock as distinct tasks | Accepted by owner |
 | Device setup | Realistic hardware integrations, platform limits and observed test result | Not started |
 | Main menu and menu groups | Navigation labels, group expansion, current screen, account/support and sign-out | Not started |
 | Notifications and feature notices | Relevant alert, one clear next action, dismissal and persistence choice | Not started |
@@ -195,10 +197,12 @@ The DothPro photos reinforce two different states. The sales-order screen is int
 | Barcode lookup result focused | 2026-10-12 | Replaced the squeezed suggestion/continuation treatment in Inventory barcode lookup with a dedicated result report showing match state, source, barcode and returned catalogue details before product entry. Existing product, saved reference, no-match, unavailable and unsupported-code outcomes each have an appropriate next action. | `npm.cmd run build:pwa` passes. Review the report with live match and no-match responses during Inventory acceptance. |
 | Earlier open screen refactors closed by owner direction | 2026-10-12 | Owner restored the working tree and asked to close all currently opened screen-refactor work. Product sales/POS work from the latest pass is discarded. Inventory and Settings are closed as active work without claiming full acceptance or changing their shipped code. | Resume those areas only when requested or when a specific issue is identified. Staff Management is now the active screen. |
 | Staff Management focused task refactor started | 2026-10-12 | Apply the existing-business Settings pattern to Staff & access: searchable task selection, distinct Team members, Access permissions, Add staff, Sign-in links and conditional password reset tasks. Keep account, role, permission and password behavior intact; make permission selection a focused task instead of an accordion inside the team table. | Inspect owner/admin visibility, empty and populated states, permission save/cancel behavior, and desktop/phone layout before closing Staff Management. |
+| Previous opened screens accepted; Subscription opened | 2026-10-12 | Owner confirms the opened screens so far have been tested and are satisfactory. Closed those refactor checkpoints at owner acceptance; this does not reinstate discarded Product sales/POS code after the working-tree restore. Began Subscription as the next screen. | Subscription is the active screen. Check its plan/payment actions, referrals and export/exit behavior in the focused task layout, then review desktop and phone states. |
+| Subscription workspace pricing and presentation updated | 2026-10-12 | Added a flip-card mobile plan carousel, translucent subscription surfaces and the “One subscription. Multiple workspaces.” benefit. Confirmed Developer settings previously had no workspace surcharge. Added a configurable surcharge (default 5%), calculates a tier from the enabled selling workspaces, excludes Payments & receipts, and records the covered workspace count at checkout. Play Store plans now support separate monthly/yearly/Enterprise product IDs for two, three or four workspaces. Payments & receipts no longer inherits the selling-workspace subscription block. | `npm.cmd run build:pwa` passes. Developer must configure the correct Play Console products/prices for each tier before those Play tiers can be purchased. Review real checkout, renewal changes and desktop/phone rendering before closing Subscription. |
 
-**Active phase:** Staff Management refactor (opened 2026-10-12)
-**Last completed:** Earlier open refactor work was closed at the owner's direction after the working tree restore. Staff Management now uses the searchable focused task picker and has distinct member-list and permissions destinations.
-**Next:** Verify Staff Management task routing, role visibility, permission saving, empty states and desktop/phone layouts. Do not mark the previously closed screen refactors complete without their own acceptance review.
+**Active phase:** Subscription screen refactor (opened 2026-10-12)
+**Last completed:** Owner confirms the previously opened screens have been tested and are satisfactory; the corresponding refactor checkpoints are closed by owner acceptance. Staff Management, Inventory, Settings and Overview remain at their accepted state; restored/discarded POS edits have not been reintroduced. Subscription workspace surcharge and plan presentation are implemented.
+**Next:** Verify task routing, plan/payment and referral behavior, export/exit safeguards, workspace-tier checkout/renewal, and desktop/phone layout before closing Subscription.
 
 ## Definition of done
 

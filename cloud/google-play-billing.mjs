@@ -11,13 +11,17 @@ function parseServiceAccount() {
   try { return JSON.parse(raw) } catch { throw new Error('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON must contain valid service account JSON.') }
 }
 function configuredProducts(saved = null) {
-  const raw = process.env.GOOGLE_PLAY_PRODUCT_IDS || saved
-  if (!raw) return null
-  let values
-  try { values = typeof raw === 'string' ? JSON.parse(raw) : raw } catch { throw new Error('GOOGLE_PLAY_PRODUCT_IDS must be JSON, for example {"monthly":"stockroom_monthly","yearly":"stockroom_yearly"}.') }
+  const raw = process.env.GOOGLE_PLAY_PRODUCT_IDS
+  let values = saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...saved } : {}
+  if (raw) {
+    let envValues
+    try { envValues = JSON.parse(raw) } catch { throw new Error('GOOGLE_PLAY_PRODUCT_IDS must be JSON, for example {"monthly":"stockroom_monthly","yearly":"stockroom_yearly"}.') }
+    if (!envValues || typeof envValues !== 'object' || Array.isArray(envValues)) throw new Error('GOOGLE_PLAY_PRODUCT_IDS must map plan IDs to Play subscription product IDs.')
+    values = { ...values, ...envValues }
+  }
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('GOOGLE_PLAY_PRODUCT_IDS must map plan IDs to Play subscription product IDs.')
   if (!Object.keys(values).length) return null
-  const allowed = new Set(['monthly', 'yearly', 'enterprise'])
+  const allowed = new Set(['monthly', 'yearly', 'enterprise', ...['monthly','yearly','enterprise'].flatMap(id => [2,3,4].map(count => `${id}${count}`))])
   const result = Object.fromEntries(Object.entries(values).map(([planId, productId]) => [planId, String(productId).trim()]))
   if (!Object.keys(result).length || Object.entries(result).some(([planId, productId]) => !allowed.has(planId) || !/^[a-zA-Z0-9._-]{3,100}$/.test(productId))) throw new Error('Configure valid monthly, yearly, or enterprise Google Play product IDs.')
   return result
@@ -114,7 +118,11 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
 
   function entitlement(data, products) {
     const lineItems = Array.isArray(data.lineItems) ? data.lineItems : []
-    const active = lineItems.map(item => ({ item, planId: planForProduct(String(item.productId || ''), products), expiry: new Date(item.expiryTime || 0) }))
+    const active = lineItems.map(item => {
+      const planKey = planForProduct(String(item.productId || ''), products)
+      const match = planKey?.match(/^(monthly|yearly|enterprise)([2-4])?$/)
+      return { item, planKey, planId: match?.[1] || null, workspaceCount: Number(match?.[2] || 1), expiry: new Date(item.expiryTime || 0) }
+    })
       .filter(item => item.planId && Number.isFinite(item.expiry.getTime()))
       .sort((a, b) => b.expiry - a.expiry)[0]
     if (!active || !ALLOWED_STATES.has(data.subscriptionState) || active.expiry <= new Date()) return null
@@ -150,7 +158,7 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
         throw error
       }
     }
-    const { item, planId, expiry, state } = currentEntitlement
+    const { item, planId, workspaceCount, expiry, state } = currentEntitlement
     if (data.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') await acknowledgeSubscription({ serviceAccount: current.serviceAccount, packageName: current.packageName, productId: item.productId, purchaseToken })
     const now = new Date()
     const configured = await database.collection('subscription_settings').findOne({ _id: 'plan' })
@@ -158,6 +166,7 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
     await subscriptions.updateOne({ _id: businessId }, { $set: {
       playExpiresAt: expiry,
       playPlanId: planId,
+      workspaceCount,
       playProductId: item.productId,
       playPurchaseTokenHash: tokenId,
       playSubscriptionState: state,
@@ -168,7 +177,7 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
     await purchases.updateOne({ _id: tokenId }, { $set: {
       businessId, productId: item.productId, planId, packageName: current.packageName,
       latestOrderId: data.latestOrderId || null, linkedPurchaseTokenHash: linkedToken ? tokenKey(linkedToken) : null,
-      expiry, subscriptionState: state, updatedAt: now,
+      expiry, subscriptionState: state, workspaceCount, updatedAt: now,
     }, $setOnInsert: { createdAt: now } }, { upsert: true })
     return { status: state, expiresAt: expiry, planId }
   }

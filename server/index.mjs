@@ -20,6 +20,7 @@ import { registerLocalCheckout, getCloudConfiguration, getCloudRegistrationToken
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudRemoveStaff, cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 import { lookupOpenFoodFacts } from './open-food-facts.mjs'
+import { businessWorkspace } from './shop-profile.mjs'
 
 const port = Number(process.env.PORT || 8787)
 const customerDisplayPort = Number(process.env.CUSTOMER_DISPLAY_PORT || 8788)
@@ -105,7 +106,7 @@ const server = createServer(async (request, response) => {
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     }
     return readJson(request, response, async input => {
-      if(['/api/pos/restaurant/settle','/api/pos/service-jobs/pay'].includes(request.url)){ const access=await getSubscriptionAccess(); if(access.blocked)return sendJson(response,402,{error:access.reason}) }
+      if(request.url==='/api/pos/restaurant/settle'){ const access=await getSubscriptionAccess(); if(access.blocked)return sendJson(response,402,{error:access.reason}) }
       try { return sendJson(response, 200, await posAction(request.url, request.method, input, user, requestBranch(request), String(request.headers['x-stockroom-till'] || ''))) }
       catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
@@ -639,7 +640,8 @@ const server = createServer(async (request, response) => {
       const user = sessionUser(request)
       if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
       const subscription = await getSubscriptionAccess()
-      if (subscription.blocked) return sendJson(response, 402, { error: subscription.reason })
+      const paymentReceiptSale = businessWorkspace((await getSettings()).shopProfile).payments && Boolean(input.paymentDetails?.servicePayment || input.paymentDetails?.serviceJob || (Array.isArray(input.items) && input.items.length > 0 && input.items.every(item => String(item.productId || '').startsWith('service:'))))
+      if (subscription.blocked && !paymentReceiptSale) return sendJson(response, 402, { error: subscription.reason })
       if (input.paymentMethod === 'wallet' && input.paymentDetails?.creditApproved && user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner may approve credit purchases.' })
       if (!input?.id || !Array.isArray(input.items) || !Number.isFinite(Number(input.total))) return sendJson(response, 400, { error: 'Sale is invalid.' })
       try {
