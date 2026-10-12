@@ -23,7 +23,7 @@ export async function sendSubscriptionReminder({ to, expiresAt, url, autoRenew =
   if (!configured()) throw new Error('Email is not configured.')
   const paymentNote = autoRenew
     ? 'Automatic renewal is enabled for this business. You can manage or cancel it from Stockroom’s Subscription screen.'
-    : 'No automatic renewal is active. Sign in as the business owner and choose a one-time Paystack payment to renew.'
+    : 'No automatic renewal is active. Sign in as the business owner and choose a one-time payment to renew.'
   await sendMail({ to, subject: 'Your Stockroom subscription expires soon', text: `Your Stockroom subscription access is due to end on ${expiresAt.toISOString().slice(0, 10)} (UTC).\n\n${paymentNote}\n\n${url}` })
 }
 
@@ -39,7 +39,7 @@ export async function sendSubscriptionConfirmation({ to, amount, currency, expir
 
 export async function sendSubscriptionPaymentFailed({ to, url }) {
   if (!configured()) throw new Error('Email is not configured.')
-  await sendMail({ to, subject: 'Action needed for your Stockroom subscription', text: `Paystack could not collect your automatic subscription renewal. Paystack does not guarantee another attempt, so please update your payment method or make a one-time renewal to avoid losing access.\n\nManage your subscription at ${url}`, html: `<p>Paystack could not collect your automatic subscription renewal.</p><p>Please update your payment method or make a one-time renewal to avoid losing access.</p><p><a href="${url}">Manage your Stockroom subscription</a></p>` })
+  await sendMail({ to, subject: 'Action needed for your Stockroom subscription', text: `We could not collect your automatic subscription renewal. Another attempt is not guaranteed, so please update your payment method or make a one-time renewal to avoid losing access.\n\nManage your subscription at ${url}`, html: `<p>We could not collect your automatic subscription renewal.</p><p>Another attempt is not guaranteed. Please update your payment method or make a one-time renewal to avoid losing access.</p><p><a href="${url}">Manage your Stockroom subscription</a></p>` })
 }
 
 export async function sendSubscriptionGraceNotice({ to, expiresAt, graceEndsAt, url }) {

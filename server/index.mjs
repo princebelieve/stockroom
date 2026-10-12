@@ -640,7 +640,7 @@ const server = createServer(async (request, response) => {
       const user = sessionUser(request)
       if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
       const subscription = await getSubscriptionAccess()
-      const paymentReceiptSale = businessWorkspace((await getSettings()).shopProfile).payments && Boolean(input.paymentDetails?.servicePayment || input.paymentDetails?.serviceJob || (Array.isArray(input.items) && input.items.length > 0 && input.items.every(item => String(item.productId || '').startsWith('service:'))))
+      const paymentReceiptSale = Boolean(input.paymentDetails?.servicePayment || input.paymentDetails?.serviceJob || (Array.isArray(input.items) && input.items.length > 0 && input.items.every(item => String(item.productId || '').startsWith('service:'))))
       if (subscription.blocked && !paymentReceiptSale) return sendJson(response, 402, { error: subscription.reason })
       if (input.paymentMethod === 'wallet' && input.paymentDetails?.creditApproved && user.role !== 'owner') return sendJson(response, 403, { error: 'Only the owner may approve credit purchases.' })
       if (!input?.id || !Array.isArray(input.items) || !Number.isFinite(Number(input.total))) return sendJson(response, 400, { error: 'Sale is invalid.' })

@@ -747,12 +747,11 @@ const server = createServer(async (request, response) => {
       if (!businessId || !deviceId || !incoming.length || claims.businessId !== businessId || claims.deviceId !== deviceId) return send(response, 403, { error: 'Token does not authorize this business/device.' })
       if (await businessExitPayments.findOne({ _id: businessId, closedAt: { $exists: true } })) return send(response, 403, { error: 'This business has completed its Stockroom exit.' })
       return await serializeBusinessSync(businessId,async()=>{
-      const containsNewSale = await Promise.all(incoming.filter(operation => (operation.entityType === 'sale' && operation.action === 'create') || (operation.entityType==='pos_record' && operation.payload?.kind==='restaurant-ledger')).map(operation => operations.findOne({ businessId, operationId: String(operation.operationId) }, { projection: { _id: 1 } }).then(existing => !existing)))
-      for(const operation of incoming.filter(operation=>operation.entityType==='pos_record' && operation.payload?.kind==='service-job')) {
-        const existing=await operations.findOne({businessId,operationId:String(operation.operationId)})
-        const head=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:String(operation.entityId)})
-        if(!existing && (operation.payload.payments?.length||0)>(head?.payload.payments?.length||0)) containsNewSale.push(true)
-      }
+      const containsNewSale = await Promise.all(incoming.filter(operation => {
+        if (operation.entityType === 'pos_record' && operation.payload?.kind === 'service-job') return false
+        if (operation.entityType === 'sale' && (operation.payload?.paymentDetails?.servicePayment || operation.payload?.paymentDetails?.serviceJob)) return false
+        return (operation.entityType === 'sale' && operation.action === 'create') || (operation.entityType === 'pos_record' && operation.payload?.kind === 'restaurant-ledger')
+      }).map(operation => operations.findOne({ businessId, operationId: String(operation.operationId) }, { projection: { _id: 1 } }).then(existing => !existing)))
       if (containsNewSale.some(Boolean)) {
         const access = await subscriptionHandler.access(businessId)
         if (access.blocked) return send(response, 402, { error: access.reason, status: access.status })

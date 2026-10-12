@@ -7,20 +7,22 @@ import { businessModes, businessWorkspace, catalogueWorkspaces, workspaceCatalog
 import { validateFields, type ShopField } from '../server/shop-fields.mjs'
 import { ShopProductFields } from './ShopProductFields'
 import { BlankProductForm } from './BlankProductForm'
+import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
-export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean }) {
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, subscriptionAccess, onSubscriptionRequired }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; subscriptionAccess: SubscriptionAccess; onSubscriptionRequired: () => void }) {
   const [view,setView]=useState('type')
   const [draft, setDraft] = useState(value)
   const [step, setStep] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [message, setMessage] = useState('')
   const [problem, setProblem] = useState('')
+  const [subscriptionPrompt, setSubscriptionPrompt] = useState(false)
   const [catalogueWorkspace, setCatalogueWorkspace] = useState<CatalogueWorkspace>('product-sales')
   const [newCategory, setNewCategory] = useState('')
   const [newUnit, setNewUnit] = useState('')
   useEffect(() => { if (!dirty) setDraft(value) }, [value, dirty])
   useEffect(() => { if (requestedView) setView(requestedView) }, [requestedView])
-  function change(next: ShopProfile) { setDraft(next); setDirty(true); setMessage(''); setProblem('') }
+  function change(next: ShopProfile) { setDraft(next); setDirty(true); setMessage(''); setProblem(''); setSubscriptionPrompt(false) }
   function changeCatalogueList(update: (settings: ReturnType<typeof workspaceCatalogueSettings>) => ReturnType<typeof workspaceCatalogueSettings>) {
     const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
     change({ ...draft, workspaceCatalogues: { ...draft.workspaceCatalogues, [catalogueWorkspace]: update(settings) } })
@@ -59,6 +61,17 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   }
   function setWorkspaceEnabled(key: 'productSales'|'oilSales'|'payments'|'fastFood'|'restaurant', enabled: boolean) {
     const current = businessWorkspace(draft)
+    const workspaceLabels = { productSales: 'Product sales', oilSales: 'Oil sales', payments: 'Payments & receipts', fastFood: 'Order counter', restaurant: 'Tables & tabs' }
+    if (enabled && key !== 'payments') {
+      const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant].filter(Boolean).length
+      const entitlement = subscriptionAccess.entitledWorkspaces ?? subscriptionAccess.workspacePricing?.count ?? 0
+      const unrestricted = subscriptionAccess.status === 'test'
+      if (!unrestricted && (subscriptionAccess.blocked || paidCount >= entitlement)) {
+        setProblem(`Please subscribe to a plan to enable ${workspaceLabels[key]}.`)
+        setSubscriptionPrompt(true)
+        return
+      }
+    }
     const next = { productSales: current.productSales, oilSales: current.oil, payments: current.payments, fastFood: current.fastFood, restaurant: current.restaurant, [key]: enabled }
     if (!next.productSales && !next.oilSales && !next.payments && !next.fastFood && !next.restaurant) {
       setProblem('Keep at least one workspace enabled.')
@@ -149,6 +162,6 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     </div>}
     <div className="shop-steps">{step > 0 && <button type="button" className="filter-button" onClick={() => go(step - 1)}>Back</button>}{step < 2 && <button type="button" className="primary-button" onClick={() => go(step + 1)}>Continue</button>}</div>
     </>}
-    </section>{problem && <p role="alert">{problem}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted" role="status">Unsaved changes.</p>}
+    </section>{problem && <p role="alert">{problem} {subscriptionPrompt && <button type="button" className="text-button" onClick={onSubscriptionRequired}>View plans</button>}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted" role="status">Unsaved changes.</p>}
   </section>
 }
