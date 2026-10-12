@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import type { ShopProfile } from '../server/shop-profile.mjs'
 import { AsyncButton } from './AsyncControls'
+import { applyAppAppearance } from './lib/appAppearance'
 
 export function BrandAppearance({profile,save,preview}:{profile:ShopProfile;save:(profile:ShopProfile)=>Promise<void>;preview:(color:string)=>void}){
  const [message,setMessage]=useState('')
  const [color,setColor]=useState(profile.brandColor||'#176b73'),[automatic,setAutomatic]=useState(!profile.brandColor)
  const [appColor,setAppColor]=useState(()=>{try{return localStorage.getItem('stockroom-app-brand-color')||'#08b9f4'}catch{return '#08b9f4'}})
- function updateAppColor(value:string){setAppColor(value);document.documentElement.style.setProperty('--app-brand-color',value);try{localStorage.setItem('stockroom-app-brand-color',value)}catch{/* Keep the selection active for this session. */}}
+ function updateAppColor(value:string){setAppColor(value);applyAppAppearance(document.documentElement.dataset.appTheme==='dark'?'dark':'light',value);try{localStorage.setItem('stockroom-app-brand-color',value)}catch{/* Keep the selection active for this session. */}}
  function update(value:string,auto=automatic){setColor(value);setAutomatic(auto);preview(auto?'':value)}
  return <section className="panel brand-appearance"><h3>App branding colour</h3><p>Choose the bright accent used by Stockroom. This preference is saved on this device. Use the always-visible switch to change between light and dark appearance anywhere in the app.</p><label>App branding colour<input type="color" value={appColor} onChange={event=>updateAppColor(event.target.value)}/></label><div className="app-brand-preview"><span>App branding preview</span><button type="button">Bright action</button></div><h3>Business colours</h3><p>Choose your business accent or suggest one from your logo.</p><label className="checkbox-label"><input type="checkbox" checked={automatic} onChange={event=>update(color,event.target.checked)}/> Suggest colours from my logo</label><label>Business primary colour<input type="color" value={color} disabled={automatic} onChange={event=>update(event.target.value,false)}/></label><div className="brand-preview"><span className="brand-preview-selected">Selected menu</span><button type="button" className="primary-button">Primary action</button><span className="brand-preview-accent">Supporting accent</span></div><div className="report-actions"><AsyncButton className="primary-button" onClick={async()=>{await save({...profile,brandColor:automatic?'':color});setMessage('Business appearance saved. Sync to apply it on other devices.')}}>Save business appearance</AsyncButton><button type="button" className="filter-button" onClick={()=>{setAutomatic(!profile.brandColor);setColor(profile.brandColor||'#176b73');preview(profile.brandColor||'')}}>Cancel business preview</button></div>{message&&<p role="status">{message}</p>}</section>
 }

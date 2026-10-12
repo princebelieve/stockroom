@@ -74,15 +74,15 @@ import { refreshDeadline } from './lib/refreshDeadline'
 import { isNativeMobile } from './lib/mobileDatabase'
 import { isBrowserPwa } from './lib/platform'
 import { resolveStartupState } from './lib/startupState'
+import { applyAppAppearance } from './lib/appAppearance'
 import './styles.css'
 import './ui.css'
 import './operational.css'
 
 try {
   const savedTheme = localStorage.getItem('stockroom-theme')
-  if (savedTheme === 'dark') document.documentElement.dataset.appTheme = 'dark'
   const savedAppColor = localStorage.getItem('stockroom-app-brand-color')
-  if (/^#[a-f0-9]{6}$/i.test(savedAppColor || '')) document.documentElement.style.setProperty('--app-brand-color', savedAppColor!)
+  applyAppAppearance(savedTheme === 'dark' ? 'dark' : 'light', savedAppColor || '#08b9f4')
 } catch { /* Use the default app appearance when storage is unavailable. */ }
 import { ReceiptPhoto } from './ReceiptPhoto'
 import { WalletCustomer } from './WalletCustomer'

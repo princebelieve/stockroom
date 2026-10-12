@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Moon, Sun } from 'lucide-react'
+import { applyAppAppearance } from './lib/appAppearance'
 
 type Theme = 'light' | 'dark'
 
@@ -8,12 +9,23 @@ function savedTheme(): Theme {
   catch { return 'light' }
 }
 
+function savedAppColor() {
+  try { return localStorage.getItem('stockroom-app-brand-color') || '#08b9f4' }
+  catch { return '#08b9f4' }
+}
+
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(savedTheme)
+  useEffect(() => {
+    const sync = (event: Event) => setTheme((event as CustomEvent<{ theme: Theme }>).detail.theme)
+    window.addEventListener('stockroom-app-appearance', sync)
+    return () => window.removeEventListener('stockroom-app-appearance', sync)
+  }, [])
+  useEffect(() => { applyAppAppearance(theme, savedAppColor()) }, [theme])
   const toggle = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
-    document.documentElement.dataset.appTheme = next
+    applyAppAppearance(next, savedAppColor())
     try { localStorage.setItem('stockroom-theme', next) } catch { /* Keep the selected theme for this session. */ }
   }
 
