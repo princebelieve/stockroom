@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ArrowRight, ClipboardList, CookingPot, Inbox, PackagePlus, ReceiptText, ShoppingBasket, Store } from 'lucide-react'
 import { posRequest } from './PosTools'
 import { restaurantBillLines } from '../server/restaurant-payments.mjs'
@@ -7,7 +7,7 @@ import type { Sale } from './types'
 
 type Workspace = { stock:boolean; productSales?:boolean; oil?:boolean; payments:boolean; fastFood:boolean; restaurant:boolean }
 type SellingScreen = 'Oil' | 'POS' | 'Payments' | 'Counter' | 'Restaurant'
-export function WorkspaceOverview({workspace,headers,receipts,money,open,configure,openRecords,openCustomers,openExpenses,scanProducts,readProductList,hasProducts=true,timeZone='UTC',subscriptionExpired=false,onSubscriptionRequired}:{configure?:(tab:'food'|'restaurant'|'products'|'starters'|'import'|'handwritten')=>void;openRecords?:()=>void;openCustomers?:()=>void;openExpenses?:()=>void;scanProducts?:()=>void;readProductList?:()=>void;hasProducts?:boolean;timeZone?:string;workspace:Workspace;headers:Record<string,string>;receipts:Sale[];money:(n:number)=>string;open:(screen:SellingScreen)=>void;subscriptionExpired?:boolean;onSubscriptionRequired?:()=>void}) {
+export function WorkspaceOverview({workspace,headers,receipts,money,open,configure,openRecords,openCustomers,openExpenses,scanProducts,readProductList,hasProducts=true,timeZone='UTC',subscriptionExpired=false,onSubscriptionRequired,businessPerformance}:{configure?:(tab:'food'|'restaurant'|'products'|'starters'|'import'|'handwritten')=>void;openRecords?:()=>void;openCustomers?:()=>void;openExpenses?:()=>void;scanProducts?:()=>void;readProductList?:()=>void;hasProducts?:boolean;timeZone?:string;workspace:Workspace;headers:Record<string,string>;receipts:Sale[];money:(n:number)=>string;open:(screen:SellingScreen)=>void;subscriptionExpired?:boolean;onSubscriptionRequired?:()=>void;businessPerformance?:ReactNode}) {
   const choices:{id:SellingScreen;label:string;action:string}[] = [
     ...(workspace.productSales?[{id:'POS' as const,label:'Product sales',action:'New sale'}]:[]),
     ...(workspace.oil?[{id:'Oil' as const,label:'Oil sales',action:'New oil sale'}]:[]),
@@ -79,5 +79,6 @@ export function WorkspaceOverview({workspace,headers,receipts,money,open,configu
         {!hasProducts&&workspace.stock&&configure&&<section className="overview-start-options" aria-label="Ways to start your product catalogue"><span className="overview-eyebrow">Product catalogue</span><h2>Bring in your products</h2><p>No file from your old app? Start with a few products, scan items as you need them, or choose starter items. Import a spreadsheet if you can export one.</p><div><button type="button" className="filter-button" onClick={()=>configure('starters')}>Use starter items</button><button type="button" className="filter-button" onClick={()=>configure('import')}>Import a spreadsheet</button>{scanProducts&&<button type="button" className="filter-button" onClick={scanProducts}>Scan a product</button>}{readProductList&&<button type="button" className="filter-button" onClick={readProductList}>Read a product list</button>}</div></section>}
       </aside>
     </div>
+    {businessPerformance&&<details className="overview-performance"><summary>Business performance</summary>{businessPerformance}</details>}
   </section>
 }

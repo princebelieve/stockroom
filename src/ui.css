@@ -166,6 +166,13 @@
 .stock-report-heading h2 { margin:4px 0; font-size:clamp(24px,3vw,34px); }
 .stock-report-heading p { margin:0; color:var(--muted); font-size:13px; }
 .stock-report-heading .filter-button { display:inline-flex; align-items:center; gap:8px; }
+.stock-report-context { display:flex; justify-content:space-between; align-items:center; gap:14px; margin:6px 0 14px; }
+.stock-report-context p { margin:0; color:var(--muted); font-size:13px; line-height:1.7; }
+.stock-report-context .filter-button { display:inline-flex; align-items:center; gap:8px; }
+.overview-performance { margin-top:18px; border:1px solid var(--line); border-radius:14px; background:var(--paper); }
+.overview-performance summary { cursor:pointer; padding:14px 16px; color:var(--ink); font-weight:600; }
+.overview-performance[open] { padding-bottom:14px; }
+.overview-performance[open] summary { margin-bottom:10px; border-bottom:1px solid var(--line); }
 .stock-report-metrics { margin:14px 0 18px; }
 .stock-report-alert { display:flex; flex-direction:column; gap:4px; margin:14px 0; padding:14px 16px; border:1px solid #e9d7ad; border-radius:14px; background:#fff9e9; }
 .stock-report-alert span { color:var(--muted); font-size:13px; }
@@ -185,4 +192,5 @@
 @media(max-width:650px){.report-chart-controls{align-items:stretch;flex-direction:column}.report-range-controls{align-items:stretch}.report-range-controls>select{width:100%}.report-range-controls label:not(.sr-only){flex:1;min-width:130px}}
 @media(max-width:650px){.report-screen-heading{align-items:flex-start;flex-direction:column;gap:10px}.report-screen-heading .report-actions{width:100%;flex-wrap:wrap}.report-screen-heading .report-actions>*{flex:1 1 auto}.report-cost-warning{padding:14px;gap:10px}.report-summary-metrics{margin-top:12px}}
 @media(max-width:650px){.stock-report-heading{align-items:flex-start;flex-direction:column}.stock-report-columns{grid-template-columns:minmax(0,1fr);gap:12px}.stock-report-metrics{margin:12px 0}}
+@media(max-width:650px){.stock-report-context{align-items:flex-start}}
 @media print{.report-chart-grid{display:block}.report-chart{margin-bottom:14px}.daily-sales-chart{height:150px}}

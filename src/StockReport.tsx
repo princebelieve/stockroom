@@ -56,15 +56,12 @@ export function StockReport({ headers, branchId, money, revision }: { headers: R
 
   if (loading && !data) return <section className="stock-report-screen" role="status">Loading stock report…</section>
   if (error && !data) return <section className="stock-report-screen"><p role="alert">{error}</p><button type="button" className="filter-button" onClick={() => setRetry(value => value + 1)}>Retry report</button></section>
-  if (!data?.supermarket) return <section className="stock-report-screen"><h2>Stock report</h2><p role="status">Stock report data is not available for this branch.</p></section>
+  if (!data?.supermarket) return <section className="stock-report-screen"><p role="status">Stock report data is not available for this branch.</p></section>
 
   const report = data.supermarket
   const period = new Intl.DateTimeFormat(undefined, { month: 'long', timeZone: data.reportingTimeZone || 'UTC' }).format(new Date())
   return <section className="stock-report-screen" aria-label="Stock report">
-    <header className="stock-report-heading">
-      <div><span className="report-eyebrow">STOCK &amp; PURCHASING</span><h2>Stock report</h2><p>{period} · {data.reportingTimeZone?.split('/').at(-1)?.replaceAll('_', ' ') || 'business'} time</p></div>
-      <button type="button" className="filter-button" onClick={exportReport}><Download size={16}/>Export report</button>
-    </header>
+    <div className="stock-report-context"><p><span className="report-eyebrow">STOCK &amp; PURCHASING</span><br/>{period} · {data.reportingTimeZone?.split('/').at(-1)?.replaceAll('_', ' ') || 'business'} time</p><button type="button" className="filter-button" onClick={exportReport}><Download size={16}/>Export report</button></div>
     {error && <p role="alert" className="auth-error">Some report data may be out of date: {error}</p>}
     <TaskPicker scope="Stock report" items={reportTasks} value={task} onChange={setTask}/>
 

@@ -421,9 +421,9 @@
   },
   {
     "id": "section-30",
-    "title": "Business performance and Reports",
+    "title": "Overview and Reports",
     "steps": [
-      "Open Business performance where available to review owner/admin business metrics.",
+      "On Overview, expand Business performance for synced sales and stock metrics without adding cards to the daily work view.",
       "Open Reports to review sales, stock valuation, estimated profit and low-stock items.",
       "Record actual running expenses with category, description, amount and date.",
       "Use the offered report export/print action for the current data.",
