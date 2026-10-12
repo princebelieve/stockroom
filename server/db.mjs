@@ -463,9 +463,14 @@ export function resetCashierPassword(userId, newPassword) {
 }
 
 export function getOwnerMetrics(branchId = 'main') {
-  const sales = getReports(branchId).daily
-  const stock = database.prepare('SELECT COALESCE(SUM(COALESCE(i.stock, 0) * p.price), 0) AS value, COUNT(*) AS products, SUM(CASE WHEN COALESCE(i.stock, 0) <= COALESCE(i.reorder_point, p.reorder_point) THEN 1 ELSE 0 END) AS lowStock FROM products p LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = ? WHERE p.organization_id = ?').get(branchId, organizationId)
-  return { salesToday: sales.total, saleCount: sales.count, inventoryValue: stock.value, productCount: stock.products, lowStock: stock.lowStock }
+  const reports = getReports(branchId)
+  return {
+    salesToday: reports.daily.total,
+    saleCount: reports.daily.count,
+    inventoryValue: reports.inventory.value,
+    productCount: reports.inventory.products,
+    lowStock: reports.inventory.lowStock,
+  }
 }
 
 export function listCustomers() {

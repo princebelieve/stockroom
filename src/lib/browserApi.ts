@@ -16,6 +16,7 @@ import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../
 import { validQuantity } from '../../server/quantities.mjs'
 import { handleRetail, applyRetailRecord } from '../../server/retail.mjs'
 import { buildReports } from '../../server/reports.mjs'
+import { getLocalOwnerMetrics } from './localOwnerMetrics'
 import { validateCounterPayment, validateCounterRetry, counterConflictRecord, requiresCounterSync, requiresRestaurantSync } from '../../server/counter-service.mjs'
 import { handlePos, ensurePos, applyPosRecord } from '../../server/pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from '../../server/shop-fields.mjs'
@@ -765,6 +766,11 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const headers = new Headers(init?.headers), from = headers.get('X-Activity-From') || '', to = headers.get('X-Activity-To') || ''
     if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) return error('A valid start and end date are required.')
     return json(await collectStaffActivity(db, branchId, new Date(from).toISOString(), new Date(to).toISOString()))
+  }
+  if (path === '/api/owner/metrics' && method === 'GET') {
+    if (!isManager(user)) return error('Admin access required.', 403)
+    await ensurePos(db)
+    return json(await getLocalOwnerMetrics(db, branchId))
   }
   if (path === '/api/reports' && method === 'GET') {
     if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
