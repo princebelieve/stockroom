@@ -471,6 +471,21 @@ body { background: var(--brand-wash,#dfece5); }
 .settings-task { display: grid; gap: 12px; max-width: 760px; }
 .settings-task > h2, .settings-task > p { margin: 0; }
 .settings-task > label:not(:has(input[type="checkbox"])) { display: grid; gap: 6px; }
+.team-management { display: grid; gap: 18px; }
+.team-management > .panel-heading { margin-bottom: 0; }
+.team-task-content { width: min(100%, 980px); margin: 0 auto; padding: clamp(16px, 2.5vw, 28px); border: 1px solid var(--line); border-radius: 16px; background: var(--paper, #fff); box-shadow: 0 10px 28px #17345310; }
+.team-task-content h3 { margin: 0; }
+.team-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.team-task-content .table-wrap { margin-top: 10px; }
+.team-task-content > label { display: grid; gap: 7px; max-width: 560px; margin: 16px 0; }
+.team-access-task .staff-permissions { display: grid; gap: 14px; max-width: 760px; }
+.team-access-task .staff-permissions fieldset { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft, #f5f7fa); }
+.team-access-task .staff-permissions legend { padding: 0 6px; font-weight: 700; }
+.team-access-task .staff-permission-options { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 8px 18px; }
+.team-access-task .staff-permission-options label { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.team-access-task .staff-permissions > button { justify-self: start; }
+.team-form { width: min(100%, 720px); margin: 0 auto; padding: clamp(16px, 2.5vw, 28px); border: 1px solid var(--line); border-radius: 16px; background: var(--paper, #fff); box-shadow: 0 10px 28px #17345310; }
+.team-form > h3 { margin-top: 0; }
 .workspace-availability-task { display: grid; gap: 12px; }
 .workspace-availability-task > h2, .workspace-availability-task > p { margin: 0; }
 .settings-workspace-option { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; align-items: start; max-width: 760px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper, #fff); cursor: pointer; }
