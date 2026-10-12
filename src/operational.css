@@ -509,20 +509,6 @@
   .inventory-product-cards { display:grid; gap:12px; margin-top:18px; }
 }
 
-/* Inventory destinations are the primary task switcher for this screen. */
-.app-shell .screen-picker.inventory-action-cards { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); width:100%; max-width:none; gap:12px; margin:14px 0 16px; }
-.app-shell .inventory-action-cards > button { display:flex; align-items:center; justify-content:space-between; min-width:0; min-height:76px; padding:15px 16px; border:1px solid #19395f; border-radius:12px; background:#19395f; color:#fff; box-shadow:0 4px 0 #102746,0 10px 22px #172b4518; font-size:15px; font-weight:650; line-height:1.25; text-align:left; white-space:normal; }
-.app-shell .inventory-action-cards > button:hover { background:#254b77; color:#fff; box-shadow:0 5px 0 #102746,0 13px 24px #172b4520; transform:translateY(-1px); }
-.app-shell .inventory-action-cards > button[aria-current="page"] { background:#0f294b; color:#fff; border-color:#0f294b; box-shadow:inset 0 0 0 2px #9cbce5,0 4px 0 #102746,0 10px 22px #172b4518; }
-.app-shell .inventory-action-cards > button:focus-visible { outline:3px solid #70a9f4; outline-offset:3px; }
-@media(max-width:900px) { .inventory-action-cards { grid-template-columns:repeat(4,minmax(0,1fr)); } }
-@media(max-width:900px) { .app-shell .screen-picker.inventory-action-cards { grid-template-columns:repeat(4,minmax(0,1fr)); margin:10px 0 14px; } }
-@media(max-width:650px) {
-  .app-shell .screen-picker.inventory-action-cards { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-start; gap:7px; margin:8px 0 14px; }
-  .app-shell .inventory-action-cards > button { flex:0 0 auto; width:auto; min-width:max-content; min-height:38px; padding:8px 12px; border:1px solid #cbd7e4; border-radius:999px; background:#eef3f8; color:#19395f; box-shadow:none; font-size:13px; font-weight:600; line-height:1.15; text-align:center; white-space:nowrap; }
-  .app-shell .inventory-action-cards > button:hover { background:#e2ebf4; color:#102746; box-shadow:none; transform:none; }
-  .app-shell .inventory-action-cards > button[aria-current="page"] { background:#19395f; color:#fff; border-color:#19395f; box-shadow:inset 0 0 0 1px #9cbce5; }
-}
 .stock-cost-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:18px 0; }
 .stock-cost-metrics > div { display:grid; gap:7px; min-width:0; padding:15px 16px; border:1px solid #d5dfeb; border-radius:9px; background:#f6f8fb; }
 .stock-cost-metrics span { color:var(--muted); font-size:13px; }
