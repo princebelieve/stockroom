@@ -750,3 +750,59 @@
 :root:not([data-app-theme="dark"]) .app-shell .searchable-select-menu,
 :root:not([data-app-theme="dark"]) .app-shell .tool-search-results { border-color:color-mix(in srgb,var(--brand-primary) 14%,var(--line)); box-shadow:inset 0 1px #fff,0 8px 22px #18385b10; }
 :root:not([data-app-theme="dark"]) .app-shell .brand-mark { box-shadow:inset 0 1px #ffffffb8,0 3px 8px color-mix(in srgb,var(--brand-primary) 20%,transparent); }
+:root[data-app-theme="dark"] .app-shell .task-picker-menu { color:#e8f2ff; border-color:#3b75a4; background:linear-gradient(145deg,#142b4f,#0c1b35); box-shadow:inset 0 1px #ffffff1c,0 18px 42px #020817a8; }
+:root[data-app-theme="dark"] .app-shell .task-picker-search { color:#a9c1dc; border-color:#42658e; background:#0b1c37; }
+:root[data-app-theme="dark"] .app-shell .task-picker-search input { color:#eff7ff!important; background:transparent!important; box-shadow:none!important; }
+:root[data-app-theme="dark"] .app-shell .task-picker-search input::placeholder { color:#91a9c7; }
+:root[data-app-theme="dark"] .app-shell .task-picker-options > button { color:#eef6ff; background:transparent; }
+:root[data-app-theme="dark"] .app-shell .task-picker-options > button strong { color:#f2f7ff; }
+:root[data-app-theme="dark"] .app-shell .task-picker-options > button small,
+:root[data-app-theme="dark"] .app-shell .task-picker-empty { color:#b4c8e0; }
+:root[data-app-theme="dark"] .app-shell .task-picker-options > button:hover,
+:root[data-app-theme="dark"] .app-shell .task-picker-options > button[aria-selected="true"] { color:#f4f9ff; background:linear-gradient(110deg,#164a71,#183766); }
+:root[data-app-theme="dark"] .app-shell .overview-stat-grid > div { border-color:#42658e; background:linear-gradient(145deg,#17345a,#102444); box-shadow:inset 0 1px #ffffff17,0 5px 14px #02081755; }
+:root[data-app-theme="dark"] .app-shell .overview-stat-grid span { color:#bdcde2; }
+:root[data-app-theme="dark"] .app-shell .overview-stat-grid strong { color:#f2f7ff; }
+:root[data-app-theme="dark"] .app-shell .overview-shortcuts .filter-button { color:#eaf4ff; border-color:#4774a0; background:linear-gradient(140deg,#1a3a63,#12294a); box-shadow:inset 0 1px #ffffff20,0 4px 11px #02081766; }
+:root[data-app-theme="dark"] .app-shell .overview-shortcuts .filter-button:hover { color:#fff; border-color:#4ccfff; background:linear-gradient(130deg,#21517c,#1b3c70); }
+:root:not([data-app-theme="dark"]) .app-shell .overview-shortcuts .filter-button { color:var(--brand-dark,#17352d); border-color:color-mix(in srgb,var(--brand-primary) 28%,white); background:linear-gradient(145deg,#fff,color-mix(in srgb,var(--brand-wash) 78%,white)); box-shadow:inset 0 1px #fff,0 3px 8px #17345310; }
+:root:not([data-app-theme="dark"]) .app-shell .overview-shortcuts .filter-button:hover { color:var(--brand-dark,#17352d); border-color:var(--brand-primary); background:linear-gradient(145deg,#fff,color-mix(in srgb,var(--brand-wash) 62%,white)); }
+:root:not([data-app-theme="dark"]) .app-shell .overview-stat-grid > div { color:#192e49; }
+:root:not([data-app-theme="dark"]) .app-shell .overview-stat-grid span { color:#536374; }
+:root:not([data-app-theme="dark"]) .app-shell .overview-stat-grid strong { color:#192e49; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-menu { color:#192e49; border-color:color-mix(in srgb,var(--brand-primary) 50%,white); background:linear-gradient(145deg,#fff,#f4f8fc); box-shadow:inset 0 1px #fff,0 18px 42px #1734532b; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button { color:#192e49; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button strong { color:#192e49; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button small,
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-empty { color:#536374; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button:hover,
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button[aria-selected="true"] { color:#172b45; background:color-mix(in srgb,var(--brand-primary) 12%,white); }
+:root[data-app-theme="dark"] .app-shell select,
+:root[data-app-theme="dark"] .app-shell select:focus { color:#eaf4ff!important; border-color:#45658e!important; background:#102344!important; }
+:root[data-app-theme="dark"] .app-shell select option { color:#eaf4ff!important; background:#102344!important; }
+.app-theme-toggle { position:fixed; z-index:180; right:18px; bottom:68px; display:inline-flex; align-items:center; gap:9px; min-height:44px; padding:5px 12px 5px 6px; border:1px solid color-mix(in srgb,var(--brand-primary) 28%,white); border-radius:999px; color:#17324d; background:linear-gradient(145deg,#fff,#edf4fb); box-shadow:inset 0 1px #fff,0 6px 18px #142b4530; font:700 12px/1 'DM Sans',sans-serif; cursor:pointer; }
+.app-theme-toggle-track { display:flex; width:42px; height:26px; align-items:center; padding:3px; border:1px solid #9bb0c8; border-radius:999px; background:linear-gradient(145deg,#d7e3f0,#bacce0); box-shadow:inset 0 1px 3px #314d6c2e; }
+.app-theme-toggle-thumb { display:grid; width:20px; height:20px; place-items:center; border-radius:50%; color:#27445f; background:linear-gradient(145deg,#fff,#e9f1fa); box-shadow:0 1px 4px #19345345; transition:transform .18s ease; }
+.app-theme-toggle[aria-checked="true"] { color:#f0f7ff; border-color:#378cc0; background:linear-gradient(145deg,#18375d,#102441); box-shadow:inset 0 1px #ffffff1b,0 6px 18px #02081777; }
+.app-theme-toggle[aria-checked="true"] .app-theme-toggle-track { border-color:#3a9bc2; background:linear-gradient(145deg,#087da6,#174eb1); }
+.app-theme-toggle[aria-checked="true"] .app-theme-toggle-thumb { color:#07304b; background:linear-gradient(145deg,#d9fbff,#62d9ff); transform:translateX(14px); }
+.app-theme-toggle:focus-visible { outline:3px solid var(--app-brand-color); outline-offset:3px; }
+.mobile-app-actions .app-theme-toggle { position:static; min-height:30px; gap:0; padding:2px; border-color:#ffffff66; color:#fff; background:#ffffff18; box-shadow:none; }
+.mobile-app-actions .app-theme-toggle-label { display:none; }
+.mobile-app-actions .app-theme-toggle-track { width:34px; height:24px; border-color:#ffffff55; background:#ffffff28; }
+.mobile-app-actions .app-theme-toggle-thumb { width:18px; height:18px; color:#0d2949; }
+.mobile-app-actions .app-theme-toggle[aria-checked="true"] { border-color:#4ccfff; background:#0c2c52; }
+.mobile-app-actions .app-theme-toggle[aria-checked="true"] .app-theme-toggle-track { border-color:#63d8ff; background:#12669b; }
+@media(max-width:1023px){.app-shell>.app-theme-toggle{display:none}}
+:root[data-app-theme="dark"] .app-shell :is(.settings-form,.team-form,.team-task-content,.payment-options,.subscription-summary>div,.subscription-enforcement,.subscription-plan-options article,.enterprise-request-list>article,.demo-account,.workspace-tutorial,.report-cost-warning,.stock-report-alert,.workspace-help[open]>div,.task-picker-trigger,.searchable-select-menu,.help-menu-panel,.tool-search-results,.guide-contents,.guide-pagination,.chart-period,.report-range-controls>select,.report-range-controls input,.attention-panel,.alert-row,.customer-row,.transaction-row,.payment-summary,.provider-add,.branch-choice,.team-access-task fieldset,.subscription-plan-face,.subscription-plan-back,.subscription-free-confirm,.subscription-benefit,.subscription-payout-grid>p,.settings-workspace-option,.catalogue-choice-list,.product-field-info-copy,.overview-performance,.workspace-launch) { color:#e5efff; border-color:#38577d; background:linear-gradient(145deg,#142b4fea,#0d1d38f5); box-shadow:inset 0 1px #ffffff12,0 6px 18px #02081745; }
+:root[data-app-theme="dark"] .app-shell :is(.settings-form,.team-form,.team-task-content,.payment-options,.subscription-summary,.subscription-enforcement,.subscription-plan-options,.enterprise-request-list,.demo-account,.workspace-tutorial,.report-cost-warning,.stock-report-alert,.workspace-help[open]>div,.task-picker,.searchable-select,.help-menu-panel,.tool-search-results,.guide-contents,.guide-pagination,.chart-period,.report-range-controls,.attention-panel,.alert-row,.customer-row,.transaction-row,.payment-summary,.provider-add,.branch-choice,.staff-permissions,.subscription-plan-face,.subscription-plan-back,.subscription-free-confirm,.subscription-benefit,.subscription-payout-grid,.settings-workspace-option,.catalogue-choice-list,.product-field-info-copy,.overview-performance,.workspace-launch) :is(h1,h2,h3,h4,p,strong,span,small,label,legend,summary,figcaption,li) { color:#e5efff; }
+:root[data-app-theme="dark"] .app-shell :is(.settings-form,.team-form,.team-task-content,.payment-options,.subscription-summary,.subscription-enforcement,.subscription-plan-options,.enterprise-request-list,.demo-account,.workspace-tutorial,.report-cost-warning,.stock-report-alert,.workspace-help[open]>div,.task-picker,.searchable-select,.help-menu-panel,.tool-search-results,.guide-contents,.guide-pagination,.chart-period,.report-range-controls,.attention-panel,.alert-row,.customer-row,.transaction-row,.payment-summary,.provider-add,.branch-choice,.staff-permissions,.subscription-plan-face,.subscription-plan-back,.subscription-free-confirm,.subscription-benefit,.subscription-payout-grid,.settings-workspace-option,.catalogue-choice-list,.product-field-info-copy,.overview-performance,.workspace-launch) :is(small,.muted,.table-subtext,.subscription-status,.subscription-plan-options small,.enterprise-request-list article>small) { color:#afc2dc; }
+:root[data-app-theme="dark"] .app-shell :is(.settings-form,.team-form,.team-task-content,.payment-options,.subscription-free-confirm,.workspace-tutorial) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),select,textarea) { color:#edf6ff!important; border-color:#45658e!important; background:#0b1c37!important; }
+:root[data-app-theme="dark"] .app-shell :is(.subscription-summary>div,.subscription-plan-options article,.enterprise-request-list>article,.demo-account,.subscription-benefit,.subscription-payout-grid>p,.settings-workspace-option,.subscription-plan-face,.subscription-plan-back,.overview-performance) { background:linear-gradient(145deg,#17345a,#102444); }
+:root[data-app-theme="dark"] .app-shell :is(.report-cost-warning,.stock-report-alert,.payment-note,.auth-error,.cloud-setup-status) { color:#ffe6bb; border-color:#755c35; background:#352a1e; }
+:root[data-app-theme="dark"] .app-shell :is(.report-cost-warning,.stock-report-alert,.payment-note,.auth-error,.cloud-setup-status) :is(p,strong,span,small) { color:#ffe6bb; }
+:root[data-app-theme="dark"] .app-shell :is(.subscription-plan-options span,.subscription-summary .positive,.wallet-positive,.status-completed,.status-paid,.cloud-setup-status.ready) { color:#8de6b8; }
+:root[data-app-theme="dark"] .app-shell :is(.role-badge,.role-badge.owner,.role-badge.admin,.transaction-dot,.product-icon) { border-color:#42658e; color:#dbeaff; background:#17345a; }
+:root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) { color:#192e49; }
+:root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(h1,h2,h3,h4,p,strong,span,small,label,summary,button) { color:#192e49; }
+:root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(small,.muted) { color:#536374; }
