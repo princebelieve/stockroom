@@ -1,6 +1,7 @@
 const appVersion = '1.0.10'
 const userAgent = `Stockroom Business/${appVersion} (https://stockroom.globalcreest.com; support@sbi.globalcreest.com)`
 const responseCache = new Map()
+const candidateCache = new Map()
 const upcItemDbCache = new Map()
 const ecomSourceCache = new Map()
 const recentUpstreamReads = []
@@ -15,11 +16,18 @@ export function validProductBarcode(value) {
   return (10 - digits.reverse().reduce((sum, digit, index) => sum + digit * (index % 2 ? 1 : 3), 0) % 10) % 10 === check
 }
 
-export async function lookupOpenFoodFacts(barcode, industry = 'general') {
+export async function lookupOpenFoodFacts(barcode, industry = 'general', requestedSource = '') {
   if (!validProductBarcode(barcode)) return { status: 400, body: { error: 'Enter a valid product barcode.' } }
-  const cacheKey = `${industry}:${barcode}`
+  const allowedSources = ['', 'Open Food Facts', 'Open Beauty Facts', 'Open Pet Food Facts', 'Open Products Facts', 'UPCitemdb', 'EcomSource', 'openFDA Drug NDC Directory', 'AccessGUDID medical device registry']
+  const source = allowedSources.includes(requestedSource) ? requestedSource : ''
+  const cacheKey = `${industry}:${barcode}:${source}`
   const cached = responseCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.result
+  const cachedCandidates = candidateCache.get(`${industry}:${barcode}`)
+  if (cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
+    const selected = source ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === source) : cachedCandidates.candidates[0]
+    return selected?.found || { status: 404, body: { status: 0, error: source ? `No exact barcode match was found in ${source}.` : 'No reliable product details were found in the available catalogues.' } }
+  }
   const minuteAgo = Date.now() - 60_000
   while (recentUpstreamReads.length && recentUpstreamReads[0] <= minuteAgo) recentUpstreamReads.shift()
   // Limit uncached public lookups per process; successful results use the
@@ -29,7 +37,7 @@ export async function lookupOpenFoodFacts(barcode, industry = 'general') {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 12000)
   try {
-    const result = await lookupCatalogues(barcode, controller.signal, industry)
+    const result = await lookupCatalogues(barcode, controller.signal, industry, source)
     if (result.status === 200 || result.status === 404) {
       // Cache both matches and confirmed misses briefly. Repeated scans of an
       // uncatalogued barcode should not spend provider quota over and over.
@@ -301,7 +309,13 @@ function providerProductType(attributes, name) {
   return ''
 }
 
-async function lookupCatalogues(barcode, signal, industry = 'general') {
+async function lookupCatalogues(barcode, signal, industry = 'general', requestedSource = '') {
+  const candidateKey = `${industry}:${barcode}`
+  const cachedCandidates = candidateCache.get(candidateKey)
+  if (cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
+    const selected = requestedSource ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === requestedSource) : cachedCandidates.candidates[0]
+    return selected?.found || (requestedSource ? { status: 404, body: { status: 0, error: `No exact barcode match was found in ${requestedSource}.` } } : { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues.' } })
+  }
   let providerResponded = false
   // The universal endpoint follows Open Food Facts' cross-catalogue redirect
   // for food, beauty, pet-food and other products in one request.
@@ -394,6 +408,10 @@ async function lookupCatalogues(barcode, signal, industry = 'general') {
   }
   if (candidates.length) {
     candidates.sort((a, b) => a.rank - b.rank || b.richness - a.richness)
+    candidateCache.set(candidateKey, { candidates, expiresAt: Date.now() + 60_000 })
+    const selected = requestedSource ? candidates.find(candidate => candidate.found.body.product.source === requestedSource) : candidates[0]
+    if (selected) return selected.found
+    if (requestedSource) return { status: 404, body: { status: 0, error: `No exact barcode match was found in ${requestedSource}.` } }
     return candidates[0].found
   }
   return !providerResponded

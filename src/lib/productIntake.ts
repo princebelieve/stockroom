@@ -47,7 +47,7 @@ export function documentSuggestions(text: string): Array<{ draft: ProductDraft; 
   return result.slice(0, 300)
 }
 
-export async function lookupProductBarcode(barcode: string, apiUrl = '', profile?: ShopProfile, workspace: CatalogueWorkspace = 'product-sales'): Promise<ProductDraft | null> {
+export async function lookupProductBarcode(barcode: string, apiUrl = '', profile?: ShopProfile, workspace: CatalogueWorkspace = 'product-sales', source = ''): Promise<ProductDraft | null> {
   if (!validGtin(barcode)) return null
   // Product suggestions are mutable and may be corrected upstream. Let the
   // server own its short cache and rate limit; a browser cache could preserve
@@ -57,7 +57,7 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
   const timer = setTimeout(() => controller.abort(), 14000)
   try {
     const base = apiUrl.replace(/\/$/, '')
-    const query = `barcode=${encodeURIComponent(barcode)}&industry=${encodeURIComponent(profile?.industry || 'general')}`
+    const query = `barcode=${encodeURIComponent(barcode)}&industry=${encodeURIComponent(profile?.industry || 'general')}${source ? `&source=${encodeURIComponent(source)}` : ''}`
     const endpoint = base && base !== '/api/cloud'
       ? `${base}/v1/public/product-lookup?${query}`
       : `/api/product-lookup?${query}`

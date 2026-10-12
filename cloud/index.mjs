@@ -284,7 +284,7 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   const requestUrl = new URL(request.url || '/', 'http://localhost')
   if (request.method === 'GET' && requestUrl.pathname === '/v1/public/product-lookup') {
-    const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim(), String(requestUrl.searchParams.get('industry') || 'general'))
+    const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim(), String(requestUrl.searchParams.get('industry') || 'general'), String(requestUrl.searchParams.get('source') || ''))
     response.setHeader('Cache-Control', 'no-store')
     return send(response, result.status, result.body)
   }

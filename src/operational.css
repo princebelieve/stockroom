@@ -421,10 +421,14 @@
 .barcode-lookup-facts dt { color:var(--muted); font-size:13px; }
 .barcode-lookup-facts dd { margin:6px 0 0; color:var(--ink); font-size:16px; font-weight:650; overflow-wrap:anywhere; }
 .barcode-lookup-facts code { font:600 15px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.barcode-source-check { display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin-top:20px; padding:16px; border:1px solid var(--line); border-radius:14px; background:#ffffffb8; }
+.barcode-source-check label { display:grid; flex:1 1 260px; gap:7px; color:var(--muted); font-size:13px; font-weight:650; }
+.barcode-source-check select { min-height:46px; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); font:inherit; }
+.barcode-source-check button { min-height:46px; }
 .barcode-lookup-note { margin:20px 0 0; padding:13px 15px; border-left:3px solid var(--brand-primary); border-radius:0 10px 10px 0; background:var(--mint); color:var(--ink); line-height:1.55; }
 .barcode-lookup-actions { display:flex; flex-wrap:wrap; gap:11px; margin-top:24px; }
 .barcode-lookup-actions button { min-height:48px; }
-@media(max-width:650px) { .barcode-lookup-report { margin-top:10px; padding:21px 17px; border-radius:17px; } .barcode-lookup-report-actions { display:grid; grid-template-columns:1fr; } .barcode-lookup-facts { grid-template-columns:1fr 1fr; gap:8px; margin-top:19px; } .barcode-lookup-facts > div { padding:12px; } .barcode-lookup-actions { display:grid; } .barcode-lookup-actions button { width:100%; justify-content:center; } }
+@media(max-width:650px) { .barcode-lookup-report { margin-top:10px; padding:21px 17px; border-radius:17px; } .barcode-lookup-report-actions { display:grid; grid-template-columns:1fr; } .barcode-lookup-facts { grid-template-columns:1fr 1fr; gap:8px; margin-top:19px; } .barcode-lookup-facts > div { padding:12px; } .barcode-lookup-actions { display:grid; } .barcode-lookup-actions button,.barcode-source-check button { width:100%; justify-content:center; } .barcode-source-check label { flex-basis:100%; } }
 @media(max-width:700px) { .product-entry-modal .form-grid { grid-template-columns:1fr; } .product-entry-modal .modal-head { top:-18px; } .product-entry-actions { bottom:-18px; } }
 
 .product-list-summary dl { display:flex; flex-wrap:wrap; gap:24px; margin:0 0 20px; }
