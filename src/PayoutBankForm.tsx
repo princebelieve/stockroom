@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { SearchableSelect } from './SearchableSelect'
 
 type Request = (path: string, init?: RequestInit) => Promise<any>
 export function PayoutBankForm({ request, onSaved, className = 'settings-form', buttonClass = 'primary-button' }: { request: Request; onSaved: () => Promise<void>; className?: string; buttonClass?: string }) {
@@ -53,7 +54,7 @@ export function PayoutBankForm({ request, onSaved, className = 'settings-form', 
   return <form className={className} onSubmit={submit}>
     <h3>Bank account for withdrawals</h3><p>Select your bank and enter your account number. Stockroom will look up the account name for you.</p>
     <label>Currency<select aria-label="Currency" value={currency} disabled={busy} onChange={e => { reset(); setBank(''); setCurrency(e.target.value) }}><option>NGN</option><option>GHS</option></select></label>
-    <label>Bank<select aria-label="Bank" required value={bankCode} disabled={busy} onChange={e => { reset(); setBank(e.target.value) }}><option value="">Select your bank</option>{banks.map(bank => <option key={bank.code} value={bank.code}>{bank.name}</option>)}</select></label>
+    <label>Bank<SearchableSelect ariaLabel="Bank" placeholder="Search banks" value={bankCode} required disabled={busy || !banks.length} options={banks.map(bank => ({ value: bank.code, label: bank.name }))} onChange={code => { reset(); setBank(code) }} /></label>
     <label>Account number<input required inputMode="numeric" autoComplete="off" pattern={currency === 'NGN' ? '[0-9]{10}' : '[0-9]{6,20}'} minLength={currency === 'NGN' ? 10 : 6} maxLength={currency === 'NGN' ? 10 : 20} disabled={busy} value={accountNumber} onChange={e => { reset(); setNumber(e.target.value.replace(/\s/g, '')) }} /></label>
     <label>Account name<input readOnly value={name} placeholder={resolving ? 'Looking up account name...' : 'Appears automatically after entering bank details'} aria-busy={resolving} /></label>
     {name && <p>Check that this is the account you want to receive your withdrawals.</p>}

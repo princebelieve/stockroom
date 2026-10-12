@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Store } from 'lucide-react'
 import { TimeZoneSelect } from './TimeZoneSelect'
+import { SearchableSelect } from './SearchableSelect'
 import { businessModes, businessWorkspace, normalizeShopProfile, productCatalogueOptions, type BusinessMode, type ShopProfile } from '../server/shop-profile.mjs'
 import { catalogueStarters, type CatalogueStarter } from '../server/catalogue-starters.mjs'
 import type { PaymentPolicy } from '../server/payment.mjs'
@@ -69,7 +70,7 @@ export function WorkspaceOnboarding({profile,currency,policy,saveProfile,savePre
     {error&&<p role="alert">{error}</p>}
     {step==='business'&&<>
       <p>Choose your business type and selling workspace separately. The catalogue list will match both choices. You can change them later.</p>
-      <label htmlFor="setup-business-type">Business type</label><select id="setup-business-type" value={industry} onChange={event=>chooseIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([id,item])=><option key={id} value={id}>{item.label}</option>)}</select>
+      <label>Business type<SearchableSelect ariaLabel="Business type" placeholder="Search business types" value={industry} options={Object.entries(businessModes).map(([id,item])=>({value:id,label:item.label}))} onChange={value=>chooseIndustry(value as BusinessMode)}/></label>
       <label htmlFor="setup-workspace">Selling workspace</label><select id="setup-workspace" value={screen} onChange={event=>chooseWorkspace(event.target.value as SetupWorkspace)}><option value="Oil">Oil sales</option><option value="POS">Product sales</option><option value="Payments">Payments &amp; receipts</option><option value="Counter">Order counter</option><option value="Restaurant">Tables &amp; tabs</option></select>
       <details className="setup-optional"><summary>Currency, time zone and other payment methods</summary>
         <label htmlFor="setup-currency">Currency</label><select id="setup-currency" value={nextCurrency} onChange={event=>setCurrency(event.target.value)}>{[...new Set([currency,'NGN','USD','GHS','KES','ZAR','GBP','EUR','XOF'])].map(code=><option key={code}>{code}</option>)}</select>

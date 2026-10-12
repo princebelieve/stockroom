@@ -472,8 +472,8 @@ export function listCustomers() {
   return database.prepare('SELECT id, name, phone, balance, birthday, birthday_reminders AS birthdayReminders FROM customers WHERE organization_id = ? ORDER BY name').all(organizationId).map(customer => ({ ...customer, transactions: database.prepare('SELECT id, amount, reason, created_at AS createdAt FROM wallet_transactions WHERE customer_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT 50').all(customer.id, organizationId) }))
 }
 
-export function getReports(branchId = 'main') {
-  const sales = database.prepare('SELECT id, total, payment_details AS paymentDetails, created_at AS createdAt FROM sales WHERE organization_id = ? AND branch_id = ?').all(organizationId, branchId)
+export function getReports(branchId = 'main', chartRange = {}) {
+  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_details AS paymentDetails, created_at AS createdAt FROM sales WHERE organization_id = ? AND branch_id = ?').all(organizationId, branchId)
   const items = database.prepare('SELECT si.sale_id AS saleId, si.product_id AS productId,si.product_name AS productName,si.quantity, si.unit_cost AS unitCost FROM sale_items si JOIN sales s ON s.id = si.sale_id WHERE s.organization_id = ? AND s.branch_id = ? ORDER BY si.rowid').all(organizationId, branchId)
   const products = listProducts(branchId)
   const expenses = database.prepare('SELECT amount, incurred_at AS incurredAt FROM expenses WHERE organization_id = ? AND branch_id = ?').all(organizationId, branchId)
@@ -484,7 +484,7 @@ export function getReports(branchId = 'main') {
   const adjustments=database.prepare('SELECT payload FROM stock_events').all().map(row=>JSON.parse(row.payload)).filter(row=>row.branchId===branchId && ['stock-loss','recipe-consumption','service-materials'].includes(row.category))
   const registers=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='register'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
   const orders=database.prepare("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='counter-order'").all(organizationId,branchId).map(row=>JSON.parse(row.payload))
-  return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers,orders,reportingTimeZone: normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile).reportingTimeZone })
+  return buildReports({ sales, items, products, expenses, returns,retail,batches,adjustments,registers,orders,reportingTimeZone: normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile).reportingTimeZone }, new Date(), chartRange)
 }
 
 export function exportSalesCsv(branchId = 'main') {

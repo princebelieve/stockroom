@@ -1,4 +1,5 @@
 import { WorkspaceHelp } from './WorkspaceHelp'
+import { SearchableSelect } from './SearchableSelect'
 import { useEffect, useMemo, useState } from 'react'
 
 const common = ['UTC', 'Africa/Lagos', 'Africa/Accra', 'Africa/Nairobi', 'Africa/Johannesburg', 'Africa/Cairo', 'Europe/London', 'Europe/Paris', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Shanghai', 'Asia/Tokyo', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto', 'America/Sao_Paulo', 'Australia/Sydney', 'Pacific/Auckland']
@@ -24,11 +25,11 @@ export function TimeZoneSelect({ value, onChange }: { value: string; onChange: (
     try { available = intl.supportedValuesOf?.('timeZone') || [] } catch { /* Older devices use common choices. */ }
     return [...new Set([...common, ...available, value, deviceZone])].filter(supported).map(zone => ({ zone, group: zone === 'UTC' ? 'UTC' : zone.includes('/') ? zone.split('/')[0] : 'Other timezones', label: label(zone).replace(/^([^/]+) \/ (.+)/, '$2 — $1') })).sort((a, b) => a.label.localeCompare(b.label))
   }, [value, deviceZone])
-  const groups = [...new Set(options.map(option => option.group))].sort((a, b) => a === 'UTC' ? 1 : b === 'UTC' ? -1 : a.localeCompare(b))
+  const searchableOptions = options.map(option => ({ value: option.zone, label: option.zone === 'UTC' ? 'UTC / Greenwich Mean Time' : `${option.group} · ${option.label}` }))
   const time = (zone: string) => new Intl.DateTimeFormat(undefined, { timeZone: zone, dateStyle: 'medium', timeStyle: 'medium' }).format(now)
   return <div>
     <label htmlFor="reporting-timezone">Business timezone</label>
-    <select id="reporting-timezone" value={value} onChange={event => { onChange(event.target.value); setNow(new Date()) }}>{groups.map(group => <optgroup key={group} label={group}>{options.filter(option => option.group === group).map(option => <option key={option.zone} value={option.zone}>{option.zone === 'UTC' ? 'UTC' : option.label}</option>)}</optgroup>)}</select>
+    <SearchableSelect value={value} options={searchableOptions} onChange={zone => { onChange(zone); setNow(new Date()) }} ariaLabel="Business timezone" placeholder="Search city, country, or timezone" />
     <WorkspaceHelp title="Business timezone"><p>Choose a city in your business’s timezone, such as Africa → Lagos. City timezones handle daylight-saving changes automatically. Save reporting timezone to apply your selection to reports on every device.</p>
     <p>UTC time: <time aria-label="UTC time" dateTime={now.toISOString()}>{time('UTC')}</time><br />Local time for your selection: <time aria-label="Selected local time" dateTime={now.toISOString()}>{time(value)}</time></p></WorkspaceHelp>
   </div>

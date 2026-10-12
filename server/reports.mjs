@@ -2,13 +2,16 @@ import { supplierAccounts } from './supplier-accounts.mjs'
 import { reportCharts } from './report-charts.mjs'
 import { reportCalendar, reportTimeZone } from './report-timezone.mjs'
 // All adapters use receipt totals once and the costs captured at sale time.
-export function buildReports({ sales, items, products, expenses, returns = [], retail = [], batches = [], adjustments = [], registers = [], orders = [], reportingTimeZone = 'UTC' }, date = new Date()) {
+export function buildReports({ sales, items, products, expenses, returns = [], retail = [], batches = [], adjustments = [], registers = [], orders = [], reportingTimeZone = 'UTC' }, date = new Date(), chartRange = {}) {
   reportingTimeZone = reportTimeZone(reportingTimeZone)
   const calendar = reportCalendar(reportingTimeZone, date)
   const day = calendar(date.toISOString())
   const monday = new Date(`${day}T00:00:00Z`); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7))
   const week = monday.toISOString().slice(0, 10)
   const month = `${day.slice(0, 7)}-01`
+  const chartFrom = chartRange.from || month, chartTo = chartRange.to || day
+  const validCivilDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+  if (!validCivilDate(chartFrom) || !validCivilDate(chartTo) || chartFrom > chartTo || chartTo > day || (Date.parse(`${chartTo}T00:00:00Z`) - Date.parse(`${chartFrom}T00:00:00Z`)) / 86400000 > 365) throw new Error('Choose a valid report date range of up to one year, ending today or earlier.')
   const within = (value, start) => { const civil = calendar(value); return Boolean(civil && civil >= start && civil <= day) }
   const round = value => Math.round((value + Number.EPSILON) * 100) / 100
   const window = start => {
@@ -69,7 +72,7 @@ export function buildReports({ sales, items, products, expenses, returns = [], r
   const expenseTotal = expenses.filter(expense => within(expense.incurredAt, month)).reduce((sum, expense) => sum + Number(expense.amount), 0)
   return {
     reportingTimeZone,
-    charts: reportCharts({ sales, items, expenses, returns, sellers, calendar, month, day }),
+    charts: reportCharts({ sales, items, expenses, returns, sellers, calendar, month, day, from: chartFrom, to: chartTo }),
     costWarnings,
     daily: window(day), weekly: window(week), monthly: window(month),
     inventory: { value: round(products.reduce((sum, product) => sum + Number(product.stock || 0) * Number(product.price || 0), 0)), products: products.length, lowStock: products.filter(product => Number(product.stock) <= Number(product.reorder)).length },

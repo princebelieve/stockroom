@@ -731,7 +731,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   if (path === '/api/reports' && method === 'GET') {
     if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     await ensurePos(db)
-    const sales = (await db.query('SELECT id,total,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id = ?', [branchId])).values || []
+    const sales = (await db.query('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails,created_at AS createdAt FROM sales WHERE branch_id = ?', [branchId])).values || []
     const items = (await db.query('SELECT si.sale_id AS saleId,si.product_id AS productId,si.product_name AS productName,si.quantity, si.unit_cost AS unitCost FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.branch_id = ? ORDER BY si.rowid', [branchId])).values || []
     const products = (await db.query('SELECT p.id,p.cost_price AS cost,COALESCE(i.stock,0) AS stock, COALESCE(i.reorder_point,p.reorder_point) AS reorder, p.price FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=?', [branchId])).values || []
     const expenses = (await db.query('SELECT amount, incurred_at AS incurredAt FROM expenses WHERE branch_id = ?', [branchId])).values || []
@@ -742,7 +742,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     const registers=((await db.query("SELECT payload FROM pos_records WHERE scope='business' AND branch_id=? AND kind='register'",[branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
     const reportingTimeZone = normalizeShopProfile((await db.query('SELECT shop_profile FROM app_settings WHERE id = 1')).values?.[0]?.shop_profile).reportingTimeZone
     const orders=((await db.query("SELECT payload FROM pos_records WHERE branch_id=? AND kind='counter-order'",[branchId])).values||[]).map(row=>JSON.parse(String(row.payload)))
-    return json(buildReports({ sales, items, products, expenses, returns,retail,batches:batchData.lots,adjustments,registers,orders,reportingTimeZone }))
+    const reportHeaders = new Headers(init?.headers), chartRange = { from: reportHeaders.get('X-Report-From') || undefined, to: reportHeaders.get('X-Report-To') || undefined }
+    return json(buildReports({ sales, items, products, expenses, returns,retail,batches:batchData.lots,adjustments,registers,orders,reportingTimeZone }, new Date(), chartRange))
   }
   if (path === '/api/users' && method === 'GET') {
     if (user.role !== 'owner') return error('Owner access required.', 403)

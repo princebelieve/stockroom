@@ -332,6 +332,8 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/api/reports') {
     const user = sessionUser(request)
     if (!user || !(user.permissions?canRequest(user,request.url||'',request.method):['owner','admin'].includes(user.role))) return sendJson(response, 403, { error: 'Access required.' })
+    const from = String(request.headers['x-report-from'] || ''), to = String(request.headers['x-report-to'] || '')
+    if (from || to) return sendJson(response, 200, await getReports(requestBranch(request), { from, to }))
     return sendJson(response, 200, await getReports(requestBranch(request)))
   }
   if (request.method === 'GET' && request.url?.startsWith('/api/staff/activity')) {

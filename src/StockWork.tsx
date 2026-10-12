@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { AsyncButton, AsyncForm, SubmitButton } from './AsyncControls'
 import { posRequest } from './PosTools'
 import type { Product } from './types'
+import { SearchableSelect } from './SearchableSelect'
 const Purchasing=lazy(()=>import('./Purchasing').then(module=>({default:module.Purchasing})))
 
 type Ingredient = { productId: string; quantity: string }
@@ -36,12 +37,12 @@ export function StockWork({headers,storageKey,money,job,refresh}: {
     {!review?<AsyncForm className="settings-form" onSubmit={async()=>{setError('');setReview(true)}}>
       <label>Work reference / reason<input required maxLength={200} value={draft.note} onChange={e=>setDraft({...draft,note:e.target.value})}/></label>
       {draft.ingredients.map((row,index)=><fieldset key={index}><legend>{job?'Material':'Ingredient'} {index+1}</legend>
-        <label>Stock used<select aria-label="Stock used" required value={row.productId} onChange={e=>rows({productId:e.target.value},index)}><option value="">Choose stock</option>{products.map(product=><option key={product.id} value={product.id}>{product.name} / {product.stock} {product.unit} available</option>)}</select></label>
+        <label>Stock used<SearchableSelect ariaLabel={`Stock used for ${job?'material':'ingredient'} ${index+1}`} placeholder="Search stock products" value={row.productId} required options={products.map(product=>({value:product.id,label:`${product.name} / ${product.stock} ${product.unit} available`}))} onChange={value=>rows({productId:value},index)}/></label>
         <label>Actual quantity used<input required type="number" min="0.001" step="0.001" value={row.quantity} onChange={e=>rows({quantity:e.target.value},index)}/></label>
         {draft.ingredients.length>1&&<button type="button" className="filter-button" onClick={()=>setDraft({...draft,ingredients:draft.ingredients.filter((_,i)=>i!==index)})}>Remove stock line</button>}
       </fieldset>)}
       <button type="button" className="filter-button" disabled={draft.ingredients.length>=50} onClick={()=>setDraft({...draft,ingredients:[...draft.ingredients,{productId:'',quantity:''}]})}>Add stock line</button>
-      {!job&&<><label>Finished stock product<select aria-label="Finished stock product" required value={draft.outputProductId} onChange={e=>setDraft({...draft,outputProductId:e.target.value})}><option value="">Choose finished product</option>{products.filter(product=>!draft.ingredients.some(row=>row.productId===product.id)).map(product=><option key={product.id} value={product.id}>{product.name} / {product.unit}</option>)}</select></label>
+      {!job&&<><label>Finished stock product<SearchableSelect ariaLabel="Finished stock product" placeholder="Search finished products" value={draft.outputProductId} required options={products.filter(product=>!draft.ingredients.some(row=>row.productId===product.id)).map(product=>({value:product.id,label:`${product.name} / ${product.unit}`}))} onChange={value=>setDraft({...draft,outputProductId:value})}/></label>
         <label>Expected finished quantity<input required type="number" min="0.001" step="0.001" value={draft.expectedQuantity} onChange={e=>setDraft({...draft,expectedQuantity:e.target.value})}/></label>
         <label>Actual usable finished quantity<input required type="number" min="0.001" step="0.001" value={draft.outputQuantity} onChange={e=>setDraft({...draft,outputQuantity:e.target.value})}/></label>
         <label>Finished batch expiry (optional)<input type="date" value={draft.expiry} onChange={e=>setDraft({...draft,expiry:e.target.value})}/></label>
