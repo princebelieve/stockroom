@@ -137,7 +137,8 @@ export function normalizeShopProfile(input) {
   const mode = ['general', 'suggested', 'custom'].includes(input.mode) ? input.mode : 'general'
   const industry = mode === 'general' || !Object.hasOwn(businessModes, input.industry) ? 'general' : input.industry
   const preset = { ...suggestions.general, ...suggestions[industry], categories: categoriesByIndustry[industry] || categoriesByIndustry.general, unit: businessModes[industry].unit }
-  const value = { version: 1, mode, industry, ...preset }
+  const workspaceSelectionVersion = input.workspaceSelectionVersion === 1 ? 1 : undefined
+  const value = { version: 1, mode, industry, ...(workspaceSelectionVersion ? { workspaceSelectionVersion } : {}), ...preset }
   if (mode === 'custom') {
     for (const key of ['itemLabel', 'inventoryLabel', 'unit']) {
       const text = typeof input[key] === 'string' ? input[key].trim().replace(/\s+/g, ' ') : ''
@@ -165,7 +166,11 @@ export function normalizeShopProfile(input) {
   value.fields = normalizeFields(input.fields, industry, value.itemLabel, Number(input.version || 0) < 3 && input.industry === industry)
   value.features = {
     services: typeof input.features?.services === 'boolean' ? input.features.services : industry !== 'supermarket',
-    productSales: typeof input.features?.productSales === 'boolean' ? input.features.productSales : industry !== 'liquids',
+    productSales: workspaceSelectionVersion === 1 && typeof input.features?.productSales === 'boolean' ? input.features.productSales : industry !== 'liquids',
+    // Older profiles that predate this explicit flag used the liquids type as
+    // the signal for Oil sales. Preserve that legacy state while new choices
+    // can enable the workspace independently of business type.
+    oilSales: workspaceSelectionVersion === 1 && typeof input.features?.oilSales === 'boolean' ? input.features.oilSales : industry === 'liquids',
   }
   value.workflows = ['stock', 'payments', 'both', 'fast-food', 'restaurant'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
   value.fastFood = input.fastFood === true || value.workflows === 'fast-food'
@@ -180,15 +185,16 @@ export function businessWorkspace(profile) {
   const value = normalizeShopProfile(profile)
   const supermarket = value.industry === 'supermarket'
   const liquids = value.industry === 'liquids'
-  const productStock = liquids || ['stock', 'both'].includes(value.workflows)
-  const stock = productStock || value.fastFood || value.restaurant
+  const productStock = ['stock', 'both'].includes(value.workflows) && value.features.productSales
+  const oil = value.features.oilSales
+  const stock = productStock || oil || value.fastFood || value.restaurant
   return {
     checkoutLabel: supermarket ? 'Checkout' : 'Sell (POS)',
     overviewTitle: supermarket ? 'Supermarket at a glance' : 'Business at a glance',
     overviewDescription: supermarket ? 'Review checkout sales, stock levels, and daily operations.' : 'Review business health, stock, and team activity.',
     liquids,
-    oil: liquids,
-    productSales: productStock && (!liquids || value.features.productSales),
+    oil,
+    productSales: productStock,
     services: value.features.services,
     stock,
     payments: ['payments', 'both'].includes(value.workflows),
@@ -245,10 +251,10 @@ export function applyBusinessPreset(profile, key) {
     units: [...(unitSuggestionsByIndustry[preset.industry] || unitSuggestionsByIndustry.general)],
     disabledCategories: [], disabledUnits: [],
   }
-  return validateShopProfile({ ...current, ...defaults, industry: preset.industry, fields: [...current.fields, ...lookupFields],
+  return validateShopProfile({ ...current, workspaceSelectionVersion: 1, ...defaults, industry: preset.industry, fields: [...current.fields, ...lookupFields],
     workspaceCatalogues,
     mode: current.mode === 'custom' ? 'custom' : 'suggested',
-    features: { ...current.features, productSales: preset.industry !== 'liquids' },
+    features: { ...current.features, productSales: preset.industry !== 'liquids', oilSales: preset.screen === 'Oil' },
     workflows: preset.workflow, fastFood: preset.workflow === 'fast-food', restaurant: preset.workflow === 'restaurant' })
 }
 

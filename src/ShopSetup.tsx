@@ -3,15 +3,13 @@ import { WorkspaceHelp } from './WorkspaceHelp'
 import { TimeZoneSelect } from './TimeZoneSelect'
 import { useEffect, useState } from 'react'
 import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
-import { businessModes, businessPresets, businessPresetGuidance, businessWorkspace, catalogueWorkspaces, workspaceCatalogueSettings, applyBusinessPreset, normalizeShopProfile, validateShopProfile, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
+import { businessModes, businessWorkspace, catalogueWorkspaces, workspaceCatalogueSettings, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { validateFields, type ShopField } from '../server/shop-fields.mjs'
 import { ShopProductFields } from './ShopProductFields'
 import { BlankProductForm } from './BlankProductForm'
 
-export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', openWorkspace }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; openWorkspace?: (screen: 'Oil' | 'POS' | 'Payments' | 'Counter' | 'Restaurant') => void }) {
-  const [presetKey, setPresetKey] = useState('')
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean }) {
   const [view,setView]=useState('type')
-  const [previewPreset, setPreviewPreset] = useState('')
   const [draft, setDraft] = useState(value)
   const [step, setStep] = useState(0)
   const [dirty, setDirty] = useState(false)
@@ -21,6 +19,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   const [newCategory, setNewCategory] = useState('')
   const [newUnit, setNewUnit] = useState('')
   useEffect(() => { if (!dirty) setDraft(value) }, [value, dirty])
+  useEffect(() => { if (requestedView) setView(requestedView) }, [requestedView])
   function change(next: ShopProfile) { setDraft(next); setDirty(true); setMessage(''); setProblem('') }
   function changeCatalogueList(update: (settings: ReturnType<typeof workspaceCatalogueSettings>) => ReturnType<typeof workspaceCatalogueSettings>) {
     const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
@@ -43,41 +42,45 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   }
   function useTemplate() {
     const next = normalizeShopProfile({ mode: draft.industry === 'general' ? 'general' : 'suggested', industry: draft.industry })
+    next.workspaceSelectionVersion = 1
     next.reportingTimeZone = draft.reportingTimeZone
     next.workflows = draft.workflows
     next.fastFood = draft.fastFood
     next.restaurant = draft.restaurant
+    next.features = { ...draft.features, services: draft.features?.services ?? true, productSales: businessWorkspace(draft).productSales, oilSales: businessWorkspace(draft).oil }
     const ids = new Set(next.fields.map(field => field.id))
     next.fields.push(...draft.fields.filter(field => !ids.has(field.id)).map(field => ({ ...field, visible: false })))
     if (next.fields.length > 49) { setProblem('This template would exceed 40 custom fields. Customize your current fields instead.'); return }
     change(next); setMessage('Template loaded into your draft. Review fields before saving.')
   }
-  function setWorkspaceEnabled(key: 'productSales'|'payments'|'fastFood'|'restaurant', enabled: boolean) {
+  function setBusinessType(industry: BusinessMode) {
     const current = businessWorkspace(draft)
-    const next = { productSales: current.productSales, payments: current.payments, fastFood: current.fastFood, restaurant: current.restaurant, [key]: enabled }
-    if (draft.industry !== 'liquids' && !next.productSales && !next.payments && !next.fastFood && !next.restaurant) {
+    change({ ...draft, mode: 'custom', industry, workspaceSelectionVersion: 1, features: { ...draft.features, services: draft.features?.services ?? true, productSales: current.productSales, oilSales: current.oil } })
+  }
+  function setWorkspaceEnabled(key: 'productSales'|'oilSales'|'payments'|'fastFood'|'restaurant', enabled: boolean) {
+    const current = businessWorkspace(draft)
+    const next = { productSales: current.productSales, oilSales: current.oil, payments: current.payments, fastFood: current.fastFood, restaurant: current.restaurant, [key]: enabled }
+    if (!next.productSales && !next.oilSales && !next.payments && !next.fastFood && !next.restaurant) {
       setProblem('Keep at least one workspace enabled.')
       return
     }
     const workflows: ShopProfile['workflows'] = next.productSales && next.payments ? 'both' : next.productSales ? 'stock' : next.payments ? 'payments' : next.fastFood ? 'fast-food' : next.restaurant ? 'restaurant' : 'stock'
-    change({ ...draft, workflows, fastFood: next.fastFood, restaurant: next.restaurant, features: { ...draft.features, services: draft.features?.services ?? true, productSales: draft.industry === 'liquids' ? next.productSales : draft.features?.productSales } })
+    change({ ...draft, workspaceSelectionVersion: 1, workflows, fastFood: next.fastFood, restaurant: next.restaurant, features: { ...draft.features, services: draft.features?.services ?? true, productSales: next.productSales, oilSales: next.oilSales } })
   }
   function go(next: number) {
     try { if (next > step) { const fields = draft.fields.map(field => ({ ...field, options: field.options.map(item => item.trim()).filter(Boolean) })); validateFields(fields); setDraft({ ...draft, fields }) }; setStep(next); setProblem('') }
     catch (error) { setProblem(error instanceof Error ? error.message : 'Check your fields.') }
   }
   return <section id="shop-setup" className="panel full-panel shop-wizard">
-    <ScreenPicker buttons className="settings-task-navigation" label="Workspace settings tasks" value={view} change={setView} options={[{id:'type',label:'Business type'},{id:'workspaces',label:'Available workspaces'},{id:'catalogues',label:'Workspace catalogues'},{id:'timezone',label:'Reporting timezone'},...(!['fast-food','restaurant'].includes(draft.workflows||'')?[{id:'form',label:'Product form'}]:[])]}/><section hidden={view!=='type'}>
+    {!hideTaskNavigation && <ScreenPicker buttons className="settings-task-navigation" label="Workspace settings tasks" value={view} change={setView} options={[{id:'type',label:'Business type'},{id:'workspaces',label:'Available workspaces'},{id:'catalogues',label:'Workspace catalogues'},{id:'timezone',label:'Reporting timezone'},...(!['fast-food','restaurant'].includes(draft.workflows||'')?[{id:'form',label:'Product form'}]:[])]}/>}<section hidden={view!=='type'}>
     <h2>Business type</h2>
-    <label htmlFor="business-preset">Business preset</label>
-    <select id="business-preset" value={presetKey} onChange={event => { setPresetKey(event.target.value); setPreviewPreset('') }}><option value="">Choose your business</option>{Object.entries(businessPresets).map(([key, preset]) => <option key={key} value={key}>{preset.label}</option>)}</select>
-    <button type="button" className="filter-button" disabled={!presetKey || dirty} onClick={() => setPreviewPreset(presetKey)}>Preview preset</button>
-    {dirty && <p>Save your current changes before applying a business preset.</p>}
-    {previewPreset && <div className="panel" aria-label="Business preset preview"><h3>{businessPresets[previewPreset].workspace}</h3><p>{businessPresetGuidance[previewPreset]}</p><WorkspaceHelp title="Workspace configuration"><p>This will become your selling workspace. Other selling screens will be hidden; you can enable them again below.</p></WorkspaceHelp><WorkspaceHelp title="Workspace configuration"><p>Your products, menu, tables, receipts and saved configuration are kept. Add your items and prices in Business settings when needed.</p></WorkspaceHelp><AsyncButton className="primary-button" busyLabel="Applying preset..." disabled={dirty} onClick={async () => { await save(applyBusinessPreset(value, previewPreset)); setDirty(false); setPreviewPreset(''); openWorkspace?.(businessPresets[previewPreset].screen) }}>Apply preset and start selling</AsyncButton><button type="button" className="filter-button" onClick={() => setPreviewPreset('')}>Cancel</button></div>}
+    <label htmlFor="business-type">Business type</label>
+    <select id="business-type" value={draft.industry} onChange={event => setBusinessType(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([key, type]) => <option key={key} value={key}>{type.label}</option>)}</select>
+    <p>Changes the business type used for catalogue suggestions. It does not rename items or switch workspaces.</p>
+    <AsyncButton className="primary-button" busyLabel="Saving business type..." disabled={!dirty || draft.industry === value.industry} onClick={async()=>{const valid=validateShopProfile(draft);await save(valid);setDraft(valid);setDirty(false);setMessage('Business type saved. Workspace choices and labels are unchanged.')}}>Save business type</AsyncButton>
     </section><section hidden={view!=='workspaces'} className="workspace-availability-task"><h2>Available workspaces</h2><p>Turn on the screens this business needs. Each appears as its own destination in the app.</p>
-    {draft.industry==='liquids'&&<label className="settings-workspace-option settings-workspace-fixed"><input type="checkbox" checked disabled/><span><strong>Oil sales</strong><small>Product selection, quantities and oil checkout.</small></span></label>}
-    {draft.industry==='liquids'&&<label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).productSales} onChange={event=>setWorkspaceEnabled('productSales',event.target.checked)}/><span><strong>Product sales</strong><small>Standard product checkout with its own basket and held sales.</small></span></label>}
-    {draft.industry!=='liquids'&&<label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).productSales} onChange={event=>setWorkspaceEnabled('productSales',event.target.checked)}/><span><strong>Product sales</strong><small>Sell stocked products and manage inventory.</small></span></label>}
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).productSales} onChange={event=>setWorkspaceEnabled('productSales',event.target.checked)}/><span><strong>Product sales</strong><small>Sell stocked products and manage inventory.</small></span></label>
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).oil} onChange={event=>setWorkspaceEnabled('oilSales',event.target.checked)}/><span><strong>Oil sales</strong><small>Sell oil by measured quantity or container.</small></span></label>
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).payments} onChange={event=>setWorkspaceEnabled('payments',event.target.checked)}/><span><strong>Payments &amp; receipts</strong><small>Record service payments without changing stock.</small></span></label>
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).fastFood} onChange={event=>setWorkspaceEnabled('fastFood',event.target.checked)}/><span><strong>Order counter</strong><small>Take menu orders for a counter, cafe or takeaway.</small></span></label>
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).restaurant} onChange={event=>setWorkspaceEnabled('restaurant',event.target.checked)}/><span><strong>Tables &amp; tabs</strong><small>Manage table orders and customer tabs.</small></span></label>

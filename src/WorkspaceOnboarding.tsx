@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Store } from 'lucide-react'
 import { TimeZoneSelect } from './TimeZoneSelect'
-import { businessModes, normalizeShopProfile, productCatalogueOptions, type BusinessMode, type ShopProfile } from '../server/shop-profile.mjs'
+import { businessModes, businessWorkspace, normalizeShopProfile, productCatalogueOptions, type BusinessMode, type ShopProfile } from '../server/shop-profile.mjs'
 import { catalogueStarters, type CatalogueStarter } from '../server/catalogue-starters.mjs'
 import type { PaymentPolicy } from '../server/payment.mjs'
 
@@ -21,7 +21,7 @@ function setupProfile(profile:ShopProfile,industry:BusinessMode,screen:SetupWork
   const options=productCatalogueOptions(industry)
   const workspaceCatalogues={...profile.workspaceCatalogues,...(workspaceKey?{[workspaceKey]:options}:{})}
   const workflows:ShopProfile['workflows']=screen==='Payments'?'payments':screen==='Counter'?'fast-food':screen==='Restaurant'?'restaurant':'stock'
-  return normalizeShopProfile({...profile,mode:industry==='general'?'general':'suggested',industry,workflows,fastFood:screen==='Counter',restaurant:screen==='Restaurant',features:{services:screen==='Payments',productSales:screen==='POS'},workspaceCatalogues,reportingTimeZone:timeZone})
+  return normalizeShopProfile({...profile,workspaceSelectionVersion:1,mode:industry==='general'?'general':'suggested',industry,workflows,fastFood:screen==='Counter',restaurant:screen==='Restaurant',features:{services:screen==='Payments',productSales:screen==='POS',oilSales:screen==='Oil'},workspaceCatalogues,reportingTimeZone:timeZone})
 }
 
 export function WorkspaceOnboarding({profile,currency,policy,saveProfile,savePreferences,saveStarters,finish}: {
@@ -32,7 +32,7 @@ export function WorkspaceOnboarding({profile,currency,policy,saveProfile,savePre
   finish:(screen?:SetupWorkspace)=>void;
 }) {
   const [industry,setIndustry]=useState<BusinessMode>(profile.industry)
-  const [screen,setScreen]=useState<SetupWorkspace>(()=>profile.industry==='liquids'?'Oil':profile.fastFood?'Counter':profile.restaurant?'Restaurant':profile.workflows==='payments'?'Payments':'POS')
+  const [screen,setScreen]=useState<SetupWorkspace>(()=>{const current=businessWorkspace(profile);return current.oil?'Oil':current.fastFood?'Counter':current.restaurant?'Restaurant':current.payments?'Payments':'POS'})
   const [nextCurrency,setCurrency]=useState(currency)
   const [timeZone,setTimeZone]=useState(profile.reportingTimeZone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')
   const [provider,setProvider]=useState(policy.providers[0]||'')
@@ -46,7 +46,7 @@ export function WorkspaceOnboarding({profile,currency,policy,saveProfile,savePre
   const starters=useMemo(()=>catalogueStarters(workspace.kind,workspace.industry),[workspace.kind,workspace.industry])
   const visible=starters.filter(item=>`${item.name} ${item.category} ${item.unit}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).slice(0,80)
   const selected=starters.filter(item=>selectedIds.includes(item.id))
-  function chooseIndustry(value:BusinessMode){setIndustry(value);if(value==='liquids')setScreen('Oil');else if(screen==='Oil')setScreen('POS');setSelectedIds([]);setQuery('')}
+  function chooseIndustry(value:BusinessMode){setIndustry(value);setSelectedIds([]);setQuery('')}
   function chooseWorkspace(value:SetupWorkspace){setScreen(value);setSelectedIds([]);setQuery('')}
   function toggle(id:string){setSelectedIds(current=>current.includes(id)?current.filter(item=>item!==id):current.length>=200?current:[...current,id])}
   async function saveSetup(itemsToSave:CatalogueStarter[]=selected){
@@ -70,8 +70,7 @@ export function WorkspaceOnboarding({profile,currency,policy,saveProfile,savePre
     {step==='business'&&<>
       <p>Choose your business type and selling workspace separately. The catalogue list will match both choices. You can change them later.</p>
       <label htmlFor="setup-business-type">Business type</label><select id="setup-business-type" value={industry} onChange={event=>chooseIndustry(event.target.value as BusinessMode)}>{Object.entries(businessModes).map(([id,item])=><option key={id} value={id}>{item.label}</option>)}</select>
-      <label htmlFor="setup-workspace">Selling workspace</label><select id="setup-workspace" value={screen} onChange={event=>chooseWorkspace(event.target.value as SetupWorkspace)}><option value="Oil" disabled={industry!=='liquids'}>Oil sales</option><option value="POS">Product sales</option><option value="Payments">Payments &amp; receipts</option><option value="Counter">Order counter</option><option value="Restaurant">Tables &amp; tabs</option></select>
-      {industry==='liquids'&&<p>Oil sales remains enabled for the oil business type. The workspace you choose here is enabled alongside it; configure other combinations later in Business settings.</p>}
+      <label htmlFor="setup-workspace">Selling workspace</label><select id="setup-workspace" value={screen} onChange={event=>chooseWorkspace(event.target.value as SetupWorkspace)}><option value="Oil">Oil sales</option><option value="POS">Product sales</option><option value="Payments">Payments &amp; receipts</option><option value="Counter">Order counter</option><option value="Restaurant">Tables &amp; tabs</option></select>
       <details className="setup-optional"><summary>Currency, time zone and other payment methods</summary>
         <label htmlFor="setup-currency">Currency</label><select id="setup-currency" value={nextCurrency} onChange={event=>setCurrency(event.target.value)}>{[...new Set([currency,'NGN','USD','GHS','KES','ZAR','GBP','EUR','XOF'])].map(code=><option key={code}>{code}</option>)}</select>
         <TimeZoneSelect value={timeZone} onChange={setTimeZone}/>

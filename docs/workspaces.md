@@ -1,6 +1,6 @@
 # Choosing and using a workspace
 
-Stockroom has five selling workspaces: Product sales, Oil sales, Payments & receipts, Order counter, and Tables & tabs. Product sales is for supermarkets, mini-marts and retail shops; Oil sales is a separate measured and container sales screen for oil businesses; Payments & receipts is for printing presses and other service businesses; Order counter is for fast food, cafes and takeaways; Tables & tabs is for restaurants, bars and lounges. These are examples, not restrictions. Choose by the way the business takes a sale. Owners configure available screens under Business settings > Workspaces; the available combinations depend on the selected business type. Configuration stays in Business settings and product management; cashiers use the transaction screens.
+Stockroom has five selling workspaces: Product sales, Oil sales, Payments & receipts, Order counter, and Tables & tabs. A **business type** describes what kind of business this is and guides catalogue suggestions. A **workspace** is an enabled area where staff do a specific kind of work. A business type does not enable a workspace, and labels such as “Oil inventory” only change displayed wording. Owners choose available workspaces separately under Business settings > Workspaces. Product sales is for stocked goods; Oil sales is for measured oil and containers; Payments & receipts records service payments without changing stock; Order counter handles menu orders; Tables & tabs handles open bills. These examples do not restrict combinations.
 
 | Workspace | Use it when | Everyday flow |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ Open Product sales in Daily work. Scan or tap products to add them to the basket
 
 ## Oil sales
 
-Oil sales is a standalone screen enabled for the wholesale/retail oil business type. It supports measured quantities and configured containers, with the saved bulk and customer pricing rules. It can be enabled alongside standard Product sales and Payments & receipts. For oil businesses, open Business settings > Workspaces > Customise workspaces (optional) and choose the separate Product sales and Payments & receipts options as needed. Other business types do not show Oil sales as a separate screen.
+Oil sales is a standalone workspace for measured quantities and configured containers, with saved bulk and customer pricing rules. It can be enabled with any business type and alongside other workspaces. Choose it under Business settings > Workspaces > Available workspaces. A business type may guide catalogue suggestions, but does not turn this workspace on or off.
 
 ## Payments & receipts
 
@@ -36,7 +36,7 @@ Owners configure Business, Workspaces and Sales. Owners and admins configure Rec
 
 ### Start from workspace suggestions
 
-During first-time setup, choose the business type and selling workspace separately, search the matching starter list, select what the business sells, review the selection and confirm. Oil sales is available for the oil business type and remains enabled alongside the selected workspace; other combinations can be configured later in Business settings. Product entries are saved with generated SKUs, no barcode, and zero opening stock, cost and selling price. Set actual values before selling. Service descriptions and menu items are saved at zero price; menu items start unavailable. You can skip the catalogue step, change the selection before saving, or add and edit entries later. In Business settings, **Preloaded catalogue starters** remains available for adding more names.
+During first-time setup, choose the business type and selling workspace separately, search suggested names, select what the business sells, review and confirm. The selected workspace is enabled; other workspaces can be enabled later in Business settings. Product entries are saved with generated SKUs, no barcode, and zero opening stock, cost and selling price. Set actual values before selling. Service descriptions and menu items are saved at zero price; menu items start unavailable. You can skip the catalogue step, change the selection before saving, or add and edit entries later. In Business settings, **Preloaded catalogue starters** remains available for adding more names.
 
 The starter lists offer broad, editable name suggestions in all five selling workspaces. Each stock business type has common retail goods plus relevant specialist names; Oil sales includes oil products and handling supplies. Payments & receipts offers reusable service descriptions, while Order counter and Tables & tabs offer food, drink, snack and meal ideas. The lists are name suggestions, not a supplier/manufacturer feed: they do not contain GTIN barcodes, prices, costs, opening stock or verified package specifications. A barcode is optional; scan the code on the actual item when available. Stockroom generates an SKU when a saved product has no SKU. Review each entry and set the business's real details. Adding a starter does not replace existing entries.
 
@@ -52,11 +52,11 @@ These names describe workflows, not full industry packages. Order counter still 
 
 Product sales uses green, Payments & receipts blue, Order counter orange and Tables & tabs purple. Overview pairs icons and business examples with compact totals and a single start action. Routine instructions are available under Help. Order statuses retain text labels beside colour; table tiles display Free or Open bill. Errors, payment confirmations and empty-screen guidance remain visible. Detailed cost information is available under Cost details rather than competing with payment actions.
 
-## Business presets
+## Business type and workspace settings
 
-Owners can open Business settings > Workspaces > Start with your business, choose a preset and preview it. Apply preset and start selling saves the workspace choice and opens its selling screen. Retail/supermarket uses Product sales; wholesale/retail oil uses Oil sales; printing/services uses Payments & receipts; takeaway uses Order counter; restaurant/bar uses Tables & tabs.
+Starter setup records the business type separately from the selected workspace. For an established business, changing Business type only changes type-based defaults and suggestions; it does not silently switch workspaces or custom labels. Workspace availability has its own controls and save action.
 
-Applying a preset hides other selling screens without deleting their records. Existing product fields and custom catalogue configuration are retained. Menu items, recipes, tables, receipts, payment settings, devices and branding are not replaced. Add actual menu items/prices or tables in the relevant settings tab. To combine workflows, scroll to **Customise workspaces (optional)**. For non-oil business types, choose Product sales, Payments & receipts, or both in **Payment screens**, then use the separate Order counter and Tables & tabs checkboxes. For oil businesses, Oil sales stays available; check the separate Product sales and Payments & receipts options to add those screens. Select **Save workspaces** and use **Sync now** to share settings. Presets do not implement hotel bookings or other sector-specific operations.
+The former “business preset” action combined business type with workspace selection, which made the concepts appear coupled. It has been removed from existing-business Settings. Existing workspace choices are saved explicitly, while older saved profiles retain their historical workspace behavior when loaded.
 
 ## Payments and data updates
 
@@ -70,7 +70,7 @@ Owners set **Business settings > Workspaces > Reporting timezone**, save, then u
 
 ## Sector scope
 
-Business presets choose selling screens; catalogue templates suggest labels, categories and units. Neither creates a complete industry system. Configure real items, prices, stock, recipes, materials, tables and devices where needed.
+Business type guides catalogue suggestions; workspace settings enable selling screens; item and catalogue labels only change displayed wording. None of those choices creates a complete industry system. Configure real items, prices, stock, recipes, materials, tables and devices where needed.
 
 | Business | Implemented daily work | Additional specialist work outside this scope |
 | --- | --- | --- |

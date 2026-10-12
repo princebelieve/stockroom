@@ -100,7 +100,7 @@
     "id": "section-9",
     "title": "Business settings > Receipts",
     "steps": [
-      "Open Receipts and select Customize receipt.",
+      "In Business settings, move to the Receipt details task and select Customize receipt.",
       "Enter the receipt business name, address, phone and email as needed.",
       "Write your thank-you message and return/payment policy in Receipt footer.",
       "Enable optional receipt tax only if needed, and review the rate and included/added treatment.",
@@ -242,7 +242,7 @@
       "Save the payment and print or share its receipt. Open Payment history to find a previous payment.",
       "For work that needs a deposit or later payment, open Jobs & invoices; New payment stays the simple full-payment form.",
       "Owners/admins use Payment history > Refund payment when money must be returned. The original receipt remains saved.",
-      "Save reusable service names and prices in Business settings > Receipts > Saved services and prices. Add saved service copies the current price into the draft."
+      "Save reusable service names and prices in Business settings > Service catalogue. Add saved service copies the current price into the draft."
     ],
     "note": "These descriptions are non-stock receipt lines: no product deduction or ingredient consumption. Confirm externally received payment before saving a manual POS/transfer entry."
   },
