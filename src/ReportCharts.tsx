@@ -57,9 +57,9 @@ function RankingChart({ title, description, rows, format, emptyText }: { title: 
   </section>
 }
 
-export function ReportCharts({ data, currency, timeZone }: { data?: ReportChartData; currency: string; timeZone: string }) {
+export function ReportCharts({ data, currency, timeZone, error = '', onRetry }: { data?: ReportChartData; currency: string; timeZone: string; error?: string; onRetry?: () => void }) {
   const money = (value: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
-  if (!data) return <section className="report-visuals" aria-label="Report charts"><p role="status">Report charts are loading. Refresh reports if they do not appear.</p></section>
+  if (!data) return <section className="report-visuals" aria-label="Report charts">{error ? <p role="alert">{error} {onRetry && <button type="button" className="filter-button" onClick={onRetry}>Retry reports</button>}</p> : <p role="status">Report charts are loading.</p>}</section>
   return <section className="report-visuals" aria-label="Business report charts">
     <div className="chart-heading"><div><span className="report-eyebrow">BUSINESS REPORT</span><h2>Month to date</h2><p>Daily activity · {timeZone}</p></div></div>
     <div className="report-chart-grid"><DailySales rows={data.daily} format={money}/><PaymentMix rows={data.payments} format={money}/><RankingChart title="Top-selling products" description="Units sold after returns." rows={data.products} format={value => value.toLocaleString()} emptyText="Product sales will appear here."/><RankingChart title="Expenses by category" description="Expenses recorded this month." rows={data.expenses} format={money} emptyText="Recorded expenses will appear here."/></div>

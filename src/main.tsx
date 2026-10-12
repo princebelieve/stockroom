@@ -251,6 +251,12 @@ type Movement = { id: string; productName: string; sku: string; quantity: number
 type SyncStatus = { configured: boolean; pending: number; pendingSettings?: number; conflicts?: number; lastError: string; existingBusiness?: boolean }
 type StaffUser = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; permissions?:Record<string,boolean>|null; operationalAccess?: boolean; createdAt: string }
 type Reports = { charts?: ReportChartData; costWarnings?: { incomplete: boolean; zeroCostSaleLines: number; missingRecipes: string[]; uncostedIngredients: number; uncostedMaterials?: number }; reportingTimeZone?: string; daily: { total: number; count: number }; weekly: { total: number; count: number }; monthly: { total: number; count: number }; inventory: { value: number; products: number; lowStock: number }; profit: { revenue: number; cost: number; expenses: number; amount: number } }
+async function fetchReports(headers: Record<string,string>): Promise<Reports> {
+  const response = await fetch('/api/reports', { headers })
+  const result = await response.json().catch(() => ({})) as Reports & { error?: string }
+  if (!response.ok) throw new Error(result.error || 'Reports could not be loaded.')
+  return result
+}
 type Expense = { id: string; category: string; description: string; amount: number; incurredAt: string; staffId?: string; staffName?: string }
 type InlinePromptRequest = { title: string; message: string; label?: string; inputType?: 'text' | 'password'; initialValue?: string; minLength?: number; resolve: (value: string | null) => void }
 
@@ -473,6 +479,8 @@ function App() {
   const [cart, setCart] = useState<Record<string, number>>({})
   const [posStage, setPosStage] = useState<'items' | 'basket' | 'payment'>('items')
   useEffect(() => { if (!Object.values(cart).some(quantity => quantity > 0)) setPosStage('items') }, [cart])
+  const [saleConfirmation, setSaleConfirmation] = useState<{ id: string; total: number } | null>(null)
+  useEffect(() => { if (Object.values(cart).some(quantity => quantity > 0)) setSaleConfirmation(null) }, [cart])
   const [currentOrderId, setCurrentOrderId] = useState<string>(() => crypto.randomUUID())
   const [orderToPrint, setOrderToPrint] = useState<PrintableOrder | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<Sale['paymentMethod']>('external-pos')
@@ -553,6 +561,7 @@ function App() {
     email.placeholder = 'Optional contact email'
   }, [active, user?.role, staff.length])
   const [reports, setReports] = useState<Reports | null>(null)
+  const [reportsError, setReportsError] = useState('')
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [sales, setSales] = useState<SaleRecord[]>([])
   const [saleVoids, setSaleVoids] = useState<SaleItemVoid[]>([])
@@ -560,6 +569,9 @@ function App() {
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
   const [receiptHistory, setReceiptHistory] = useState<Sale[]>([])
+  const [receiptQuery, setReceiptQuery] = useState('')
+  const [receiptFrom, setReceiptFrom] = useState('')
+  const [receiptTo, setReceiptTo] = useState('')
   const [receiptError, setReceiptError] = useState('')
   const receiptPrinting = useRef(false)
   useEffect(() => { let cancelled = false; setReceiptHistory([]); if (user?.organizationId) getReceiptHistory(user.organizationId).then(rows => { if (!cancelled) setReceiptHistory(rows) }).catch(() => { if (!cancelled) setReceiptError('Local receipt history could not be loaded.') }); return () => { cancelled = true } }, [user?.organizationId])
@@ -872,7 +884,10 @@ function App() {
   }, [authToken, activeBranchId, user?.role])
   useEffect(() => {
     if (!authToken || !hasPermission(user,'reports')) return
-    fetch('/api/reports', { headers: authHeaders }).then((response) => response.ok ? response.json() as Promise<Reports> : Promise.reject()).then(setReports).catch(() => undefined)
+    let live = true
+    setReportsError('')
+    fetchReports(authHeaders).then(data => { if (live) setReports(data) }).catch(error => { if (live) setReportsError(error instanceof Error ? error.message : 'Reports could not be loaded.') })
+    return () => { live = false }
   }, [authToken, activeBranchId, user?.role])
   useEffect(() => {
     const refresh = async () => {
@@ -881,8 +896,8 @@ function App() {
         const response = await fetch('/api/sales', { headers: authHeaders })
         if (response.ok) setSales((await response.json()).sales)
         if (hasPermission(user,'reports')) {
-          const reportResponse = await fetch('/api/reports', { headers: authHeaders })
-          if (reportResponse.ok) setReports(await reportResponse.json())
+          try { setReports(await fetchReports(authHeaders)); setReportsError('') }
+          catch (error) { setReportsError(error instanceof Error ? error.message : 'Reports could not be refreshed.') }
         }
       } catch { /* Saved local records remain available for Refresh to retry. */ }
     }
@@ -1582,6 +1597,7 @@ function App() {
     setProducts(updatedProducts)
     setReceiptHistory(current => [sale, ...current.filter(row => row.id !== sale.id)])
     setLastReceipt(sale)
+    setSaleConfirmation({ id: sale.id, total: sale.total })
     setCompletedCustomerSale({ items: cartProducts.map((product) => ({ name: product.name, quantity: cart[product.id], price: product.price })), total: cartTotal })
     setWalletCustomerId('')
     pos.clear()
@@ -1874,6 +1890,12 @@ function App() {
     const link = document.createElement('a')
     link.href = url; link.download = 'stockroom-sales.csv'; link.click()
     URL.revokeObjectURL(url)
+  }
+
+  async function reloadReports() {
+    setReportsError('')
+    try { setReports(await fetchReports(authHeaders)) }
+    catch (error) { setReportsError(error instanceof Error ? error.message : 'Reports could not be loaded.') }
   }
 
   async function addExpense(event: React.FormEvent<HTMLFormElement>) {
@@ -2212,6 +2234,7 @@ function App() {
     <main inert={mobileMenuOpen&&!desktopLayout} className={`main-content workspace-accent-${active}${productWorkspaceActive ? ' pos-workspace' : ''}`}>
       <header className="topbar"><div><p className="eyebrow">{user.name} · {user.role}</p><h1>{active === 'Guide' ? 'How to use Stockroom' : active === 'Inventory' ? ({'add-search':'Add or search product','new-product':'Add product','import':'Import products','import-csv':'Import CSV','import-barcode':'Find by barcode','import-photo':'Read product photo','import-reference':'Find saved reference','import-save-reference':'Save offline references','import-review':'Review imported products','starters':'Starter products','handwritten':'Read a product list','products':'Products','transfers':'Move stock','purchasing':'Supply records','purchasing-delivery':'New supply / stock operation','purchasing-suppliers':'Suppliers','purchasing-new-supplier':'Add supplier','purchasing-balances':'Supplier balances','purchasing-packs':'Pack conversions','expiry':'Stock costs & expiry','pricing':'Prices','options':'Product variants & extras'} as Record<string,string>)[section] || shopProfile.inventoryLabel : active === 'Register' ? 'Cash register' : active === 'Oil' ? oilWorkspaceName : active === 'POS' ? salesWorkspaceName : active === 'RetailOrders' ? 'Online orders' : active === 'Counter' ? 'Order counter' : active === 'Restaurant' ? 'Tables & tabs' : active === 'Payments' ? 'Payments & receipts' : active === 'Wallet' ? section === 'new-customer' ? 'Add customer' : section === 'birthdays' ? 'Birthdays' : 'Customers' : active === 'Owner' ? 'Business performance' : active === 'Activity' ? 'Staff activity' : active === 'Overview' ? (user.role === 'owner' ? 'Business overview' : 'Operations overview') : active === 'Reports' ? section === 'expenses' ? 'Expenses' : section === 'new-expense' ? 'New expense' : 'Reports' : active === 'Team' ? 'Staff & access' : active === 'Subscription' ? 'Subscription' : active === 'Settings' ? 'Business settings' : active === 'Sales' ? 'Sales history' : active === 'Stocktake' ? 'Stock count' : active === 'Movements' ? 'Stock movements' : active === 'Display' ? 'Customer display' : active === 'Sync' ? 'Sync issues' : active === 'Device' ? 'Printers & devices' : active === 'Account' ? 'Close your account' : 'Stockroom'}</h1></div><div className="top-actions"><label className="branch-switcher"><Store size={16} /><span className="sr-only">Active branch</span><select aria-label="Active branch" disabled={Boolean(branchError)||!branches.length} value={activeBranchId} onChange={event => setActiveBranchId(event.target.value)}>{!branches.length&&<option value={activeBranchId}>{branchError?'Branches unavailable':'Loading branches...'}</option>}{branches.filter(branch => branch.isActive !== false).map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>{desktopLayout&&<NotificationCenter apiUrl={subscriptionApiUrl} token={cloudAccessToken} onToken={(nextToken, refreshToken) => { setCloudAccessToken(nextToken); localStorage.setItem('stockroom-cloud-access-token', nextToken); localStorage.setItem('stockroom-cloud-refresh-token', refreshToken) }} allowPush={isBrowserPwa()} /> }<button type="button" className="icon-button" title="Back" onClick={goBackInApp} disabled={active === 'Overview'} aria-label="Go back"><ArrowLeft size={18} /></button><PageOptions onRefresh={refreshLocalView} busy={refreshingView || syncing} refreshing={refreshingView} /><span className="avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span></div></header>
       {branchError&&<div role="alert" className="panel"><p>{branchError}</p><button type="button" className="filter-button" onClick={()=>setBranchRetry(value=>value+1)}>Retry loading branches</button></div>}
+      {productWorkspaceActive && saleConfirmation && <section className="panel" role="status" aria-live="polite"><strong>Sale saved</strong><p>{formatMoney(saleConfirmation.total)}. The basket is ready for the next sale.</p>{lastReceipt && lastReceipt.id===saleConfirmation.id && <AsyncButton type="button" className="filter-button" busyLabel="Opening print dialog…" onClick={()=>printReceipt(lastReceipt)}>Print receipt</AsyncButton>}<small>If no receipt printer is selected, this opens the device’s print dialog.</small></section>}
 
       {salesBlocked && <section className="empty-screen subscription-block" aria-label="Sales access"><h2>{['expired','trial-expired','unpaid'].includes(posAccess.status)?'Subscription required':'Sales unavailable'}</h2><p>{['expired','trial-expired','unpaid'].includes(posAccess.status)?`Please subscribe to a plan to use ${activePaidWorkspaceName}.`:posAccess.reason}</p><button type="button" className="primary-button" onClick={()=>setActive('Subscription')}>View plans</button><AsyncButton className="text-button" busyLabel="Checking..." onClick={async()=>setPosAccess(await readPosAccess(authToken,user.organizationId,true))}>Check again</AsyncButton></section>}
       <div className="workspace-content" hidden={salesBlocked}>
@@ -2287,7 +2310,7 @@ function App() {
       {(active === 'POS' || active === 'Display') && displayError && <div role="alert" className="auth-error">{displayError}<button className="filter-button" onClick={() => setDisplayRetry(value => value + 1)}>Retry display update</button></div>}
       {receiptError && <p role="alert" className="auth-error">{receiptError}</p>}
       {(productWorkspaceActive || active === 'Sales') && <>{pos.error && <p role="alert">{pos.error}</p>}{productWorkspaceActive && pos.data.baskets.length > 0 && <section className="panel full-panel"><h2>Held sales</h2>{pos.data.baskets.map(basket => <div className="customer-row" key={basket.id}><span>{basket.label} / {basket.staffName}</span><AsyncButton className="filter-button" busyLabel="Restoring basket..." onClick={() => { if (terminalLocked) throw new Error('Resolve the Paystack payment first.'); return pos.resume(basket) }}>Resume sale</AsyncButton></div>)}</section>}{active==='Sales' && section==='returns' && <PosTools mode="history" stockEnabled={workspace.stock} data={pos.data} headers={authHeaders} reload={pos.reload} user={user} branches={branches} products={products} customers={customers} sales={allReceipts} money={formatMoney} restored={reloadPosStock} />}</>}
-      {active === 'Sales' && section==='sales-receipt-history' && <details open id="sales-receipt-history" className="panel full-panel"><summary>Receipt history</summary><p>Find and reprint previous receipts.</p>{allReceipts.length ? allReceipts.map(receipt => <div className="customer-row" key={receipt.id}><div><strong>{new Date(receipt.createdAt).toLocaleString()}</strong><small>{receipt.id} ? {receipt.paymentReference || receipt.paymentMethod}</small></div><AsyncButton className="filter-button" busyLabel="Printing..." onClick={() => printReceipt(receipt)}>Reprint receipt</AsyncButton><DigitalReceipt sale={receipt} headers={authHeaders} beforeSend={async () => { await syncQueuedOperations(); const response = await fetch('/api/sync/now', { method: 'POST', headers: authHeaders }); if (!response.ok) throw new Error('Synchronize the receipt before emailing it.') }} /></div>) : <EmptyScreen title="No receipts yet" description="Complete a sale or record a payment. Saved receipts will appear here for viewing, sharing and reprinting." />}</details>}
+      {active === 'Sales' && section==='sales-receipt-history' && <section id="sales-receipt-history" className="panel full-panel"><div className="panel-heading"><div><h2>Receipt history</h2><p>Find and reprint saved receipts.</p></div></div><RecordFilters query={receiptQuery} setQuery={setReceiptQuery} from={receiptFrom} setFrom={setReceiptFrom} to={receiptTo} setTo={setReceiptTo} placeholder="Search receipt, product, cashier or payment reference" />{allReceipts.filter(receipt => `${receipt.id} ${receipt.paymentReference || ''} ${receipt.paymentMethod} ${receipt.staffName || ''} ${receipt.items.map(item => item.productName).join(' ')}`.toLowerCase().includes(receiptQuery.toLowerCase()) && isInDateRange(businessDate(receipt.createdAt,shopProfile.reportingTimeZone||'UTC'),receiptFrom,receiptTo)).length ? allReceipts.filter(receipt => `${receipt.id} ${receipt.paymentReference || ''} ${receipt.paymentMethod} ${receipt.staffName || ''} ${receipt.items.map(item => item.productName).join(' ')}`.toLowerCase().includes(receiptQuery.toLowerCase()) && isInDateRange(businessDate(receipt.createdAt,shopProfile.reportingTimeZone||'UTC'),receiptFrom,receiptTo)).map(receipt => <div className="customer-row" key={receipt.id}><div><strong>{new Date(receipt.createdAt).toLocaleString()}</strong><small>{receipt.id} · {receipt.paymentReference || receipt.paymentMethod}</small></div><AsyncButton className="filter-button" busyLabel="Printing..." onClick={() => printReceipt(receipt)}>Reprint receipt</AsyncButton><DigitalReceipt sale={receipt} headers={authHeaders} beforeSend={async () => { await syncQueuedOperations(); const response = await fetch('/api/sync/now', { method: 'POST', headers: authHeaders }); if (!response.ok) throw new Error('Synchronize the receipt before emailing it.') }} /></div>) : <EmptyScreen title={allReceipts.length ? 'No receipts match these filters' : 'No receipts yet'} description={allReceipts.length ? 'Change or clear the search and date filters.' : 'Complete a sale or record a payment. Saved receipts will appear here for viewing, sharing and reprinting.'} />}</section>}
       {active === 'Sales' && section==='sales-reconciliation' && canManageOperations && <Reconciliation key={user.organizationId} sales={allReceipts} />}
       {active === 'Sales' && section==='sales-payment-evidence' && <PaymentEvidence sales={allReceipts} money={formatMoney} />}
       {active === 'Sales' && ['sales-history','sales-void-history'].includes(section) && <SalesHistory view={section} headers={authHeaders} timeZone={shopProfile.reportingTimeZone || 'UTC'} sales={sales} voids={saleVoids} money={formatMoney} />}
@@ -2298,7 +2321,7 @@ function App() {
       {active==='Register' && <PosTools mode="register" stockEnabled={workspace.stock} data={pos.data} headers={authHeaders} reload={pos.reload} user={user} branches={branches} products={products} customers={customers} sales={allReceipts} money={formatMoney} restored={reloadPosStock} />}
       {((active==='Settings'&&settingsTab==='sales'&&user.role==='owner')||(active==='Inventory'&&section==='options'&&canManageDeviceSetup)) && <PosTools mode={active==='Inventory'?'products':'settings'} requestedSettingsView={active==='Settings'?salesSettingsTask:undefined} hideSettingsNavigation={active==='Settings'} stockEnabled={workspace.stock} data={pos.data} headers={authHeaders} reload={pos.reload} user={user} branches={branches} products={products} customers={customers} sales={allReceipts} money={formatMoney} restored={reloadPosStock} />}
       {active === 'Reports' && section==='stock-report' && workspace.stock && <SupermarketReports headers={authHeaders} branchId={activeBranchId} money={formatMoney} revision={reports} oilMode={workspace.oil}/>}
-      {active === 'Reports' && section!=='stock-report' && <ReportsDashboard view={section} reports={reports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} />}
+      {active === 'Reports' && section!=='stock-report' && <ReportsDashboard view={section} reports={reports} reportsError={reportsError} reloadReports={reloadReports} currency={currency} expenses={expenses} exportCsv={exportSalesCsv} addExpense={addExpense} headers={authHeaders} timeZone={shopProfile.reportingTimeZone || 'UTC'} sales={sales} voids={saleVoids} />}
       {active === 'Sync' && <SyncIssues conflicts={syncConflicts} resolveConflict={resolveConflict} navigate={screen=>setActive(screen)} headers={authHeaders} />}
       {active === 'Activity' && <StaffActivity timeZone={shopProfile.reportingTimeZone || 'UTC'} token={authToken} branchId={activeBranchId} currency={currency} />}
       {active === 'Team' && <>{section==='links' && ['owner', 'admin'].includes(user.role) && <BusinessSignInLink profile={shopProfile} businessId={linkedBusinessId} />}{['team-members','team-access','team-add-staff'].includes(section) && <TeamManagement profile={shopProfile} view={section} navigate={chooseSection} removeStaff={removeStaff} staff={staff} loaded={staffLoaded} addStaff={addStaff} updateStaffRole={updateStaffRole} setCashierAccess={setCashierAccess} canCreateStaff={user.role === 'owner'} message={settingsMessage || cloudSessionError} />}{section==='team-password-recovery' && user.role === 'owner' && <StaffPasswordReset staff={staff} resetStaffPassword={resetStaffPassword} />}</>}
@@ -2322,7 +2345,7 @@ function App() {
     {inlinePrompt && <InlinePrompt request={inlinePrompt} onClose={closeInlinePrompt} />}
     {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><video ref={cameraVideo} muted playsInline style={{ width: '100%' }} /><button className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
     {orderToPrint && <OrderDocument order={orderToPrint} />}
-    {lastReceipt && (productWorkspaceActive || active === 'Payments') && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
+    {lastReceipt && active === 'Payments' && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
     <datalist id="approved-payment-providers">{extraPaymentPolicy.providers.map(provider => <option key={provider} value={provider} />)}</datalist>
     {lastReceipt && <Suspense fallback={null}><Receipt sale={lastReceipt} fallbackName={appName} fallbackCurrency={currency} /></Suspense>}
   </div>
@@ -2580,15 +2603,18 @@ function CashierActivityLegacy({ staff, sales, money }: { staff: StaffUser[]; sa
   return <section id="team-cashier-activity" className="panel full-panel staff-activity"><div className="panel-heading"><div><h2>Cashier activity</h2><p>Completed sales are grouped by the cashier who recorded them.</p></div></div><div className="table-wrap"><table><thead><tr><th>Cashier</th><th>Role</th><th>Sales</th><th>Sales total</th><th>Latest sale</th></tr></thead><tbody>{cashiers.length ? cashiers.map(cashier => { const recorded = sales.filter(sale => sale.staffId === cashier.id || (!sale.staffId && sale.staffName === cashier.name)); const latest = recorded[0]; return <tr key={cashier.id}><td><strong>{cashier.name}</strong><span className="table-subtext">{cashier.email}</span></td><td>Cashier</td><td>{recorded.length}</td><td>{money(recorded.reduce((sum, sale) => sum + sale.total, 0))}</td><td>{latest ? <>{new Date(latest.createdAt).toLocaleString()}<span className="table-subtext">{money(latest.total)} · {latest.paymentMethod}</span></> : 'No recorded sales'}</td></tr> }) : <tr><td colSpan={5} className="empty-state">No cashier accounts have been added yet.</td></tr>}</tbody></table></div></section>
 }
 
-function ReportsDashboard({ view, reports, currency, expenses, exportCsv, addExpense }: { view:string; reports: Reports | null; currency: string; expenses: Expense[]; exportCsv: () => Promise<void>; addExpense: (event: React.FormEvent<HTMLFormElement>) => Promise<void> }) {
+function ReportsDashboard({ view, reports, reportsError, reloadReports, currency, expenses, exportCsv, addExpense, headers, timeZone, sales, voids }: { view:string; reports: Reports | null; reportsError:string; reloadReports:()=>Promise<void>; currency: string; expenses: Expense[]; exportCsv: () => Promise<void>; addExpense: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; headers:Record<string,string>; timeZone:string; sales:SaleRecord[]; voids:SaleItemVoid[] }) {
+  const [expenseQuery,setExpenseQuery]=useState(''),[expenseFrom,setExpenseFrom]=useState(''),[expenseTo,setExpenseTo]=useState('')
   const money = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
+  const filteredExpenses=expenses.filter(expense=>`${expense.description} ${expense.category}`.toLowerCase().includes(expenseQuery.toLowerCase())&&isInDateRange(businessDate(expense.incurredAt,timeZone),expenseFrom,expenseTo))
   const summary = reports || { daily: { total: 0, count: 0 }, weekly: { total: 0, count: 0 }, monthly: { total: 0, count: 0 }, inventory: { value: 0, products: 0, lowStock: 0 }, profit: { revenue: 0, cost: 0, expenses: 0, amount: 0 } }
   if (view === 'summary') return <section className="reports-dashboard report-screen">
     <header className="report-screen-heading">
       <div><span className="report-eyebrow">BUSINESS REPORT</span><h2>Sales at a glance</h2><p>{reports?.reportingTimeZone || 'UTC'} · month to date</p></div>
       <div className="report-actions"><AsyncButton busyLabel="Exporting…" className="filter-button" onClick={exportCsv}><Download size={16} />Export CSV</AsyncButton><button className="primary-button" onClick={() => { void printDocument('report').catch(error => window.alert(error.message)) }}><Printer size={16} />{window.stockroomDesktop ? 'Print A4' : 'Print / Save PDF'}</button></div>
     </header>
-    <ReportCharts data={reports?.charts} currency={currency} timeZone={reports?.reportingTimeZone || 'UTC'} />
+    {reports && reportsError && <p className="auth-error" role="alert">Could not refresh report data: {reportsError} <button type="button" className="filter-button" onClick={()=>{void reloadReports()}}>Retry reports</button></p>}
+    <ReportCharts data={reports?.charts} currency={currency} timeZone={reports?.reportingTimeZone || 'UTC'} error={reportsError} onRetry={reloadReports} />
     <section className="metric-grid report-summary-metrics" aria-label="Sales totals">
       <ReportMetric label="Today" value={money(summary.daily.total)} note={`${summary.daily.count} sales`} />
       <ReportMetric label="This week" value={money(summary.weekly.total)} note={`${summary.weekly.count} sales`} />
@@ -2599,10 +2625,11 @@ function ReportsDashboard({ view, reports, currency, expenses, exportCsv, addExp
       <ReportMetric label="Estimated profit" value={money(summary.profit.amount)} note={`${money(summary.profit.revenue)} revenue · ${money(summary.profit.cost)} cost · ${money(summary.profit.expenses)} expenses`} />
       <ReportMetric label="Low stock" value={String(summary.inventory.lowStock)} note="At or below reorder point" />
     </section>
+    <SalesHistory view="sales-history" headers={headers} timeZone={timeZone} sales={sales} voids={voids} money={money} />
     {reports?.costWarnings?.incomplete && <section className="report-cost-warning" role="alert"><div><strong>Profit estimate needs cost details</strong><p>{reports.costWarnings.zeroCostSaleLines} goods lines, {reports.costWarnings.uncostedIngredients} ingredient deductions and {reports.costWarnings.uncostedMaterials || 0} job material deductions have no cost recorded.{reports.costWarnings.missingRecipes.length ? ` Recipes needed: ${reports.costWarnings.missingRecipes.join(', ')}.` : ''}</p></div><WorkspaceHelp title="Why this affects profit"><p>Check Inventory and Purchasing for purchase costs, and Food menu &amp; recipes or Restaurant menu &amp; tables for recipes. Record running expenses separately.</p></WorkspaceHelp></section>}
     <WorkspaceHelp title="How profit is calculated"><p>Estimated profit subtracts refunds, receipt tax, sold stock cost, recorded expenses, recipe ingredients, job materials, wastage and register differences. Missing purchase costs or recipes can make the estimate too high.</p></WorkspaceHelp>
   </section>
-  return <section className="reports-dashboard">{view === 'expenses' && <section className="panel"><h3>Recent expenses</h3>{expenses.length ? expenses.slice(0, 8).map(expense => <div className="customer-row" key={expense.id}><div><strong>{expense.description}</strong><small>{expense.category} · {new Date(expense.incurredAt).toLocaleDateString()}</small></div><b>{money(expense.amount)}</b></div>) : <EmptyScreen title="No expenses yet" description="Record rent, utilities or another running cost in New expense. Saved expenses will appear here." />}</section>}{view === 'new-expense' && <AsyncForm className="settings-form team-form" busyLabel="Saving expense…" onSubmit={addExpense}><h3>Record expense</h3><label>Category<input name="category" required placeholder="Rent, transport, utilities" /></label><label>Description<input name="description" required placeholder="What was paid for?" /></label><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Date<input name="incurredAt" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} /></label><SubmitButton className="primary-button">Save expense</SubmitButton></AsyncForm>}</section>
+  return <section className="reports-dashboard">{view === 'expenses' && <section className="panel full-panel"><h2>Expenses</h2><p>Search recorded expenses by description or category and filter by the date incurred.</p><RecordFilters query={expenseQuery} setQuery={setExpenseQuery} from={expenseFrom} setFrom={setExpenseFrom} to={expenseTo} setTo={setExpenseTo} placeholder="Search expense or category" />{filteredExpenses.length ? filteredExpenses.map(expense => <div className="customer-row" key={expense.id}><div><strong>{expense.description}</strong><small>{expense.category} · {new Date(expense.incurredAt).toLocaleDateString()}</small></div><b>{money(expense.amount)}</b></div>) : <EmptyScreen title={expenses.length ? 'No expenses match these filters' : 'No expenses yet'} description={expenses.length ? 'Change or clear the search and date filters.' : 'Record rent, utilities or another running cost in New expense. Saved expenses will appear here.'} />}</section>}{view === 'new-expense' && <AsyncForm className="settings-form team-form" busyLabel="Saving expense…" onSubmit={addExpense}><h3>Record expense</h3><label>Category<input name="category" required placeholder="Rent, transport, utilities" /></label><label>Description<input name="description" required placeholder="What was paid for?" /></label><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Date<input name="incurredAt" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} /></label><SubmitButton className="primary-button">Save expense</SubmitButton></AsyncForm>}</section>
 }
 function ReportMetric({ label, value, note }: { label: string; value: string; note: string }) {
   return <div className="metric-card"><span>{label}</span><strong>{value}</strong><small>{note}</small></div>
