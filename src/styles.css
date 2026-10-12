@@ -494,6 +494,7 @@ body { background: var(--brand-wash,#dfece5); }
 .catalogue-choice-list > legend { padding: 13px 6px 13px 0; font-weight: 650; }
 .catalogue-choice-list > legend span { margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
 .catalogue-choice-hint { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.catalogue-choice-workspace { display: inline-block; margin: 0 2px; padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--brand-hover) 80%, #000); border-radius: 999px; color: var(--brand-on-primary, #fff); background: linear-gradient(135deg, var(--ink), var(--brand-hover)); font-weight: 700; white-space: nowrap; }
 .catalogue-choice-rows { display: grid; gap: 6px; }
 .catalogue-choice-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 8px; align-items: center; min-height: 42px; border-bottom: 1px solid var(--line); }
 .catalogue-choice-delete { width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; color: #a33a32; font-size: 22px; cursor: pointer; }

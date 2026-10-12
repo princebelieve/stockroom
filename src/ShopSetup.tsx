@@ -99,9 +99,9 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
         const inputValue = field === 'categories' ? newCategory : newUnit
         return <fieldset key={field} className="catalogue-choice-list">
           <legend>{title} <span>{settings[field].length - disabled.length} of {settings[field].length} enabled</span></legend>
-          <p className="catalogue-choice-hint">Checked choices appear in this workspace's dropdown. Uncheck to hide a choice. Delete removes it from this list.</p>
+          <p className="catalogue-choice-hint">Checked choices appear in the <strong className="catalogue-choice-workspace">{catalogueWorkspaces[catalogueWorkspace]}</strong> dropdown. Uncheck to hide a choice. Removing it does not change saved products.</p>
           <div className="catalogue-choice-rows">{settings[field].map((choice,index) => <div className="catalogue-choice-row" key={`${choice}-${index}`}>
-            <button type="button" className="catalogue-choice-delete" aria-label={`Delete ${choice}`} title={`Delete ${choice}`} onClick={() => changeCatalogueList(current => {
+            <button type="button" className="catalogue-choice-delete" aria-label={`Remove ${choice} from ${title}`} title={`Remove ${choice} from this list`} onClick={() => changeCatalogueList(current => {
               const disabledKey = field === 'categories' ? 'disabledCategories' : 'disabledUnits'
               return { ...current, [field]: current[field].filter((_,i)=>i!==index), [disabledKey]: current[disabledKey].filter(item=>item!==choice) }
             })}>&times;</button>
@@ -115,7 +115,15 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
         </fieldset>
       })}
       <WorkspaceHelp><p>'Other (please specify)' remains available in product entry. Product sales, Oil sales, Order counter and Tables &amp; tabs each keep separate lists.</p></WorkspaceHelp>
-      <AsyncForm onSubmit={async()=>{await save(validateShopProfile({...draft,fields:draft.fields.map(field=>({...field,options:field.options.map(item=>item.trim()).filter(Boolean)}))}));setDirty(false);setMessage(`${catalogueWorkspaces[catalogueWorkspace]} catalogue saved on this device. Use Sync now to share it with your other devices.`)}}><SubmitButton className="primary-button">Save {catalogueWorkspaces[catalogueWorkspace]} catalogue</SubmitButton></AsyncForm>
+      <AsyncForm onSubmit={async()=>{
+        const activeCatalogue = workspaceCatalogueSettings(draft, catalogueWorkspace)
+        const savedProfile = validateShopProfile({ ...value, workspaceCatalogues: { ...value.workspaceCatalogues, [catalogueWorkspace]: activeCatalogue } })
+        await save(savedProfile)
+        const remainingDraft = { ...draft, workspaceCatalogues: { ...draft.workspaceCatalogues, [catalogueWorkspace]: savedProfile.workspaceCatalogues[catalogueWorkspace] } }
+        setDraft(remainingDraft)
+        setDirty(JSON.stringify(remainingDraft) !== JSON.stringify(savedProfile))
+        setMessage(`${catalogueWorkspaces[catalogueWorkspace]} catalogue saved on this device. Use Sync now to share it with your other devices.`)
+      }}><SubmitButton className="primary-button">Save {catalogueWorkspaces[catalogueWorkspace]} catalogue</SubmitButton></AsyncForm>
     </section><section hidden={view!=='form'}>{!['fast-food','restaurant'].includes(draft.workflows || '') && <><h2>Product form (optional)</h2><WorkspaceHelp><p>Choose a template, customize your product form, then preview and save. Existing products keep their values.</p></WorkspaceHelp>
     <nav aria-label="Shop setup steps" className="shop-steps">{['Choose template', 'Customize fields', 'Preview and save'].map((title, index) => <button key={title} type="button" className={step === index ? 'primary-button' : 'filter-button'} aria-current={step === index ? 'step' : undefined} onClick={() => go(index)}>{index + 1}. {title}</button>)}</nav>
     {step === 0 && <div className="shop-step">
