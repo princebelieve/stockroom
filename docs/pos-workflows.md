@@ -2,7 +2,7 @@
 
 Counter-service menu ordering and preparation use the separate optional [Fast food workspace](fast-food-workspace.md). These controls do not appear in stock checkout.
 
-For payments without inventory, use the separate **Payments & receipts** screen. Enter what the customer is paying for, optional customer details, the amount and payment method, then save and print or share the receipt. This screen never deducts stock. Owners can enable **Product sales**, **Payments & receipts**, or both in **Business settings > Workspaces > Payment screens**. See [Payments and receipts](payments-and-receipts.md) for details.
+For payments without inventory, use the separate **Payments & receipts** screen. Enter what the customer is paying for, optional customer details, the amount and payment method, then save and print or share the receipt. This screen never deducts stock. Owners enable **Product sales**, **Oil sales**, **Payments & receipts**, **Order counter**, and **Tables & tabs** separately in **Business settings > Available workspaces**. The searchable Settings task selector opens each configuration task; paid workspace selection is subject to active subscription entitlement. See [Payments and receipts](payments-and-receipts.md) and [subscriptions](subscriptions.md) for details.
 
 Unpaid baskets are saved on the current device per staff member and branch. **Hold sale** saves a named basket for later; hold or clear the current basket before resuming another. The existing explicit void action keeps its reason requirement. Ordinary quantity changes do not ask for a reason.
 

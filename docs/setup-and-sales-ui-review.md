@@ -1,6 +1,6 @@
 # Setup and sales UI review
 
-Aligned with the current implementation on 2026-10-06. Configuration is separated from daily transactions. The original product catalogue, basket, payment-reference scanner and desktop customer display remain the Product sales workflow.
+Aligned with the current implementation on 2026-10-12. Configuration is separated from daily transactions. Complex management screens use the searchable task selector to open one focused task at a time. The original product catalogue, basket, payment-reference scanner and desktop customer display remain the Product sales workflow.
 
 ## Current locations
 
@@ -10,7 +10,7 @@ Aligned with the current implementation on 2026-10-06. Configuration is separate
 | POS device profile, scanner, printers and customer display setup | Business settings > Devices | Product scanning, manual POS receipt/reference scanning, supported printing and desktop display pairing. |
 | Connected Paystack credentials | Business-scoped cloud server configuration | Product sales > POS > Use connected Paystack POS; ordinary device profiles do not activate it. |
 | Tax, rewards and offline till allocation | Business settings > Sales (owner only) | Checkout totals, customer rewards and stock-location validation. Food menu settings also expose the shared tax/reward configuration. |
-| Reporting timezone | Business settings > Workspaces (owner only) | Shared Reports periods and their expired-stock summary; defaults to UTC. |
+| Reporting timezone | Business settings > Reporting timezone task (owner only; searchable task selector) | Shared Reports periods and their expired-stock summary; defaults to UTC. |
 | Product variants and extras | Product management | Catalogue variant filtering and extras selection. |
 | Receipt identity, footer and non-stock receipt tax | Business settings > Receipts | Payment receipts and saved restaurant bill-payment receipt profiles. Stock/food checkout tax uses its own shared sales settings. |
 | Counter menu, packaged stock and recipes | Business settings > Food menu & recipes | Order counter order entry, preparation, payment and collection. |

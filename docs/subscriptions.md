@@ -2,7 +2,7 @@
 
 ## Where each role goes
 
-- Business owners open **Subscription** inside the Stockroom app to renew, copy an owner referral link, review referral rewards and request a payout.
+- Business owners open **Subscription** inside Stockroom. Its searchable task selector opens **Plan and renewal**, **Referral rewards**, or **Export or close business**. Owners can review access, choose a plan, manage renewal, copy an invitation, review/request referral payouts, and export or leave the business.
 - Visitor promoters use `/visitor` to register or sign in, share their personal referral link, see attributed businesses and manage their reward wallet.
 - The developer uses `/developer` to manage businesses, referrals, payouts, Enterprise requests, subscription plans, reward rates and global subscription enforcement.
 
@@ -24,7 +24,13 @@ Configure Paystack's webhook URL as `https://YOUR-CLOUD-HOST/v1/subscriptions/we
 
 The Play Store AAB continues to use Google Play Billing for recurring subscriptions. Do not route Play Store users through Paystack checkout.
 
-The developer sets monthly grace in days and yearly/Enterprise grace in calendar months in Control Centre plan settings. Subscription enforcement starts off for a first rollout. New businesses receive the configured free trial when their registration key is redeemed. Trial time starts then; subscription grace does not extend a free trial. Business-specific POS suspension is separate from global subscription enforcement and remains in force if global enforcement is turned off.
+The developer sets free-trial duration, monthly grace in days, and yearly/Enterprise grace in calendar months in Control Centre plan settings. These values are not removed or overridden by choosing the Free plan. New businesses receive the configured free trial when their registration key is redeemed. Trial time starts then; subscription grace does not extend a free trial. A trial grants access until its configured expiry and has no extra grace in the current access policy. Paid subscriptions remain available through their configured grace period and become blocked only after that grace ends. Business-specific POS suspension is separate from global subscription enforcement and remains in force if global enforcement is turned off.
+
+One business subscription covers its enabled selling workspaces. Payments & receipts is the subscription-free workspace. The first enabled selling workspace uses the base price; each additional enabled selling workspace adds the configured percentage (5% by default). Inventory is a capability rather than a separately billed workspace. The subscription screen shows the covered workspaces and quote before checkout. Google Play requires configured products for each enabled workspace-count tier; a tier without a matching product cannot be purchased through Play.
+
+Choosing **Free plan** explicitly saves Payments & receipts as the only enabled workspace and turns off the selling workspaces. Existing records remain. It does not cancel or refund an existing paid renewal. Owners stop future renewal with **Manage or cancel subscription** in Stockroom; Android purchases are managed in the app-store subscription settings. Do not confuse selecting the free workspace with cancelling a paid renewal.
+
+When paid access expires, Stockroom preserves the owner's saved workspace configuration and records, presents Payments & receipts as the available sales workspace, and blocks attempts to reopen paid workspaces until an eligible subscription is active. A previously active paid workspace is routed back to Payments & receipts when available. Service payment receipts remain available. Offline devices may keep a cached access decision until they reconnect and refresh.
 
 Desktop, Android and PWA fetch the business-specific access decision from the cloud and cache it for offline use. Connected clients normally refresh within one minute. An offline client cannot learn about a new renewal or suspension until it reconnects. The Control Centre manages subscription and POS access, referral attribution, registration keys and payouts; it does not expose a business's sales or inventory records or let the developer sign in as its owner.
 

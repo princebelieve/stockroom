@@ -10,7 +10,7 @@ The original audit identified a real issue: changing product labels and template
 
 ## What the app supports now
 
-Owners can choose **Product sales**, **Payments & receipts**, or **Both** in **Business settings > Workspaces > Payment screens**. Oil businesses have a separate Oil sales screen and can add Product sales and/or Payments & receipts under **Customise workspaces (optional)**.
+Owners choose **Product sales**, **Oil sales**, **Payments & receipts**, **Order counter**, and **Tables & tabs** separately in **Business settings > Available workspaces**. Business type affects catalogue suggestions; it does not silently enable workspaces. Payments & receipts is the only subscription-free workspace. See [Subscriptions](subscriptions.md) for expiry and entitlement behavior.
 
 Owners can also choose **Order counter only**, or enable Fast food alongside their existing screens. Its menu, orders, preparation queue and packaged-stock tools stay in a separate workspace. Supermarkets receive no Fast food screens unless the owner enables it. **Tables & tabs only**, or its separate enable checkbox, adds its own menu, tables, seats, named tabs and open bills.
 

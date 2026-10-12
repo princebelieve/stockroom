@@ -1,12 +1,12 @@
 # Payments & receipts
 
-In receipt settings, **Preloaded catalogue starters** provides generic, editable service-description ideas. Add the descriptions that apply and enter your own prices; no fees or business transactions are created automatically.
+In Business settings, **Service catalogue** is a separate task from **Receipt details**. It stores reusable payment and job descriptions with prices; adding or saving a service suggestion does not create a payment or charge. Receipt details configure the business identity and tax information printed on new receipts.
 
 Use this workspace for payments described by the cashier, without automatic product stock or ingredient deduction on payment. Issued jobs can separately record materials actually used. It has three tabs: **New payment**, **Jobs & invoices**, and **Payment history**.
 
 ## Start using it
 
-A new owner can choose **Printing and copy shop** or **Services / church office** during account setup. Existing owners can preview and apply a preset in **Business settings > Workspaces**, or enable this workspace alongside other screens. Changing workspace choices preserves products, orders and receipts. Use **Sync now** to share a saved choice.
+A new owner selects a business type and selling workspaces as separate setup choices. Existing owners open **Business settings > Available workspaces** to enable or disable Payments & receipts and other selling screens. Payments & receipts is always the free workspace. Changing workspace choices preserves products, orders and receipts; selecting the explicit Free plan turns off paid selling workspaces but does not cancel a paid renewal. Use **Sync now** to share a saved choice.
 
 ## Immediate payment
 

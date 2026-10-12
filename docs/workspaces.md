@@ -1,6 +1,6 @@
 # Choosing and using a workspace
 
-Stockroom has five selling workspaces: Product sales, Oil sales, Payments & receipts, Order counter, and Tables & tabs. A **business type** describes what kind of business this is and guides catalogue suggestions. A **workspace** is an enabled area where staff do a specific kind of work. A business type does not enable a workspace, and labels such as “Oil inventory” only change displayed wording. Owners choose available workspaces separately under Business settings > Workspaces. Product sales is for stocked goods; Oil sales is for measured oil and containers; Payments & receipts records service payments without changing stock; Order counter handles menu orders; Tables & tabs handles open bills. These examples do not restrict combinations.
+Stockroom has five selling workspaces: Product sales, Oil sales, Payments & receipts, Order counter, and Tables & tabs. A **business type** describes what kind of business this is and guides catalogue suggestions. A **workspace** is an enabled area where staff do a specific kind of work. A business type does not enable a workspace, and labels such as “Oil inventory” only change displayed wording. Owners choose available workspaces separately in Business settings > Available workspaces. Product sales is for stocked goods; Oil sales is for measured oil and containers; Payments & receipts records service payments without changing stock; Order counter handles menu orders; Tables & tabs handles open bills. These examples do not restrict combinations.
 
 | Workspace | Use it when | Everyday flow |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ Open Product sales in Daily work. Scan or tap products to add them to the basket
 
 ## Oil sales
 
-Oil sales is a standalone workspace for measured quantities and configured containers, with saved bulk and customer pricing rules. It can be enabled with any business type and alongside other workspaces. Choose it under Business settings > Workspaces > Available workspaces. A business type may guide catalogue suggestions, but does not turn this workspace on or off.
+Oil sales is a standalone workspace for measured quantities and configured containers, with saved bulk and customer pricing rules. It can be enabled with any business type and alongside other workspaces. Choose it under Business settings > Available workspaces. A business type may guide catalogue suggestions, but does not turn this workspace on or off.
 
 ## Payments & receipts
 
@@ -36,7 +36,7 @@ Owners configure Business, Workspaces and Sales. Owners and admins configure Rec
 
 ### Start from workspace suggestions
 
-During first-time setup, choose the business type and selling workspace separately, search suggested names, select what the business sells, review and confirm. The selected workspace is enabled; other workspaces can be enabled later in Business settings. Product entries are saved with generated SKUs, no barcode, and zero opening stock, cost and selling price. Set actual values before selling. Service descriptions and menu items are saved at zero price; menu items start unavailable. You can skip the catalogue step, change the selection before saving, or add and edit entries later. In Business settings, **Preloaded catalogue starters** remains available for adding more names.
+During first-time setup, choose the business type and selling workspace separately, search suggested names, select what the business sells, review and confirm. The selected workspace is enabled; other workspaces can be enabled later in Business settings. Product entries are saved with generated SKUs, no barcode, and zero opening stock, cost and selling price. Set actual values before selling. Service descriptions and menu items are saved at zero price; menu items start unavailable. You can skip the catalogue step, change the selection before saving, or add and edit entries later. Use the **Starter products** task in Inventory to add further product suggestions. Business settings does not contain a second starter catalogue task.
 
 The starter lists offer broad, editable name suggestions in all five selling workspaces. Each stock business type has common retail goods plus relevant specialist names; Oil sales includes oil products and handling supplies. Payments & receipts offers reusable service descriptions, while Order counter and Tables & tabs offer food, drink, snack and meal ideas. The lists are name suggestions, not a supplier/manufacturer feed: they do not contain GTIN barcodes, prices, costs, opening stock or verified package specifications. A barcode is optional; scan the code on the actual item when available. Stockroom generates an SKU when a saved product has no SKU. Review each entry and set the business's real details. Adding a starter does not replace existing entries.
 
@@ -44,7 +44,7 @@ Starter names are generic and unbranded. Their coverage was informed by public g
 
 ### Configure category and unit dropdowns
 
-Owners open **Business settings > Workspaces > Workspace catalogues**, choose Product sales, Oil sales, Order counter or Tables & tabs, and edit category and unit choices one per line. Each stock-selling workspace saves its own lists. When staff add a product from Oil sales or Product sales, the form uses that workspace's list; inventory entry uses the primary available stock workspace. Payments & receipts records described service items and does not use product catalogue categories. **Other (please specify)** remains available; after the product or ingredient is saved, its new category or unit is added to that workspace's dropdown for future entries. Existing choices are not duplicated. Business type provides starting suggestions and does not decide which saved workspace list is used. Product form custom dropdown fields have their own choices under **Product form**.
+Owners open **Business settings > Workspace catalogues**, choose Product sales, Oil sales, Order counter or Tables & tabs from the centered workspace selector, and edit category and unit choices. The highlighted workspace name is reflected in the help sentence, so it is clear which list is being changed. Each stock-selling workspace saves its own lists. When staff add a product from Oil sales or Product sales, the form uses that workspace's list; inventory entry uses the primary available stock workspace. Payments & receipts records described service items and does not use product catalogue categories. **Other (please specify)** remains available; after the product or ingredient is saved, its new category or unit is added to that workspace's dropdown for future entries. Existing choices are not duplicated. Business type provides starting suggestions and does not decide which saved workspace list is used. Product form custom dropdown fields have their own choices under **Product form**.
 
 These names describe workflows, not full industry packages. Order counter still uses the existing menu/preparation model; Tables & tabs manages open bills, not hotel reservations or club memberships. Oil sales handles oil quantities, containers and pricing; it does not integrate with pumps or meters. Validate the five selling workspaces with real staff and hardware before adding another sector.
 
@@ -66,7 +66,7 @@ Refresh downloads business updates and reloads selling data without uploading qu
 
 ## Reporting timezone
 
-Owners set **Business settings > Workspaces > Reporting timezone**, save, then use **Sync now** to share the setting. Choose an IANA timezone such as `Africa/Lagos`; businesses without a saved choice default to UTC. Reports and their expired-stock summary use the business calendar across updated devices. See [report calculations](report-calculations.md).
+Owners set **Business settings > Reporting timezone**, save, then use **Sync now** to share the setting. The searchable settings task selector jumps to this focused task. Choose an IANA timezone such as `Africa/Lagos`; businesses without a saved choice default to UTC. Reports and their expired-stock summary use the business calendar across updated devices. See [report calculations](report-calculations.md).
 
 ## Sector scope
 

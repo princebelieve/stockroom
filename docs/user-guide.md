@@ -55,18 +55,18 @@ This guide follows the current app screens. Availability depends on your workspa
 
 ## Subscription: activate and renew access
 
-1. Sign in as the owner and open Subscription, or use Subscribe in the sidebar.
-2. Review the current trial/access status and the plans and prices actually displayed. Use Refresh if the screen needs an update.
-3. If asked to sign in to the cloud owner account, use the same registered owner credentials. This is separate from signing out of the local app.
-4. Choose the offered plan and renewal option. Complete the payment provider checkout. Play Store subscriptions use the Google Play flow supplied in that build.
-5. Return to the app and refresh access. Confirm the displayed subscription status before attempting a paid-access transaction. Review automatic-renewal management separately if you enabled it.
+1. Sign in as the owner and open Subscription, or use Subscribe in the sidebar. Use the task selector to switch between Plan and renewal, Referral rewards, and Export or close business.
+2. Review the current access status, enabled selling workspaces, and the plans and prices displayed. One paid plan covers the enabled selling workspaces; Payments & receipts is free. Additional selling workspaces may change the quoted price shown before checkout.
+3. Choose a paid plan and renewal option, then complete checkout. Play Store subscriptions use the purchase flow in that build. Return to Stockroom and refresh if the access status does not update.
+4. To use only the free workspace, choose Free plan and confirm. This turns off paid selling workspaces in the saved workspace setup, while keeping their records. It does not cancel or refund a current paid subscription.
+5. To stop future renewal, use **Manage or cancel subscription** on the Plan and renewal task. On Android, manage it in the app store where you subscribed. Cancelling renewal does not end already-paid access immediately; the displayed expiry and any configured grace period still apply.
 
-**Remember:** A trial, price or grace period is determined by the displayed plan, not this guide. Subscription payment is different from a customer paying your business. Reconnect to refresh renewal status on an offline device.
+**Remember:** The configured free-trial duration, plan prices and grace periods are shown by the app. A free trial ends at its expiry; it does not receive paid-plan grace. Paid-plan access continues through its configured grace period. After access is blocked, Stockroom returns sales work to Payments & receipts and asks for a plan when a paid workspace is selected; saved workspace choices and records are retained. Subscription payment is different from a customer paying your business. Reconnect to refresh renewal status on an offline device.
 
 ## Your first working setup
 
-1. Open Business settings > Business. Save the business name, currency and payment rules.
-2. Open Business settings > Workspaces if you want to change the preset chosen during setup. Preview and apply it; existing products, menus and receipts are kept.
+1. Open Business settings and use the task selector to choose Business identity, Payment methods, Branches, Available workspaces, or the other task you need. Each task has its own focused screen.
+2. In Available workspaces, turn on the selling screens this business needs and select Save workspaces. Business type supplies relevant suggestions; it does not choose or enable workspaces. Existing products, menus and receipts are kept when workspace availability changes.
 3. For Product sales, add products and opening stock in product management. For Order counter, configure a menu. For Tables & tabs, configure its own menu and tables.
 4. Open Devices and configure only the scanner, POS, printer and customer display you actually use. Run a test where supported.
 5. Create staff accounts in Staff & access, then practice one transaction in each enabled workspace. Confirm the receipt, stock effect and payment amount.
@@ -78,8 +78,9 @@ This guide follows the current app screens. Availability depends on your workspa
 1. Use Daily work to open Overview, an enabled workspace or Cash register. On a small screen, open the navigation menu first.
 2. Use the branch selector at the top before starting work. Stock and transactions follow that branch.
 3. Use Records and management to review history, stock and reports. Some links appear only for the enabled workflow or your role.
-4. Open Help beside a feature when you need an explanation. Optional sections expand without leaving the current transaction.
-5. Owners see business configuration and subscriptions. Admins see the configuration their existing permissions allow. Cashiers do not see owner configuration.
+4. In complex areas such as Settings, Inventory, Staff & access and Subscription, use the searchable task selector near the top to jump to one focused task. On phone, the selector can filter tasks by typing. The selector changes the task shown; it does not itself enable a workspace or save a setting.
+5. Open Help beside a feature when you need an explanation. Optional sections expand without leaving the current transaction.
+6. Owners see business configuration and subscriptions. Admins see the configuration their existing permissions allow. Cashiers do not see owner configuration.
 
 **Remember:** Names may vary with a customised product form. Product management may be labelled Inventory, Menu and stock or another owner-defined catalogue name.
 
@@ -106,11 +107,11 @@ Owners can publish QR bank details and enable takeaway delivery with a fixed cha
 
 ## Business settings > Workspaces
 
-1. Open Workspaces. Oil businesses keep Oil sales as their dedicated screen; use **Customise workspaces (optional)** to add Product sales and/or Payments & receipts. Other business types choose the Payment screens selection.
-2. Choose Product sales for stocked goods, Payments & receipts for manually described non-stock payments, or the combined option for both.
-3. Choose Order counter only or Tables & tabs only when that is your main workflow. The separate enable checkboxes can add these workflows to another screen selection.
-4. Select Save workspaces. Check Daily work for the resulting links. Choosing an only option hides workspaces outside that selection.
-5. For stock/product forms, use Choose template, Customize fields, then Preview and save. Review categories, unit, labels and custom fields before saving.
+1. Open Business settings and select **Available workspaces** from the task selector.
+2. Turn on each needed destination: Product sales, Oil sales, Payments & receipts, Order counter, or Tables & tabs. Business type and workspace selection are separate settings.
+3. Select Save workspaces. Check Daily work for the resulting links. Workspace changes do not delete products, menus, payments or records already saved.
+4. Use **Business type** to change type-based suggestions without changing workspace selection. Use **Workspace catalogues** to choose a workspace; the highlighted workspace name identifies which category and unit dropdowns you are editing.
+5. Use **Product form** for templates and custom product fields where that task is available. This changes product-entry fields, not the business type or enabled workspaces.
 6. Choose a city from the Reporting timezone dropdown, grouped by continent, such as Africa → Lagos. Check the UTC and local-time previews below the dropdown. Select Save reporting timezone, then Sync now. Existing saved timezones are retained until changed; businesses without a saved timezone default to UTC.
 
 **Remember:** Catalogue templates supply labels, categories and units; they do not add specialist operations such as hotel bookings or prescription dispensing. Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices.
@@ -201,7 +202,7 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 
 1. Open the catalogue link, commonly Inventory. Search for the product before creating a duplicate.
 2. Add or edit its name, SKU/barcode, category, selling unit, price, cost, current stock and reorder level as appropriate.
-3. Use Preloaded catalogue starters for workspace-specific names, or import/completed-form tools for larger catalogues. Saved catalogue entries remain. Enter actual prices, costs and stock before saving; starters do not supply manufacturer barcodes or assumed prices.
+3. Use the **Starter products** task for editable product-name suggestions, or **Import products** for a file. Barcode lookup, saved barcode references and product-photo/list reading each have their own task. Starter names are not supplier data; enter actual prices, costs and stock before selling.
 4. Configure Product variants and extras here when required: choose the product, group/variant labels and extra names/prices, then save product options.
 5. Return to Product sales and confirm scanning, item selection and price.
 
@@ -249,7 +250,7 @@ For shared kitchen/bar printing, the owner designates a Windows checkout as the 
 5. Save the payment and print or share its receipt. Open Payment history to find a previous payment.
 6. For work that needs a deposit or later payment, open Jobs & invoices; New payment stays the simple full-payment form.
 7. Owners/admins use Payment history > Refund payment when money must be returned. The original receipt remains saved.
-8. Save reusable service names and prices in Business settings > Receipts > Saved services and prices. Add saved service copies the current price into the draft.
+8. Save reusable service names and prices in Business settings > Service catalogue. Add saved service copies the current price into the draft.
 
 **Remember:** These descriptions are non-stock receipt lines: no product deduction or ingredient consumption. Confirm externally received payment before saving a manual POS/transfer entry.
 
@@ -415,10 +416,10 @@ If Profit estimate has incomplete costs appears, review the named prepared items
 
 ## Staff & access and Staff activity
 
-1. As owner, open Staff & access > Team members, select Choose staff access and tick the selling workspaces and operations the staff member needs. Save staff access using your owner password. New staff cannot operate until access is granted. Existing access remains until you save a selection; offline devices receive changes on their next sync.
-2. Choose Add staff, enter the requested details and temporary password, then confirm the username and owner credentials when prompted.
-3. Give the staff member their username and temporary password securely. Grant only the access their job needs.
-4. Use Staff passwords for recovery/reset. To revoke access, choose Remove staff beside an admin or cashier, read the warning, and enter your owner password. Cancel makes no change; the red Confirm staff removal button submits the request. Synchronize other devices afterward.
+1. Use the Staff & access task selector to move between **Team members**, **Access permissions**, **Add staff**, **Sign-in links**, and **Reset staff password** when available. These are separate tasks; Team members and Access permissions are not duplicate views.
+2. As owner, open **Access permissions**, select a staff member and tick the workspaces and operations they need. Save using your owner password. New staff cannot operate until access is granted. Existing access remains until you save a selection; offline devices receive changes on their next sync.
+3. Open **Add staff**, enter the requested details and temporary password, then confirm the username and owner credentials when prompted. Give the staff member their username and temporary password securely.
+4. Use **Reset staff password** for recovery. To revoke access, use Remove staff beside an admin or cashier in Team members, read the warning, and enter your owner password. Cancel makes no change; the red Confirm staff removal button submits the request. Synchronize other devices afterward.
 5. Open Staff activity to select branch/person/date range and review recorded sales, expenses and voids.
 
 **Remember:** Staff creation/recovery requires the appropriate online owner verification. Cashiers use their staff username; the owner uses the registered email. Only owners can remove staff. Removal preserves sales and activity history, blocks cloud access immediately, and reaches offline devices when they reconnect and sync. Removed usernames remain reserved for historical identity. Admin access does not automatically grant every owner setting.
@@ -438,7 +439,7 @@ If Profit estimate has incomplete costs appears, review the named prepared items
 1. Open Subscription for owner referral links, rewards and payout controls where available. Customer accounts are a different balance system.
 2. Before leaving, use the offered export controls and check that you can open the downloaded files.
 3. Only owners can open Close business account. Choose Delete business account to read the warning screen. Choose Cancel to leave without submitting, or type DELETE and use the red Confirm account deletion button when ready. Staff cannot close their accounts.
-4. Manage recurring billing through its supplied subscription/provider controls as directed; do not assume deleting local app files cancels billing.
+4. To stop future subscription renewal, use **Manage or cancel subscription** on the Subscription screen or the app-store subscription settings for an Android purchase. Closing a business account and cancelling renewal are separate actions.
 
 **Remember:** Closure deactivates cloud access immediately and schedules deletion after the displayed waiting period (14 days by default). Cancel before the deadline to restore access. Export necessary records and manage recurring subscriptions separately. Offline device copies are not remotely erased.
 

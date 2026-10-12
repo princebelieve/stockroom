@@ -1,6 +1,6 @@
 # Documentation alignment
 
-Reviewed: 2026-10-06 against the current repository implementation. This review covers the root README/PWA guide, cloud README, every project guide in `docs`, the in-app guide source, and factual feature descriptions on the public terms/privacy/account-deletion pages. Generated builds, dependencies and release artifacts are not documentation authorities.
+Original full review: 2026-10-06. Incremental screen/subscription review: 2026-10-12 against the current repository implementation. The October 6 inventory remains useful for backend/product behavior; the October 12 pass corrects the navigation and subscription claims affected by the Settings, Inventory, Staff & access and Subscription refactors. Generated builds, dependencies and release artifacts are not documentation authorities.
 
 ## Current authority
 
@@ -12,7 +12,7 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 
 - README now includes service jobs/invoices/deposits, Tables & tabs, recipe consumption, current cashier scope, reporting timezone and local development requirements.
 - Prepared food with recipes consumes ingredients at preparation; counter packaged goods consume stock at payment; restaurant packaged goods consume stock at preparation. Refunds do not recreate cooked ingredients.
-- Setup paths point to Business settings > Workspaces, Sales, Receipts and Devices. Product options and daily Cash register remain operationally separate.
+- Setup paths point to the focused Settings task selector: Available workspaces, Sales tasks, Receipt details, Service catalogue, and Devices. Product options and daily Cash register remain operationally separate.
 - Reports use a synchronized business timezone, defaulting to UTC. Their expired-stock summary uses that calendar; inventory batch alerts and stock allocation still use UTC dates. The profit formula includes consumed recipe ingredients.
 - Account-deletion default is 14 days, consistent with `cloud/index.mjs`, `cloud/account-deletion.mjs` and configurable plan settings. Previously README/PWA/public deletion text said 90 days.
 - Direct subscriptions can use explicitly authorized recurring monthly/yearly Paystack renewal; public terms no longer describe every direct subscription as manual renewal. Play Store billing remains separate.
@@ -57,11 +57,21 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 
 ## What this confirms
 
-Documentation is aligned with implemented repository behavior for the areas above. It does not certify that the current code is deployed, that provider credentials are configured, that released installers contain these changes, or that physical hardware works. External policies and competitor references are dated references; their current account-side requirements must be checked when deploying or publishing. No new application workflow or external deployment is introduced by this documentation pass.
+The October 6 review confirms the implementation facts listed in its coverage table as of that date. This incremental pass updates the operational user guide, in-app guide source, workspace guide, subscription guide, sales/payment guides, setup review, README, and roadmap for the newer screen navigation and subscription behavior. It does not certify that current code is deployed, that provider credentials are configured, that released installers contain these changes, or that physical hardware works. Historical audits retain their original dates and findings; follow current operational guides when they differ.
+
+## Incremental review: 2026-10-12
+
+- Complex Settings, Inventory, Staff & access, and Subscription screens use a searchable task selector for focused task views. The selector navigates between tasks; it does not itself save configuration or enable workspaces.
+- Existing-business Settings separates business type, enabled workspaces, workspace catalogues, reporting timezone, and product form. The highlighted workspace name identifies which catalogue dropdown choices are being edited.
+- Staff & access separates Team members and Access permissions; the user guide now reflects the available Add staff, Sign-in links, and conditional password-reset tasks.
+- The Subscription guide now explains the explicit Free plan, paid workspace entitlements, renewal cancellation, expiry fallback to Payments & receipts, and the difference between trial expiry and paid-plan grace.
+- `docs/user-guide.md` and `src/user-guide.json` are the paired owner/staff instructions. Both were updated together for the changed navigation and subscription behavior. `support.html` remains a contact/how-to route and does not promise a separate support workflow.
+- The app's contextual “Help for this screen” descriptions in `src/lib/screenHelp.ts` now describe the focused task selector, separate staff access task, and trial/grace/expiry behavior in concise screen-specific language.
+- Historical audit notes are not rewritten as if they described today's UI. Update their date or mark them historical when reusing them as operational instructions.
 
 ## Verification results
 
-All 29 project Markdown documents were included in the inventory (including this review). Relative Markdown links resolve to existing files. All 35 in-app guide chapters match the Markdown instructions. Standard and PWA builds pass after the guide/public-page changes. Diff whitespace checks pass with the existing CRLF convention respected. This pass changes documentation and guide content only; it does not rerun physical-device or provider acceptance.
+The initial October 6 review inventoried 29 project Markdown documents. The October 12 incremental pass reconciled the listed task-navigation and subscription guides against the current source; relative-link and guide-pair checks are recorded only when rerun for the current working tree. This pass changes documentation only; it does not change app code or rerun physical-device/provider acceptance.
 
 ## Account closure and removal controls
 

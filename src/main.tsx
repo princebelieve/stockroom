@@ -226,9 +226,21 @@ function preferredScreen(user: User) {
 function initialScreen() {
   try {
     const user = JSON.parse(localStorage.getItem('stockroom-user') || 'null') as User | null
-    if (user?.role === 'owner' && new URLSearchParams(window.location.search).get('screen') === 'account-deletion') return 'Account'
     const requested = new URLSearchParams(window.location.search).get('screen')
-    if (user && requested && screenAllowedByRole(requested, user)) return requested
+    if (user?.role === 'owner' && requested === 'account-deletion') return 'Account'
+    // Only public deep-link aliases are valid route overrides. Internal screen
+    // names can remain in old/shared URLs; accepting them here lets a stale
+    // `?screen=Team` override the user's most recently visited screen on reload.
+    const linkedScreen = ({
+      'retail-orders': 'RetailOrders',
+      customers: 'Wallet',
+      counter: 'Counter',
+      restaurant: 'Restaurant',
+      subscription: 'Subscription',
+    } as const)[requested as 'retail-orders' | 'customers' | 'counter' | 'restaurant' | 'subscription']
+    if (user && linkedScreen && screenAllowedByRole(linkedScreen, user)) return linkedScreen
+    const route = window.history.state as { stockroomNavigation?: boolean; screen?: string } | null
+    if (user && route?.stockroomNavigation && route.screen && screenAllowedByRole(route.screen, user)) return route.screen
     return user ? preferredScreen(user) : 'Overview'
   } catch { return 'Overview' }
 }

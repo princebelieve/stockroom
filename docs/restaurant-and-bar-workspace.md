@@ -2,7 +2,7 @@
 
 In menu setup, **Preloaded catalogue starters** provides editable restaurant or bar menu ideas. Review and price each item, and link stock where needed; starters do not contain prices, stock, barcodes, or verified supplier data.
 
-In **Business settings > Workspaces > Payment screens**, choose **Tables & tabs only**. For a mixed business, keep your existing payment-screen choice and check **Enable separate Tables & tabs workspace**, then **Save workspaces**.
+In **Business settings > Available workspaces**, turn on **Tables & tabs** and any other needed selling workspace, then **Save workspaces**. The searchable Settings task selector opens this focused configuration task.
 
 Inventory, Purchasing, Stock count, Stock movements and stock reports are available for ingredients and drinks. Owners and administrators can receive supplier deliveries, track batch costs and expiry dates, and record wastage without enabling Product sales.
 
@@ -42,7 +42,7 @@ Printing uses the same configured 58 mm or 80 mm receipt printer for payment rec
 
 ## Reporting periods
 
-Financial reports use the saved business reporting timezone, configured under Business settings > Workspaces and shared with Sync now. Existing businesses default to UTC. See [report calculations](report-calculations.md) for period boundaries and stock-cost treatment.
+Financial reports use the saved business reporting timezone, configured in the searchable Settings task selector under Business settings > Reporting timezone and shared with Sync now. Existing businesses default to UTC. See [report calculations](report-calculations.md) for period boundaries and stock-cost treatment.
 
 ## QR orders and preparation stations
 
