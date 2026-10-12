@@ -12,12 +12,13 @@ import type { ProductDraft } from './lib/productIntake'
 import type { Product } from './types'
 
 type Row = { id: number; draft: ProductDraft; source: string; selected: boolean }
+type BarcodeLookupReport = { barcode: string; draft: ProductDraft; state: 'match' | 'saved-reference' | 'existing' | 'not-found' | 'unavailable' | 'invalid'; message: string }
 const numericFields = ['price', 'cost', 'stock', 'reorder'] as const
 const fields = ['name', 'sku', 'barcode', 'category', 'unit', ...numericFields] as const
 const labels = { name: 'Name', sku: 'SKU', barcode: 'Barcode', category: 'Category', unit: 'Sell by', price: 'Selling price', cost: 'Unit cost', stock: 'Current stock', reorder: 'Reorder point' }
 
 
-export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openProduct, shopProfile, catalogueWorkspace = 'product-sales', create, products, defaultUnit, scan, screen, navigate, compact = false }: { businessId?: string; lookupApiUrl?: string; openProduct?: (draft: ProductDraft, message?: string) => void; shopProfile?: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; create: (product: ProductDraft) => Promise<void>; products: Product[]; defaultUnit: string; scan: () => Promise<string | undefined>; screen: string; navigate: (screen: string) => void; compact?: boolean }) {
+export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openProduct, shopProfile, catalogueWorkspace = 'product-sales', create, products, defaultUnit, scan, scanKey = 'Enter', screen, navigate, compact = false }: { businessId?: string; lookupApiUrl?: string; openProduct?: (draft: ProductDraft, message?: string) => void; shopProfile?: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; create: (product: ProductDraft) => Promise<void>; products: Product[]; defaultUnit: string; scan: () => Promise<string | undefined>; scanKey?: 'Enter' | 'Tab'; screen: string; navigate: (screen: string) => void; compact?: boolean }) {
   const [referenceQuery,setReferenceQuery]=useState('');const [referenceResults,setReferenceResults]=useState<ProductDraft[]>([])
   const [rows, setRows] = useState<Row[]>([])
   const [csvTable,setCsvTable]=useState<string[][]>([])
@@ -25,6 +26,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
   const [mapping,setMapping]=useState<Record<string,number>>({})
   const [skipExisting,setSkipExisting]=useState(true)
   const [barcode, setBarcode] = useState('')
+  const [barcodeReport, setBarcodeReport] = useState<BarcodeLookupReport | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState<'package' | 'document'>('package')
@@ -49,21 +51,31 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
   async function lookup(code: string) {
     code = code.trim()
     if (!/^\S{3,200}$/.test(code)) { setMessage('Enter or scan a barcode first.'); return }
-    if (products.some(product => product.barcode === code || product.sku === code)) { setMessage('This product is already in your catalogue. Use its inventory entry to change stock or details.'); return }
+    const existing = products.find(product => product.barcode === code || product.sku === code)
+    if (existing) { setBarcodeReport({ barcode: code, draft: { name: existing.name, barcode: existing.barcode || code, category: existing.category }, state: 'existing', message: 'This code already belongs to a product in your catalogue. Open it from Products to change its details or stock.' }); return }
     const reference=await findReferenceBarcode(businessId,code).catch(()=>null)
-    if(reference){if(openProduct)openProduct(reference);else { add(reference,'Your offline reference catalogue'); navigate('import-review') }setMessage('Reference found offline. Check the product and enter your own price, cost and stock.');return}
     let draft: ProductDraft = { name: '', barcode: code }
-    let source = 'Scanned or entered barcode'
-    let status = 'No online match. Add a package photo or complete the blank fields below.'
-    if (validGtin(code)) {
+    let state: BarcodeLookupReport['state'] = 'not-found'
+    let status = 'No catalogue match was returned. You can still add the product manually with this barcode.'
+    if(reference){draft=reference;state='saved-reference';status='Found on this device. Confirm that the name, barcode and pack match the product in your hand; enter your own price, cost and stock.'}
+    else if (validGtin(code)) {
       setMessage('Looking up barcode online...')
       try {
         const match = await lookupProductBarcode(code, lookupApiUrl, shopProfile, catalogueWorkspace)
-        if (match) { draft = match; source = `${match.catalogueSource || 'Online catalogue'} suggestion`; status = `${match.catalogueSource || 'Online catalogue'} suggested a name. Check the exact product and pack size, then complete your price and current stock.` }
-      } catch (error) { status = `${error instanceof Error ? error.message : 'Online lookup failed.'} The barcode has been kept below.` }
-    }
-    if (openProduct) { openProduct(draft, `${status} Complete the Add Product form and save when ready.`); return }
-    add(draft, source); navigate('import-review'); setMessage(status)
+        if (match) { draft = match; state = 'match'; status = `${match.catalogueSource || 'Online catalogue'} suggested this name. Confirm the exact product and pack; your business price, cost and stock are not supplied by the catalogue.` }
+      } catch (error) { state = 'unavailable'; status = `${error instanceof Error ? error.message : 'Online lookup failed.'} The scanned barcode is preserved so you can continue manually.` }
+    } else { state = 'invalid'; status = 'This code is not a supported product GTIN, so online catalogues could not verify it. You can still add it as your product barcode.' }
+    setBarcodeReport({ barcode: code, draft, state, message: status })
+    setMessage('')
+  }
+  function continueWithLookupResult() {
+    if (!barcodeReport) return
+    const draft = barcodeReport.state === 'match' || barcodeReport.state === 'saved-reference'
+      ? barcodeReport.draft
+      : { name: '', barcode: barcodeReport.barcode }
+    if (openProduct) { openProduct(draft, `${barcodeReport.message} Confirm the product details before saving.`); return }
+    add(draft, barcodeReport.state === 'saved-reference' ? 'Your offline reference catalogue' : `${draft.catalogueSource || 'Barcode lookup'} suggestion`)
+    navigate('import-review')
   }
   async function suggest(content = text, source = sourceName) {
     if (!content.trim()) { setMessage('No text found. Try a clearer photo or add the details yourself.'); return }
@@ -106,7 +118,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
   }
   const page = screen === 'import' ? 'home' : screen.replace('import-', '')
   return <section className="panel full-panel product-intake">
-    {page !== 'home' && <button type="button" className="filter-button task-back-button" onClick={() => navigate('products')}>Products</button>}
+    {page !== 'home' && <button type="button" className="filter-button task-back-button" onClick={() => { if(page==='barcode'&&barcodeReport){setBarcodeReport(null);setMessage('');return} navigate(page === 'save-reference' ? 'import-csv' : 'products') }}>{page === 'save-reference' ? 'Back to CSV import' : page === 'barcode' && barcodeReport ? 'New barcode lookup' : 'Products'}</button>}
     {page === 'home' && <nav className="screen-picker screen-picker-buttons" aria-label="Import product task"><button type="button" className="filter-button" onClick={() => navigate('import-csv')}>Import CSV</button>{!compact && <><button type="button" className="filter-button" onClick={() => navigate('import-barcode')}>Find by barcode</button><button type="button" className="filter-button" onClick={() => navigate('import-photo')}>Read product photo</button><button type="button" className="filter-button" onClick={() => navigate('import-reference')}>Find saved reference</button></>}{rows.length > 0 && <button type="button" className="filter-button" onClick={() => navigate('import-review')}>Review imported products ({rows.length})</button>}</nav>}
     <fieldset disabled={busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
       <div className="payment-options">
@@ -121,14 +133,20 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
             setMessage('Match your file columns, then load products for review.')
           })
         }} /></label>
-        {csvTable.length>0 && <><h3>Match CSV columns: {csvName}</h3><div className="form-grid">{importFields.map(field=><label key={field}>{labels[field as keyof typeof labels]} column<select aria-label={`${labels[field as keyof typeof labels]} column`} value={mapping[field]??-1} onChange={event=>setMapping(current=>({...current,[field]:Number(event.target.value)}))}><option value={-1}>Not in this file</option>{csvTable[0].map((column,index)=><option key={index} value={index}>{column||`Column ${index+1}`}</option>)}</select></label>)}</div><div className="report-actions"><button type="button" className="primary-button" onClick={()=>void run(async()=>{const drafts=mappedProducts(csvTable,mapping);if(drafts.length>2000)throw new Error('Review at most 2,000 inventory products at a time.');drafts.forEach(draft=>add(draft,csvName));setCsvTable([]);navigate('import-review');setMessage('Products loaded for review.')} )}>Load products for review</button>{!compact && <button type="button" className="filter-button" onClick={()=>navigate('import-save-reference')}>Save as offline reference</button>}</div></>}
+        {csvTable.length>0 && <><h3>Match CSV columns: {csvName}</h3><div className="form-grid">{importFields.map(field=><label key={field}>{labels[field as keyof typeof labels]} column<select aria-label={`${labels[field as keyof typeof labels]} column`} value={mapping[field]??-1} onChange={event=>setMapping(current=>({...current,[field]:Number(event.target.value)}))}><option value={-1}>Not in this file</option>{csvTable[0].map((column,index)=><option key={index} value={index}>{column||`Column ${index+1}`}</option>)}</select></label>)}</div><div className="report-actions"><button type="button" className="primary-button" onClick={()=>void run(async()=>{const drafts=mappedProducts(csvTable,mapping);if(drafts.length>2000)throw new Error('Review at most 2,000 inventory products at a time.');drafts.forEach(draft=>add(draft,csvName));setCsvTable([]);navigate('import-review');setMessage('Products loaded for review.')} )}>Load products for review</button><button type="button" className="filter-button" onClick={()=>navigate('import-save-reference')}>Save as offline reference</button></div></>}
         <label><input type="checkbox" checked={skipExisting} onChange={event=>setSkipExisting(event.target.checked)}/>Skip products already matched by barcode or SKU</label>
         </>}
-        {page === 'barcode' && <>
-        <label>Barcode<div className="barcode-field"><input value={barcode} onChange={event => setBarcode(event.target.value)} placeholder="Enter or scan barcode" /><button type="button" className="barcode-scan-button" aria-label="Scan barcode" onClick={() => void run(async () => { const code = await scan(); if (code) { setBarcode(code); await lookup(code) } })}><ScanLine size={19} /></button></div></label>
+        {page === 'barcode' && !barcodeReport && <>
+        <label>Barcode<div className="barcode-field"><input value={barcode} onChange={event => setBarcode(event.target.value)} onKeyDown={event => { if (event.key === scanKey && barcode.trim()) { event.preventDefault(); void run(() => lookup(barcode)) } }} placeholder="Enter or scan barcode" /><button type="button" className="barcode-scan-button" aria-label="Scan barcode" onClick={() => void run(async () => { const code = await scan(); if (code) { setBarcode(code); await lookup(code) } })}><ScanLine size={19} /></button></div></label>
         <button type="button" className="filter-button" onClick={() => void run(() => lookup(barcode))}>Find product details</button>
         <p>For medicines and regulated health products, you can also check the <a href="https://greenbook.nafdac.gov.ng/" target="_blank" rel="noreferrer">NAFDAC Greenbook</a>. To check who issued a GTIN, use <a href="https://www.gs1.org/services/verified-by-gs1" target="_blank" rel="noreferrer">Verified by GS1</a>. These checks may identify a product or registration, but do not fill your selling price or stock.</p>
         </>}
+        {page === 'barcode' && barcodeReport && <section className={`barcode-lookup-report barcode-lookup-report-${barcodeReport.state}`} aria-labelledby="barcode-result-title">
+          <div className="barcode-lookup-report-heading"><span className="barcode-lookup-status">{barcodeReport.state==='match'?'Catalogue match':barcodeReport.state==='saved-reference'?'Saved reference':barcodeReport.state==='existing'?'Already in Products':barcodeReport.state==='unavailable'?'Lookup unavailable':barcodeReport.state==='invalid'?'Code not verified':'No catalogue match'}</span><h2 id="barcode-result-title">{barcodeReport.state==='existing'?barcodeReport.draft.name:barcodeReport.draft.name||'Product details not found'}</h2><p>{barcodeReport.message}</p></div>
+          <dl className="barcode-lookup-facts"><div><dt>Barcode</dt><dd><code>{barcodeReport.barcode}</code></dd></div>{barcodeReport.draft.category&&<div><dt>Category</dt><dd>{barcodeReport.draft.category}</dd></div>}{barcodeReport.draft.catalogueSource&&<div><dt>Source</dt><dd>{barcodeReport.draft.catalogueSource}</dd></div>}{barcodeReport.draft.customValues&&shopProfile?.fields.filter(field=>field.visible&&barcodeReport.draft.customValues?.[field.id]).map(field=><div key={field.id}><dt>{field.label}</dt><dd>{barcodeReport.draft.customValues?.[field.id]}</dd></div>)}</dl>
+          {(barcodeReport.state==='match'||barcodeReport.state==='saved-reference')&&<p className="barcode-lookup-note">This is a product identification suggestion. Confirm the exact item and pack. Set your own selling price, cost and stock when you continue.</p>}
+          <div className="barcode-lookup-actions">{barcodeReport.state==='existing'?<button type="button" className="primary-button" onClick={()=>navigate('products')}>Open Products</button>:<button type="button" className="primary-button" onClick={continueWithLookupResult}>{barcodeReport.state==='match'||barcodeReport.state==='saved-reference'?'Use these details':'Enter product details'}</button>}<button type="button" className="filter-button" onClick={()=>{setBarcodeReport(null);setBarcode('');setMessage('')}}>Look up another barcode</button></div>
+        </section>}
         {page === 'photo' && <>
         <label>What are you reading?<select value={mode} onChange={event => setMode(event.target.value as typeof mode)}><option value="package">One product package / carton</option><option value="document">Invoice / product-list screenshot</option></select></label>
         <label>Photo or screenshot<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => {

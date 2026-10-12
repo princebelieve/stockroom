@@ -1658,6 +1658,9 @@ function App() {
       {id:'expiry',label:'Stock costs & expiry',hint:'Review purchase costs, batches and expiry dates.'},
       {id:'pricing',label:'Prices',hint:'Manage selling prices and customer rates.'},
       {id:'import',label:'Import products',hint:'Add products from a file or supported product list.'},
+      {id:'import-barcode',label:'Look up product by barcode',hint:'Scan or enter a barcode to check Open Food Facts and other connected catalogues.'},
+      {id:'import-reference',label:'Find saved barcode reference',hint:'Search this device’s saved product names and barcodes.'},
+      {id:'import-photo',label:'Read a product photo or list',hint:'Read package details or product-list rows; verify suggestions before saving.'},
       {id:'starters',label:'Starter products',hint:'Choose suggested products to add to the catalogue.'},
     ] : []),
     ...(hasPermission(user,'purchasing') ? [
@@ -1671,7 +1674,7 @@ function App() {
     ...(canManageDeviceSetup ? [{id:'options',label:'Product variants & extras',hint:'Configure options used when products are sold.'}] : []),
     ...(user?.role==='owner' && hasPermission(user,'inventory') ? [{id:'handwritten',label:'Read a product list',hint:'Capture product details from a paper list.'}] : []),
   ].filter((item,index,items)=>items.findIndex(candidate=>candidate.id===item.id)===index)
-  const inventoryPickerValue = section.startsWith('import-') ? 'import' : section
+  const inventoryPickerValue = ['import-barcode','import-reference','import-photo'].includes(section) ? section : section.startsWith('import-') ? 'import' : section
   useEffect(()=>{if(user?.role==='admin'&&settingsTab==='devices'&&settingsTask!=='devices')setSettingsTask('devices')},[user?.role,settingsTab,settingsTask])
   function chooseSettingsTask(id:string) {
     const [group,task]=id.split('.')
@@ -1892,6 +1895,11 @@ function App() {
   async function scanBarcode(target: 'product' | 'payment' | 'setup' | 'intake' = 'product', intake?: (value: string) => void) {
     const accept = target === 'setup' ? (_code: string) => {} : target === 'intake' ? (value: string) => intake?.(value) : target === 'payment' ? acceptPaymentReference : acceptBarcode
     if (scanning) return
+    if (target !== 'setup' && scannerSettings().mode === 'keyboard') {
+      const value = await requestInlinePrompt({ title: 'Scan or enter barcode', message: 'Use your connected keyboard scanner, or type the barcode.' }) || ''
+      accept(value)
+      return value || undefined
+    }
     const Detector = (window as unknown as { BarcodeDetector?: new () => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> } }).BarcodeDetector
     if (!Detector || !navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
@@ -2222,7 +2230,7 @@ function App() {
       {active==='Inventory' && section==='pricing' && workspace.stock && (canManageDeviceSetup||hasPermission(user,'inventory')) && <OilPricing oil={workspace.oil} headers={authHeaders} products={products} customers={customers} storageKey={'oil-pricing:'+user.organizationId+':'+activeBranchId} refresh={pos.reload} openProducts={()=>chooseSection('products')}/>}
       {active === 'Inventory' && hasPermission(user,'purchasing') && <div hidden={section!=='purchasing'&&!section.startsWith('purchasing-')}><Purchasing businessId={user.organizationId} headers={authHeaders} products={products} branchId={activeBranchId} refresh={reloadPosStock} oil={workspace.oil} requestedView={section==='purchasing'?'history':section.replace(/^purchasing-/,'')} changeView={view=>chooseSection(view==='history'?'purchasing':`purchasing-${view}`)} hideTaskNavigation /></div>}
       {active==='Inventory'&& section==='starters' &&hasPermission(user,'inventory')&&<CatalogueStarters industry={shopProfile.industry} existing={products} save={items=>saveOnboardingStarters(workspace.oil?'Oil':'POS',shopProfile.industry,items)} openProducts={()=>chooseSection('products')}/>}
-      {active === 'Inventory' && hasPermission(user,'inventory') && <div hidden={!['import','import-csv','import-review'].includes(section)}><ProductIntake businessId={user.organizationId} lookupApiUrl={subscriptionApiUrl} openProduct={openAddProduct} shopProfile={shopProfile} catalogueWorkspace={workspace.productSales?'product-sales':workspace.oil?'oil-sales':workspace.fastFood?'order-counter':'tables-tabs'} create={importProduct} products={products} defaultUnit={defaultUnit} scan={() => scanBarcode('intake')} screen={section === 'import' ? 'import-csv' : section} navigate={chooseSection} compact /></div>}
+      {active === 'Inventory' && hasPermission(user,'inventory') && <div hidden={!['import','import-csv','import-barcode','import-reference','import-photo','import-save-reference','import-review'].includes(section)}><ProductIntake businessId={user.organizationId} lookupApiUrl={subscriptionApiUrl} openProduct={openAddProduct} shopProfile={shopProfile} catalogueWorkspace={workspace.productSales?'product-sales':workspace.oil?'oil-sales':workspace.fastFood?'order-counter':'tables-tabs'} create={importProduct} products={products} defaultUnit={defaultUnit} scan={() => scanBarcode('intake')} scanKey={scannerSettings().suffix} screen={section === 'import' ? 'import-csv' : section} navigate={chooseSection} compact /></div>}
       {active === 'Inventory' && section==='handwritten' && user.role === 'owner' && <HandwrittenProductForm shopProfile={shopProfile} apiUrl={subscriptionApiUrl} token={cloudAccessToken} onToken={(token, refresh) => { setCloudAccessToken(token); localStorage.setItem('stockroom-cloud-access-token', token); localStorage.setItem('stockroom-cloud-refresh-token', refresh) }} products={products} create={importProduct} />}
       {active === 'Subscription' && user.role !== 'owner' && <EmptyScreen title="Business subscription" description="Ask your business owner to renew the subscription." />}
       {active === 'Subscription' && user.role === 'owner' && <SubscriptionSettings apiUrl={subscriptionApiUrl} token={cloudAccessToken} localToken={authToken} onFinalExit={logout} onAccess={setPosAccess} onToken={(nextToken, refreshToken) => { setCloudAccessToken(nextToken); localStorage.setItem('stockroom-cloud-access-token', nextToken); localStorage.setItem('stockroom-cloud-refresh-token', refreshToken) }} signInToCloud={signInToCloud} />}

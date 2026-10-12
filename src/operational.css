@@ -409,6 +409,22 @@
 .product-search > label input { width:100%; }
 .product-search-actions { display:flex; gap:12px; margin-top:24px; flex-wrap:wrap; }
 .product-search-result { display:flex; justify-content:space-between; width:100%; padding:16px; background:white; color:var(--ink); border:1px solid var(--line); }
+.barcode-lookup-report { max-width:900px; margin:18px auto 0; padding:clamp(22px,4vw,42px); border:1px solid color-mix(in srgb,var(--brand-primary) 18%,var(--line)); border-radius:22px; background:linear-gradient(145deg,#fff 0%,var(--paper) 100%); box-shadow:0 5px 0 color-mix(in srgb,var(--brand-primary) 10%,white),0 18px 40px #172b4510; }
+.barcode-lookup-report-heading { max-width:70ch; }
+.barcode-lookup-status { display:inline-flex; align-items:center; min-height:30px; padding:4px 11px; border:1px solid color-mix(in srgb,var(--brand-primary) 24%,white); border-radius:999px; background:var(--mint); color:var(--brand-primary); font-size:13px; font-weight:750; }
+.barcode-lookup-report-existing .barcode-lookup-status { color:#286044; background:#e8f5ed; border-color:#b9d9c4; }
+.barcode-lookup-report-unavailable .barcode-lookup-status,.barcode-lookup-report-not-found .barcode-lookup-status,.barcode-lookup-report-invalid .barcode-lookup-status { color:#765316; background:#fff7e4; border-color:#ead39b; }
+.barcode-lookup-report-heading h2 { margin:16px 0 0; color:var(--ink); font:700 clamp(26px,3.4vw,40px)/1.12 'Space Grotesk',sans-serif; overflow-wrap:anywhere; }
+.barcode-lookup-report-heading p { max-width:64ch; margin:12px 0 0; color:var(--muted); font-size:16px; line-height:1.6; }
+.barcode-lookup-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr)); gap:10px; margin:26px 0 0; }
+.barcode-lookup-facts > div { min-width:0; padding:14px 16px; border:1px solid var(--line); border-radius:13px; background:#fff; }
+.barcode-lookup-facts dt { color:var(--muted); font-size:13px; }
+.barcode-lookup-facts dd { margin:6px 0 0; color:var(--ink); font-size:16px; font-weight:650; overflow-wrap:anywhere; }
+.barcode-lookup-facts code { font:600 15px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.barcode-lookup-note { margin:20px 0 0; padding:13px 15px; border-left:3px solid var(--brand-primary); border-radius:0 10px 10px 0; background:var(--mint); color:var(--ink); line-height:1.55; }
+.barcode-lookup-actions { display:flex; flex-wrap:wrap; gap:11px; margin-top:24px; }
+.barcode-lookup-actions button { min-height:48px; }
+@media(max-width:650px) { .barcode-lookup-report { margin-top:10px; padding:21px 17px; border-radius:17px; } .barcode-lookup-report-actions { display:grid; grid-template-columns:1fr; } .barcode-lookup-facts { grid-template-columns:1fr 1fr; gap:8px; margin-top:19px; } .barcode-lookup-facts > div { padding:12px; } .barcode-lookup-actions { display:grid; } .barcode-lookup-actions button { width:100%; justify-content:center; } }
 @media(max-width:700px) { .product-entry-modal .form-grid { grid-template-columns:1fr; } .product-entry-modal .modal-head { top:-18px; } .product-entry-actions { bottom:-18px; } }
 
 .product-list-summary dl { display:flex; flex-wrap:wrap; gap:24px; margin:0 0 20px; }

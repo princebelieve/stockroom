@@ -3,6 +3,7 @@ import { catalogueWorkspaces, workspaceCatalogueOptions, workspaceCatalogueSetti
 import { readCustomValues, validateCustomValues } from '../server/shop-fields.mjs'
 import type { ProductDraft } from './lib/productIntake'
 import { lookupProductBarcode, validGtin } from './lib/productIntake'
+import { scannerSettings } from './lib/deviceSetup'
 
 function fieldHint(id: string, label: string, type: string) {
   if (id.startsWith('custom_')) return type === 'select' ? `Choose the closest value for ${label}. Add or change choices in Business settings > Workspaces > Product form.` : `Enter the ${label.toLowerCase()} for this product. Leave it blank when it does not apply.`
@@ -37,6 +38,35 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
   const [barcodeLookupMessage,setBarcodeLookupMessage]=useState('')
   const nameFor = (field: string) => field.startsWith('custom_') ? `custom:${field}` : field
   const idFor = (field: string) => `product-entry-${field}`
+  async function lookupBarcode(code: string, codeInput: HTMLInputElement) {
+    const value=code.trim()
+    if(!value)return
+    const formGrid=codeInput.closest('.form-grid')
+    setBarcodeLookupMessage('Checking barcode catalogue...')
+    try {
+      const match=validGtin(value)?await lookupProductBarcode(value,lookupApiUrl,profile,catalogueWorkspace):null
+      if(!validGtin(value)){setBarcodeLookupMessage('Barcode saved. This format cannot be checked in the online catalogue.');return}
+      if(!match?.name){setBarcodeLookupMessage('No catalogue match. Barcode saved; enter the product name and store details.');return}
+      const nameInput=formGrid?.querySelector<HTMLInputElement|HTMLTextAreaElement>('input[name="name"], textarea[name="name"]')
+      if(nameInput){nameInput.value=match.name;nameInput.dispatchEvent(new Event('input',{bubbles:true}))}
+      for(const [fieldId,fieldValue] of Object.entries(match.customValues||{})){
+        const input=formGrid?.querySelector<HTMLInputElement>(`input[name="custom:${fieldId}"]`)
+        if(input){input.value=fieldValue;input.dispatchEvent(new Event('input',{bubbles:true}))}
+      }
+      if(match.category){
+        const select=formGrid?.querySelector<HTMLSelectElement>('select[name="category"]')
+        if(select){
+          const known=[...select.options].some(option=>option.value===match.category)
+          select.value=known?match.category:'__custom__'
+          select.dispatchEvent(new Event('change',{bubbles:true}))
+          if(!known){await new Promise(resolve=>requestAnimationFrame(()=>resolve(undefined)));const categoryInput=formGrid?.querySelector<HTMLInputElement>('input[name="customCategory"]');if(categoryInput)categoryInput.value=match.category}
+        }
+      }
+      setBarcodeLookupMessage(`Catalogue details filled from ${match.catalogueSource}. Edit any field to match your product.`)
+    } catch(error) {
+      setBarcodeLookupMessage(`${error instanceof Error?error.message:'Barcode lookup failed.'} Barcode saved; enter the product details.`)
+    }
+  }
 
   return <div className="form-grid">{profile.fields.filter(field => field.visible && (!customOnly || field.id.startsWith('custom_'))).map(field => {
     const custom = field.id.startsWith('custom_')
@@ -63,7 +93,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
       {customUnit && <input aria-label="Specify product unit" name="customUnit" required maxLength={30} defaultValue={initialUnit && !units.includes(initialUnit) ? initialUnit : ''} placeholder="Enter unit, such as roll or hour" />}
     </> : field.type === 'select' ? <select id={inputId} name={name} required={field.required} defaultValue={saved[field.id] || ''}><option value="">{field.placeholder || 'Choose an option'}</option>{field.options.map(option => <option key={option}>{option}</option>)}</select>
       : field.id === 'name' ? <textarea id={inputId} name={name} required={field.required} maxLength={180} defaultValue={defaults[field.id] ?? ''} rows={2} placeholder={field.placeholder} />
-      : <><input id={inputId} name={name} type={field.type} required={field.required} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || initialDraft?.customValues?.[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} />{field.id === 'barcode' && scanBarcode && <button type="button" className="filter-button" onClick={async event => { const button=event.currentTarget; const codeInput = button.parentElement?.querySelector('input'); const formGrid=button.closest('.form-grid'); const code = await scanBarcode(); if (code && codeInput?.isConnected) { codeInput.value = code; codeInput.dispatchEvent(new Event('input', { bubbles: true })); setBarcodeLookupMessage('Checking barcode catalogue...'); try { const match = validGtin(code) ? await lookupProductBarcode(code,lookupApiUrl,profile,catalogueWorkspace) : null; if (match?.name) { const nameInput=formGrid?.querySelector<HTMLInputElement | HTMLTextAreaElement>('input[name="name"], textarea[name="name"]'); if(nameInput){nameInput.value=match.name;nameInput.dispatchEvent(new Event('input',{bubbles:true}))} for (const [fieldId, value] of Object.entries(match.customValues || {})) { const input=formGrid?.querySelector<HTMLInputElement>(`input[name="custom:${fieldId}"]`); if(input){input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}))} } if(match.category){const select=formGrid?.querySelector<HTMLSelectElement>('select[name="category"]');if(select){const known=[...select.options].some(option=>option.value===match.category);select.value=known?match.category:'__custom__';select.dispatchEvent(new Event('change',{bubbles:true}));if(!known){await new Promise(resolve=>requestAnimationFrame(()=>resolve(undefined)));const categoryInput=formGrid?.querySelector<HTMLInputElement>('input[name="customCategory"]');if(categoryInput)categoryInput.value=match.category}}} setBarcodeLookupMessage(`Catalogue details filled from ${match.catalogueSource}. Edit any field to match your product.`) } else setBarcodeLookupMessage('No catalogue match. Barcode filled; enter the product name and store details.') } catch(error) { setBarcodeLookupMessage(`${error instanceof Error?error.message:'Barcode lookup failed.'} Barcode filled; enter the product details.`) } } }}>Scan product barcode</button>}</>
+      : <><input id={inputId} name={name} type={field.type} required={field.required} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || initialDraft?.customValues?.[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} onKeyDown={field.id==='barcode'?event=>{if(event.key===scannerSettings().suffix&&event.currentTarget.value.trim()){event.preventDefault();void lookupBarcode(event.currentTarget.value,event.currentTarget)}}:undefined} />{field.id === 'barcode' && scanBarcode && <button type="button" className="filter-button" onClick={async event => { const codeInput=event.currentTarget.parentElement?.querySelector('input'); const code=await scanBarcode(); if(code&&codeInput?.isConnected){codeInput.value=code;codeInput.dispatchEvent(new Event('input',{bubbles:true}));await lookupBarcode(code,codeInput)} }}>Scan product barcode</button>}</>
 
     return <div className="shop-product-field" key={field.id}>
       <div className="shop-product-field-label"><label htmlFor={inputId}>{field.label}{field.required ? ' *' : ''}</label><FieldInfo label={field.label} description={hint} /></div>
