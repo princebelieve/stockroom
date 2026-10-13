@@ -516,7 +516,7 @@ const server = createServer(async (request, response) => {
       const password = String(input.password || '')
       const enrollment = verifyToken(request)
       if (enrollment?.kind !== 'device' || enrollment.businessId !== businessId || !await devices.findOne({ businessId, deviceId: enrollment.deviceId, revokedAt: null })) return send(response, 403, { error: 'Use a business registration key or an installer-enrolled device to register.' })
-      if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId) || !ownerName || !/^\S+@\S+\.\S+$/.test(email) || password.length < 10) return send(response, 400, { error: 'Provide a valid business ID, owner name, email, and password of at least 10 characters.' })
+      if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId) || !ownerName || !/^\S+@\S+\.\S+$/.test(email) || password.length < 6 || password.length > 256) return send(response, 400, { error: 'Provide a valid business ID, owner name, email, and password of 6–256 characters.' })
       const account = { businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash: hashPassword(password), createdAt: new Date() }
       try { const created = await accounts.insertOne(account); account._id = created.insertedId } catch (error) { if (error?.code === 11000) return send(response, 409, { error: 'That business ID or email already exists.' }); throw error }
       return send(response, 201, await cloudSession(account))
@@ -642,9 +642,8 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/v1/staff') {
       if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       const input = await readJson(request)
-      if (!await ownerPasswordIsValid(claims, input.ownerPassword)) return send(response, 401, { error: 'Owner password confirmation is required to create a staff account.' })
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
-      if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 10 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“32 character username, and a 10-character password.' })
+      if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 4 || password.length > 256 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“32 character username, and a password of 4–256 characters.' })
       const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, permissions:{}, operationalAccess:false, passwordHash: hashPassword(password), createdAt: new Date() }
       try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) {
         if (error?.code === 11000) {
@@ -701,7 +700,7 @@ const server = createServer(async (request, response) => {
       if (!ObjectId.isValid(passwordMatch[1])) return send(response, 400, { error: 'Invalid staff account.' })
       const input = await readJson(request)
       const password = String(input.password || '')
-      if (password.length < 10) return send(response, 400, { error: 'Password must be at least 10 characters.' })
+      if (password.length < 4 || password.length > 256) return send(response, 400, { error: 'Staff passwords must be 4–256 characters.' })
       const updated = await accounts.findOneAndUpdate({ _id: new ObjectId(passwordMatch[1]), businessId: claims.businessId, role: { $in: ['admin', 'cashier'] }, removedAt: { $exists: false } }, { $set: { passwordHash: hashPassword(password), passwordChangedAt: new Date() } }, { returnDocument: 'after' })
       if (!updated) return send(response, 404, { error: 'Staff account not found.' })
       await refreshTokens.deleteMany({ accountId: updated._id })

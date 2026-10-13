@@ -396,7 +396,7 @@ export async function createOwnerSetup(input) {
   const password = String(input.password || '')
   const mongoUri = String(input.mongoUri || '').trim()
   const mongoDatabase = String(input.mongoDatabase || 'stockroom').trim() || 'stockroom'
-  if (!email || !password) throw new Error('Owner email and password are required.')
+  if (!email || password.length < 6 || password.length > 256) throw new Error('Owner email and a password of 6–256 characters are required.')
   const configured = database.prepare('SELECT 1 FROM users WHERE organization_id = ? LIMIT 1').get(organizationId)
   if (configured) throw new Error('This installation already has an owner account.')
   database.prepare('INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), organizationId, ownerName, email, hashPassword(password), 'owner', now())
@@ -441,7 +441,7 @@ export function changePassword(userId, currentPassword, newPassword) {
   const user = database.prepare('SELECT id, password_hash AS passwordHash FROM users WHERE id = ? AND organization_id = ?').get(userId, organizationId)
   if (!user) throw new Error('User not found.')
   const trimmedNewPassword = String(newPassword || '').trim()
-  if (!trimmedNewPassword || trimmedNewPassword.length < 6) throw new Error('New password must be at least 6 characters long.')
+  if (trimmedNewPassword.length < 6 || trimmedNewPassword.length > 256) throw new Error('New password must be 6–256 characters long.')
   if (!matchesPassword(currentPassword, user.passwordHash)) throw new Error('Current password is incorrect.')
   const nextHash = hashPassword(trimmedNewPassword)
   database.prepare('UPDATE users SET password_hash = ? WHERE id = ? AND organization_id = ?').run(nextHash, userId, organizationId)
@@ -454,7 +454,7 @@ export function changePassword(userId, currentPassword, newPassword) {
 // cannot continue to work on this device.
 export function resetCashierPassword(userId, newPassword) {
   const password = String(newPassword || '').trim()
-  if (password.length < 10) throw new Error('New password must be at least 10 characters long.')
+  if (password.length < 4 || password.length > 256) throw new Error('Staff passwords must be 4–256 characters long.')
   const user = database.prepare("SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess FROM users WHERE id = ? AND organization_id = ? AND role IN ('admin', 'cashier')").get(userId, organizationId)
   if (!user) throw new Error('Staff account not found on this device.')
   database.prepare('UPDATE users SET password_hash = ? WHERE id = ? AND organization_id = ?').run(hashPassword(password), user.id, organizationId)
@@ -551,7 +551,7 @@ export function createUser(input) {
   if (!name || name.length > 100) throw new Error('Name is required and must be 100 characters or less.')
   if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error('A valid email address is required when supplied.')
   if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) throw new Error('Username must be 3ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“32 characters and use letters, numbers, dots, hyphens, or underscores.')
-  if (password.length < 10) throw new Error('Password must be at least 10 characters long.')
+  if (password.length < 4 || password.length > 256) throw new Error('Staff passwords must be 4–256 characters long.')
   if (!['admin', 'cashier'].includes(role)) throw new Error('New users can only be admins or cashiers.')
   const id = String(input.id || crypto.randomUUID())
   const createdAt = normalizeCreatedAt(input.createdAt)

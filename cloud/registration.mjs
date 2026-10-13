@@ -73,7 +73,7 @@ export async function createRegistration({ database, client, accounts, hashPassw
       const code = String(input.referralCode || '').trim()
       const currency = String(input.currency || 'USD')
       if (!['NGN', 'USD', 'GHS', 'ZAR', 'KES', 'XOF'].includes(currency)) throw new Error('Choose a supported currency.')
-      if (!ownerName || ownerName.length > 100 || password.length < 10 || password.length > 256 || !/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter your name, registered owner email, and a password of 10–256 characters.')
+      if (!ownerName || ownerName.length > 100 || password.length < 6 || password.length > 256 || !/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter your name, registered owner email, and a password of 6–256 characters.')
       if (!/^SBIT-[a-f0-9]{48}$/.test(String(input.key || '').trim())) throw new Error('Registration key is invalid or expired.')
       const passwordHash = hashPassword(password)
       return client.withSession(session => session.withTransaction(async () => {

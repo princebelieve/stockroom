@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 
 export async function completeOwnerPasswordReset({ token, password, jwtSecret, passwordResets, accounts, refreshTokens, hashPassword, createAccessToken }) {
   const nextPassword = String(password || '')
-  if (nextPassword.length < 10) throw new Error('Password must be at least 10 characters.')
+  if (nextPassword.length < 6 || nextPassword.length > 256) throw new Error('Owner passwords must be 6–256 characters.')
 
   const tokenHash = createHmac('sha256', jwtSecret).update(String(token || '')).digest('hex')
   const reset = await passwordResets.findOneAndUpdate(
