@@ -97,7 +97,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
 
     return <div className="shop-product-field" key={field.id}>
       <div className="shop-product-field-label"><label htmlFor={inputId}>{field.label}{field.required ? ' *' : ''}</label><FieldInfo label={field.label} description={hint} /></div>
-      {control}{field.id==='barcode'&&barcodeLookupMessage&&<p className="settings-message" role="status">{barcodeLookupMessage}</p>}
+      {control}{field.id==='barcode'&&barcodeLookupMessage&&(barcodeLookupMessage==='Checking barcode catalogue...'?<div className="barcode-lookup-inline-loading" role="status" aria-live="polite"><span className="barcode-lookup-spinner" aria-hidden="true"/>Checking barcode catalogue...</div>:<p className="settings-message" role="status">{barcodeLookupMessage}</p>)}
     </div>
   })}</div>
 }

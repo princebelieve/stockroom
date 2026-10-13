@@ -411,9 +411,9 @@
 .product-search > label input { width:100%; }
 .product-search-actions { display:flex; gap:12px; margin-top:24px; flex-wrap:wrap; }
 .product-search-result { display:flex; justify-content:space-between; width:100%; padding:16px; background:white; color:var(--ink); border:1px solid var(--line); }
-.barcode-lookup-report { max-width:900px; margin:18px auto 0; padding:clamp(22px,4vw,42px); border:1px solid color-mix(in srgb,var(--brand-primary) 18%,var(--line)); border-radius:22px; background:linear-gradient(145deg,#fff 0%,var(--paper) 100%); box-shadow:0 5px 0 color-mix(in srgb,var(--brand-primary) 10%,white),0 18px 40px #172b4510; }
+.barcode-lookup-report { max-width:900px; margin:18px auto 0; padding:clamp(22px,4vw,42px); border:1px solid #a7c89e; border-radius:22px; background:linear-gradient(145deg,#f4faef 0%,var(--paper) 100%); box-shadow:0 5px 0 #6c9d5830,0 18px 40px #172b4510; }
 .barcode-lookup-report-heading { max-width:70ch; }
-.barcode-lookup-status { display:inline-flex; align-items:center; min-height:30px; padding:4px 11px; border:1px solid color-mix(in srgb,var(--brand-primary) 24%,white); border-radius:999px; background:var(--mint); color:var(--brand-primary); font-size:13px; font-weight:750; }
+.barcode-lookup-status { display:inline-flex; align-items:center; min-height:30px; padding:4px 11px; border:1px solid #a6c99c; border-radius:999px; background:#e6f3df; color:#28563a; font-size:13px; font-weight:750; }
 .barcode-lookup-report-existing .barcode-lookup-status { color:#286044; background:#e8f5ed; border-color:#b9d9c4; }
 .barcode-lookup-report-unavailable .barcode-lookup-status,.barcode-lookup-report-not-found .barcode-lookup-status,.barcode-lookup-report-invalid .barcode-lookup-status { color:#765316; background:#fff7e4; border-color:#ead39b; }
 .barcode-lookup-report-heading h2 { margin:16px 0 0; color:var(--ink); font:700 clamp(26px,3.4vw,40px)/1.12 'Space Grotesk',sans-serif; overflow-wrap:anywhere; }
@@ -427,7 +427,14 @@
 .barcode-source-check label { display:grid; flex:1 1 260px; gap:7px; color:var(--muted); font-size:13px; font-weight:650; }
 .barcode-source-check select { min-height:46px; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); font:inherit; }
 .barcode-source-check button { min-height:46px; }
-.barcode-lookup-note { margin:20px 0 0; padding:13px 15px; border-left:3px solid var(--brand-primary); border-radius:0 10px 10px 0; background:var(--mint); color:var(--ink); line-height:1.55; }
+.barcode-lookup-note { margin:20px 0 0; padding:13px 15px; border-left:4px solid #d4a928; border-radius:0 10px 10px 0; background:#fff3c7; color:#55430e; line-height:1.55; }
+.barcode-lookup-loading { display:flex; align-items:center; gap:14px; margin:16px 0; padding:16px; border:1px solid #b5cc85; border-left:5px solid #63934d; border-radius:14px; color:#254932; background:linear-gradient(110deg,#eaf4df,#fff6d7); }
+.barcode-lookup-loading strong { display:block; color:#254932; }
+.barcode-lookup-loading p { margin:3px 0 0; color:#51634a; }
+.barcode-lookup-spinner { flex:0 0 30px; width:30px; height:30px; border:4px solid #d8e3bc; border-top-color:#5f9148; border-right-color:#d2aa32; border-radius:50%; animation:barcode-lookup-spin .8s linear infinite; }
+.barcode-lookup-inline-loading { display:inline-flex; align-items:center; gap:9px; color:#365a35; }
+.barcode-lookup-inline-loading .barcode-lookup-spinner { flex-basis:20px; width:20px; height:20px; border-width:3px; }
+@keyframes barcode-lookup-spin { to { transform:rotate(360deg); } }
 .barcode-lookup-actions { display:flex; flex-wrap:wrap; gap:11px; margin-top:24px; }
 .barcode-lookup-actions button { min-height:48px; }
 @media(max-width:650px) { .barcode-lookup-report { margin-top:10px; padding:21px 17px; border-radius:17px; } .barcode-lookup-report-actions { display:grid; grid-template-columns:1fr; } .barcode-lookup-facts { grid-template-columns:1fr 1fr; gap:8px; margin-top:19px; } .barcode-lookup-facts > div { padding:12px; } .barcode-lookup-actions { display:grid; } .barcode-lookup-actions button,.barcode-source-check button { width:100%; justify-content:center; } .barcode-source-check label { flex-basis:100%; } }
@@ -827,19 +834,27 @@
 :root[data-app-theme="dark"] .app-shell .pos-flow-steps button.active span { color:#eaf7ff; background:#12365d; }
 :root[data-app-theme="dark"] .app-shell .account-deletion-warning { color:#ffe4df; border-color:#81534e; background:#392522; }
 :root[data-app-theme="dark"] .app-shell .account-deletion-request small { color:#b7c9e0; }
-:root[data-app-theme="dark"] .app-shell .barcode-lookup-report { color:#e8f2ff; border-color:#45658e; background:linear-gradient(145deg,#142b4f,#0b1b35 76%); box-shadow:inset 0 1px #ffffff12,0 12px 30px #02081766; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-report { color:#e8f2ff; border-color:#557b48; background:linear-gradient(145deg,#183a36,#102c32 76%); box-shadow:inset 0 1px #ffffff12,0 12px 30px #02081766; }
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-report-heading h2 { color:#f0f7ff; }
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-report-heading p { color:#c2d1e6; }
-:root[data-app-theme="dark"] .app-shell .barcode-lookup-status { color:#b8edff; border-color:#347ca2; background:#123858; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-status { color:#c7f0c2; border-color:#53804f; background:#1b493d; }
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-report-existing .barcode-lookup-status { color:#b9f1d0; border-color:#397c60; background:#153c37; }
 :root[data-app-theme="dark"] .app-shell :is(.barcode-lookup-report-unavailable,.barcode-lookup-report-not-found,.barcode-lookup-report-invalid) .barcode-lookup-status { color:#ffe5ae; border-color:#80653a; background:#392f20; }
-:root[data-app-theme="dark"] .app-shell .barcode-lookup-facts > div { border-color:#38577d; background:#0b1b35; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-facts > div { border-color:#426654; background:#102b31; }
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-facts dt { color:#afc2dc; }
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-facts dd { color:#edf6ff; }
-:root[data-app-theme="dark"] .app-shell .barcode-source-check { border-color:#38577d; background:#0c1b34; }
+:root[data-app-theme="dark"] .app-shell .barcode-source-check { border-color:#426654; background:#102b31; }
 :root[data-app-theme="dark"] .app-shell .barcode-source-check label { color:#c2d1e6; }
 :root[data-app-theme="dark"] .app-shell .barcode-source-check select { color:#edf6ff; border-color:#45658e; background:#102442; }
-:root[data-app-theme="dark"] .app-shell .barcode-lookup-note { color:#d9edff; border-left-color:#35bdf0; background:#123252; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-note { color:#fff0bb; border-left-color:#e0b536; background:#433b20; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-loading { border-color:#557b48; border-left-color:#91bf66; color:#eaf4d9; background:linear-gradient(110deg,#183b35,#3b351f); }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-loading strong { color:#eaf4d9; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-loading p { color:#d2dfbd; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-spinner { border-color:#4f6540; border-top-color:#9aca6d; border-right-color:#e0b536; }
+:root[data-app-theme="dark"] .app-shell .barcode-lookup-inline-loading { color:#eaf4d9; }
+:root[data-app-theme="dark"] .app-shell .product-flow-message { color:#eaf4d9; border-color:#638253; background:#183b35; }
+:root[data-app-theme="dark"] .app-shell .product-flow-message .text-button { color:#f4d36f; }
+:root[data-app-theme="dark"] .app-shell .product-flow-message > span { color:#eaf4d9; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(h1,h2,h3,h4,p,strong,span,small,label,summary,button) { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(small,.muted) { color:#536374; }

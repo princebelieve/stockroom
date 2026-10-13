@@ -132,6 +132,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
   const page = screen === 'import' ? 'home' : screen.replace('import-', '')
   return <section className="panel full-panel product-intake">
     {page !== 'home' && <button type="button" className="filter-button task-back-button" onClick={() => { if(page==='barcode'&&barcodeReport){setBarcodeReport(null);setMessage('');return} navigate(page === 'save-reference' ? 'import-csv' : 'products') }}>{page === 'save-reference' ? 'Back to CSV import' : page === 'barcode' && barcodeReport ? 'New barcode lookup' : 'Products'}</button>}
+    {busy && message && (page === 'barcode' || page === 'photo' && /barcode|catalogue/i.test(message)) && <div className="barcode-lookup-loading" role="status" aria-live="polite"><span className="barcode-lookup-spinner" aria-hidden="true"/><div><strong>{page === 'photo' ? 'Checking the barcode from your product photo' : 'Looking for a product match'}</strong><p>{message}</p></div></div>}
     {page === 'home' && <nav className="screen-picker screen-picker-buttons" aria-label="Import product task"><button type="button" className="filter-button" onClick={() => navigate('import-csv')}>Import CSV</button>{!compact && <><button type="button" className="filter-button" onClick={() => navigate('import-barcode')}>Find by barcode</button><button type="button" className="filter-button" onClick={() => navigate('import-photo')}>Read product photo</button><button type="button" className="filter-button" onClick={() => navigate('import-reference')}>Find saved reference</button></>}{rows.length > 0 && <button type="button" className="filter-button" onClick={() => navigate('import-review')}>Review imported products ({rows.length})</button>}</nav>}
     <fieldset disabled={busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
       <div className="payment-options">
@@ -190,7 +191,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
       </>}
       {page === 'review' && rows.length === 0 && <button type="button" className="filter-button" onClick={() => navigate('import-csv')}>Import CSV</button>}
     </fieldset>
-    {message && <p role="status">{message}</p>}
+    {message && !(busy && (page === 'barcode' || page === 'photo' && /barcode|catalogue/i.test(message))) && <p role="status">{message}</p>}
     {page === 'review' && /^Imported \d+ products?\.$/.test(message) && <button type="button" className="primary-button" onClick={() => navigate('products')}>Products</button>}
   </section>
 }

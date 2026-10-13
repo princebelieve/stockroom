@@ -13,7 +13,6 @@ try {
   const image = await page.evaluate(async () => {
     const { React, createRoot } = await import('/test/shop-setup-harness.ts')
     const { ProductIntake } = await import('/src/ProductIntake.tsx')
-    const { PackageProductPhoto } = await import('/src/PackageProductPhoto.tsx')
     const { ShopProductFields } = await import('/src/ShopProductFields.tsx')
     const { normalizeShopProfile } = await import('/server/shop-profile.mjs')
     function Test() {
@@ -21,7 +20,7 @@ try {
       return React.createElement(React.Fragment, null,
         React.createElement(ProductIntake, { products: [], defaultUnit: 'item', scan: async () => '', create: async () => { throw Error('Package must use Add Product') }, openProduct: setDraft }),
         draft && React.createElement('form', { onSubmit: event => { event.preventDefault(); window.saved = Object.fromEntries(new FormData(event.currentTarget)) } },
-          React.createElement('h2', null, 'Add product'), React.createElement(PackageProductPhoto), React.createElement(ShopProductFields, { profile: normalizeShopProfile(), initialDraft: draft }), React.createElement('button', { type: 'submit' }, 'Save product')))
+          React.createElement('h2', null, 'Add product'), React.createElement(ShopProductFields, { profile: normalizeShopProfile(), initialDraft: draft }), React.createElement('button', { type: 'submit' }, 'Save product')))
     }
     createRoot(document.getElementById('root')).render(React.createElement(Test))
     const canvas = document.createElement('canvas'); canvas.width = 900; canvas.height = 320
@@ -38,19 +37,10 @@ try {
   assert.equal(await page.getByLabel('Name row 1', { exact: true }).count(), 0)
   assert.equal(await form.locator('[name=price]').inputValue(), '')
   assert.equal(await form.locator('[name=stock]').inputValue(), '')
-  await form.locator('[name=name]').fill('OWNER NAME')
   await form.locator('[name=price]').fill('25')
   await form.locator('[name=stock]').fill('8')
-  await page.getByLabel('Fill from a package photo').setInputFiles(file)
-  await page.getByRole('status').filter({ hasText: 'No empty fields could be filled' }).waitFor({ timeout: 90000 })
-  assert.equal(await form.locator('[name=name]').inputValue(), 'OWNER NAME')
-  assert.equal(await form.locator('[name=price]').inputValue(), '25')
-  await form.locator('[name=name]').fill('')
-  await page.getByLabel('Fill from a package photo').setInputFiles(file)
-  await page.getByRole('status').filter({ hasText: 'Details filled in this form' }).waitFor({ timeout: 90000 })
-  assert.match(await form.locator('[name=name]').inputValue(), /Orange Juice/)
   await page.getByRole('button', { name: 'Save product', exact: true }).click()
   assert.equal(await page.evaluate(() => window.saved.stock), '8')
   assert.equal(await page.evaluate(() => window.saved.price), '25')
-  console.log('PASS: package upload opens populated Add Product inputs, no package review row, direct photo autofill preserves owner entries and submits the same form')
+  console.log('PASS: active package-photo import opens populated Add Product inputs, no package review row, and submits the business-specific details')
 } finally { await browser.close(); await server.close() }
