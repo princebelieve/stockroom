@@ -1,7 +1,7 @@
 import { nextSettingsTimestamp } from '../../server/settings-sync.mjs'
 import { birthdayValue } from '../../server/customer-birthdays.mjs'
 import { isBranchOperation } from '../../server/branch-access.mjs'
-import { parsePermissions, canRequest, hasPermission } from '../../server/staff-permissions.mjs'
+import { parsePermissions, canRequest, hasPermission, ownStaffActivity } from '../../server/staff-permissions.mjs'
 import { conflictReview, conflictReviewSchema } from '../../server/sync-conflict-review.mjs'
 import { requiresChurchSync } from '../../server/church-ledger.mjs'
 import { requiresReservationSync } from '../../server/restaurant-reservations.mjs'
@@ -570,7 +570,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   const productEdit = path.match(/^\/api\/products\/([^/]+)$/)
   if (productEdit && method === 'PUT') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const input = await body(init), current = (await db.query('SELECT p.id,p.name,p.sku,p.barcode,p.category,COALESCE(i.stock,0) AS stock,COALESCE(i.reorder_point,p.reorder_point) AS reorder,p.price,p.cost_price AS cost,p.unit,p.custom_values AS customValues FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=? WHERE p.id=?',[branchId,productEdit[1]])).values?.[0]
+    const input = await body(init), current = (await db.query('SELECT p.id,p.name,p.sku,p.barcode,p.category,COALESCE(i.stock,0) AS stock,COALESCE(i.reorder_point,p.reorder_point) AS reorder,p.price,p.cost_price AS cost,p.unit,p.custom_values AS customValues FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=? WHERE p.id=?',[branchId,productEdit[1]])).values?.[0] as { id:string; name:string; sku:string; barcode:string; category:string; stock:number; reorder:number; price:number; cost:number; unit:string; customValues:string|null } | undefined
     if (!current) return error('Product not found.',404)
     const product = { ...current, name:String(input.name||'').trim(), sku:String(input.sku||'').trim(), barcode:String(input.barcode||'').trim(), category:String(input.category||'').trim(), unit:String(input.unit||'').trim(), reorder:Number(input.reorder), price:Number(input.price), cost:Number(input.cost||0) }
     if (!product.name || !product.sku || !product.category || !product.unit || [product.reorder,product.price,product.cost].some(value=>!Number.isFinite(value)||value<0)) return error('Product fields are invalid.')
@@ -703,12 +703,12 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     try {
       const headers=new Headers(init?.headers)
       const profile=normalizeShopProfile((await db.query('SELECT shop_profile FROM app_settings WHERE id=1')).values?.[0]?.shop_profile)
-      return json(await salesHistory(db,{branchId,timeZone:profile.reportingTimeZone,query:decodeURIComponent(headers.get('X-History-Query')||''),from:headers.get('X-History-From')||'',to:headers.get('X-History-To')||'',order:headers.get('X-History-Order')||'newest',page:Number(headers.get('X-History-Page')||0)}))
+      return json(await salesHistory(db,{branchId,...(user.role==='cashier'?{staffId:user.id}:{}),timeZone:profile.reportingTimeZone,query:decodeURIComponent(headers.get('X-History-Query')||''),from:headers.get('X-History-From')||'',to:headers.get('X-History-To')||'',order:headers.get('X-History-Order')||'newest',page:Number(headers.get('X-History-Page')||0)}))
     } catch(caught) {return error(caught instanceof Error ? caught.message : 'Could not load history.',400)}
   }
   if (path === '/api/sales' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    const sales = (await db.query('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_name AS staffName, created_at AS createdAt FROM sales WHERE branch_id = ? ORDER BY created_at DESC', [branchId])).values || []
+    const sales = (await db.query(`SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE branch_id = ? ${user.role==='cashier'?'AND staff_id = ?':''} ORDER BY created_at DESC`, user.role==='cashier'?[branchId,user.id]:[branchId])).values || []
     for (const sale of sales) sale.paymentDetails = sale.paymentDetails ? JSON.parse(String(sale.paymentDetails)) : undefined
     for (const sale of sales) sale.items = (await db.query('SELECT product_id AS productId, product_name AS productName, quantity, unit_cost AS unitCost, batch_allocations AS batchAllocations, unit_price AS unitPrice FROM sale_items WHERE sale_id = ?', [sale.id])).values || []
     return json({ sales })
@@ -781,7 +781,8 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (!(isManager(user)||(user.permissions&&canRequest(user,path,method)))) return error('Owner or admin access required.', 403)
     const headers = new Headers(init?.headers), from = headers.get('X-Activity-From') || '', to = headers.get('X-Activity-To') || ''
     if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) return error('A valid start and end date are required.')
-    return json(await collectStaffActivity(db, branchId, new Date(from).toISOString(), new Date(to).toISOString()))
+    const activity=await collectStaffActivity(db, branchId, new Date(from).toISOString(), new Date(to).toISOString())
+    return json(user.role==='cashier'?ownStaffActivity(activity,user.id):activity)
   }
   if (path === '/api/owner/metrics' && method === 'GET') {
     if (!isManager(user)) return error('Admin access required.', 403)

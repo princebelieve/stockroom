@@ -627,8 +627,9 @@
 .appearance-theme-switch input[role="switch"]::after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:white; box-shadow:0 1px 4px #172b4540; transition:transform .18s; }
 .appearance-theme-switch input[role="switch"]:checked { border-color:var(--app-brand-color); background:var(--app-brand-color); }
 .appearance-theme-switch input[role="switch"]:checked::after { transform:translateX(20px); }
-:root { --app-brand-color:#08b9f4; --app-brand-on-color:#071525; }
+:root { --app-brand-color:#08b9f4; --app-brand-on-color:#071525; --mobile-app-header-color:#fffdf8; --mobile-app-header-text:#17324d; }
 :root[data-app-theme="dark"] { color-scheme:dark; --paper:#0a1530; --ink:#e8f2ff; --muted:#9fb2d0; --line:#29436c; --mint:#12284c; --lime:var(--app-brand-color); --brand-wash:#11254a; --brand-wash-alt:#171e46; --brand-primary:var(--app-brand-color); --brand-hover:color-mix(in srgb,var(--app-brand-color) 76%,#276bff); --brand-dark:#06112a; --brand-on-primary:#041329; --brand-on-hover:#041329; }
+:root[data-app-theme="dark"] { --mobile-app-header-color:#06112a; --mobile-app-header-text:#f2f7ff; }
 :root[data-app-theme="dark"] body { color:#e8f2ff; background:#050d20; }
 :root[data-app-theme="dark"] .app-shell { color:#e8f2ff; background:radial-gradient(ellipse at 72% -10%,color-mix(in srgb,var(--app-brand-color) 18%,transparent),transparent 42%),linear-gradient(145deg,#071127,#0b1731 54%,#09132a); }
 :root[data-app-theme="dark"] .app-shell .main-content { color:#e8f2ff; background:radial-gradient(ellipse at 90% 0%,color-mix(in srgb,var(--app-brand-color) 10%,transparent),transparent 36%),linear-gradient(145deg,#0a1530e8,#0b1833e6); }
@@ -808,19 +809,43 @@
 :root[data-app-theme="dark"] .app-shell :is(.report-cost-warning,.stock-report-alert,.payment-note,.auth-error,.cloud-setup-status) :is(p,strong,span,small) { color:#ffe6bb; }
 :root[data-app-theme="dark"] .app-shell :is(.subscription-plan-options span,.subscription-summary .positive,.wallet-positive,.status-completed,.status-paid,.cloud-setup-status.ready) { color:#8de6b8; }
 :root[data-app-theme="dark"] .app-shell :is(.role-badge,.role-badge.owner,.role-badge.admin,.transaction-dot,.product-icon) { border-color:#42658e; color:#dbeaff; background:#17345a; }
+:root[data-app-theme="dark"] .app-shell .inventory-product-card { color:#eaf3ff; border-color:#38577d; background:linear-gradient(145deg,#142b4f,#0d1d38); }
+:root[data-app-theme="dark"] .app-shell .inventory-product-card-low { border-color:#8b7048; background:linear-gradient(145deg,#342d22,#211f20); }
+:root[data-app-theme="dark"] .app-shell .inventory-product-card > header > div:first-child > span,
+:root[data-app-theme="dark"] .app-shell .inventory-product-card > footer > small,
+:root[data-app-theme="dark"] .app-shell .inventory-product-prices span { color:#b7c9e0; }
+:root[data-app-theme="dark"] .app-shell .inventory-product-stock,
+:root[data-app-theme="dark"] .app-shell .inventory-product-prices > div { color:#eaf3ff; background:#102442; }
+:root[data-app-theme="dark"] .app-shell .pos-flow-steps { background:transparent; }
+:root[data-app-theme="dark"] .app-shell .pos-flow-steps button { color:#d1def0; border-color:#45658e; background:#102442; }
+:root[data-app-theme="dark"] .app-shell .pos-flow-steps button span { color:#d1def0; background:#244163; }
+:root[data-app-theme="dark"] .app-shell .pos-flow-steps button.complete { color:#dff5e8; border-color:#397b69; background:#153a39; }
+:root[data-app-theme="dark"] .app-shell .pos-flow-steps button:disabled { opacity:.72; }
+:root[data-app-theme="dark"] .app-shell .pos-flow-steps button.active { color:#fff; border-color:#208ed0; background:#075dbf; }
+:root[data-app-theme="dark"] .app-shell .pos-flow-steps button.active span { color:#eaf7ff; background:#12365d; }
+:root[data-app-theme="dark"] .app-shell .account-deletion-warning { color:#ffe4df; border-color:#81534e; background:#392522; }
+:root[data-app-theme="dark"] .app-shell .account-deletion-request small { color:#b7c9e0; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(h1,h2,h3,h4,p,strong,span,small,label,summary,button) { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(small,.muted) { color:#536374; }
-:root .app-shell .mobile-app-header { color:var(--app-brand-on-color); background:var(--app-brand-color); border-bottom-color:color-mix(in srgb,var(--app-brand-on-color) 25%,transparent); }
+:root .app-shell .mobile-app-header { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); border-bottom-color:color-mix(in srgb,var(--mobile-app-header-text) 16%,transparent); }
 :root .app-shell .mobile-app-brand,
 :root .app-shell .mobile-app-brand strong,
-:root .app-shell .mobile-app-brand span { color:var(--app-brand-on-color); }
+:root .app-shell .mobile-app-brand span { color:var(--mobile-app-header-text); }
 :root .app-shell .mobile-app-brand span { opacity:.78; }
 :root .app-shell .mobile-header-sync,
 :root .app-shell .mobile-header-help>summary,
-:root .app-shell .mobile-app-header .notification-center button { color:var(--app-brand-on-color); border-color:color-mix(in srgb,var(--app-brand-on-color) 38%,transparent); background:color-mix(in srgb,var(--app-brand-color) 84%,white); }
+:root .app-shell .mobile-app-header .notification-center button { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:transparent; }
+:root .app-shell .mobile-header-sync,
+:root .app-shell .mobile-header-help>summary { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 92%,var(--mobile-app-header-text)); }
+:root .app-shell .mobile-app-actions .app-theme-toggle { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 34%,transparent); background:transparent; }
+:root .app-shell .mobile-app-actions .app-theme-toggle-track { border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 88%,var(--mobile-app-header-text)); }
+:root .app-shell .mobile-app-actions .app-theme-toggle-thumb { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
+:root .app-shell .mobile-app-actions .app-theme-toggle[aria-checked="true"] { border-color:var(--app-brand-color); background:color-mix(in srgb,var(--app-brand-color) 18%,var(--mobile-app-header-color)); }
+:root .app-shell .mobile-app-actions .app-theme-toggle[aria-checked="true"] .app-theme-toggle-track { border-color:var(--app-brand-color); background:color-mix(in srgb,var(--app-brand-color) 42%,var(--mobile-app-header-color)); }
+:root .app-shell .mobile-app-actions .app-theme-toggle[aria-checked="true"] .app-theme-toggle-thumb { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
 :root .app-shell .mobile-header-help>summary { box-shadow:inset 0 1px #ffffff7a,0 2px 6px #07152522; }
 :root .app-shell .mobile-header-sync-feedback { color:#14263c; background:#f5f8fc; }
-:root[data-app-theme="dark"] .app-shell .mobile-app-header { color:var(--app-brand-on-color); background:var(--app-brand-color); }
-:root[data-app-theme="dark"] .app-shell .mobile-app-header :is(.mobile-app-brand,.mobile-app-brand strong,.mobile-app-brand span,.mobile-header-sync,.mobile-header-help>summary,.notification-center button) { color:var(--app-brand-on-color); }
+:root[data-app-theme="dark"] .app-shell .mobile-app-header { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
+:root[data-app-theme="dark"] .app-shell .mobile-app-header :is(.mobile-app-brand,.mobile-app-brand strong,.mobile-app-brand span,.mobile-header-sync,.mobile-header-help>summary,.notification-center button) { color:var(--mobile-app-header-text); }
 :root[data-app-theme="dark"] .app-shell .mobile-header-sync-feedback { color:#14263c; background:#f5f8fc; }

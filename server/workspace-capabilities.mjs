@@ -19,6 +19,12 @@ export function workspaceCapabilities(profile) {
   return Object.fromEntries(Object.entries(labels).filter(([key]) => available[key] !== false))
 }
 
+export function defaultCashierPermissions(profile) {
+  const available = workspaceCapabilities(profile)
+  const selling = new Set(['productSales', 'oilSales', 'payments', 'counter', 'restaurant'])
+  return Object.fromEntries(Object.keys(available).map(key => [key, key === 'register' || key === 'sales' || key === 'activity' || selling.has(key)]))
+}
+
 export function workspaceScreenAvailable(profile, screen) {
   const w = businessWorkspace(profile)
   const available = { POS:w.productSales, Oil:w.oil, Payments:w.payments,

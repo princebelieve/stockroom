@@ -1,9 +1,10 @@
 import { businessDayStart, nextBusinessDate } from './report-timezone.mjs'
 
-export async function salesHistory(db, { branchId, organizationId, timeZone = 'UTC', query = '', from = '', to = '', page = 0, pageSize = 50, order = 'newest' }) {
+export async function salesHistory(db, { branchId, organizationId, staffId, timeZone = 'UTC', query = '', from = '', to = '', page = 0, pageSize = 50, order = 'newest' }) {
   const size = Math.min(100, Math.max(1, Number(pageSize) || 50)), index = Math.max(0, Math.floor(Number(page) || 0))
   const where = ['s.branch_id = ?'], params = [branchId]
   if (organizationId) { where.push('s.organization_id = ?'); params.push(organizationId) }
+  if (staffId) { where.push('s.staff_id = ?'); params.push(staffId) }
   if (from) { where.push('s.created_at >= ?'); params.push(businessDayStart(from,timeZone)) }
   if (to) { where.push('s.created_at < ?'); params.push(businessDayStart(nextBusinessDate(to),timeZone)) }
   if (from && to && from > to) throw new Error('Start date must not follow end date.')

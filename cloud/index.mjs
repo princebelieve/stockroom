@@ -2,6 +2,8 @@ import { birthdayValue, birthdayCustomers } from '../server/customer-birthdays.m
 import { businessDate } from '../server/report-timezone.mjs'
 import { retailCatalogue } from '../server/retail-catalogue.mjs'
 import { parsePermissions, hasPermission, operationPermission } from '../server/staff-permissions.mjs'
+import { defaultCashierPermissions } from '../server/workspace-capabilities.mjs'
+import { normalizeShopProfile } from '../server/shop-profile.mjs'
 import { oilPricing } from '../server/oil-pricing.mjs'
 import { validateChurchRecord, requiresChurchSync } from '../server/church-ledger.mjs'
 import { reservationBookId, validateReservationBook, validateReservationArchive, checkReservationOpening, requiresReservationSync } from '../server/restaurant-reservations.mjs'
@@ -644,7 +646,9 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request)
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
       if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 4 || password.length > 256 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“32 character username, and a password of 4–256 characters.' })
-      const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, permissions:{}, operationalAccess:false, passwordHash: hashPassword(password), createdAt: new Date() }
+      const savedSettings = await businessSettings.findOne({ businessId: claims.businessId }, { projection: { 'settings.shopProfile': 1 } })
+      const permissions = role === 'cashier' ? defaultCashierPermissions(normalizeShopProfile(savedSettings?.settings?.shopProfile)) : {}
+      const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, permissions, operationalAccess:Object.values(permissions).some(Boolean), passwordHash: hashPassword(password), createdAt: new Date() }
       try { const created = await accounts.insertOne(staff); staff._id = created.insertedId } catch (error) {
         if (error?.code === 11000) {
           const duplicate = error.keyPattern?.username ? 'username' : error.keyPattern?.email ? 'contact email' : 'staff account'

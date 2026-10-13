@@ -1,4 +1,4 @@
-import { canRequest, hasPermission } from './staff-permissions.mjs'
+import { canRequest, hasPermission, ownStaffActivity } from './staff-permissions.mjs'
 import { isBranchOperation, hasActiveBranchAccess } from './branch-access.mjs'
 import { updateCustomerBirthday, setStaffPermissions } from './db.mjs'
 import { cloudSetStaffPermissions } from './cloud-auth.mjs'
@@ -214,12 +214,13 @@ const server = createServer(async (request, response) => {
     try {
       const db={query:async(sql,params=[])=>({values:database.prepare(sql).all(...params)})}
       const profile=(await getSettings()).shopProfile
-      return sendJson(response,200,await salesHistory(db,{organizationId:user.organizationId,branchId:requestBranch(request),timeZone:profile?.reportingTimeZone || 'UTC',query:decodeURIComponent(String(request.headers['x-history-query']||'')),from:String(request.headers['x-history-from']||''),to:String(request.headers['x-history-to']||''),order:String(request.headers['x-history-order']||'newest'),page:Number(request.headers['x-history-page']||0)}))
+      return sendJson(response,200,await salesHistory(db,{organizationId:user.organizationId,branchId:requestBranch(request),...(user.role==='cashier'?{staffId:user.id}:{}),timeZone:profile?.reportingTimeZone || 'UTC',query:decodeURIComponent(String(request.headers['x-history-query']||'')),from:String(request.headers['x-history-from']||''),to:String(request.headers['x-history-to']||''),order:String(request.headers['x-history-order']||'newest'),page:Number(request.headers['x-history-page']||0)}))
     } catch(error) {return sendJson(response,400,{error:error.message})}
   }
   if (request.method === 'GET' && request.url === '/api/sales') {
-    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
-    return sendJson(response, 200, { sales: await listSales(100, requestBranch(request)) })
+    const user=sessionUser(request)
+    if (!canOperate(user)) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return sendJson(response, 200, { sales: await listSales(100, requestBranch(request), user.role==='cashier'?user.id:'') })
   }
   if (request.method === 'GET' && request.url === '/api/sales/voids') {
     if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
@@ -341,7 +342,8 @@ const server = createServer(async (request, response) => {
     if (!user || !(user.permissions?canRequest(user,request.url||'',request.method):['owner','admin'].includes(user.role))) return sendJson(response, 403, { error: 'Access required.' })
     const from = String(request.headers['x-activity-from'] || ''), to = String(request.headers['x-activity-to'] || '')
     if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(from) >= Date.parse(to)) return sendJson(response, 400, { error: 'A valid start and end date are required.' })
-    return sendJson(response, 200, getStaffActivity(requestBranch(request), new Date(from).toISOString(), new Date(to).toISOString()))
+    const activity=getStaffActivity(requestBranch(request), new Date(from).toISOString(), new Date(to).toISOString())
+    return sendJson(response, 200, user.role==='cashier'?ownStaffActivity(activity,user.id):activity)
   }
   if (request.method === 'GET' && request.url === '/api/reports/sales.csv') {
     const user = sessionUser(request)
@@ -385,7 +387,7 @@ const server = createServer(async (request, response) => {
         const configured = await getCloudConfiguration()
         await cloudOwnerForBusiness(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), configured.businessId)
         const cloud = await cloudCreateStaff(String(request.headers['x-cloud-access-token'] || input.cloudAccessToken || ''), input)
-        return sendJson(response, 201, await createUser({ ...input, id: cloud.account.id, createdAt: cloud.account.createdAt || new Date().toISOString() }))
+        return sendJson(response, 201, await createUser({ ...input, permissions: cloud.account.permissions, operationalAccess: cloud.account.operationalAccess, id: cloud.account.id, createdAt: cloud.account.createdAt || new Date().toISOString() }))
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }

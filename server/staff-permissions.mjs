@@ -7,6 +7,7 @@ export function effectivePermissions(user) {
  const all=user?.role==='owner'||user?.role==='admin'; const operational=all||user?.operationalAccess; const selling=['productSales','oilSales','payments','counter','restaurant','register'];return Object.fromEntries(Object.keys(staffCapabilities).map(key=>[key,Boolean(all||selling.includes(key)||(operational&&!['reports','activity','configuration'].includes(key)))]))
 }
 export function hasPermission(user,key){return Boolean(user&&(user.role==='owner'||effectivePermissions(user)[key]))}
+export function ownStaffActivity(activity,staffId){return {...activity,staff:activity.staff.filter(row=>row.staffId===staffId),events:activity.events.filter(row=>row.staffId===staffId)}}
 export function screenPermission(screen){return {POS:'productSales',RetailOrders:'productSales',Oil:'oilSales',Payments:'payments',Counter:'counter',Restaurant:'restaurant',Register:'register',Wallet:'customers',Inventory:'inventory',Stocktake:'stocktake',Movements:'movements',Sales:'sales',Reports:'reports',Activity:'activity',Settings:'configuration',Device:'configuration',Sync:'configuration',Owner:'reports',Display:'productSales'}[screen]}
 export function routePermission(path,method='GET',input={}){
  path=path.split('?')[0]

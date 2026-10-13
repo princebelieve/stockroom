@@ -558,9 +558,11 @@ export function createUser(input) {
   // SQLite retains a non-null unique email column for compatibility with
   // existing installations. This internal placeholder is never exposed.
   const storedEmail = email || `${id}@staff.local.invalid`
+  const permissions = parsePermissions(input.permissions || {})
+  const operationalAccess = input.operationalAccess === true || Object.values(permissions || {}).some(Boolean)
   try {
-    database.prepare('INSERT INTO users (id, organization_id, name, email, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, storedEmail, username, hashPassword(password), role, createdAt)
-    database.prepare('UPDATE users SET permissions=? WHERE id=?').run(JSON.stringify(parsePermissions(input.permissions||{})),id)
+    database.prepare('INSERT INTO users (id, organization_id, name, email, username, password_hash, role, operational_access, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, organizationId, name, storedEmail, username, hashPassword(password), role, operationalAccess ? 1 : 0, createdAt)
+    database.prepare('UPDATE users SET permissions=? WHERE id=?').run(JSON.stringify(permissions),id)
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) throw new Error('That email address is already in use.')
     throw error
@@ -669,8 +671,8 @@ export function updateCustomerBirthday(id,input){
  queueSync('customer',id,'upsert',customer);return customer
 }
 
-export function listSales(limit = 100, branchId = 'main') {
-  const sales = database.prepare('SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? AND branch_id = ? ORDER BY created_at DESC LIMIT ?').all(organizationId, branchId, Math.min(Math.max(Number(limit) || 100, 1), 500))
+export function listSales(limit = 100, branchId = 'main', staffId = '') {
+  const sales = database.prepare(`SELECT id, total, payment_method AS paymentMethod, payment_reference AS paymentReference, terminal_provider AS terminalProvider, cash_received AS cashReceived, change_given AS changeGiven, payment_details AS paymentDetails, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sales WHERE organization_id = ? AND branch_id = ? ${staffId ? 'AND staff_id = ?' : ''} ORDER BY created_at DESC LIMIT ?`).all(...(staffId ? [organizationId, branchId, staffId, Math.min(Math.max(Number(limit) || 100, 1), 500)] : [organizationId, branchId, Math.min(Math.max(Number(limit) || 100, 1), 500)]))
   const itemQuery = database.prepare('SELECT product_id AS productId, product_name AS productName, quantity, unit_cost AS unitCost, batch_allocations AS batchAllocations, unit_price AS unitPrice FROM sale_items WHERE sale_id = ? ORDER BY rowid')
   return sales.map((sale) => ({ ...sale, paymentDetails: sale.paymentDetails ? JSON.parse(sale.paymentDetails) : undefined, items: itemQuery.all(sale.id) }))
 }
