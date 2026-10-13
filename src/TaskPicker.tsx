@@ -36,12 +36,12 @@ export function TaskPicker({ items, value, onChange, scope }: { items: TaskOptio
         setQuery('')
         requestAnimationFrame(() => inputRef.current?.focus())
       }}>
-        <span>{current.label}</span><ChevronDown size={19} aria-hidden="true" />
+        <span className="task-picker-current"><small>Looking for a screen or task?</small><strong>{current.label}</strong></span><ChevronDown size={19} aria-hidden="true" />
       </button>
       {open && <div className="task-picker-menu">
         <label className="task-picker-search">
           <Search size={18} aria-hidden="true" />
-          <input ref={inputRef} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={`Search ${scope.toLocaleLowerCase()} tasks`} aria-label={`Search ${scope.toLocaleLowerCase()} tasks`} aria-controls="task-picker-options" />
+          <input ref={inputRef} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={`Looking for a screen? Search ${scope.toLocaleLowerCase()} tasks`} aria-label={`Search ${scope.toLocaleLowerCase()} tasks`} aria-controls="task-picker-options" />
         </label>
         <div className="task-picker-options" id="task-picker-options" role="listbox" aria-label={`${scope} tasks`}>
           {filteredItems.length ? filteredItems.map(item => <button type="button" role="option" aria-selected={item.id === current.id} key={item.id} onClick={() => selectTask(item.id)}>

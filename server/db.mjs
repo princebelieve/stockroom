@@ -791,10 +791,11 @@ export function applyRemoteOperations(operations) {
           database.exec('COMMIT')
         } catch (error) { database.exec('ROLLBACK'); throw error }
       } else if (operation.entityType === 'product' && operation.action === 'upsert') {
-        database.prepare(`INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, unit, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sku = excluded.sku, barcode = excluded.barcode, category = excluded.category, reorder_point = excluded.reorder_point, price = excluded.price, unit = excluded.unit, updated_at = excluded.updated_at`)
-          .run(payload.id, organizationId, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, payload.unit, payload.updated || now())
+        database.prepare(`INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sku = excluded.sku, barcode = excluded.barcode, category = excluded.category, reorder_point = excluded.reorder_point, price = excluded.price, cost_price = excluded.cost_price, unit = excluded.unit, updated_at = excluded.updated_at`)
+          .run(payload.id, organizationId, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, Number(payload.cost) || 0, payload.unit, payload.updated || now())
         database.prepare("INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES ('main', ?, ?, ?, ?)").run(payload.id, Number(payload.stock) || 0, Number(payload.reorder) || 0, payload.updated || now())
+        database.prepare('UPDATE branch_inventory SET reorder_point = ?, updated_at = ? WHERE product_id = ?').run(Number(payload.reorder) || 0, payload.updated || now(), payload.id)
         if (payload.customValues != null) database.prepare('UPDATE products SET custom_values = ? WHERE id = ?').run(JSON.stringify(readCustomValues(payload.customValues)), payload.id)
       } else if (operation.entityType === 'branch' && operation.action === 'upsert') {
         database.prepare('INSERT INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address, updated_at=excluded.updated_at').run(payload.id, organizationId, payload.name, payload.address || '', payload.isDefault ? 1 : 0, payload.createdAt || now(), payload.updatedAt || now())
@@ -1089,6 +1090,33 @@ export function createProduct(input, branchId = 'main') {
   const saved = database.prepare('SELECT custom_values AS customValues, id, name, sku, barcode, category, ? AS stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(input.stock, product.id)
   queueSync('product', saved.id, 'upsert', { ...saved, stock: 0 })
   if (Number(input.stock)) queueSync('stock', saved.id, 'adjust', { productId: saved.id, branchId, amount: Number(input.stock), reason: 'initial-stock', updatedAt: product.updated })
+  return saved
+}
+
+export async function updateProduct(productId, input, branchId = 'main') {
+  const current = (await listProducts(branchId)).find(product => product.id === productId)
+  if (!current) throw new Error('Product not found.')
+  const profile = normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile)
+  const product = {
+    ...current,
+    name: String(input.name || '').trim(), sku: String(input.sku || '').trim(), barcode: String(input.barcode || '').trim(),
+    category: String(input.category || '').trim(), unit: String(input.unit || '').trim(),
+    reorder: Number(input.reorder), price: Number(input.price), cost: Number(input.cost || 0),
+  }
+  if (!product.name || !product.sku || !product.category || !product.unit || [product.reorder, product.price, product.cost].some(value => !Number.isFinite(value) || value < 0)) throw new Error('Product fields are invalid.')
+  if (!validQuantity(product.reorder)) throw new Error('Reorder point must have at most three decimals.')
+  validateCoreRequirements(product, profile)
+  const customValues = { ...readCustomValues(current.customValues), ...validateCustomValues(input.customValues, profile) }
+  const updated = now()
+  try {
+    database.prepare('UPDATE products SET name=?,sku=?,barcode=?,category=?,reorder_point=?,price=?,cost_price=?,unit=?,custom_values=?,updated_at=? WHERE id=? AND organization_id=?').run(product.name, product.sku, product.barcode, product.category, product.reorder, product.price, product.cost, product.unit, JSON.stringify(customValues), updated, productId, organizationId)
+  } catch (error) {
+    if (String(error.message).includes('UNIQUE')) throw new Error('That SKU is already in use.')
+    throw error
+  }
+  database.prepare('UPDATE branch_inventory SET reorder_point=?,updated_at=? WHERE product_id=?').run(product.reorder, updated, productId)
+  const saved = { ...product, customValues, updated }
+  queueSync('product', productId, 'upsert', { ...saved, stock: 0 })
   return saved
 }
 

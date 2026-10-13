@@ -771,6 +771,11 @@
 :root:not([data-app-theme="dark"]) .app-shell .overview-stat-grid span { color:#536374; }
 :root:not([data-app-theme="dark"]) .app-shell .overview-stat-grid strong { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell .task-picker-menu { color:#192e49; border-color:color-mix(in srgb,var(--brand-primary) 50%,white); background:linear-gradient(145deg,#fff,#f4f8fc); box-shadow:inset 0 1px #fff,0 18px 42px #1734532b; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-trigger { color:#17324d; border:2px solid color-mix(in srgb,var(--brand-primary) 46%,#50677f); background:linear-gradient(145deg,#fff,#eaf2fb); box-shadow:inset 0 1px #fff,0 4px 14px #1734531c; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-trigger:hover { border-color:var(--brand-primary); background:linear-gradient(145deg,#fff,#dceafb); }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-trigger:focus-visible { outline:3px solid color-mix(in srgb,var(--brand-primary) 35%,transparent); outline-offset:2px; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-current small { color:#43566b; }
+:root:not([data-app-theme="dark"]) .app-shell .task-picker-current strong { color:#17324d; }
 :root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button strong { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell .task-picker-options > button small,

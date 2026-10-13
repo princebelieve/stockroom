@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createProduct, adjustStock, createSale, getSettings, listProducts, exportProductCatalogCsv, updateSettings, storageName } from './repository.mjs'
+import { createProduct, updateProduct, adjustStock, createSale, getSettings, listProducts, exportProductCatalogCsv, updateSettings, storageName } from './repository.mjs'
 import { recordStaffRemovalLocal, authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
 import { registerLocalCheckout, getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
@@ -671,6 +671,13 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 201, await createProduct(product, requestBranch(request)))
     })
   }
+
+  const productMatch = request.url?.match(/^\/api\/products\/([^/]+)$/)
+  if (request.method === 'PUT' && productMatch) return readJson(request, response, async input => {
+    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
+    try { return sendJson(response, 200, await updateProduct(productMatch[1], input, requestBranch(request))) }
+    catch (error) { return sendJson(response, error.message === 'Product not found.' ? 404 : 400, { error: error.message }) }
+  })
 
   const fieldsMatch = request.url?.match(/^\/api\/products\/([^/]+)\/custom-values$/)
   if (request.method === 'PUT' && fieldsMatch) return readJson(request, response, async input => {

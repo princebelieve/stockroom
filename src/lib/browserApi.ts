@@ -20,7 +20,7 @@ import { getLocalOwnerMetrics } from './localOwnerMetrics'
 import { validateCounterPayment, validateCounterRetry, counterConflictRecord, requiresCounterSync, requiresRestaurantSync } from '../../server/counter-service.mjs'
 import { handlePos, ensurePos, applyPosRecord } from '../../server/pos-service.mjs'
 import { readCustomValues, validateCustomValues, validateCoreRequirements } from '../../server/shop-fields.mjs'
-import { normalizeShopProfile, validateShopProfile } from '../../server/shop-profile.mjs'
+import { catalogueWorkspaces, normalizeShopProfile, validateShopProfile, workspaceCatalogueSettings } from '../../server/shop-profile.mjs'
 import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
 import { normalizeCashSale } from '../../server/cash.mjs'
 import { loadSubscriptionAccess } from '../../server/subscription-client.mjs'
@@ -141,6 +141,7 @@ async function applyOperation(operation: Operation) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sku=excluded.sku, barcode=excluded.barcode, category=excluded.category, reorder_point=excluded.reorder_point, price=excluded.price, cost_price=excluded.cost_price, unit=excluded.unit, updated_at=excluded.updated_at`,
     [payload.id, payload.name, payload.sku, payload.barcode || '', payload.category, Number(payload.stock) || 0, Number(payload.reorder) || 0, Number(payload.price) || 0, Number(payload.cost) || 0, payload.unit, payload.updated || operation.createdAt])
     await db.run("INSERT OR IGNORE INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES ('main', ?, ?, ?, ?)", [payload.id, Number(payload.stock) || 0, Number(payload.reorder) || 0, payload.updated || operation.createdAt])
+    await db.run('UPDATE branch_inventory SET reorder_point=?,updated_at=? WHERE product_id=?',[Number(payload.reorder)||0,payload.updated||operation.createdAt,payload.id])
     if (payload.customValues != null) await db.run('UPDATE products SET custom_values = ? WHERE id = ?', [JSON.stringify(readCustomValues(payload.customValues)), payload.id])
   } else if (operation.entityType === 'stock' && operation.action === 'adjust') {
     if (!(await db.query('SELECT id FROM products WHERE id = ?', [payload.productId])).values?.length) throw new Error('A stock change references a missing product. Refresh again after the product is synchronized.')
@@ -566,6 +567,21 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     if (product.stock) await queue('stock', product.id, 'adjust', { productId: product.id, branchId, amount: product.stock, reason: 'initial-stock', updatedAt: product.updated })
     return json(product, 201)
   }
+  const productEdit = path.match(/^\/api\/products\/([^/]+)$/)
+  if (productEdit && method === 'PUT') {
+    if (!canOperate(user)) return error('Operational access is required.', 403)
+    const input = await body(init), current = (await db.query('SELECT p.id,p.name,p.sku,p.barcode,p.category,COALESCE(i.stock,0) AS stock,COALESCE(i.reorder_point,p.reorder_point) AS reorder,p.price,p.cost_price AS cost,p.unit,p.custom_values AS customValues FROM products p LEFT JOIN branch_inventory i ON i.product_id=p.id AND i.branch_id=? WHERE p.id=?',[branchId,productEdit[1]])).values?.[0]
+    if (!current) return error('Product not found.',404)
+    const product = { ...current, name:String(input.name||'').trim(), sku:String(input.sku||'').trim(), barcode:String(input.barcode||'').trim(), category:String(input.category||'').trim(), unit:String(input.unit||'').trim(), reorder:Number(input.reorder), price:Number(input.price), cost:Number(input.cost||0) }
+    if (!product.name || !product.sku || !product.category || !product.unit || [product.reorder,product.price,product.cost].some(value=>!Number.isFinite(value)||value<0)) return error('Product fields are invalid.')
+    if (!validQuantity(product.reorder)) return error('Reorder point must have at most three decimals.')
+    let customValues: Record<string,string>
+    try { const profile=normalizeShopProfile((await hydrateBusinessSettings()).shopProfile); validateCoreRequirements(product,profile); customValues={...readCustomValues(current.customValues),...validateCustomValues(input.customValues,profile)} } catch(caught) { return error(caught instanceof Error?caught.message:'Invalid custom fields.') }
+    const updated=now()
+    try { await db.run('UPDATE products SET name=?,sku=?,barcode=?,category=?,reorder_point=?,price=?,cost_price=?,unit=?,custom_values=?,updated_at=? WHERE id=?',[product.name,product.sku,product.barcode,product.category,product.reorder,product.price,product.cost,product.unit,JSON.stringify(customValues),updated,product.id]) } catch { return error('That SKU is already in use.') }
+    await db.run('UPDATE branch_inventory SET reorder_point=?,updated_at=? WHERE product_id=?',[product.reorder,updated,product.id])
+    const saved={...product,customValues,updated}; await queue('product',String(product.id),'upsert',{...saved,stock:0}); return json(saved)
+  }
   const fieldsMatch = path.match(/^\/api\/products\/([^/]+)\/custom-values$/)
   if (fieldsMatch && method === 'PUT') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
@@ -843,6 +859,21 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const snapshot = await hydrateBusinessSettings()
     await queue('settings', 'business', 'upsert', { ...snapshot, shopProfile: profile, paymentPolicy: paymentPolicy(snapshot.paymentPolicy) })
     return json(profile)
+  }
+  if (path === '/api/settings/shop-profile/options' && method === 'POST') {
+    if (!canOperate(user)) return error('Operational access is required.',403)
+    const input=await body(init), workspaceValue=String(input.workspace||''), fieldValue=String(input.field||'')
+    if (!Object.hasOwn(catalogueWorkspaces,workspaceValue) || !['categories','units'].includes(fieldValue)) return error('Choose a valid workspace category or unit list.')
+    const workspace=workspaceValue as keyof typeof catalogueWorkspaces, field=fieldValue as 'categories'|'units'
+    const value=typeof input.value==='string'?input.value.trim().replace(/\s+/g,' '):''
+    if (!value || value.length>(field==='units'?30:80)) return error('Enter a shorter category or unit name.')
+    const profile=normalizeShopProfile((await hydrateBusinessSettings()).shopProfile), settings=workspaceCatalogueSettings(profile,workspace)
+    const match=settings[field].find(item=>item.toLocaleLowerCase()===value.toLocaleLowerCase()), disabledKey=field==='categories'?'disabledCategories':'disabledUnits'
+    if (!match && settings[field].length>=30) return error('This workspace already has 30 choices. Remove one in Workspace catalogues before adding another.')
+    const nextSettings={...settings,[field]:match?settings[field]:[...settings[field],value],[disabledKey]:match?settings[disabledKey].filter(item=>item!==match):settings[disabledKey]}
+    const next=validateShopProfile({...profile,workspaceCatalogues:{...profile.workspaceCatalogues,[workspace]:nextSettings}})
+    await db.run('UPDATE app_settings SET shop_profile=?,updated_at=? WHERE id=1',[JSON.stringify(next),nextSettingsTimestamp((await db.query('SELECT updated_at FROM app_settings WHERE id=1')).values?.[0]?.updated_at)])
+    const snapshot=await hydrateBusinessSettings(); await queue('settings','business','upsert',{...snapshot,shopProfile:next,paymentPolicy:paymentPolicy(snapshot.paymentPolicy)}); return json(next)
   }
   if (path === '/api/settings' && method === 'PUT') {
     if (user.role !== 'owner') return error('Only the owner can change business settings.', 403)

@@ -455,9 +455,14 @@ body { background: var(--brand-wash,#dfece5); }
 .shop-steps { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
 .task-picker { min-width: 0; margin: 0 0 20px; }
 .task-picker-control { position: relative; display: grid; justify-items: center; gap: 7px; width: min(100%, 680px); margin: 0 auto; z-index: 5; }
-.task-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 50px; padding: 0 17px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: #fff; text-align: left; box-shadow: 0 3px 12px #1734530d; }
-.task-picker-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 64px; padding: 8px 17px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: #fff; text-align: left; box-shadow: 0 3px 12px #1734530d; }
+.task-picker-trigger .task-picker-current { display: grid; gap: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-picker-current small { color: var(--muted); font-size: 11px; font-weight: 600; }
+.task-picker-current strong { color: var(--ink); font-size: 15px; }
 .task-picker-trigger[aria-expanded="true"] { border-color: var(--brand-primary); border-radius: 12px 12px 0 0; }
+@keyframes task-picker-attention { 0%, 100% { transform: translateY(0); } 22% { transform: translateY(-3px); } 44% { transform: translateY(0); } 66% { transform: translateY(-2px); } 84% { transform: translateY(0); } }
+.task-picker-trigger { animation: task-picker-attention 900ms ease-out 1; }
+@media (prefers-reduced-motion: reduce) { .task-picker-trigger { animation: none; } }
 .task-picker-menu { position: absolute; top: calc(100% - 1px); left: 0; right: 0; overflow: hidden; border: 1px solid var(--brand-primary); border-radius: 0 0 12px 12px; background: #fff; box-shadow: 0 16px 32px #17345324; }
 .task-picker-search { display: flex; align-items: center; gap: 10px; margin: 12px; padding: 0 12px; min-height: 44px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); }
 .task-picker-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; }

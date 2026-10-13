@@ -25,7 +25,7 @@ function FieldInfo({ label, description }: { label: string; description: string 
   return <details className="product-field-info"><summary aria-label={`What to enter for ${label}`} title={`What to enter for ${label}`}>(i)</summary><div className="product-field-info-copy" role="note">{description}</div></details>
 }
 
-export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales', customOnly = false, values, initialDraft, scanBarcode, lookupApiUrl = '' }: { profile: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; customOnly?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: () => Promise<string | undefined>; lookupApiUrl?: string }) {
+export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales', customOnly = false, readOnlyStock = false, values, initialDraft, scanBarcode, lookupApiUrl = '' }: { profile: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; customOnly?: boolean; readOnlyStock?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: (mode?: 'configured' | 'camera') => Promise<string | undefined>; lookupApiUrl?: string }) {
   const saved = readCustomValues(values)
   const catalogue = workspaceCatalogueOptions(profile, catalogueWorkspace)
   const catalogueSettings = workspaceCatalogueSettings(profile, catalogueWorkspace)
@@ -36,7 +36,6 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
   const [categoryChoice, setCategoryChoice] = useState(() => categories.includes(initialCategory) ? initialCategory : initialCategory ? '__custom__' : '')
   const [unitChoice, setUnitChoice] = useState(() => units.includes(initialUnit) ? initialUnit : '__custom__')
   const [barcodeLookupMessage,setBarcodeLookupMessage]=useState('')
-  const [barcodeLookupSource,setBarcodeLookupSource]=useState('')
   const nameFor = (field: string) => field.startsWith('custom_') ? `custom:${field}` : field
   const idFor = (field: string) => `product-entry-${field}`
   async function lookupBarcode(code: string, codeInput: HTMLInputElement) {
@@ -45,7 +44,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
     const formGrid=codeInput.closest('.form-grid')
     setBarcodeLookupMessage('Checking barcode catalogue...')
     try {
-      const match=validGtin(value)?await lookupProductBarcode(value,lookupApiUrl,profile,catalogueWorkspace,barcodeLookupSource):null
+      const match=validGtin(value)?await lookupProductBarcode(value,lookupApiUrl,profile,catalogueWorkspace):null
       if(!validGtin(value)){setBarcodeLookupMessage('Barcode saved. This format cannot be checked in the online catalogue.');return}
       if(!match?.name){setBarcodeLookupMessage('No catalogue match. Barcode saved; enter the product name and store details.');return}
       const nameInput=formGrid?.querySelector<HTMLInputElement|HTMLTextAreaElement>('input[name="name"], textarea[name="name"]')
@@ -69,7 +68,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
     }
   }
 
-  return <div className="form-grid">{profile.fields.filter(field => field.visible && (!customOnly || field.id.startsWith('custom_'))).map(field => {
+  return <div className="form-grid">{profile.fields.filter(field => (field.visible || ['category', 'unit'].includes(field.id)) && (!customOnly || field.id.startsWith('custom_'))).map(field => {
     const custom = field.id.startsWith('custom_')
     const defaults: Record<string, string | number | undefined> = { unit: profile.unit, stock: '', reorder: '0', cost: '0', price: '', ...Object.fromEntries(Object.entries(initialDraft || {}).filter(([, value]) => typeof value === 'string' || typeof value === 'number')) }
     const name = nameFor(field.id)
@@ -94,11 +93,11 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
       {customUnit && <input aria-label="Specify product unit" name="customUnit" required maxLength={30} defaultValue={initialUnit && !units.includes(initialUnit) ? initialUnit : ''} placeholder="Enter unit, such as roll or hour" />}
     </> : field.type === 'select' ? <select id={inputId} name={name} required={field.required} defaultValue={saved[field.id] || ''}><option value="">{field.placeholder || 'Choose an option'}</option>{field.options.map(option => <option key={option}>{option}</option>)}</select>
       : field.id === 'name' ? <textarea id={inputId} name={name} required={field.required} maxLength={180} defaultValue={defaults[field.id] ?? ''} rows={2} placeholder={field.placeholder} />
-      : <><input id={inputId} name={name} type={field.type} required={field.required} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || initialDraft?.customValues?.[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} onKeyDown={field.id==='barcode'?event=>{if(event.key===scannerSettings().suffix&&event.currentTarget.value.trim()){event.preventDefault();void lookupBarcode(event.currentTarget.value,event.currentTarget)}}:undefined} />{field.id === 'barcode' && scanBarcode && <button type="button" className="filter-button" onClick={async event => { const codeInput=event.currentTarget.parentElement?.querySelector('input'); const code=await scanBarcode(); if(code&&codeInput?.isConnected){codeInput.value=code;codeInput.dispatchEvent(new Event('input',{bubbles:true}));await lookupBarcode(code,codeInput)} }}>Scan product barcode</button>}</>
+      : <><input id={inputId} name={name} type={field.type} required={field.required} readOnly={readOnlyStock && field.id === 'stock'} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || initialDraft?.customValues?.[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} onKeyDown={field.id==='barcode'?event=>{if(event.key===scannerSettings().suffix&&event.currentTarget.value.trim()){event.preventDefault();void lookupBarcode(event.currentTarget.value,event.currentTarget)}}:undefined} />{field.id === 'barcode' && scanBarcode && <button type="button" className="filter-button" onClick={async event => { const codeInput=event.currentTarget.parentElement?.querySelector('input'); const code=await scanBarcode('camera'); if(code&&codeInput?.isConnected){codeInput.value=code;codeInput.dispatchEvent(new Event('input',{bubbles:true}));await lookupBarcode(code,codeInput)} }}>Scan product barcode</button>}</>
 
     return <div className="shop-product-field" key={field.id}>
       <div className="shop-product-field-label"><label htmlFor={inputId}>{field.label}{field.required ? ' *' : ''}</label><FieldInfo label={field.label} description={hint} /></div>
-      {control}{field.id==='barcode'&&<><label className="barcode-inline-source">Online catalogue<select value={barcodeLookupSource} onChange={event=>setBarcodeLookupSource(event.target.value)}><option value="">Automatic best match</option><option>Open Food Facts</option><option>Open Beauty Facts</option><option>Open Pet Food Facts</option><option>Open Products Facts</option><option>UPCitemdb</option><option>EcomSource</option><option>openFDA Drug NDC Directory</option><option>AccessGUDID medical device registry</option></select></label>{barcodeLookupMessage&&<p className="settings-message" role="status">{barcodeLookupMessage}</p>}</>}
+      {control}{field.id==='barcode'&&barcodeLookupMessage&&<p className="settings-message" role="status">{barcodeLookupMessage}</p>}
     </div>
   })}</div>
 }
