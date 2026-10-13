@@ -576,7 +576,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     await db.run('INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)', [product.id, product.name, product.sku, product.barcode, product.category, product.reorder, product.price, product.cost, product.unit, product.updated])
     await db.run('UPDATE products SET custom_values = ? WHERE id = ?', [JSON.stringify(customValues), product.id])
     await db.run('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, ?, ?)', [branchId, product.id, product.stock, product.reorder, product.updated])
-    await queue('product', product.id, 'upsert', { ...product, stock: 0 })
+    await queue('product', product.id, 'upsert', { ...product, stock: 0, ...(typeof input.catalogueContributionDecision === 'boolean' ? { catalogueContributionDecision: input.catalogueContributionDecision } : {}) })
     if (product.stock) await queue('stock', product.id, 'adjust', { productId: product.id, branchId, amount: product.stock, reason: 'initial-stock', updatedAt: product.updated })
     return json(product, 201)
   }

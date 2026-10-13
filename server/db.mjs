@@ -1104,7 +1104,7 @@ export function createProduct(input, branchId = 'main') {
   database.prepare('INSERT INTO branch_inventory (branch_id, product_id, stock, reorder_point, updated_at) VALUES (?, ?, ?, ?, ?)').run(branchId, product.id, input.stock, input.reorder, product.updated)
   database.prepare('UPDATE products SET custom_values = ? WHERE id = ?').run(JSON.stringify(customValues), product.id)
   const saved = database.prepare('SELECT custom_values AS customValues, id, name, sku, barcode, category, ? AS stock, reorder_point AS reorder, price, cost_price AS cost, unit, updated_at AS updated FROM products WHERE id = ?').get(input.stock, product.id)
-  queueSync('product', saved.id, 'upsert', { ...saved, stock: 0 })
+  queueSync('product', saved.id, 'upsert', { ...saved, stock: 0, ...(typeof input.catalogueContributionDecision === 'boolean' ? { catalogueContributionDecision: input.catalogueContributionDecision } : {}) })
   if (Number(input.stock)) queueSync('stock', saved.id, 'adjust', { productId: saved.id, branchId, amount: Number(input.stock), reason: 'initial-stock', updatedAt: product.updated })
   return saved
 }

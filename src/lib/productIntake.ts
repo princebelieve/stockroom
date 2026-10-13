@@ -58,9 +58,11 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
   try {
     const base = apiUrl.replace(/\/$/, '')
     const query = `barcode=${encodeURIComponent(barcode)}&industry=${encodeURIComponent(profile?.industry || 'general')}${source ? `&source=${encodeURIComponent(source)}` : ''}`
-    const endpoint = base && base !== '/api/cloud'
-      ? `${base}/v1/public/product-lookup?${query}`
-      : `/api/product-lookup?${query}`
+    const endpoint = base === '/api/cloud'
+      ? `/api/cloud/v1/public/product-lookup?${query}`
+      : base
+        ? `${base}/v1/public/product-lookup?${query}`
+        : `/api/product-lookup?${query}`
     const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin', cache: 'no-store' })
     if (response.status === 404) {
       const failure = await response.json().catch(() => ({}))

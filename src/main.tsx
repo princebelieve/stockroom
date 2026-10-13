@@ -302,13 +302,13 @@ async function probeOverviewEndpoint(path: string, headers: Record<string,string
   }
 }
 type Expense = { id: string; category: string; description: string; amount: number; incurredAt: string; staffId?: string; staffName?: string }
-type InlinePromptRequest = { title: string; message: string; label?: string; inputType?: 'text' | 'password'; initialValue?: string; minLength?: number; resolve: (value: string | null) => void }
+type InlinePromptRequest = { title: string; message: string; label?: string; inputType?: 'text' | 'password'; initialValue?: string; minLength?: number; choices?: { label: string; value: string }[]; resolve: (value: string | null) => void }
 
 function InlinePrompt({ request, onClose }: { request: InlinePromptRequest; onClose: (value: string | null) => void }) {
   const [value, setValue] = useState(request.initialValue || '')
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => { input.current?.focus() }, [])
-  return <div className="modal-backdrop" onMouseDown={() => onClose(null)}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="inline-prompt-title" onMouseDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); onClose(value) }}><div className="modal-head"><div><h2 id="inline-prompt-title">{request.title}</h2><p>{request.message}</p></div><button type="button" className="icon-button" aria-label="Cancel" onClick={() => onClose(null)}><X size={19} /></button></div><label>{request.label || 'Value'}<input ref={input} type={request.inputType || 'text'} value={value} minLength={request.minLength} required onChange={event => setValue(event.target.value)} /></label><div className="report-actions"><button type="button" className="filter-button" onClick={() => onClose(null)}>Cancel</button><button className="primary-button" type="submit">Continue</button></div></form></div>
+  return <div className="modal-backdrop" onMouseDown={() => onClose(null)}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="inline-prompt-title" onMouseDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); onClose(value) }}><div className="modal-head"><div><h2 id="inline-prompt-title">{request.title}</h2><p>{request.message}</p></div><button type="button" className="icon-button" aria-label="Cancel" onClick={() => onClose(null)}><X size={19} /></button></div>{request.choices ? <div className="report-actions">{request.choices.map(choice => <button type="button" key={choice.value} className={choice.value === 'yes' ? 'primary-button' : 'filter-button'} onClick={() => onClose(choice.value)}>{choice.label}</button>)}</div> : <><label>{request.label || 'Value'}<input ref={input} type={request.inputType || 'text'} value={value} minLength={request.minLength} required onChange={event => setValue(event.target.value)} /></label><div className="report-actions"><button type="button" className="filter-button" onClick={() => onClose(null)}>Cancel</button><button className="primary-button" type="submit">Continue</button></div></>}</form></div>
 }
 
 function PublicLandingLink() {
@@ -513,6 +513,12 @@ function App() {
     }
   }, [])
   const [settingsMessage, setSettingsMessage] = useState('')
+  const [catalogueContributionMode, setCatalogueContributionMode] = useState<'auto' | 'never' | 'ask'>(() => {
+    const saved = localStorage.getItem(`stockroom-catalogue-contribution:${localStorage.getItem('stockroom-business-id') || ''}`)
+    return saved === 'auto' || saved === 'ask' ? saved : 'never'
+  })
+  const [catalogueContributionModeDraft, setCatalogueContributionModeDraft] = useState(catalogueContributionMode)
+  const [catalogueModeLoaded, setCatalogueModeLoaded] = useState(false)
   const [inlinePrompt, setInlinePrompt] = useState<InlinePromptRequest | null>(null)
   function requestInlinePrompt(options: Omit<InlinePromptRequest, 'resolve'>) {
     return new Promise<string | null>(resolve => setInlinePrompt({ ...options, resolve }))
@@ -805,6 +811,62 @@ function App() {
   }
   const subscriptionApiUrl = !isBrowserPwa() && !isNativeMobile() ? '/api/cloud' : __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
   const linkedBusinessId = businessIdFromAccessToken(cloudAccessToken) || user?.organizationId || ''
+  useEffect(() => {
+    if (!user?.organizationId) return
+    let cancelled = false
+    const cacheKey = `stockroom-catalogue-contribution:${user.organizationId}`
+    const cached = localStorage.getItem(cacheKey)
+    if (cached === 'auto' || cached === 'ask' || cached === 'never') { setCatalogueContributionMode(cached); setCatalogueContributionModeDraft(cached) }
+    setCatalogueModeLoaded(false)
+    void cloudRequest(subscriptionApiUrl, '/v1/business/catalogue-contribution', {}, (access, refresh) => {
+      setCloudAccessToken(access)
+      localStorage.setItem('stockroom-cloud-access-token', access)
+      localStorage.setItem('stockroom-cloud-refresh-token', refresh)
+    }, cloudAccessToken).then(result => {
+      if (cancelled || !['auto', 'never', 'ask'].includes(result.mode)) return
+      setCatalogueContributionMode(result.mode)
+      setCatalogueContributionModeDraft(result.mode)
+      localStorage.setItem(cacheKey, result.mode)
+    }).catch(() => undefined).finally(() => { if (!cancelled) setCatalogueModeLoaded(true) })
+    return () => { cancelled = true }
+  }, [user?.organizationId, subscriptionApiUrl, cloudAccessToken])
+  async function saveCatalogueContributionMode(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const mode = String(form.get('catalogueContributionMode') || '')
+    if (!['auto', 'never', 'ask'].includes(mode)) throw new Error('Choose how this business shares new products.')
+    const saved = await cloudRequest(subscriptionApiUrl, '/v1/business/catalogue-contribution', { method: 'PUT', body: JSON.stringify({ mode }) }, (access, refresh) => {
+      setCloudAccessToken(access)
+      localStorage.setItem('stockroom-cloud-access-token', access)
+      localStorage.setItem('stockroom-cloud-refresh-token', refresh)
+    }, cloudAccessToken)
+    setCatalogueContributionMode(saved.mode)
+    setCatalogueContributionModeDraft(saved.mode)
+    localStorage.setItem(`stockroom-catalogue-contribution:${user!.organizationId}`, saved.mode)
+    setSettingsMessage('Product catalogue sharing preference saved for this business.')
+  }
+  async function askCatalogueContribution(name: string, barcode: string): Promise<boolean | null> {
+    let mode = catalogueContributionMode
+    if (!catalogueModeLoaded && (cloudAccessToken || localStorage.getItem('stockroom-cloud-refresh-token'))) {
+      try {
+        const result = await cloudRequest(subscriptionApiUrl, '/v1/business/catalogue-contribution', {}, (access, refresh) => {
+          setCloudAccessToken(access)
+          localStorage.setItem('stockroom-cloud-access-token', access)
+          localStorage.setItem('stockroom-cloud-refresh-token', refresh)
+        }, cloudAccessToken)
+        if (['auto', 'never', 'ask'].includes(result.mode)) {
+          mode = result.mode
+          setCatalogueContributionMode(mode)
+          setCatalogueContributionModeDraft(mode)
+          localStorage.setItem(`stockroom-catalogue-contribution:${user?.organizationId || ''}`, mode)
+        }
+      } catch { /* The last saved local preference remains usable offline. */ }
+    }
+    if (mode === 'auto') return true
+    if (mode !== 'ask' || !validGtin(barcode)) return false
+    const choice = await requestInlinePrompt({ title: 'Contribute this product?', message: `Help other Stockroom businesses identify ${name} (${barcode}). Only its name, barcode and recognized general details are shared. Your business prices, stock, SKU, category and unit stay private.`, choices: [{ label: 'No, keep it private', value: 'no' }, { label: 'Yes, contribute', value: 'yes' }] })
+    return choice === null ? null : choice === 'yes'
+  }
   useEffect(() => {
     if (!user) return
     const url = new URL(window.location.href)
@@ -1476,7 +1538,10 @@ function App() {
     const unit = unitChoice === '__custom__' ? String(data.get('customUnit') || '').trim() : unitChoice
     if (!unit) throw new Error('Enter the unit used to count this product.')
     if (categoryChoice === '__custom__' && !category.trim()) throw new Error('Enter the product category.')
-    const input = { customValues: validateCustomValues(collectCustomValues(data), shopProfile), name, sku: String(data.get('sku') || '').trim() || deriveSku(name), barcode: String(data.get('barcode') || '').trim(), category, stock: Number(data.get('stock')), reorder: Number(data.get('reorder')), price: Number(data.get('price')), cost: Number(data.get('cost') || 0), unit }
+    const barcode = String(data.get('barcode') || '').trim()
+    const catalogueContributionDecision = await askCatalogueContribution(name, barcode)
+    if (catalogueContributionDecision === null) return
+    const input = { customValues: validateCustomValues(collectCustomValues(data), shopProfile), name, sku: String(data.get('sku') || '').trim() || deriveSku(name), barcode, category, stock: Number(data.get('stock')), reorder: Number(data.get('reorder')), price: Number(data.get('price')), cost: Number(data.get('cost') || 0), unit, catalogueContributionDecision }
     let rejected = false
     let savedProduct: Product | undefined
     try {
@@ -1523,7 +1588,9 @@ function App() {
     if (catalogueSaveProblem) setProductFlowMessage(`Product saved. The new choice is available on this device, but could not be saved to the workspace settings: ${catalogueSaveProblem}`)
   }
   async function importProduct(input: { customValues?: Record<string, string>; name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number }) {
-    const payload = { ...input, sku: input.sku?.trim() || deriveSku(input.name), barcode: input.barcode || '', category: input.category || '', unit: input.unit || defaultUnit, price: input.price || 0, cost: input.cost || 0, stock: input.stock || 0, reorder: input.reorder || 0 }
+    const catalogueContributionDecision = await askCatalogueContribution(input.name, input.barcode || '')
+    if (catalogueContributionDecision === null) throw new Error('Product upload cancelled before saving.')
+    const payload = { ...input, sku: input.sku?.trim() || deriveSku(input.name), barcode: input.barcode || '', category: input.category || '', unit: input.unit || defaultUnit, price: input.price || 0, cost: input.cost || 0, stock: input.stock || 0, reorder: input.reorder || 0, catalogueContributionDecision }
     const response = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(payload) })
     if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || 'Could not save product.') }
     const product = await response.json() as Product
@@ -1786,6 +1853,7 @@ function App() {
   const settingsSlides: TaskOption[] = [
     ...(user?.role==='owner' ? [
       {id:'business.identity',label:'Business identity',hint:'Set the business name and currency used throughout Stockroom.'},
+      {id:'business.catalogue-contribution',label:'Product catalogue sharing',hint:'Choose whether new product details are shared with Stockroom businesses.'},
       {id:'business.payment-methods',label:'Payment methods',hint:'Choose which payment methods your team can use.'},
       {id:'business.branches',label:'Branches',hint:'Add locations and control where staff work.'},
       {id:'business.appearance',label:'Colours and logo',hint:'Set the visual identity shown across the app.'},
@@ -2480,6 +2548,7 @@ function App() {
       {active === 'Settings' && user.role === 'owner' && settingsTab === 'business' && section==='appearance' && <section className="panel full-panel logo-settings"><h3>Business logo</h3><WorkspaceHelp><p>PNG, JPEG, or WebP up to 1 MB. It syncs to enrolled devices when you save business settings.</p></WorkspaceHelp>{logoData && <img src={logoData} alt="Business logo preview" className="settings-logo-preview" />}<label className="logo-upload-control"><strong>Upload logo</strong><input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseLogo} /></label></section>}
 
       {active === 'Settings' && user.role === 'owner' && settingsTab === 'business' && ['identity','payment-methods','password'].includes(section) && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div>{section!=='password' && <AsyncForm className="settings-form" busyLabel="Saving settings..." onSubmit={saveAppName}>{section==='identity' && <><label>App name<input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label></>}{section==='payment-methods' && <PaymentPolicySettings profile={shopProfile} products={products} value={extraPaymentPolicy} onChange={(policy) => { setExtraPaymentPolicy(policy); setPosProvider(policy.providers[0] || ''); setSettingsMessage('') }} />}<SubmitButton className="primary-button">Save business settings <ArrowUpToLine size={17} /></SubmitButton>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</AsyncForm>}{section==='password' && !isBrowserPwa() && <AsyncForm className="settings-form" busyLabel="Updating password..." onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" minLength={6} maxLength={256} placeholder="At least 6 characters" /></label><label>Confirm password<input name="confirmPassword" type="password" minLength={6} maxLength={256} placeholder="Confirm new password" /></label><SubmitButton className="primary-button" type="submit">Update password</SubmitButton>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</AsyncForm>}{section==='password' && isBrowserPwa() && <WorkspaceHelp title="Workspace help"><p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p></WorkspaceHelp>}</section>}
+      {active === 'Settings' && user.role === 'owner' && settingsTab === 'business' && section==='catalogue-contribution' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Product catalogue sharing</h2><p>Choose what happens when this business adds a product with a valid barcode.</p></div><Settings2 size={20}/></div><WorkspaceHelp title="Shared product details"><p>Only the product name, valid barcode and recognized general details such as brand or package size are shared. Business SKU, category, unit, prices, costs, stock and other fields remain private. Turning sharing off stops future contributions; it does not remove earlier contributions.</p></WorkspaceHelp><AsyncForm className="settings-form" busyLabel="Saving preference..." onSubmit={saveCatalogueContributionMode}><label>New product contribution<select name="catalogueContributionMode" value={catalogueContributionModeDraft} onChange={event=>setCatalogueContributionModeDraft(event.target.value as 'auto'|'never'|'ask')}><option value="auto">Automatically contribute new products</option><option value="never">Do not contribute new products</option><option value="ask">Ask for each new product</option></select></label><p className="settings-message">{catalogueModeLoaded ? 'This preference applies to the whole business.' : 'Loading this business’s saved preference…'}</p><SubmitButton className="primary-button">Save sharing preference</SubmitButton>{settingsMessage&&<p className="settings-message" role="status">{settingsMessage}</p>}</AsyncForm></section>}
       </Suspense></div><div className="project-copyright app-copyright">S. B. Ibhadode Technologies Copyright, 2026 | <a href="privacy.html">Privacy Policy</a> | <a href="terms.html">Terms and Conditions</a></div>
     </main>
     {detailsProduct && <div className="modal-backdrop"><AsyncForm key={detailsProduct.id} className="modal product-edit-modal" busyLabel="Saving product..." onSubmit={async event => {

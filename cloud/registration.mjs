@@ -72,7 +72,10 @@ export async function createRegistration({ database, client, accounts, hashPassw
       const password = String(input.password || '')
       const code = String(input.referralCode || '').trim()
       const currency = String(input.currency || 'USD')
-      const catalogueContributionOptIn = input.catalogueContributionOptIn === true
+      const requestedCatalogueMode = String(input.catalogueContributionMode || '')
+      const catalogueContributionMode = ['auto', 'never', 'ask'].includes(requestedCatalogueMode)
+        ? requestedCatalogueMode
+        : input.catalogueContributionOptIn === true ? 'auto' : 'never'
       if (!['NGN', 'USD', 'GHS', 'ZAR', 'KES', 'XOF'].includes(currency)) throw new Error('Choose a supported currency.')
       if (!ownerName || ownerName.length > 100 || password.length < 6 || password.length > 256 || !/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter your name, registered owner email, and a password of 6–256 characters.')
       if (!/^SBIT-[a-f0-9]{48}$/.test(String(input.key || '').trim())) throw new Error('Registration key is invalid or expired.')
@@ -93,7 +96,8 @@ export async function createRegistration({ database, client, accounts, hashPassw
         const account = { businessId: grant.businessId, ownerName, name: ownerName, email, role: 'owner', passwordHash, createdAt: accountCreatedAt }
         await accounts.insertOne(account, { session })
         const settings = { appName: grant.businessName, currency, updatedAt: new Date().toISOString() }
-        await database.collection('business_settings').updateOne({ businessId: grant.businessId }, { $set: { businessId: grant.businessId, settings, catalogueContributionOptIn } }, { upsert: true, session })
+        settings.catalogueContributionMode = catalogueContributionMode
+        await database.collection('business_settings').updateOne({ businessId: grant.businessId }, { $set: { businessId: grant.businessId, settings, catalogueContributionMode } }, { upsert: true, session })
         // Every client hydrates its new local workspace through the sync log.
         await database.collection('sync_operations').insertOne({ businessId: grant.businessId, deviceId: 'registration', operationId: randomUUID(), entityType: 'settings', entityId: 'business', action: 'upsert', payload: settings, createdAt: settings.updatedAt, receivedAt: new Date() }, { session })
         const plan = await database.collection('subscription_settings').findOne({ _id: 'plan' }, { session })

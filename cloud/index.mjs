@@ -42,7 +42,7 @@ import { createProductFormReader } from './product-form.mjs'
 import { readCustomValues } from '../server/shop-fields.mjs'
 import { posSettings, priceOrder } from '../server/pos-pricing.mjs'
 import { lookupOpenFoodFacts } from '../server/open-food-facts.mjs'
-import { findSharedProduct, saveSharedProductContribution, removeSharedProductContribution, canonicalProductBarcode, equivalentProductBarcodes } from './shared-product-catalogue.mjs'
+import { findSharedProduct, queueSharedProductContribution, processSharedProductContributionQueue, catalogueContributionMode, canonicalProductBarcode, equivalentProductBarcodes } from './shared-product-catalogue.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -58,6 +58,7 @@ const coordinateSupermarket=createSupermarketCoordinator(database,client)
 const entityHeads = database.collection('sync_entity_heads')
 const businessSettings = database.collection('business_settings')
 const sharedProductCatalogue = database.collection('shared_product_catalogue_contributions')
+const sharedProductCatalogueQueue = database.collection('shared_product_catalogue_queue')
 const inventoryAlertState = database.collection('inventory_alert_state')
 async function publishedRetail(businessId,settings){
  const config=customerOrderSettings(settings?.paymentPolicy?.customerOrdering)
@@ -84,6 +85,7 @@ await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { u
 await entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.barcode': 1 }, { name: 'business_product_barcode', partialFilterExpression: { entityType: 'product', 'payload.barcode': { $type: 'string' } } })
 await businessSettings.createIndex({ businessId: 1 }, { unique: true })
 await sharedProductCatalogue.createIndex({ barcode: 1, lastContributedAt: -1 })
+await sharedProductCatalogueQueue.createIndex({ businessId: 1, state: 1, createdAt: 1 })
 await inventoryAlertState.createIndex({ businessId: 1, branchId: 1, productId: 1 }, { unique: true })
 // Staff email is optional contact data. Convert the original mandatory unique
 // index once so several staff accounts can omit it.
@@ -263,6 +265,15 @@ async function serializeBusinessSync(businessId,job) {
   const next=previous.catch(()=>{}).then(job)
   businessSyncJobs.set(businessId,next)
   try{return await next}finally{if(businessSyncJobs.get(businessId)===next)businessSyncJobs.delete(businessId)}
+}
+async function queueProductCatalogueContribution(businessId, document) {
+  if (document?.entityType !== 'product' || document.action !== 'upsert') return
+  const preferences = await businessSettings.findOne({ businessId }, { projection: { catalogueContributionMode: 1, catalogueContributionOptIn: 1, 'settings.catalogueContributionMode': 1, 'settings.shopProfile': 1 } })
+  const mode = catalogueContributionMode(preferences)
+  if (mode !== 'auto' && !(mode === 'ask' && document.payload?.catalogueContributionDecision === true)) return
+  let savedProfile = preferences?.settings?.shopProfile
+  if (typeof savedProfile === 'string') { try { savedProfile = JSON.parse(savedProfile) } catch { savedProfile = null } }
+  await queueSharedProductContribution(sharedProductCatalogueQueue, businessId, document.operationId, document.payload, normalizeShopProfile(savedProfile))
 }
 const staffRemoval = createStaffRemoval({ accounts, refreshTokens, operations, verifyToken, ownerPasswordIsValid, readJson, send })
 
@@ -627,6 +638,18 @@ const server = createServer(async (request, response) => {
     if (!claims) return send(response, 401, { error: 'Unauthorized.' })
     const device = isDevice(claims) ? await devices.findOne({ businessId: claims.businessId, deviceId: claims.deviceId }) : null
     if (isDevice(claims) && (!device || device.revokedAt || device.recoveryRetiredAt)) return send(response, 401, { error: 'This device has been revoked.' })
+    if (request.url === '/v1/business/catalogue-contribution' && request.method === 'GET') {
+      const settings = await businessSettings.findOne({ businessId: claims.businessId })
+      return send(response, 200, { mode: catalogueContributionMode(settings) })
+    }
+    if (request.url === '/v1/business/catalogue-contribution' && request.method === 'PUT') {
+      if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
+      if (!ObjectId.isValid(claims.sub) || !await accounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, role: 'owner', removedAt: { $exists: false } })) return send(response, 403, { error: 'An active business owner must change catalogue sharing.' })
+      const input = await readJson(request)
+      if (!['auto', 'never', 'ask'].includes(input.mode)) return send(response, 400, { error: 'Choose automatic contribution, no contribution, or ask each time.' })
+      await businessSettings.updateOne({ businessId: claims.businessId }, { $set: { businessId: claims.businessId, catalogueContributionMode: input.mode, 'settings.catalogueContributionMode': input.mode, updatedAt: new Date() }, $unset: { catalogueContributionOptIn: '' } }, { upsert: true })
+      return send(response, 200, { mode: input.mode })
+    }
     if (request.method === 'GET' && request.url?.startsWith('/v1/business/settings')) {
       if (!isDevice(claims)) return send(response, 403, { error: 'Device token required.' })
       const query = new URL(request.url, `http://${request.headers.host}`).searchParams
@@ -1025,29 +1048,19 @@ const server = createServer(async (request, response) => {
               if(!previous && document.payload.kind==='supplier-opening'){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This supplier already has an opening balance from another till. Review the existing entry.'});continue}
               if (previous && JSON.stringify(previous.payload) !== JSON.stringify(document.payload)) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Purchasing record ID already exists with different details.' }); continue }
             }
+            await queueProductCatalogueContribution(businessId, document)
             acceptedOperationIds.push(document.operationId); continue
           }
           throw error
         }
         try { await processInventoryNotification(document) } catch (error) { console.error('Inventory notification processing failed.', error instanceof Error ? error.message : 'Unknown error.') }
-        if (document.entityType === 'product' && document.action === 'upsert') {
-          try {
-            const preferences = await businessSettings.findOne({ businessId }, { projection: { catalogueContributionOptIn: 1, 'settings.shopProfile': 1 } })
-            if (preferences?.catalogueContributionOptIn === true) {
-              const previousBarcode = canonicalProductBarcode(current?.payload?.barcode)
-              const nextBarcode = canonicalProductBarcode(document.payload.barcode)
-              if (previousBarcode && previousBarcode !== nextBarcode) await removeSharedProductContribution(sharedProductCatalogue, businessId, previousBarcode)
-              let savedProfile = preferences.settings?.shopProfile
-              if (typeof savedProfile === 'string') { try { savedProfile = JSON.parse(savedProfile) } catch { savedProfile = null } }
-              await saveSharedProductContribution(sharedProductCatalogue, businessId, document.payload, normalizeShopProfile(savedProfile))
-            }
-          } catch (error) { console.error('Shared product catalogue contribution failed.', error instanceof Error ? error.message : 'Unknown error.') }
-        }
+        await queueProductCatalogueContribution(businessId, document)
         if (document.entityType === 'settings' && document.action === 'upsert' && document.payload?.appName && document.payload?.currency) {
-          await businessSettings.updateOne({ businessId }, { $set: { businessId, settings: document.payload, updatedAt: operationUpdatedAt(document), receivedAt: new Date() } }, { upsert: true })
+          await businessSettings.updateOne({ businessId }, { $set: { businessId, settings: document.payload, ...(document.payload.catalogueContributionMode ? { catalogueContributionMode: document.payload.catalogueContributionMode } : {}), updatedAt: operationUpdatedAt(document), receivedAt: new Date() } }, { upsert: true })
         }
         acceptedOperationIds.push(document.operationId)
       }
+      await processSharedProductContributionQueue(sharedProductCatalogueQueue, sharedProductCatalogue, businessId)
       return send(response, 200, { acceptedOperationIds, conflicts })
       })
     }
@@ -1077,6 +1090,7 @@ const server = createServer(async (request, response) => {
       if (!['retail-v3', 'business-v4'].includes(query.get('protocol')) && rows.some(row => row.entityType === 'retail_record' || row.payload?.stockEvent || row.payload?.counts?.some(count=>count.stockEvent) || row.payload?.batchAllocations || row.payload?.items?.some(item=>item.batchAllocations))) return send(response, 426, { error: 'Update this device to synchronize supermarket stock and financial records.' })
       const staffAccess=await accounts.find({businessId,role:{$in:['admin','cashier']},removedAt:{$exists:false}}).toArray()
       if(staffAccess.some(account=>account.permissions)&&query.get('staffPermissionsCapability')!=='staff-permissions-v1')return send(response,426,{error:'Update this device to apply individual staff permissions.'})
+      await processSharedProductContributionQueue(sharedProductCatalogueQueue, sharedProductCatalogue, businessId)
       return send(response, 200, { staffAccess:staffAccess.map(account=>({id:account._id.toString(),role:account.role,permissions:parsePermissions(account.permissions),operationalAccess:Boolean(account.operationalAccess)})), operations: rows.map(({ _id, ...operation }) => ({ ...operation, operationId: operation.operationId })), cursor: rows.length ? rows.at(-1)._id.toString() : cursor })
     }
     return send(response, 404, { error: 'Not found.' })

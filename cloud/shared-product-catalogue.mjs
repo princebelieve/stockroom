@@ -17,10 +17,16 @@ export function equivalentProductBarcodes(value) {
   return [14, 13, 12, 8].map(length => canonical.slice(-length)).filter(candidate => canonicalProductBarcode(candidate) === canonical)
 }
 
-export async function saveSharedProductContribution(collection, businessId, product, profile) {
+export function catalogueContributionMode(settings) {
+  const mode = settings?.catalogueContributionMode || settings?.settings?.catalogueContributionMode
+  if (['auto', 'never', 'ask'].includes(mode)) return mode
+  return settings?.catalogueContributionOptIn === true ? 'auto' : 'never'
+}
+
+function sharedContribution(businessId, product, profile) {
   const barcode = canonicalProductBarcode(product?.barcode)
   const name = String(product?.name || '').trim().replace(/\s+/g, ' ').slice(0, 180)
-  if (!barcode || !name || !businessId) return
+  if (!barcode || !name || !businessId) return null
   const attributeNames = { brand: 'brand', brands: 'brand', brand_owner: 'brand', manufacturer: 'manufacturer', model: 'model', quantity: 'packageSize', packagesize: 'packageSize', packaging: 'packageSize', description: 'description', generic_name: 'description' }
   const attributes = {}
   const values = product?.customValues && typeof product.customValues === 'object' && !Array.isArray(product.customValues) ? product.customValues : {}
@@ -29,22 +35,54 @@ export async function saveSharedProductContribution(collection, businessId, prod
     const value = String(values[field.id] || '').replace(/\s+/g, ' ').trim().slice(0, 2000)
     if (target && value && !attributes[target]) attributes[target] = value
   }
+  const contributorId = createHash('sha256').update(String(businessId)).digest('hex')
   const now = new Date()
-  // Share only general fields explicitly recognized as external catalogue
-  // metadata. SKU, category, unit, pricing, cost, stock and other custom
-  // fields remain private.
+  // Build the safe shared record before queueing it: private business fields
+  // never enter the retry queue.
+  return {
+    _id: `${barcode}:${contributorId}`,
+    barcode,
+    name,
+    attributes,
+    searchName: name.toLocaleLowerCase(),
+    sourceBusinessId: String(businessId),
+    lastContributedAt: now,
+    createdAt: now,
+  }
+}
+
+export async function saveSharedProductContribution(collection, contribution) {
+  if (!contribution?._id || !contribution.barcode || !contribution.name) return
+  const { _id, createdAt, ...fields } = contribution
   await collection.updateOne(
-    { _id: `${barcode}:${createHash('sha256').update(String(businessId)).digest('hex')}` },
-    { $set: { barcode, name, attributes, searchName: name.toLocaleLowerCase(), lastContributedAt: now }, $setOnInsert: { createdAt: now } },
+    { _id },
+    { $set: fields, $setOnInsert: { createdAt } },
     { upsert: true },
   )
 }
 
-export async function removeSharedProductContribution(collection, businessId, barcode) {
-  const canonical = canonicalProductBarcode(barcode)
-  if (!canonical || !businessId) return
-  const contributor = createHash('sha256').update(String(businessId)).digest('hex')
-  await collection.deleteOne({ _id: `${canonical}:${contributor}` })
+export async function queueSharedProductContribution(queue, businessId, operationId, product, profile) {
+  const contribution = sharedContribution(businessId, product, profile)
+  if (!contribution || !operationId) return false
+  await queue.updateOne(
+    { _id: `${businessId}:${operationId}` },
+    { $setOnInsert: { businessId: String(businessId), operationId: String(operationId), contribution, state: 'pending', attempts: 0, createdAt: new Date() } },
+    { upsert: true },
+  )
+  return true
+}
+
+export async function processSharedProductContributionQueue(queue, catalogue, businessId, limit = 100) {
+  const jobs = await queue.find({ businessId: String(businessId), state: 'pending' }).sort({ createdAt: 1 }).limit(limit).toArray()
+  for (const job of jobs) {
+    try {
+      await saveSharedProductContribution(catalogue, job.contribution)
+      await queue.updateOne({ _id: job._id, state: 'pending' }, { $set: { state: 'complete', completedAt: new Date() }, $unset: { lastError: '' } })
+    } catch (error) {
+      await queue.updateOne({ _id: job._id, state: 'pending' }, { $inc: { attempts: 1 }, $set: { lastError: String(error?.message || 'Catalogue save failed').slice(0, 300), lastAttemptAt: new Date() } })
+    }
+  }
+  return jobs.length
 }
 
 export async function findSharedProduct(collection, value) {
