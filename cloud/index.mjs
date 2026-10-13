@@ -42,6 +42,7 @@ import { createProductFormReader } from './product-form.mjs'
 import { readCustomValues } from '../server/shop-fields.mjs'
 import { posSettings, priceOrder } from '../server/pos-pricing.mjs'
 import { lookupOpenFoodFacts } from '../server/open-food-facts.mjs'
+import { findSharedProduct, saveSharedProductContribution, removeSharedProductContribution, canonicalProductBarcode, equivalentProductBarcodes } from './shared-product-catalogue.mjs'
 
 const port = Number(process.env.PORT || 8080)
 const uri = process.env.MONGODB_URI
@@ -56,6 +57,7 @@ const operations = database.collection('sync_operations')
 const coordinateSupermarket=createSupermarketCoordinator(database,client)
 const entityHeads = database.collection('sync_entity_heads')
 const businessSettings = database.collection('business_settings')
+const sharedProductCatalogue = database.collection('shared_product_catalogue_contributions')
 const inventoryAlertState = database.collection('inventory_alert_state')
 async function publishedRetail(businessId,settings){
  const config=customerOrderSettings(settings?.paymentPolicy?.customerOrdering)
@@ -79,7 +81,9 @@ await operations.createIndex({businessId:1,'payload.branchId':1,'payload.supplie
 await operations.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { name: 'counter_order_receipt', unique: true, partialFilterExpression: { entityType: 'sale', 'payload.paymentDetails.counterOrder.id': { $exists: true } } })
 await operations.createIndex({ businessId: 1, _id: 1 })
 await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
+await entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.barcode': 1 }, { name: 'business_product_barcode', partialFilterExpression: { entityType: 'product', 'payload.barcode': { $type: 'string' } } })
 await businessSettings.createIndex({ businessId: 1 }, { unique: true })
+await sharedProductCatalogue.createIndex({ barcode: 1, lastContributedAt: -1 })
 await inventoryAlertState.createIndex({ businessId: 1, branchId: 1, productId: 1 }, { unique: true })
 // Staff email is optional contact data. Convert the original mandatory unique
 // index once so several staff accounts can omit it.
@@ -285,7 +289,10 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   const requestUrl = new URL(request.url || '/', 'http://localhost')
   if (request.method === 'GET' && requestUrl.pathname === '/v1/public/product-lookup') {
-    const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim(), String(requestUrl.searchParams.get('industry') || 'general'), String(requestUrl.searchParams.get('source') || ''))
+    const barcode = String(requestUrl.searchParams.get('barcode') || '').trim()
+    const source = String(requestUrl.searchParams.get('source') || '')
+    const shared = source && source !== 'Stockroom Global Catalogue' ? null : await findSharedProduct(sharedProductCatalogue, barcode)
+    const result = shared || await lookupOpenFoodFacts(barcode, String(requestUrl.searchParams.get('industry') || 'general'), source)
     response.setHeader('Cache-Control', 'no-store')
     return send(response, result.status, result.body)
   }
@@ -982,6 +989,13 @@ const server = createServer(async (request, response) => {
           }
           if(document.entityType==='customer' && document.payload.birthday!==undefined){try{birthdayValue(document.payload.birthday)}catch(error){conflicts.push({operationId:document.operationId,reason:error.message});continue}}
           if (document.entityType === 'product') {
+            const barcodeValues = equivalentProductBarcodes(document.payload.barcode)
+            const previousBarcodeIdentity = canonicalProductBarcode(current?.payload?.barcode) || String(current?.payload?.barcode || '').trim().toLocaleLowerCase()
+            const nextBarcodeIdentity = canonicalProductBarcode(document.payload.barcode) || String(document.payload.barcode || '').trim().toLocaleLowerCase()
+            if (barcodeValues.length && previousBarcodeIdentity !== nextBarcodeIdentity) {
+              const duplicate = await entityHeads.findOne({ businessId, entityType: 'product', entityId: { $ne: document.entityId }, 'payload.barcode': { $in: barcodeValues } })
+              if (duplicate) { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'This barcode is already assigned to another product in this business.', localPayload: document.payload, remotePayload: duplicate.payload }); continue }
+            }
             try { document.payload.customValues = { ...readCustomValues(current?.payload?.customValues), ...readCustomValues(document.payload.customValues) } }
             catch { conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'Invalid custom product details.' }); continue }
           }
@@ -1016,6 +1030,19 @@ const server = createServer(async (request, response) => {
           throw error
         }
         try { await processInventoryNotification(document) } catch (error) { console.error('Inventory notification processing failed.', error instanceof Error ? error.message : 'Unknown error.') }
+        if (document.entityType === 'product' && document.action === 'upsert') {
+          try {
+            const preferences = await businessSettings.findOne({ businessId }, { projection: { catalogueContributionOptIn: 1, 'settings.shopProfile': 1 } })
+            if (preferences?.catalogueContributionOptIn === true) {
+              const previousBarcode = canonicalProductBarcode(current?.payload?.barcode)
+              const nextBarcode = canonicalProductBarcode(document.payload.barcode)
+              if (previousBarcode && previousBarcode !== nextBarcode) await removeSharedProductContribution(sharedProductCatalogue, businessId, previousBarcode)
+              let savedProfile = preferences.settings?.shopProfile
+              if (typeof savedProfile === 'string') { try { savedProfile = JSON.parse(savedProfile) } catch { savedProfile = null } }
+              await saveSharedProductContribution(sharedProductCatalogue, businessId, document.payload, normalizeShopProfile(savedProfile))
+            }
+          } catch (error) { console.error('Shared product catalogue contribution failed.', error instanceof Error ? error.message : 'Unknown error.') }
+        }
         if (document.entityType === 'settings' && document.action === 'upsert' && document.payload?.appName && document.payload?.currency) {
           await businessSettings.updateOne({ businessId }, { $set: { businessId, settings: document.payload, updatedAt: operationUpdatedAt(document), receivedAt: new Date() } }, { upsert: true })
         }

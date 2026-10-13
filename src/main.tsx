@@ -2023,6 +2023,9 @@ function App() {
   }
 
   const [scanning, setScanning] = useState(false)
+  const [torchSupported, setTorchSupported] = useState(false)
+  const [torchOn, setTorchOn] = useState(false)
+  const [torchMessage, setTorchMessage] = useState('')
   const cameraVideo = useRef<HTMLVideoElement>(null)
   const cameraSession = useRef(0)
   const cameraStream = useRef<MediaStream | null>(null)
@@ -2036,7 +2039,22 @@ function App() {
     cameraSession.current += 1
     cameraStream.current?.getTracks().forEach(track => track.stop())
     cameraStream.current = null
+    setTorchSupported(false)
+    setTorchOn(false)
+    setTorchMessage('')
     setScanning(false)
+  }
+  async function toggleScannerTorch() {
+    const track = cameraStream.current?.getVideoTracks()[0]
+    if (!track || !torchSupported) return
+    const next = !torchOn
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next }] } as unknown as MediaTrackConstraints)
+      setTorchOn(next)
+      setTorchMessage('')
+    } catch {
+      setTorchMessage('This camera could not change its flashlight setting.')
+    }
   }
   useEffect(() => { stopScan(); return () => { cameraSession.current += 1; cameraStream.current?.getTracks().forEach(track => track.stop()) } }, [active, authToken])
   async function acceptBarcode(code: string) {
@@ -2086,10 +2104,36 @@ function App() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       if (session !== cameraSession.current) { stream.getTracks().forEach(track => track.stop()); return }
       cameraStream.current = stream
+      const videoTrack = stream.getVideoTracks()[0]
+      const capabilities = videoTrack?.getCapabilities() as (MediaTrackCapabilities & { torch?: boolean }) | undefined
+      // Try to enable the rear-camera torch as the scanner opens. Some runtimes
+      // accept torch constraints even when getCapabilities() omits the field.
+      setTorchSupported(Boolean(videoTrack))
+      setTorchMessage(videoTrack ? 'Turning flashlight on…' : '')
       const video = cameraVideo.current
       if (!video) throw new Error('Camera preview is unavailable.')
       video.srcObject = stream
       await video.play()
+      if (videoTrack) {
+        try {
+          await videoTrack.applyConstraints({ advanced: [{ torch: true }] } as unknown as MediaTrackConstraints)
+          const settings = videoTrack.getSettings() as MediaTrackSettings & { torch?: boolean }
+          const torchActive = capabilities?.torch === true ? settings.torch !== false : settings.torch === true
+          if (torchActive) {
+            setTorchSupported(true)
+            setTorchOn(true)
+            setTorchMessage('')
+          } else {
+            setTorchSupported(false)
+            setTorchOn(false)
+            setTorchMessage('This camera does not allow Stockroom to use its flashlight.')
+          }
+        } catch {
+          setTorchSupported(false)
+          setTorchOn(false)
+          setTorchMessage('This camera does not allow Stockroom to use its flashlight.')
+        }
+      }
       const detector = new Detector()
       while (session === cameraSession.current) {
         const codes = await detector.detect(video)
@@ -2209,7 +2253,7 @@ function App() {
     if (password !== form.get('confirmPassword')) throw new Error('Passwords do not match.')
     const response = await fetch('/api/auth/register-business', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(25000),
-      body: JSON.stringify({ key: form.get('registrationKey'), ownerName: form.get('ownerName'), email, password, currency: form.get('currency'), referralCode: form.get('referralCode') }),
+      body: JSON.stringify({ key: form.get('registrationKey'), ownerName: form.get('ownerName'), email, password, currency: form.get('currency'), referralCode: form.get('referralCode'), catalogueContributionOptIn: form.get('catalogueContributionOptIn') === 'yes' }),
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Business registration failed.')
@@ -2459,7 +2503,7 @@ function App() {
     }}><div className="modal-head"><h2>Edit product</h2><button type="button" className="icon-button" onClick={() => setDetailsProduct(null)} aria-label="Close product editor"><X size={19} /></button></div><p>Use the stock controls on the product row to record stock changes.</p><ShopProductFields profile={shopProfile} catalogueWorkspace={businessWorkspace(shopProfile).productSales ? 'product-sales' : 'oil-sales'} readOnlyStock initialDraft={{...detailsProduct,customValues:readCustomValues(detailsProduct.customValues)}} values={detailsProduct.customValues} />
       <div className="task-actions"><button type="button" className="filter-button" onClick={() => setDetailsProduct(null)}>Cancel</button><SubmitButton className="primary-button">Save product changes</SubmitButton></div></AsyncForm></div>}
     {inlinePrompt && <InlinePrompt request={inlinePrompt} onClose={closeInlinePrompt} />}
-    {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><p>Point the camera at a printed barcode. Product lookup accepts valid UPC/EAN barcodes, not package text or photos.</p><video ref={cameraVideo} muted autoPlay playsInline className="barcode-camera-preview" /><button type="button" className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
+    {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><p>Point the camera at a printed barcode. Product lookup accepts valid UPC/EAN barcodes, not package text or photos.</p><div className="scanner-preview-controls"><button type="button" className="filter-button" disabled={!torchSupported} aria-pressed={torchOn} onClick={() => void toggleScannerTorch()}>{torchSupported ? (torchOn ? 'Turn flashlight off' : 'Turn flashlight on') : 'Flashlight unavailable'}</button>{torchMessage && <span role="status">{torchMessage}</span>}</div><video ref={cameraVideo} muted autoPlay playsInline className="barcode-camera-preview" /><button type="button" className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
     {orderToPrint && <OrderDocument order={orderToPrint} />}
     {lastReceipt && active === 'Payments' && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
     <datalist id="approved-payment-providers">{extraPaymentPolicy.providers.map(provider => <option key={provider} value={provider} />)}</datalist>
@@ -2563,7 +2607,7 @@ function SetupScreen({ onCreate, error, setError, keyRegistration = false, initi
     if(step===1&&keyRegistration&&data.get('password')!==data.get('confirmPassword')){setError('Passwords do not match.');return}
     setError('');setReview({business:String(data.get('shopName')||'Your registered business'),owner:String(data.get('ownerName')||''),email:String(data.get('email')||'')});setStep(step+1)
   }
-  return <main className="login-screen"><AsyncForm busyLabel="Creating account..." className="login-card" onSubmit={async (event) => { event.preventDefault(); if(step<2) return; setError(''); try { await onCreate(event) } catch (loginError) { setError(loginError instanceof Error ? loginError.message : 'Unable to create your business account.') } }}><div className="brand-mark"><Boxes size={21} /></div><h1>{["Your business","Your owner account","Ready to begin"][step]}</h1><div className="setup-progress" aria-live="polite">Step {step+1} of 3</div><fieldset className="setup-fields" data-setup-step="0" hidden={step!==0}>{keyRegistration ? <label>Business registration key<input name="registrationKey" required autoComplete="off" defaultValue={initialRegistrationKey} placeholder="SBIT-?" /></label> : <label>Business name<input name="shopName" required placeholder="My Business" /></label>}<label htmlFor="setup-business-type">Business type</label><select id="setup-business-type" name="businessType" defaultValue="general">{Object.entries(businessModes).map(([key,type])=><option key={key} value={key}>{type.label}</option>)}</select><label>Owner name<input name="ownerName" required placeholder="John Doe" /></label></fieldset><fieldset className="setup-fields" data-setup-step="1" hidden={step!==1}><label>Email<input name="email" type="email" required defaultValue={keyRegistration ? initialEmail : undefined} placeholder="owner@yourshop.com" /></label><label>Password<div className="password-wrap"><input name="password" type="password" minLength={6} maxLength={256} required placeholder="At least 6 characters" /><button type="button" className="icon-button password-toggle" aria-label="Show password" onClick={(event) => { const input = (event.currentTarget.parentElement?.querySelector('input') as HTMLInputElement | null); if (!input) return; const shouldShow = input.type === 'password'; input.type = shouldShow ? 'text' : 'password'; event.currentTarget.setAttribute('aria-label', shouldShow ? 'Hide password' : 'Show password'); }}><Eye size={16} /></button></div></label>{keyRegistration && <><label>Confirm password<input name="confirmPassword" type="password" required minLength={6} maxLength={256} autoComplete="new-password" /></label></>}</fieldset><fieldset className="setup-fields" data-setup-step="2" hidden={step!==2}><div className="setup-review"><strong>{review.business}</strong><p>{review.owner}<br/>{review.email}</p><WorkspaceHelp title="Workspace help"><p>Enter your business with an empty workspace. Add products or a menu, payment options and staff when you need them.</p></WorkspaceHelp></div>{keyRegistration && <><label>Business currency<select name="currency" defaultValue="NGN">{['NGN', 'USD', 'GHS', 'ZAR', 'KES', 'XOF'].map(code => <option key={code}>{code}</option>)}</select></label><label>Referral code (optional)<input name="referralCode" pattern="[a-f0-9]{32}" defaultValue={sessionStorage.getItem('stockroom-referral-code') || ''} /></label></>}</fieldset><WorkspaceHelp title="Account setup"><p className="settings-message">{keyRegistration ? 'The key identifies your business and owner email. Manage your plan and payments from Subscription after signing in.' : 'Your database is configured by the developer. After payment, the owner can change their password from Admin settings.'}</p></WorkspaceHelp><p className="settings-message"><a href="privacy.html">Privacy Policy</a> | <a href="terms.html">Terms and Conditions</a></p>{error && <div className="auth-error">{error}</div>}{step<2?<button type="button" className="primary-button login-button" onClick={next}>Continue</button>:<SubmitButton className="primary-button login-button">Create owner account</SubmitButton>}{step>0&&<button type="button" className="text-button" onClick={()=>{setError('');setStep(step-1)}}>Previous step</button>}{onCancel && <button type="button" className="text-button" onClick={onCancel}>Back to sign in / existing business</button>}<PublicLandingLink />{keyRegistration && sessionStorage.getItem('stockroom-referral-code') && <WorkspaceHelp title="Workspace help"><p className="settings-message">Your referral code stays saved in this tab when you return to the welcome page. You can finish business registration later or open a separate promoter account from there.</p></WorkspaceHelp>}</AsyncForm></main>
+  return <main className="login-screen"><AsyncForm busyLabel="Creating account..." className="login-card" onSubmit={async (event) => { event.preventDefault(); if(step<2) return; setError(''); try { await onCreate(event) } catch (loginError) { setError(loginError instanceof Error ? loginError.message : 'Unable to create your business account.') } }}><div className="brand-mark"><Boxes size={21} /></div><h1>{["Your business","Your owner account","Ready to begin"][step]}</h1><div className="setup-progress" aria-live="polite">Step {step+1} of 3</div><fieldset className="setup-fields" data-setup-step="0" hidden={step!==0}>{keyRegistration ? <label>Business registration key<input name="registrationKey" required autoComplete="off" defaultValue={initialRegistrationKey} placeholder="SBIT-?" /></label> : <label>Business name<input name="shopName" required placeholder="My Business" /></label>}<label htmlFor="setup-business-type">Business type</label><select id="setup-business-type" name="businessType" defaultValue="general">{Object.entries(businessModes).map(([key,type])=><option key={key} value={key}>{type.label}</option>)}</select><label>Owner name<input name="ownerName" required placeholder="John Doe" /></label></fieldset><fieldset className="setup-fields" data-setup-step="1" hidden={step!==1}><label>Email<input name="email" type="email" required defaultValue={keyRegistration ? initialEmail : undefined} placeholder="owner@yourshop.com" /></label><label>Password<div className="password-wrap"><input name="password" type="password" minLength={6} maxLength={256} required placeholder="At least 6 characters" /><button type="button" className="icon-button password-toggle" aria-label="Show password" onClick={(event) => { const input = (event.currentTarget.parentElement?.querySelector('input') as HTMLInputElement | null); if (!input) return; const shouldShow = input.type === 'password'; input.type = shouldShow ? 'text' : 'password'; event.currentTarget.setAttribute('aria-label', shouldShow ? 'Hide password' : 'Show password'); }}><Eye size={16} /></button></div></label>{keyRegistration && <><label>Confirm password<input name="confirmPassword" type="password" required minLength={6} maxLength={256} autoComplete="new-password" /></label></>}</fieldset><fieldset className="setup-fields" data-setup-step="2" hidden={step!==2}><div className="setup-review"><strong>{review.business}</strong><p>{review.owner}<br/>{review.email}</p><WorkspaceHelp title="Workspace help"><p>Enter your business with an empty workspace. Add products or a menu, payment options and staff when you need them.</p></WorkspaceHelp></div>{keyRegistration && <><fieldset className="catalogue-consent"><legend>Help new businesses start immediately by donating this information to the Stockroom global catalogue</legend><p>Only a product’s name, valid barcode and general details such as brand or package size are shared when available. Your business SKU, category, unit, prices, costs, stock and other custom fields stay private. You can edit your own product details.</p><div className="catalogue-consent-actions"><label><input type="radio" name="catalogueContributionOptIn" value="no" required />No</label><label><input type="radio" name="catalogueContributionOptIn" value="yes" required />Yes</label></div></fieldset><label>Business currency<select name="currency" defaultValue="NGN">{['NGN', 'USD', 'GHS', 'ZAR', 'KES', 'XOF'].map(code => <option key={code}>{code}</option>)}</select></label><label>Referral code (optional)<input name="referralCode" pattern="[a-f0-9]{32}" defaultValue={sessionStorage.getItem('stockroom-referral-code') || ''} /></label></>}</fieldset><WorkspaceHelp title="Account setup"><p className="settings-message">{keyRegistration ? 'The key identifies your business and owner email. Manage your plan and payments from Subscription after signing in.' : 'Your database is configured by the developer. After payment, the owner can change their password from Admin settings.'}</p></WorkspaceHelp><p className="settings-message"><a href="privacy.html">Privacy Policy</a> | <a href="terms.html">Terms and Conditions</a></p>{error && <div className="auth-error">{error}</div>}{step<2?<button type="button" className="primary-button login-button" onClick={next}>Continue</button>:<SubmitButton className="primary-button login-button">Create owner account</SubmitButton>}{step>0&&<button type="button" className="text-button" onClick={()=>{setError('');setStep(step-1)}}>Previous step</button>}{onCancel && <button type="button" className="text-button" onClick={onCancel}>Back to sign in / existing business</button>}<PublicLandingLink />{keyRegistration && sessionStorage.getItem('stockroom-referral-code') && <WorkspaceHelp title="Workspace help"><p className="settings-message">Your referral code stays saved in this tab when you return to the welcome page. You can finish business registration later or open a separate promoter account from there.</p></WorkspaceHelp>}</AsyncForm></main>
 }
 
 function OwnerDashboard({ headers, currency }: { headers: Record<string,string>; currency: string }) {

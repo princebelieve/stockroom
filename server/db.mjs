@@ -1081,9 +1081,23 @@ export function exportProductCatalogCsv() {
   return [['Product', 'SKU', 'Barcode', 'Category', 'Cost price', 'Selling price', 'Unit', 'Branch', 'Stock', 'Reorder point', ...customIds.map(id => `${profile.fields.find(field => field.id === id)?.label || id} [${id}]`)], ...rows.map(row => [row.name, row.sku, row.barcode, row.category, row.cost, row.price, row.unit, row.branch, row.stock, row.reorder, ...customIds.map(id => readCustomValues(row.customValues)[id] || '')])].map(row => row.map(cell).join(',')).join('\r\n')
 }
 
+function productBarcodeIdentity(value) {
+  const barcode = String(value || '').trim()
+  if (!barcode) return ''
+  return /^\d+$/.test(barcode) && /^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(barcode) ? barcode.padStart(14, '0') : barcode.toLocaleLowerCase()
+}
+
+function ensureUniqueProductBarcode(barcode, excludeId = '') {
+  const identity = productBarcodeIdentity(barcode)
+  if (!identity) return
+  const duplicate = database.prepare('SELECT id, barcode FROM products WHERE organization_id = ? AND barcode <> ?').all(organizationId, '').find(row => row.id !== excludeId && productBarcodeIdentity(row.barcode) === identity)
+  if (duplicate) throw new Error('This barcode is already assigned to another product in this business.')
+}
+
 export function createProduct(input, branchId = 'main') {
   const profile = normalizeShopProfile(database.prepare('SELECT shop_profile FROM app_settings WHERE organization_id = ?').get(organizationId)?.shop_profile)
   validateCoreRequirements(input, profile)
+  ensureUniqueProductBarcode(input.barcode)
   const customValues = validateCustomValues(input.customValues, profile)
   const product = { id: crypto.randomUUID(), updated: now() }
   database.prepare('INSERT INTO products (id, organization_id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)').run(product.id, organizationId, input.name, input.sku, input.barcode || '', input.category, input.reorder, input.price, input.cost || 0, input.unit, product.updated)
@@ -1108,6 +1122,7 @@ export async function updateProduct(productId, input, branchId = 'main') {
   if (!product.name || !product.sku || !product.category || !product.unit || [product.reorder, product.price, product.cost].some(value => !Number.isFinite(value) || value < 0)) throw new Error('Product fields are invalid.')
   if (!validQuantity(product.reorder)) throw new Error('Reorder point must have at most three decimals.')
   validateCoreRequirements(product, profile)
+  if (productBarcodeIdentity(current.barcode) !== productBarcodeIdentity(product.barcode)) ensureUniqueProductBarcode(product.barcode, productId)
   const customValues = { ...readCustomValues(current.customValues), ...validateCustomValues(input.customValues, profile) }
   const updated = now()
   try {

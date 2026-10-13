@@ -40,6 +40,17 @@ const now = () => new Date().toISOString()
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const error = (message: string, status = 400) => json({ error: message }, status)
 const id = () => crypto.randomUUID()
+function productBarcodeIdentity(value: unknown) {
+  const barcode = String(value || '').trim()
+  if (!barcode) return ''
+  return /^\d+$/.test(barcode) && /^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(barcode) ? barcode.padStart(14, '0') : barcode.toLocaleLowerCase()
+}
+async function ensureUniqueProductBarcode(db: Awaited<ReturnType<typeof openMobileDatabase>>, barcode: unknown, excludeId = '') {
+  const identity = productBarcodeIdentity(barcode)
+  if (!identity) return
+  const rows = (await db.query("SELECT id, barcode FROM products WHERE barcode <> ''")).values || []
+  if (rows.some(row => row.id !== excludeId && productBarcodeIdentity(row.barcode) === identity)) throw new Error('This barcode is already assigned to another product in this business.')
+}
 
 async function setting(key: string) {
   const db = await openMobileDatabase()
@@ -518,6 +529,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     if (!validQuantity(product.stock) || !validQuantity(product.reorder)) return error('Stock values must have at most three decimals.')
     let customValues: Record<string, string>
     try { const profile = normalizeShopProfile((await hydrateBusinessSettings()).shopProfile); validateCoreRequirements(product, profile); customValues = validateCustomValues(input.customValues, profile) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Invalid custom fields.') }
+    try { await ensureUniqueProductBarcode(db, product.barcode) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Barcode is already in use.') }
     Object.assign(product, { customValues })
     await db.run('INSERT INTO products (id, name, sku, barcode, category, stock, reorder_point, price, cost_price, unit, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)', [product.id, product.name, product.sku, product.barcode, product.category, product.reorder, product.price, product.cost, product.unit, product.updated])
     await db.run('UPDATE products SET custom_values = ? WHERE id = ?', [JSON.stringify(customValues), product.id])
@@ -535,6 +547,7 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     if (!validQuantity(product.reorder)) return error('Reorder point must have at most three decimals.')
     let customValues: Record<string,string>
     try { const profile=normalizeShopProfile((await hydrateBusinessSettings()).shopProfile); validateCoreRequirements(product,profile); customValues={...readCustomValues(current.customValues),...validateCustomValues(input.customValues,profile)} } catch(caught) { return error(caught instanceof Error?caught.message:'Invalid custom fields.') }
+    if (productBarcodeIdentity(current.barcode) !== productBarcodeIdentity(product.barcode)) try { await ensureUniqueProductBarcode(db, product.barcode, productEdit[1]) } catch (caught) { return error(caught instanceof Error ? caught.message : 'Barcode is already in use.') }
     const updated=now()
     try { await db.run('UPDATE products SET name=?,sku=?,barcode=?,category=?,reorder_point=?,price=?,cost_price=?,unit=?,custom_values=?,updated_at=? WHERE id=?',[product.name,product.sku,product.barcode,product.category,product.reorder,product.price,product.cost,product.unit,JSON.stringify(customValues),updated,product.id]) } catch { return error('That SKU is already in use.') }
     await db.run('UPDATE branch_inventory SET reorder_point=?,updated_at=? WHERE product_id=?',[product.reorder,updated,product.id])
