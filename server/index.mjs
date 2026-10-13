@@ -489,7 +489,9 @@ const server = createServer(async (request, response) => {
   }
   if (request.method === 'POST' && request.url === '/api/sync/now') {
     const user = sessionUser(request)
-    if (!user || !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access is required.' })
+    // Sync transports already-authorized local operations. The cloud validates
+    // each operation against its staff actor and permissions before accepting it.
+    if (!user) return sendJson(response, 401, { error: 'Authentication required.' })
     return sendJson(response, 200, await syncNow(String(request.headers['x-stockroom-till'] || '')))
   }
   if (request.method === 'POST' && request.url === '/api/sync/pull') {

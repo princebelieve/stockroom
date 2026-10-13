@@ -456,6 +456,8 @@ function App() {
   const [posAccess, setPosAccess] = useState<SubscriptionAccess>(() => subscriptionAccess(null))
   const [syncing, setSyncing] = useState(false)
   const [syncFeedback, setSyncFeedback] = useState('')
+  const syncInFlight = useRef(false)
+  const queuedOperationsInFlight = useRef(false)
   const [syncConflicts, setSyncConflicts] = useState<SyncConflict[]>([])
   const [displayPairing, setDisplayPairing] = useState<{ url: string; code: string; expiresAt: string } | null>(null)
   const [appName, setAppName] = useState(() => localStorage.getItem('stockroom-app-name') || 'My Business')
@@ -1038,9 +1040,13 @@ function App() {
     const response = await fetch('/api/sync/status').catch(() => null)
     if (response?.ok) setSyncStatus(await response.json() as SyncStatus)
   }
-  async function syncNow() {
-    setSyncing(true)
-    setSyncFeedback('Uploading and downloading changes...')
+  async function syncNow(showFeedback = true) {
+    if (syncInFlight.current) return
+    syncInFlight.current = true
+    if (showFeedback) {
+      setSyncing(true)
+      setSyncFeedback('Uploading and downloading changes...')
+    }
     try {
       await syncQueuedOperations()
       const response = await fetch('/api/sync/now', { method: 'POST', headers: authHeaders })
@@ -1051,23 +1057,30 @@ function App() {
       if (!status.configured) throw new Error('Cloud sync is not configured for this device.')
       if (status.lastError) throw new Error(status.lastError)
       const pending = status.pending + (isBrowserPwa() ? 0 : (await getQueuedOperations()).length)
-      setSyncFeedback(status.conflicts ? `Sync needs review: ${status.conflicts} conflicting change(s), ${pending} still queued.` : pending ? `Sync incomplete: ${pending} change(s) still queued. Press Sync now to retry.` : `Sync complete at ${new Date().toLocaleTimeString()}. All changes uploaded; 0 queued.`)
+      if (showFeedback) setSyncFeedback(status.conflicts ? `Sync needs review: ${status.conflicts} conflicting change(s), ${pending} still queued.` : pending ? `Sync incomplete: ${pending} change(s) still queued. Press Sync now to retry.` : `Sync complete at ${new Date().toLocaleTimeString()}. All changes uploaded; 0 queued.`)
       await refreshBusinessSettings()
       if (!isBrowserPwa() && (await getQueuedOperations()).length) return
       const productsResponse = await fetch('/api/products', { headers: authHeaders })
       if (productsResponse.ok) setProducts((await productsResponse.json()).products)
+      const customersResponse = await fetch('/api/customers', { headers: authHeaders }).catch(() => null)
+      if (customersResponse?.ok) setCustomers((await customersResponse.json()).customers)
+      await pos.reload().catch(() => undefined)
+      window.dispatchEvent(new Event('stockroom-data-refreshed'))
     } catch (error) {
-      setSyncFeedback(syncErrorMessage(error instanceof Error ? error.message : 'Could not reach cloud sync. Changes remain saved on this device.'))
-    } finally { setSyncing(false) }
+      if (showFeedback) setSyncFeedback(syncErrorMessage(error instanceof Error ? error.message : 'Could not reach cloud sync. Changes remain saved on this device.'))
+      else void refreshSyncStatus().catch(() => undefined)
+    } finally {
+      syncInFlight.current = false
+      if (showFeedback) setSyncing(false)
+    }
   }
   async function pullLatest() {
     refreshLocalView()
   }
   useEffect(() => {
-    // A PWA's local database is intentionally serialized. Its explicit Refresh
-    // and Sync actions may use the network, but a background pull must not hold
-    // that database lock and delay an offline action such as Start Count.
-    if (isBrowserPwa() || !authToken || !online || !['owner', 'admin'].includes(user?.role || '')) return
+    // Desktop's local server sync worker handles cloud traffic. This refreshes
+    // the renderer's view of that local database for every signed-in staff user.
+    if (isBrowserPwa() || isNativeMobile() || !authToken || !online) return
     let cancelled = false
     let busy = false
     const download = async () => {
@@ -1093,7 +1106,7 @@ function App() {
     void download()
     const interval = window.setInterval(() => { void download() }, 30_000)
     return () => { cancelled = true; window.clearInterval(interval) }
-  }, [authToken, online, user?.role])
+  }, [authToken, online])
   useEffect(() => {
     if (isNativeMobile()) return
     const handleDesktopReload = (event: KeyboardEvent) => {
@@ -1271,33 +1284,74 @@ function App() {
     const interval = window.setInterval(() => refreshSyncStatus().catch(() => undefined), 15_000)
     return () => window.clearInterval(interval)
   }, [])
+  useEffect(() => {
+    // Desktop already has a local server worker. PWA and Android sync when a
+    // change is queued, when connectivity returns, on resume, and periodically
+    // while the app is in active use.
+    if ((!isBrowserPwa() && !isNativeMobile()) || !authToken || !online || !syncStatus.configured) return
+    let lastActivity = Date.now()
+    let debounce = 0
+    const markActive = () => { lastActivity = Date.now() }
+    const syncIfReady = () => {
+      if (!document.hidden && navigator.onLine) void syncNow(false)
+    }
+    const queued = () => {
+      window.clearTimeout(debounce)
+      debounce = window.setTimeout(syncIfReady, 900)
+    }
+    const resumed = () => {
+      if (document.visibilityState === 'visible') { markActive(); syncIfReady() }
+    }
+    const interval = window.setInterval(() => {
+      if (!document.hidden && navigator.onLine && Date.now() - lastActivity < 3 * 60_000) syncIfReady()
+    }, 60_000)
+    for (const event of ['pointerdown', 'keydown', 'touchstart']) window.addEventListener(event, markActive, { passive: true })
+    window.addEventListener('stockroom-sync-queued', queued)
+    window.addEventListener('online', syncIfReady)
+    window.addEventListener('focus', resumed)
+    document.addEventListener('visibilitychange', resumed)
+    syncIfReady()
+    return () => {
+      window.clearTimeout(debounce)
+      window.clearInterval(interval)
+      for (const event of ['pointerdown', 'keydown', 'touchstart']) window.removeEventListener(event, markActive)
+      window.removeEventListener('stockroom-sync-queued', queued)
+      window.removeEventListener('online', syncIfReady)
+      window.removeEventListener('focus', resumed)
+      document.removeEventListener('visibilitychange', resumed)
+    }
+  }, [authToken, activeBranchId, online, syncStatus.configured])
   async function syncQueuedOperations() {
     if (isBrowserPwa()) return
     if (!navigator.onLine) return
-    const operations = await getQueuedOperations()
-    for (const operation of operations) {
-      const endpoint = operation.type === 'stock' ? `/api/products/${operation.payload.productId}/stock` : operation.type === 'sale' ? '/api/sales' : operation.type === 'sale-void' ? '/api/sales/voids' : operation.type === 'settings' ? '/api/settings' : '/api/products'
-      const body = operation.type === 'stock' ? { amount: operation.payload.amount } : operation.payload
-      const response = await fetch(endpoint, { method: operation.type === 'settings' ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(body) }).catch(() => null)
-      if (!response?.ok || operation.id === undefined) continue
-      if (operation.type === 'product') {
-        const synced = await response.json() as Product
-        const localId = String(operation.payload.localId || '')
-        setProducts((current) => current.map((product) => product.id === localId ? synced : product))
-        await upsertCachedProducts([synced])
-        if (localId) await replaceQueuedProductId(localId, synced.id)
+    if (queuedOperationsInFlight.current) return
+    queuedOperationsInFlight.current = true
+    try {
+      const operations = await getQueuedOperations()
+      for (const operation of operations) {
+        const endpoint = operation.type === 'stock' ? `/api/products/${operation.payload.productId}/stock` : operation.type === 'sale' ? '/api/sales' : operation.type === 'sale-void' ? '/api/sales/voids' : operation.type === 'settings' ? '/api/settings' : '/api/products'
+        const body = operation.type === 'stock' ? { amount: operation.payload.amount } : operation.payload
+        const response = await fetch(endpoint, { method: operation.type === 'settings' ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(body) }).catch(() => null)
+        if (!response?.ok || operation.id === undefined) continue
+        if (operation.type === 'product') {
+          const synced = await response.json() as Product
+          const localId = String(operation.payload.localId || '')
+          setProducts((current) => current.map((product) => product.id === localId ? synced : product))
+          await upsertCachedProducts([synced])
+          if (localId) await replaceQueuedProductId(localId, synced.id)
+        }
+        if (operation.type === 'sale') await saveSale({ ...operation.payload, syncStatus: 'synced' } as Sale)
+        await removeQueuedOperation(operation.id)
       }
-      if (operation.type === 'sale') await saveSale({ ...operation.payload, syncStatus: 'synced' } as Sale)
-      await removeQueuedOperation(operation.id)
-    }
+    } finally { queuedOperationsInFlight.current = false }
   }
 
   useEffect(() => {
-    if (!online) return
+    if (!online || !authToken) return
     syncQueuedOperations().catch(() => undefined)
     const interval = window.setInterval(() => syncQueuedOperations().catch(() => undefined), 30_000)
     return () => window.clearInterval(interval)
-  }, [online])
+  }, [online, authToken, activeBranchId])
   useEffect(() => {
     fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }> : Promise.reject()).then((settings) => {
       const cachedName = localStorage.getItem('stockroom-app-name') || ''
@@ -2267,7 +2321,7 @@ function App() {
 
   if(chooseBranch) return <main className="login-screen"><section className="login-card"><div className="brand-mark"><Store size={21}/></div><h1>Choose your branch</h1><p>You can switch branches later from the app header.</p>{branches.length?branches.filter(branch=>branch.isActive!==false).map(branch=><button type="button" key={branch.id} className={activeBranchId===branch.id?'branch-choice selected':'branch-choice'} aria-pressed={activeBranchId===branch.id} onClick={()=>setActiveBranchId(branch.id)}><Store size={18}/><span><strong>{branch.name}</strong>{branch.address&&<small>{branch.address}</small>}</span></button>):!branchError&&<p role="status">Loading your branches...</p>}{branchError&&<div role="alert"><p>{branchError}</p><button type="button" className="filter-button" onClick={()=>setBranchRetry(value=>value+1)}>Retry loading branches</button><button type="button" className="text-button" onClick={()=>void logout()}>Back to sign in</button></div>}<button type="button" className="primary-button login-button" disabled={Boolean(branchError)||!branches.some(branch=>branch.id===activeBranchId&&branch.isActive!==false)} onClick={()=>setChooseBranch(false)}>Continue to your business</button></section></main>
   if(user.role==='owner'&&(workspaceSetupRequested||localStorage.getItem(workspaceSetupKey(user.organizationId))!==null&&localStorage.getItem(workspaceSetupKey(user.organizationId))!=='complete')) return <><HelpMenu screenHelpTopic={{title:'Workspace setup',description:'Choose a business type and selling workspace separately, select matching starter items, and confirm them. You can edit catalogue entries later or skip this step.'}}/><WorkspaceOnboarding profile={shopProfile} currency={currency} policy={extraPaymentPolicy} saveProfile={saveShopProfile} savePreferences={saveWorkspacePreferences} saveStarters={saveOnboardingStarters} finish={screen=>{localStorage.setItem(workspaceSetupKey(user.organizationId),'complete');setWorkspaceSetupRequested(false);setActive(screen||'Overview')}}/></>
-  return <div className={`app-shell${desktopLayout&&desktopSidebarCollapsed?' sidebar-collapsed':''}`}>{!desktopLayout&&<div className="mobile-app-header"><div className="mobile-app-topline"><div className="mobile-app-brand"><div className="brand-mark">{logoData?<img src={logoData} alt="" className="brand-logo"/>:<Boxes size={24}/>}</div><div className="mobile-app-brand-copy"><strong title={appName}>{appName}</strong><span>Business operations</span></div></div><NotificationCenter apiUrl={subscriptionApiUrl} token={cloudAccessToken} onToken={(nextToken,refreshToken)=>{setCloudAccessToken(nextToken);localStorage.setItem('stockroom-cloud-access-token',nextToken);localStorage.setItem('stockroom-cloud-refresh-token',refreshToken)}} allowPush={isBrowserPwa()}/></div><div className="mobile-app-actions"><ThemeToggle/><button className="mobile-header-sync" type="button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} aria-label="Sync business data" title={syncFeedback || 'Upload local changes and download business updates'}><RefreshCw size={16} className={syncing?'spin':''}/><span>{syncing?'Syncing':'Sync'}</span></button><HelpMenu guide={()=>setActive('Guide')} headers={authHeaders} scope={`${user.organizationId}:${user.id}`} screenHelpTopic={{...screenHelpFor(active,section,settingsTab,paymentTab),title:'What this screen is for'}} className="mobile-header-help"/></div>{syncFeedback&&<div className="mobile-header-sync-feedback" role="status" aria-live="polite">{syncFeedback}</div>}</div>}<ReadingControls/>
+  return <div className={`app-shell${desktopLayout&&desktopSidebarCollapsed?' sidebar-collapsed':''}`}>{!desktopLayout&&<div className="mobile-app-header"><div className="mobile-app-topline"><div className="mobile-app-brand"><div className="brand-mark">{logoData?<img src={logoData} alt="" className="brand-logo"/>:<Boxes size={24}/>}</div><div className="mobile-app-brand-copy"><strong title={appName}>{appName}</strong><span>Business operations</span></div></div><NotificationCenter apiUrl={subscriptionApiUrl} token={cloudAccessToken} onToken={(nextToken,refreshToken)=>{setCloudAccessToken(nextToken);localStorage.setItem('stockroom-cloud-access-token',nextToken);localStorage.setItem('stockroom-cloud-refresh-token',refreshToken)}} allowPush={isBrowserPwa()}/></div><div className="mobile-app-actions"><ThemeToggle/><button className="mobile-header-sync" type="button" onClick={() => syncNow()} disabled={!online || !syncStatus.configured || syncing} aria-label="Sync business data" title={syncFeedback || 'Upload local changes and download business updates'}><RefreshCw size={16} className={syncing?'spin':''}/><span>{syncing?'Syncing':'Sync'}</span></button><HelpMenu guide={()=>setActive('Guide')} headers={authHeaders} scope={`${user.organizationId}:${user.id}`} screenHelpTopic={{...screenHelpFor(active,section,settingsTab,paymentTab),title:'What this screen is for'}} className="mobile-header-help"/></div>{syncFeedback&&<div className="mobile-header-sync-feedback" role="status" aria-live="polite">{syncFeedback}</div>}</div>}<ReadingControls/>
     {(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{refreshingView ? 'Refreshing…' : mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
     <button ref={mobileMenuToggleRef} className="mobile-nav-toggle" type="button" aria-controls="business-navigation" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen?<X size={22}/>:<Menu size={22}/>}</button>
     {mobileMenuOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />}
@@ -2285,7 +2339,7 @@ function App() {
         {workspace.stock && canManageOperations && screenAllowedForUser('Movements',user) && <button className={active === 'Movements' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Movements' ? 'page' : undefined} onClick={() => setActive('Movements')}><ArrowDownToLine size={18} />Stock movements</button>}</NavigationGroup>        {canManageOperations && screenAllowedForUser('Wallet',user) && <NavigationGroup title="Customer" current={active==='Wallet'}><button className={active==='Wallet'&&section==='customers'?'nav-item active':'nav-item'} aria-current={active==='Wallet'&&section==='customers'?'page':undefined} onClick={()=>navigateToSection('Wallet','customers')}><WalletCards size={18}/>Customers</button><button className={active==='Wallet'&&section==='new-customer'?'nav-item active':'nav-item'} aria-current={active==='Wallet'&&section==='new-customer'?'page':undefined} onClick={()=>navigateToSection('Wallet','new-customer')}><Plus size={18}/>Add customer</button><button className={active==='Wallet'&&section==='birthdays'?'nav-item active':'nav-item'} aria-current={active==='Wallet'&&section==='birthdays'?'page':undefined} onClick={()=>navigateToSection('Wallet','birthdays')}>Birthdays</button></NavigationGroup>}{user.role === 'owner' && <div className="sidebar-nav-group"><button className={active === 'Team' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Team' ? 'page' : undefined} aria-expanded={expandedSidebarGroup === 'Team'} onClick={() => { setExpandedSidebarGroup(group => group === 'Team' ? null : 'Team') }}><UserRoundCog size={18} />Staff & access <span className="nav-disclosure" aria-hidden="true">{expandedSidebarGroup === 'Team' ? '−' : '+'}</span></button>{expandedSidebarGroup === 'Team' && <div className="sidebar-subnav"><a href="#team-cashier-activity" onClick={event => { event.preventDefault(); setActive('Activity') }}>Cashier activity</a><a href="#team-members" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-members') }}>Team members</a><a href="#team-members" onClick={event=>{event.preventDefault();navigateToSection('Team','team-access')}}>Access permissions</a><a href="#team-add-staff" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-add-staff') }}>Add staff</a>{staff.some(member => member.role === 'cashier' || member.role === 'admin') && <a href="#team-password-recovery" onClick={event => { event.preventDefault(); navigateToSection('Team', 'team-password-recovery') }}>Staff passwords</a>}</div>}</div>}<NavigationGroup title="Reports" current={['Reports','Owner','Activity'].includes(active)}>
         {screenAllowedForUser('Reports',user) && <button className={active === 'Reports' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Reports' ? 'page' : undefined} onClick={() => setActive('Reports')}><BarChart3 size={18} />Reports</button>}
         {screenAllowedForUser('Activity',user) && <button className={active === 'Activity' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Activity' ? 'page' : undefined} onClick={() => setActive('Activity')}><UserRoundCog size={18} />Staff activity</button>}</NavigationGroup><NavigationGroup title="Settings" current={['Settings','Subscription','Sync','Display','Account','Device'].includes(active)}>        {screenAllowedForUser('Settings',user) && <button className={active === 'Settings' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Settings' ? 'page' : undefined} onClick={() => {chooseSettingsTask(user.role==='owner'?'business.identity':'devices');setActive('Settings')}}><UserRoundCog size={18} />Business settings</button>}        {user.role === 'owner' && <button className={active === 'Subscription' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Subscription' ? 'page' : undefined} onClick={() => setActive('Subscription')}><WalletCards size={18} />Subscription</button>}        {screenAllowedForUser('Sync',user) && <button className={active === 'Sync' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Sync' ? 'page' : undefined} onClick={() => setActive('Sync')}><RefreshCw size={18} />Sync issues {syncConflicts.length > 0 && <b>{syncConflicts.length}</b>}</button>}        {(workspace.productSales || workspace.oil) && !isBrowserPwa() && !isNativeMobile() && screenAllowedForUser('Display',user) && <button className={active === 'Display' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Display' ? 'page' : undefined} onClick={() => setActive('Display')}><Store size={18} />Customer display</button>}        {user.role === 'owner' && <button className={active === 'Account' ? 'nav-item active' : 'nav-item'} aria-current={active === 'Account' ? 'page' : undefined} onClick={() => setActive('Account')}><Trash2 size={18} />Close business account</button>}</NavigationGroup><NavigationGroup title="Help" current={active==='Guide'}>        <button className={active==='Guide'?'nav-item active':'nav-item'} aria-current={active === 'Guide' ? 'page' : undefined} onClick={()=>setActive('Guide')}><BookOpen size={18}/>How to use the app</button>        <a className="nav-item" href="https://stockroom.globalcreest.com/downloads" target="_blank" rel="noreferrer"><Download size={18} />Download / install Stockroom</a></NavigationGroup></nav>
-      <div className="sidebar-foot pwa-sync-controls"><SyncStatusIndicator online={online} status={syncStatus}/><button className="sync-button" onClick={syncNow} disabled={!online || !syncStatus.configured || syncing} title="Upload local changes and download business updates"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button>{syncFeedback && <p className="sync-feedback" role="status" aria-live="polite">{syncFeedback}</p>}{(syncStatus.lastError || syncConflicts.length > 0 || Number(syncStatus.conflicts) > 0) && <button type="button" className="sync-issue-link" onClick={()=>{setActive('Sync');setMobileMenuOpen(false)}}><AlertTriangle size={15} aria-hidden="true"/><span>{syncStatus.lastError ? `${syncErrorMessage(syncStatus.lastError)} Open sync issues` : `${syncConflicts.length || syncStatus.conflicts || 0} change${(syncConflicts.length || syncStatus.conflicts || 0)===1?' needs':'s need'} review. Review now`}</span></button>}</div>
+      <div className="sidebar-foot pwa-sync-controls"><SyncStatusIndicator online={online} status={syncStatus}/><button className="sync-button" onClick={() => syncNow()} disabled={!online || !syncStatus.configured || syncing} title="Upload local changes and download business updates"><RefreshCw size={14} className={syncing ? 'spin' : ''} />{syncing ? 'Syncing…' : 'Sync now'}</button>{syncFeedback && <p className="sync-feedback" role="status" aria-live="polite">{syncFeedback}</p>}{(syncStatus.lastError || syncConflicts.length > 0 || Number(syncStatus.conflicts) > 0) && <button type="button" className="sync-issue-link" onClick={()=>{setActive('Sync');setMobileMenuOpen(false)}}><AlertTriangle size={15} aria-hidden="true"/><span>{syncStatus.lastError ? `${syncErrorMessage(syncStatus.lastError)} Open sync issues` : `${syncConflicts.length || syncStatus.conflicts || 0} change${(syncConflicts.length || syncStatus.conflicts || 0)===1?' needs':'s need'} review. Review now`}</span></button>}</div>
       {user.role === 'owner' && <button type="button" className={`sidebar-subscription-status subscription-status-${posAccess.status}`} data-status-label={posAccess.status === 'trial' ? 'Trial' : posAccess.status === 'active' ? 'Active' : posAccess.status === 'grace' ? 'Grace' : posAccess.status === 'free' ? 'Free' : posAccess.status === 'expired' || posAccess.status === 'trial-expired' ? 'Expired' : posAccess.status === 'suspended' ? 'Paused' : posAccess.status === 'test' ? 'Test' : posAccess.status === 'unknown' ? 'Unknown' : 'Unpaid'} aria-label={`Subscription: ${posAccess.status}`} title={`Subscription: ${posAccess.status}`} onClick={() => { setActive('Subscription'); setMobileMenuOpen(false) }}><span>Subscription</span><strong>{posAccess.status === 'trial' ? 'Free trial' : posAccess.status === 'trial-expired' ? 'Trial ended' : posAccess.status === 'active' ? 'Active' : posAccess.status === 'grace' ? 'Grace period' : posAccess.status === 'free' ? 'Payments free' : posAccess.status === 'test' ? 'Enforcement off' : posAccess.status === 'unknown' ? 'Status unavailable' : 'Payment needed'}</strong>{posAccess.status === 'trial' && posAccess.expiresAt && <small>Ends {new Date(String(posAccess.expiresAt)).toLocaleDateString()}</small>}</button>}
       {desktopLayout&&<HelpMenu guide={()=>setActive('Guide')} headers={authHeaders} scope={`${user.organizationId}:${user.id}`} screenHelpTopic={{...screenHelpFor(active,section,settingsTab,paymentTab),title:'What this screen is for'}} className="desktop-sidebar-help"/>}
     <AsyncButton busyLabel="Signing out..." className="text-button logout-button" onClick={logout}>Log out</AsyncButton></aside>

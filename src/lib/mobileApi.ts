@@ -110,6 +110,7 @@ async function body(init?: RequestInit) { try { return JSON.parse(String(init?.b
 async function queue(entityType: string, entityId: string, action: string, payload: Record<string, unknown>, transaction = false) {
   const db = await openMobileDatabase()
   await db.run('INSERT INTO sync_outbox (operation_id, entity_type, entity_id, action, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)', [id(), entityType, entityId, action, JSON.stringify(payload), now()], transaction)
+  window.setTimeout(() => window.dispatchEvent(new Event('stockroom-sync-queued')), 250)
 }
 async function ensureBranches(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
   const timestamp = now()

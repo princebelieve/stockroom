@@ -55,6 +55,7 @@ export async function upsertCachedProducts(products: Product[]) {
 
 export async function queueOperation(operation: SyncOperation) {
   await transaction('operations', 'readwrite', (store) => store.add(operation))
+  window.setTimeout(() => window.dispatchEvent(new Event('stockroom-sync-queued')), 250)
 }
 
 export async function getQueuedOperations() {
