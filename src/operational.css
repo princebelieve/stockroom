@@ -442,6 +442,7 @@
 .inventory-product-toolbar .search-box { flex:1 1 300px; max-width:none; min-width:220px; }
 .inventory-product-toolbar .list-sort { flex:0 1 220px; }
 .inventory-product-toolbar > button { min-height:44px; }
+.barcode-camera-preview { display:block; width:100%; min-height:220px; max-height:min(58dvh,640px); border-radius:10px; background:#05080d; object-fit:contain; }
 .inventory-no-results { display:grid; justify-items:start; gap:10px; padding:28px 12px; }
 .inventory-no-results p { margin:0; color:var(--muted); line-height:1.6; }
 .inventory-product-cards { display:none; }
@@ -508,6 +509,7 @@
   .inventory-product-list { margin-top:12px; }
   .inventory-product-toolbar { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:end; gap:10px; }
   .inventory-product-toolbar .search-box { grid-column:1/-1; width:100%; min-width:0; }
+  .inventory-product-toolbar .inventory-scan-action { grid-column:1/-1; }
   .inventory-product-toolbar .list-sort { min-width:0; width:100%; }
   .inventory-product-toolbar > button { min-height:46px; justify-content:center; }
   .purchasing-screen .screen-picker { max-width:none; margin:0 0 10px; }

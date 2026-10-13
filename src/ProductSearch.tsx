@@ -33,7 +33,7 @@ export function ProductSearch({ products, add, open, scan, openStarters, lookupA
     {query.trim() && !matches.length && <p role="status">No matching product</p>}
     <div className="product-search-actions">
       <button type="button" className="primary-button" onClick={() => add(query.trim() ? { name: query.trim() } : undefined)}>Add product</button>
-      <AsyncButton className="filter-button" onClick={scanForProduct}><ScanLine size={20} />Scan barcode</AsyncButton>
+      <AsyncButton className="filter-button" onClick={scanForProduct}><ScanLine size={20} />Scan product barcode</AsyncButton>
       <button type="button" className="filter-button" onClick={openStarters}>Browse starter products</button>
     </div>
     {missing && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="missing-product-title">
