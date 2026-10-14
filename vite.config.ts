@@ -39,7 +39,10 @@ export default defineConfig(({ mode }) => {
   }, {
     name: 'offline-shell',
     writeBundle(options, bundle) {
-      const assets = ['/', '/features', '/workspaces', '/hardware', '/getting-started', '/downloads', '/referrals', '/support', '/welcome', '/developer', '/visitor', '/privacy', '/terms', '/account-deletion', '/guide/staff-access.png', '/manifest.webmanifest', '/icon.svg', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', ...Object.keys(bundle).filter(name => !['index.html', 'welcome.html', 'developer.html', 'visitor.html', 'account-deletion.html'].includes(name)).map(name => `/${name}`)]
+      // OCR engines and trained data are fetched only when OCR is used. Keeping
+      // their ~41 MB payload out of the app-shell install prevents a quota or
+      // one-file failure from leaving iOS PWAs on an old worker indefinitely.
+      const assets = ['/', '/features', '/workspaces', '/hardware', '/getting-started', '/downloads', '/referrals', '/support', '/welcome', '/developer', '/visitor', '/privacy', '/terms', '/account-deletion', '/guide/staff-access.png', '/manifest.webmanifest', '/icon.svg', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', ...Object.keys(bundle).filter(name => !['index.html', 'welcome.html', 'developer.html', 'visitor.html', 'account-deletion.html'].includes(name) && !name.startsWith('ocr/')).map(name => `/${name}`)]
       const hash = createHash('sha256').update(JSON.stringify(assets)).update(readFileSync(resolve(options.dir || 'dist', 'index.html'))).update(readFileSync(resolve(options.dir || 'dist', 'welcome.html'))).update(readFileSync(resolve(options.dir || 'dist', 'developer.html'))).update(readFileSync(resolve(options.dir || 'dist', 'visitor.html'))).update(readFileSync(resolve(options.dir || 'dist', 'account-deletion.html'))).update(readFileSync(resolve(options.dir || 'dist', 'privacy.html'))).update(readFileSync(resolve(options.dir || 'dist', 'terms.html'))).digest('hex').slice(0, 16)
       // A unique shell name lets a newly deployed worker discard every older
       // app shell. Keep this in sync with the declaration in public/sw.js,

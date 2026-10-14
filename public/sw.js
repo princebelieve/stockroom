@@ -4,7 +4,9 @@
 const CACHE_NAME = 'stockroom-shell-v2'
 const APP_SHELL = ['/', '/welcome', '/developer', '/visitor', '/manifest.webmanifest', '/icon.svg']
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()))
+  // A single unavailable optional shell resource must not block the update.
+  // In particular, large OCR assets are fetched only when OCR is used.
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => Promise.all(APP_SHELL.map(url => cache.add(url).catch(() => undefined)))).then(() => self.skipWaiting()))
 })
 self.addEventListener('activate', event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('stockroom-shell-') && key !== CACHE_NAME).map(key => caches.delete(key)))).then(() => self.clients.claim()))
@@ -37,13 +39,9 @@ self.addEventListener('fetch', event => {
     // These are real static documents. Do not turn their navigations into the
     // app shell: doing so makes sitemap.xml render Stockroom instead of XML.
     if (['/sitemap.xml', '/robots.txt', '/privacy', '/privacy.html', '/terms', '/terms.html'].includes(url.pathname)) return
-    // Keep an HTML shell and its hashed assets together. An older worker can
-    // see a newly deployed index.html before its replacement worker has
-    // precached that deployment's assets. Saving that HTML in the older cache
-    // would make the next offline launch request JavaScript that it does not
-    // have. The replacement worker is activated immediately and reloads the
-    // client, so cache-first navigation does not leave the app on an old
-    // release once the new shell is ready.
+    // Prefer the deployed HTML whenever online. An old controlling worker
+    // must not keep returning its cached app document after a deployment.
+    // Retain the cached document only as an offline fallback.
     const publicPages = ['features','workspaces','hardware','getting-started','downloads','referrals','support']
     const publicPage = publicPages.find(page => url.pathname === '/' + page || url.pathname === '/' + page + '.html')
     const shellUrl = publicPage ? '/' + publicPage : ['/welcome', '/welcome.html'].includes(url.pathname) ? '/welcome'
@@ -54,7 +52,11 @@ self.addEventListener('fetch', event => {
       // Fetch canonical clean URLs, not the incoming navigation Request. On
       // Vercel, legacy *.html URLs redirect and navigation requests may use a
       // manual redirect mode that cannot be returned from a service worker.
-      return cached || fetch(new URL(shellUrl, self.location.origin))
+      try {
+        const fresh = await fetch(new URL(shellUrl, self.location.origin), { cache: 'no-store' })
+        if (fresh.ok) return fresh
+      } catch { /* use the cached app shell while offline */ }
+      return cached || Response.error()
     }))
     return
   }

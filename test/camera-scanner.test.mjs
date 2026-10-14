@@ -6,25 +6,31 @@ import { stripTypeScriptTypes } from 'node:module'
 const source = await readFile(new URL('../src/lib/cameraScanner.ts', import.meta.url), 'utf8')
 const cameraScanner = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`)
 
-test('camera scanner prefers the rear camera when the browser accepts it', async () => {
+test('barcode scanning requests the rear camera', async () => {
   const stream = { id: 'rear' }
   const constraints = []
   const result = await cameraScanner.requestBarcodeCamera({ getUserMedia: async value => { constraints.push(value); return stream } })
   assert.equal(result, stream)
-  assert.deepEqual(constraints, [{ video: { facingMode: 'environment' } }])
+  assert.deepEqual(constraints, [{ video: { facingMode: { exact: 'environment' } } }])
 })
 
-test('camera scanner retries iOS compatible constraints when strict rear-camera selection is rejected', async () => {
-  const stream = { id: 'default' }
+test('barcode scanning does not silently fall back to a front-facing camera', async () => {
   const constraints = []
-  const result = await cameraScanner.requestBarcodeCamera({ getUserMedia: async value => {
-    constraints.push(value)
-    if (constraints.length === 1) throw new Error('facingMode unsupported')
-    if (constraints.length === 2) throw new Error('ideal facingMode unsupported')
-    return stream
-  } })
-  assert.equal(result, stream)
-  assert.deepEqual(constraints, [{ video: { facingMode: 'environment' } }, { video: { facingMode: { ideal: 'environment' } } }, { video: true }])
+  await assert.rejects(cameraScanner.requestBarcodeCamera({ getUserMedia: async value => { constraints.push(value); throw Object.assign(new Error('rear camera unavailable'), { name: 'OverconstrainedError' }) } }), { name: 'OverconstrainedError' })
+  assert.deepEqual(constraints, [{ video: { facingMode: { exact: 'environment' } } }])
+})
+
+test('camera API absence identifies insecure origin separately from unsupported app context', () => {
+  assert.match(cameraScanner.cameraAccessUnavailableMessage(false, true), /secure HTTPS/)
+  assert.match(cameraScanner.cameraAccessUnavailableMessage(true, false), /does not expose the browser camera API/)
+  assert.match(cameraScanner.cameraAccessUnavailableMessage(true, true), /does not expose camera access/)
+})
+
+test('camera failures report permission and rear-camera errors distinctly', () => {
+  const permissionError = Object.assign(new Error('denied'), { name: 'NotAllowedError' })
+  const rearCameraError = Object.assign(new Error('missing'), { name: 'OverconstrainedError' })
+  assert.match(cameraScanner.cameraFailureMessage(permissionError), /permission was denied or blocked/)
+  assert.match(cameraScanner.cameraFailureMessage(rearCameraError), /rear-facing camera/)
 })
 
 test('camera scanner waits for the preview element to mount before attaching the stream', async () => {

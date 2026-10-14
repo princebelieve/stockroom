@@ -103,7 +103,7 @@ import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
 import { decodeEanFrame } from './lib/eanBarcode'
-import { requestBarcodeCamera, waitForCameraPreview } from './lib/cameraScanner'
+import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, waitForCameraPreview } from './lib/cameraScanner'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, businessModes, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
 import type { CatalogueStarter } from '../server/catalogue-starters.mjs'
@@ -2163,7 +2163,7 @@ function App() {
     const Detector = (window as unknown as { BarcodeDetector?: new () => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> } }).BarcodeDetector
     if (!navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
-      window.alert('This browser cannot open the camera. Allow camera access in Safari settings, or enter the barcode manually.')
+      window.alert(`${cameraAccessUnavailableMessage(window.isSecureContext, Boolean(navigator.mediaDevices))} The barcode field still accepts manual entry.`)
       return undefined
     }
     stopScan()
@@ -2221,7 +2221,7 @@ function App() {
         await new Promise(resolve => window.setTimeout(resolve, 150))
       }
     } catch (error) {
-      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; window.alert(target === 'payment' ? (error instanceof Error ? error.message : 'QR scanning is unavailable in this browser.') : 'Camera unavailable. Check Safari camera permission and try again. The barcode field still accepts manual entry.'); return undefined }
+      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; window.alert(target === 'payment' ? (error instanceof Error ? error.message : 'QR scanning is unavailable in this browser.') : `${cameraFailureMessage(error)} The barcode field still accepts manual entry.`); return undefined }
     } finally { window.clearTimeout(timeout) }
   }
 
