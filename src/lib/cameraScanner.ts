@@ -1,22 +1,31 @@
 type CameraMediaDevices = Pick<MediaDevices, 'getUserMedia'>
 
-/** Request the rear camera; do not silently switch to a front-facing camera. */
-export async function requestBarcodeCamera(mediaDevices: CameraMediaDevices) {
-  return mediaDevices.getUserMedia({ video: { facingMode: { exact: 'environment' } } })
+export function requiresRearCamera(userAgent: string, platform: string, maxTouchPoints: number) {
+  return /Android|iPhone|iPad|iPod/i.test(userAgent) || (platform === 'MacIntel' && maxTouchPoints > 1)
 }
 
-export function cameraAccessUnavailableMessage(secureContext: boolean, mediaDevicesPresent: boolean) {
+/** Phones require their rear camera; desktops use their available webcam. */
+export async function requestBarcodeCamera(mediaDevices: CameraMediaDevices, requireRearCamera: boolean) {
+  return mediaDevices.getUserMedia({ video: requireRearCamera ? { facingMode: { exact: 'environment' } } : true })
+}
+
+export function cameraAccessUnavailableMessage(secureContext: boolean, mediaDevicesPresent: boolean, requireRearCamera: boolean) {
   if (!secureContext) return 'Camera access requires a secure HTTPS connection. Open Stockroom at its HTTPS address.'
-  if (!mediaDevicesPresent) return 'This iPhone app window does not expose the browser camera API. Open Stockroom directly in Safari, then try the scanner again.'
+  if (!mediaDevicesPresent && requireRearCamera) return 'This mobile app window does not expose the browser camera API. Open Stockroom in Safari or your mobile browser, then try the scanner again.'
+  if (!mediaDevicesPresent) return 'This browser window does not expose the camera API. Open Stockroom in a supported browser, then try the scanner again.'
   return 'This browser does not expose camera access. Open Stockroom directly in Safari, then try the scanner again.'
 }
 
-export function cameraFailureMessage(error: unknown) {
+export function cameraFailureMessage(error: unknown, requireRearCamera: boolean) {
   const failure = error instanceof Error ? error : new Error(String(error))
-  if (failure.name === 'NotAllowedError' || failure.name === 'SecurityError') return 'Camera permission was denied or blocked. Allow camera access for Stockroom in Safari or iPhone Settings, then try again.'
-  if (failure.name === 'NotFoundError' || failure.name === 'OverconstrainedError') return 'The browser could not find a rear-facing camera. Check that the iPhone rear camera is available, then try again.'
-  if (failure.name === 'NotReadableError' || failure.name === 'AbortError') return 'The rear camera could not start. Close other apps using the camera and try again.'
-  return `The rear camera could not start (${failure.name}: ${failure.message}).`
+  if (failure.name === 'NotAllowedError' || failure.name === 'SecurityError') return requireRearCamera
+    ? 'Camera permission was denied or blocked. Allow camera access for Stockroom in Safari or your phone settings, then try again.'
+    : 'Camera permission was denied or blocked. Allow camera access for Stockroom in your browser or operating system settings, then try again.'
+  if (failure.name === 'NotFoundError' || failure.name === 'OverconstrainedError') return requireRearCamera
+    ? 'The browser could not find a rear-facing camera. Check that the phone rear camera is available, then try again.'
+    : 'The browser could not find an available camera. Connect or enable a webcam, then try again.'
+  if (failure.name === 'NotReadableError' || failure.name === 'AbortError') return `The ${requireRearCamera ? 'rear camera' : 'camera'} could not start. Close other apps using the camera and try again.`
+  return `The ${requireRearCamera ? 'rear camera' : 'camera'} could not start (${failure.name}: ${failure.message}).`
 }
 
 /** Wait for React to mount the scanner preview after its dialog state changes. */

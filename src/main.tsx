@@ -103,7 +103,7 @@ import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
 import { decodeEanFrame } from './lib/eanBarcode'
-import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, waitForCameraPreview } from './lib/cameraScanner'
+import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, waitForCameraPreview } from './lib/cameraScanner'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, businessModes, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
 import type { CatalogueStarter } from '../server/catalogue-starters.mjs'
@@ -2160,10 +2160,11 @@ function App() {
   async function scanBarcode(target: 'product' | 'payment' | 'setup' | 'intake' = 'product', intake?: (value: string) => void) {
     const accept = target === 'setup' ? (_code: string) => {} : target === 'intake' ? (value: string) => intake?.(value) : target === 'payment' ? acceptPaymentReference : acceptBarcode
     if (scanning) return
+    const requireRearCamera = requiresRearCamera(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
     const Detector = (window as unknown as { BarcodeDetector?: new () => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> } }).BarcodeDetector
     if (!navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
-      window.alert(`${cameraAccessUnavailableMessage(window.isSecureContext, Boolean(navigator.mediaDevices))} The barcode field still accepts manual entry.`)
+      window.alert(`${cameraAccessUnavailableMessage(window.isSecureContext, Boolean(navigator.mediaDevices), requireRearCamera)} The barcode field still accepts manual entry.`)
       return undefined
     }
     stopScan()
@@ -2171,9 +2172,7 @@ function App() {
     setScanning(true)
     const timeout = window.setTimeout(() => { if (session === cameraSession.current) { stopScan(); window.alert('Scan timed out. Try again or enter the barcode.') } }, 30_000)
     try {
-      // Some iOS WebKit/PWA versions reject a camera-facing constraint even
-      // though they can open the camera. Retry with the browser default.
-      const stream = await requestBarcodeCamera(navigator.mediaDevices)
+      const stream = await requestBarcodeCamera(navigator.mediaDevices, requireRearCamera)
       if (session !== cameraSession.current) { stream.getTracks().forEach(track => track.stop()); return }
       cameraStream.current = stream
       const videoTrack = stream.getVideoTracks()[0]
@@ -2221,7 +2220,7 @@ function App() {
         await new Promise(resolve => window.setTimeout(resolve, 150))
       }
     } catch (error) {
-      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; window.alert(target === 'payment' ? (error instanceof Error ? error.message : 'QR scanning is unavailable in this browser.') : `${cameraFailureMessage(error)} The barcode field still accepts manual entry.`); return undefined }
+      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; window.alert(target === 'payment' ? (error instanceof Error ? error.message : 'QR scanning is unavailable in this browser.') : `${cameraFailureMessage(error, requireRearCamera)} The barcode field still accepts manual entry.`); return undefined }
     } finally { window.clearTimeout(timeout) }
   }
 
