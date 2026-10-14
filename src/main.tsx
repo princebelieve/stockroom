@@ -103,7 +103,7 @@ import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
 import { decodeEanFrame } from './lib/eanBarcode'
-import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, waitForCameraPreview } from './lib/cameraScanner'
+import { cameraAccessUnavailableMessage, cameraFailureMessage, detectBarcodeValue, requestBarcodeCamera, requiresRearCamera, waitForCameraPreview } from './lib/cameraScanner'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, businessModes, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
 import type { CatalogueStarter } from '../server/catalogue-starters.mjs'
@@ -2212,10 +2212,11 @@ function App() {
       const detector = Detector ? new Detector() : undefined
       const fallbackCanvas = document.createElement('canvas')
       while (session === cameraSession.current) {
-        const codes = detector ? await detector.detect(video) : []
+        const productBarcode = target === 'product' || target === 'intake'
+        const rawValue = productBarcode
+          ? await detectBarcodeValue(detector, video, () => decodeEanFrame(video, fallbackCanvas), value => target !== 'intake' || validGtin(value))
+          : (await detector?.detect(video))?.[0]?.rawValue || ''
         if (session !== cameraSession.current) break
-        const detected = codes.find(code => target !== 'intake' || validGtin(code.rawValue.trim()))
-        const rawValue = detected?.rawValue || (detector ? '' : decodeEanFrame(video, fallbackCanvas))
         if (rawValue) { accept(rawValue); stopScan(); return rawValue }
         await new Promise(resolve => window.setTimeout(resolve, 150))
       }

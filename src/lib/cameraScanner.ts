@@ -1,12 +1,37 @@
 type CameraMediaDevices = Pick<MediaDevices, 'getUserMedia'>
+type BarcodeFrameDetector = { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> }
+
+/** Use the browser's decoder first, then the EAN decoder if it has no result. */
+export async function detectBarcodeValue(
+  detector: BarcodeFrameDetector | undefined,
+  video: HTMLVideoElement,
+  fallback: () => string,
+  accepts: (value: string) => boolean = () => true,
+) {
+  if (detector) {
+    try {
+      const codes = await detector.detect(video)
+      const detected = codes.find(code => code.rawValue?.trim() && accepts(code.rawValue.trim()))
+      if (detected) return detected.rawValue
+    } catch {
+      // Native barcode support differs by browser and camera. Keep scanning
+      // frames with the built-in EAN/UPC decoder if native detection fails.
+    }
+  }
+  return fallback()
+}
 
 export function requiresRearCamera(userAgent: string, platform: string, maxTouchPoints: number) {
-  return /Android|iPhone|iPad|iPod/i.test(userAgent) || (platform === 'MacIntel' && maxTouchPoints > 1)
+  // DevTools device emulation can override userAgent without changing the
+  // actual Windows platform. Honor an explicit desktop platform first.
+  if (/^Win/i.test(platform) || /^Linux x86/i.test(platform)) return false
+  if (/^Mac/i.test(platform)) return maxTouchPoints > 1
+  return /Android|iPhone|iPad|iPod/i.test(userAgent)
 }
 
 /** Phones require their rear camera; desktops use their available webcam. */
 export async function requestBarcodeCamera(mediaDevices: CameraMediaDevices, requireRearCamera: boolean) {
-  return mediaDevices.getUserMedia({ video: requireRearCamera ? { facingMode: { exact: 'environment' } } : true })
+  return mediaDevices.getUserMedia({ video: requireRearCamera ? { facingMode: { exact: 'environment' } } : { facingMode: { ideal: 'user' } } })
 }
 
 export function cameraAccessUnavailableMessage(secureContext: boolean, mediaDevicesPresent: boolean, requireRearCamera: boolean) {
@@ -22,7 +47,7 @@ export function cameraFailureMessage(error: unknown, requireRearCamera: boolean)
     ? 'Camera permission was denied or blocked. Allow camera access for Stockroom in Safari or your phone settings, then try again.'
     : 'Camera permission was denied or blocked. Allow camera access for Stockroom in your browser or operating system settings, then try again.'
   if (failure.name === 'NotFoundError' || failure.name === 'OverconstrainedError') return requireRearCamera
-    ? 'The browser could not find a rear-facing camera. Check that the phone rear camera is available, then try again.'
+    ? 'The browser could not find a rear-facing camera. Check that the mobile device rear camera is available, then try again.'
     : 'The browser could not find an available camera. Connect or enable a webcam, then try again.'
   if (failure.name === 'NotReadableError' || failure.name === 'AbortError') return `The ${requireRearCamera ? 'rear camera' : 'camera'} could not start. Close other apps using the camera and try again.`
   return `The ${requireRearCamera ? 'rear camera' : 'camera'} could not start (${failure.name}: ${failure.message}).`

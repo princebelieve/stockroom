@@ -9,7 +9,7 @@ function checksumValid(value: string) { return validGtin(value) }
 
 function digit(bits: string, patterns: string[]) { return patterns.indexOf(bits) }
 
-function decodeBits(bits: string) {
+function decodeEanBits(bits: string) {
   if (bits.length === 95 && bits.startsWith('101') && bits.slice(45, 50) === '01010' && bits.endsWith('101')) {
     let leftDigits = ''
     let parity = ''
@@ -48,7 +48,7 @@ function decodeBits(bits: string) {
   return ''
 }
 
-function decodeLine(data: Uint8ClampedArray, width: number, y: number) {
+function decodeEanLine(data: Uint8ClampedArray, width: number, y: number) {
   const luminance = new Uint8Array(width)
   let min = 255, max = 0
   for (let x = 0; x < width; x++) {
@@ -62,19 +62,23 @@ function decodeLine(data: Uint8ClampedArray, width: number, y: number) {
   const bits = Array.from(luminance, value => value < threshold ? '1' : '0').join('')
   // The quiet zone may be partly outside the preview. Locate likely start
   // guards and estimate one module from their first three alternating runs.
-  for (let at = 0; at < width - 95 * 1.1; at++) {
-    if (bits.slice(at, at + 3) !== '101') continue
-    let runEnd = at + 1
-    while (runEnd < width && bits[runEnd] === bits[at]) runEnd++
-    const module = (runEnd - at) // first guard run is one module
-    if (module < 1 || module > width / 67) continue
-    for (const scale of [0.96, 1, 1.04]) {
+  for (let at = 1; at < width - 95; at++) {
+    if (bits[at] !== '1' || bits[at - 1] !== '0') continue
+    let firstBarEnd = at
+    while (firstBarEnd < width && bits[firstBarEnd] === '1') firstBarEnd++
+    let firstSpaceEnd = firstBarEnd
+    while (firstSpaceEnd < width && bits[firstSpaceEnd] === '0') firstSpaceEnd++
+    let secondBarEnd = firstSpaceEnd
+    while (secondBarEnd < width && bits[secondBarEnd] === '1') secondBarEnd++
+    const module = ((firstBarEnd - at) + (firstSpaceEnd - firstBarEnd) + (secondBarEnd - firstSpaceEnd)) / 3
+    if (module < 1 || module > width / 67 || at + 95 * module > width) continue
+    for (const scale of [0.9, 0.96, 1, 1.04, 1.1]) {
       const unit = module * scale
       for (const offset of [-0.2, 0, 0.2]) {
         for (const length of [95, 67]) {
           let sampled = ''
           for (let i = 0; i < length; i++) sampled += bits[Math.round(at + (i + 0.5 + offset) * unit)] || '0'
-          const result = decodeBits(sampled)
+          const result = decodeEanBits(sampled)
           if (result) return result
         }
       }
@@ -94,7 +98,7 @@ export function decodeEanFrame(video: HTMLVideoElement, canvas: HTMLCanvasElemen
   context.drawImage(video, 0, 0, width, height)
   const rows = [0.35, 0.42, 0.49, 0.56, 0.63, 0.70].map(fraction => Math.floor(height * fraction))
   for (const y of rows) {
-    const decoded = decodeLine(context.getImageData(0, y, width, 1).data, width, 0)
+    const decoded = decodeEanLine(context.getImageData(0, y, width, 1).data, width, 0)
     if (decoded) return decoded
   }
   return ''
