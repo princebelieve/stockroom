@@ -4,7 +4,7 @@ import type { ShopProfile } from '../server/shop-profile.mjs'
 import type { CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { CustomFieldEditor, customFieldProblem } from './ShopProductFields'
 import { useRef, useState } from 'react'
-import { ScanLine } from 'lucide-react'
+import { Check, ScanLine, X } from 'lucide-react'
 import { readReceiptPhoto } from './lib/receiptOcr'
 import { parseReport } from './lib/reconciliation'
 import { documentSuggestions, draftProblem, labelSuggestion, lookupProductBarcode, lookupProductNafdac, validGtin } from './lib/productIntake'
@@ -31,6 +31,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
   const [lookupSource, setLookupSource] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [uploadFeedback, setUploadFeedback] = useState<{ state: 'success' | 'error'; text: string } | null>(null)
   const [mode, setMode] = useState<'package' | 'document'>('package')
   const [text, setText] = useState('')
   const [sourceName, setSourceName] = useState('Pasted text')
@@ -128,8 +129,9 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     }
   }
   async function importSelected() {
+    setUploadFeedback(null)
     const invalid = selected.find(row => problem(row))
-    if (invalid) { setMessage(problem(invalid)); return }
+    if (invalid) { setUploadFeedback({ state: 'error', text: problem(invalid) }); return }
     let saved = 0
     try {
       for (const row of selected) {
@@ -138,8 +140,9 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
         saved++
         setRows(current => current.filter(item => item.id !== row.id))
       }
-      setMessage(`Imported ${saved} product${saved === 1 ? '' : 's'}.`)
-    } catch (error) { setMessage(`Imported ${saved}; stopped on the next product. Confirmed saved rows have been removed. If the connection failed, refresh inventory before retrying to check whether the last product was saved. ${error instanceof Error ? error.message : ''}`) }
+      setMessage('')
+      setUploadFeedback({ state: 'success', text: `Imported ${saved} product${saved === 1 ? '' : 's'}.` })
+    } catch (error) { setMessage(''); setUploadFeedback({ state: 'error', text: `Imported ${saved}; stopped on the next product. Confirmed saved rows have been removed. If the connection failed, refresh inventory before retrying to check whether the last product was saved. ${error instanceof Error ? error.message : ''}` }) }
   }
   const page = screen === 'import' ? 'home' : screen.replace('import-', '')
   return <section className="panel full-panel product-intake">
@@ -202,11 +205,12 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
           <td>{shopProfile && <CustomFieldEditor profile={shopProfile} values={row.draft.customValues} labelPrefix={`Row ${index + 1} `} onChange={customValues => setRows(current => current.map(item => item.id === row.id ? { ...item, draft: { ...item.draft, customValues } } : item))} />}{row.selected && <small>{skipExisting && matches(row).length===1?`Skipped: already exists as ${matches(row)[0].name}`:problem(row) || 'Ready for your review'}</small>}<details><summary>Source</summary><pre style={{ whiteSpace: 'pre-wrap', maxWidth: 300 }}>{row.source}</pre></details></td>
           <td><button type="button" className="filter-button" aria-label={`Remove row ${index + 1}`} onClick={() => setRows(current => current.filter(item => item.id !== row.id))}>Remove</button></td>
         </tr>)}</tbody></table></div>
-        <button type="button" className="primary-button" disabled={!selected.length || selected.some(row => problem(row))} onClick={() => void run(importSelected)}>Import {selected.length} reviewed product{selected.length === 1 ? '' : 's'}</button>
+        <button type="button" className="primary-button" disabled={!selected.length || selected.some(row => problem(row)) || busy} aria-busy={busy} onClick={() => { setUploadFeedback(null); void run(importSelected) }}>{busy && <span className="button-spinner" aria-hidden="true"/>}{busy ? 'Importing products...' : `Import ${selected.length} reviewed product${selected.length === 1 ? '' : 's'}`}</button>
       </>}
       {page === 'review' && rows.length === 0 && <button type="button" className="filter-button" onClick={() => navigate('import-csv')}>Import CSV</button>}
     </fieldset>
     {message && !(busy && (page === 'barcode' || page === 'photo' && /barcode|catalogue/i.test(message))) && <p role="status">{message}</p>}
-    {page === 'review' && /^Imported \d+ products?\.$/.test(message) && <button type="button" className="primary-button" onClick={() => navigate('products')}>Products</button>}
+    {page === 'review' && uploadFeedback && <p className={`product-upload-feedback product-upload-feedback-${uploadFeedback.state}`} role={uploadFeedback.state === 'error' ? 'alert' : 'status'} aria-live="polite">{uploadFeedback.state === 'success' ? <Check size={18} aria-hidden="true"/> : <X size={18} aria-hidden="true"/>}<span>{uploadFeedback.text}</span></p>}
+    {page === 'review' && uploadFeedback?.state === 'success' && <button type="button" className="primary-button" onClick={() => navigate('products')}>Products</button>}
   </section>
 }

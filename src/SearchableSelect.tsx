@@ -1,5 +1,6 @@
 import { ChevronDown, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { matchesSearchText } from './lib/searchText'
 
 export type SearchOption = { value: string; label: string }
 
@@ -18,7 +19,7 @@ export function SearchableSelect({ value, options, onChange, placeholder = 'Sear
   const input = useRef<HTMLInputElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const selected = options.find(option => option.value === value)
-  const matches = options.filter(option => `${option.label} ${option.value}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+  const matches = options.filter(option => matchesSearchText(query,[option.label,option.value]))
 
   useEffect(() => {
     if (!open) return

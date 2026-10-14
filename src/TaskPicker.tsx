@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { matchesSearchText } from './lib/searchText'
 
 export type TaskOption = { id: string; label: string; hint: string }
 
@@ -10,7 +11,7 @@ export function TaskPicker({ items, value, onChange, scope }: { items: TaskOptio
   const inputRef = useRef<HTMLInputElement>(null)
   const index = items.findIndex(item => item.id === value)
   const current = items[index]
-  const filteredItems = items.filter(item => `${item.label} ${item.hint}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+  const filteredItems = items.filter(item => matchesSearchText(query,[item.label,item.hint]))
 
   useEffect(() => {
     if (!open) return

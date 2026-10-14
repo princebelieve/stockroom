@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ButtonHTML
 
 const Submission = createContext({ busy: false, label: 'Saving...' })
 
-export function AsyncForm({ onSubmit, busyLabel = 'Saving...', children, ...props }: Omit<FormHTMLAttributes<HTMLFormElement>, 'onSubmit'> & { onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>; busyLabel?: string }) {
+export function AsyncForm({ onSubmit, busyLabel = 'Saving...', feedbackIcons = false, children, ...props }: Omit<FormHTMLAttributes<HTMLFormElement>, 'onSubmit'> & { onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>; busyLabel?: string; feedbackIcons?: boolean }) {
   const locked = useRef(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -20,7 +20,7 @@ export function AsyncForm({ onSubmit, busyLabel = 'Saving...', children, ...prop
     try { await onSubmit(event) }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to complete this action. Please try again.') }
     finally { locked.current = false; setBusy(false) }
-  }}><fieldset className="submission-fields" disabled={busy}>{children}</fieldset>{error && <p className="auth-error" role="alert">{error}</p>}</form></Submission.Provider>
+  }}><fieldset className="submission-fields" disabled={busy}>{children}</fieldset>{error && <p className={`auth-error${feedbackIcons ? ' submission-feedback-error' : ''}`} role="alert">{feedbackIcons && <span aria-hidden="true">×</span>}{error}</p>}</form></Submission.Provider>
 }
 
 export function SubmitButton({ children, disabled, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {

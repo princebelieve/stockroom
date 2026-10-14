@@ -212,6 +212,13 @@
 .pos-stage-items .pos-catalog-slot,.pos-stage-basket .cart-panel,.pos-stage-payment .pos-payment-panel { display:block; grid-column:1 / -1; max-width:900px; width:100%; margin-inline:auto; }
 .product-flow-message { display:flex; align-items:center; gap:12px; width:fit-content; margin:12px 0; padding:10px 14px; border:1px solid #b9dbca; border-radius:14px; color:#18563d; background:#f2fbf5; }
 .product-flow-message .text-button { display:grid; place-items:center; min-width:32px; min-height:32px; padding:4px; }
+.product-flow-message-success { color:#18563d; }
+.product-upload-feedback { display:flex; align-items:flex-start; gap:10px; width:fit-content; max-width:100%; margin:14px 0; padding:12px 14px; border:1px solid; border-radius:12px; line-height:1.45; }
+.product-upload-feedback-success { color:#18563d; border-color:#9ac9a8; background:#f0faf2; }
+.product-upload-feedback-error,.submission-feedback-error { color:#842e2e; border-color:#e0a1a1; background:#fff0ef; }
+.product-upload-feedback svg { flex:0 0 auto; }
+.submission-feedback-error { display:flex; align-items:flex-start; gap:9px; }
+.submission-feedback-error > span { display:grid; place-items:center; width:20px; height:20px; flex:0 0 auto; border:1px solid currentColor; border-radius:50%; font-weight:700; }
 .sidebar-subscription-status.subscription-status-trial,.sidebar-subscription-status.subscription-status-active { color:#155b35; border-color:#8ac6a0; background:#edf8f0; }
 .sidebar-subscription-status.subscription-status-trial strong,.sidebar-subscription-status.subscription-status-active strong { color:#155b35; }
 .sidebar-subscription-status.subscription-status-grace { color:#795400; border-color:#e7c568; background:#fff8df; }
@@ -864,6 +871,8 @@
 :root[data-app-theme="dark"] .app-shell .product-flow-message { color:#eaf4d9; border-color:#638253; background:#183b35; }
 :root[data-app-theme="dark"] .app-shell .product-flow-message .text-button { color:#f4d36f; }
 :root[data-app-theme="dark"] .app-shell .product-flow-message > span { color:#eaf4d9; }
+:root[data-app-theme="dark"] .app-shell .product-upload-feedback-success { color:#d7f2dc; border-color:#568a62; background:#173a2c; }
+:root[data-app-theme="dark"] .app-shell :is(.product-upload-feedback-error,.submission-feedback-error) { color:#ffd9d5; border-color:#985752; background:#3a2427; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(h1,h2,h3,h4,p,strong,span,small,label,summary,button) { color:#192e49; }
 :root:not([data-app-theme="dark"]) .app-shell :is(.task-picker-menu,.searchable-select-menu,.help-menu-panel,.tool-search-results,.workspace-tutorial,.subscription-free-confirm,.modal) :is(small,.muted) { color:#536374; }
