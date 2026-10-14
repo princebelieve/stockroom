@@ -26,6 +26,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
   const [mapping,setMapping]=useState<Record<string,number>>({})
   const [skipExisting,setSkipExisting]=useState(true)
   const [barcode, setBarcode] = useState('')
+  const [registrationNumber, setRegistrationNumber] = useState('')
   const [barcodeReport, setBarcodeReport] = useState<BarcodeLookupReport | null>(null)
   const [lookupSource, setLookupSource] = useState('')
   const [message, setMessage] = useState('')
@@ -49,7 +50,7 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     try { await action() } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not finish. Your review rows are still available.') }
     finally { working.current = false; setBusy(false) }
   }
-  async function lookup(code: string) {
+  async function lookup(code: string, registration = registrationNumber) {
     code = code.trim()
     if (!/^\S{3,200}$/.test(code)) { setMessage('Enter or scan a barcode first.'); return }
     const existing = products.find(product => product.barcode === code || product.sku === code)
@@ -62,8 +63,8 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     else if (validGtin(code)) {
       setMessage('Looking up barcode online...')
       try {
-        const match = await lookupProductBarcode(code, lookupApiUrl, shopProfile, catalogueWorkspace, lookupSource)
-        if (match) { draft = match; state = 'match'; status = `${match.catalogueSource || 'Online catalogue'} suggested this name. Confirm the exact product and pack; your business price, cost and stock are not supplied by the catalogue.` }
+        const match = await lookupProductBarcode(code, lookupApiUrl, shopProfile, catalogueWorkspace, lookupSource, registration)
+        if (match) { draft = match; state = 'match'; status = match.catalogueSource === 'NAFDAC Greenbook' ? 'NAFDAC Greenbook matched the registration number. Confirm that the package and barcode belong to this product; your business price, cost and stock are not supplied by the registry.' : `${match.catalogueSource || 'Online catalogue'} suggested this name. Confirm the exact product and pack; your business price, cost and stock are not supplied by the catalogue.` }
       } catch (error) { state = 'unavailable'; status = `${error instanceof Error ? error.message : 'Online lookup failed.'} The scanned barcode is preserved so you can continue manually.` }
     } else { state = 'invalid'; status = 'This code is not a supported product GTIN, so online catalogues could not verify it. You can still add it as your product barcode.' }
     setBarcodeReport({ barcode: code, draft, state, message: status })
@@ -73,9 +74,9 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     if (!barcodeReport || !validGtin(barcodeReport.barcode)) return
     setMessage(source ? `Checking ${source}...` : 'Checking available catalogues...')
     try {
-      const match = await lookupProductBarcode(barcodeReport.barcode, lookupApiUrl, shopProfile, catalogueWorkspace, source)
+      const match = await lookupProductBarcode(barcodeReport.barcode, lookupApiUrl, shopProfile, catalogueWorkspace, source, registrationNumber)
       setBarcodeReport(match
-        ? { barcode: barcodeReport.barcode, draft: match, state: 'match', message: `${match.catalogueSource || 'Online catalogue'} returned an exact barcode match. Confirm the exact product and pack; set your own business price, cost and stock.` }
+        ? { barcode: barcodeReport.barcode, draft: match, state: 'match', message: match.catalogueSource === 'NAFDAC Greenbook' ? 'NAFDAC Greenbook matched the registration number. Confirm that the package and barcode belong to this product; set your own business price, cost and stock.' : `${match.catalogueSource || 'Online catalogue'} returned an exact barcode match. Confirm the exact product and pack; set your own business price, cost and stock.` }
         : { barcode: barcodeReport.barcode, draft: { name: '', barcode: barcodeReport.barcode }, state: 'not-found', message: source ? `No exact barcode match was found in ${source}. The barcode is preserved; choose another source or enter the product details.` : 'No catalogue match was returned. You can still add the product manually with this barcode.' })
     } catch (error) {
       setBarcodeReport({ ...barcodeReport, state: 'unavailable', message: `${error instanceof Error ? error.message : 'Online lookup failed.'} The barcode is preserved so you can try another source or continue manually.` })
@@ -94,11 +95,13 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
     if (!content.trim()) { setMessage('No text found. Try a clearer photo or add the details yourself.'); return }
     if (mode === 'package') {
       const draft = labelSuggestion(content)
+      const registration = content.toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
+      if (registration) setRegistrationNumber(registration)
       let lookupSource = ''
       if (draft.barcode && !existingBarcodes.includes(draft.barcode)) {
         setMessage('Checking the barcode found on the package...')
         try {
-          const match = await lookupProductBarcode(draft.barcode, lookupApiUrl, shopProfile, catalogueWorkspace)
+          const match = await lookupProductBarcode(draft.barcode, lookupApiUrl, shopProfile, catalogueWorkspace, '', registration)
           if (match) { Object.assign(draft, match); lookupSource = `${match.catalogueSource || 'Online catalogue'}; ` }
         } catch { /* The image suggestion remains useful when lookup is unavailable. */ }
       }
@@ -152,14 +155,16 @@ export function ProductIntake({ businessId = 'local', lookupApiUrl = '', openPro
         </>}
         {page === 'barcode' && !barcodeReport && <>
         <label>Barcode<div className="barcode-field"><input value={barcode} onChange={event => setBarcode(event.target.value)} onKeyDown={event => { if (event.key === scanKey && barcode.trim()) { event.preventDefault(); void run(() => lookup(barcode)) } }} placeholder="Enter or scan barcode" /></div><button type="button" className="filter-button" onClick={() => void run(async () => { const code = await scan(); if (code) { setBarcode(code); await lookup(code) } })}><ScanLine size={19} />Scan product barcode</button></label>
-        <label>Online catalogue<select value={lookupSource} onChange={event=>setLookupSource(event.target.value)}><option value="">Automatic best match</option><option>Open Food Facts</option><option>Open Beauty Facts</option><option>Open Pet Food Facts</option><option>Open Products Facts</option><option>UPCitemdb</option><option>EcomSource</option><option>openFDA Drug NDC Directory</option><option>AccessGUDID medical device registry</option></select></label>
+        <label>NAFDAC registration number (optional for herbal or regulated products)<input value={registrationNumber} onChange={event=>setRegistrationNumber(event.target.value)} placeholder="e.g. A7-102608L" /></label>
+        <label>Online catalogue<select value={lookupSource} onChange={event=>setLookupSource(event.target.value)}><option value="">Automatic best match</option><option>Open Food Facts</option><option>Open Beauty Facts</option><option>Open Pet Food Facts</option><option>Open Products Facts</option><option>UPCitemdb</option><option>EcomSource</option><option>openFDA Drug NDC Directory</option><option>AccessGUDID medical device registry</option><option>NAFDAC Greenbook</option></select></label>
         <button type="button" className="filter-button" onClick={() => void run(() => lookup(barcode))}>Find product details</button>
-        <p>For medicines and regulated health products, you can also check the <a href="https://greenbook.nafdac.gov.ng/" target="_blank" rel="noreferrer">NAFDAC Greenbook</a>. To check who issued a GTIN, use <a href="https://www.gs1.org/services/verified-by-gs1" target="_blank" rel="noreferrer">Verified by GS1</a>. These checks may identify a product or registration, but do not fill your selling price or stock.</p>
+        <p>For medicines and regulated health products, Stockroom can search the <a href="https://greenbook.nafdac.gov.ng/" target="_blank" rel="noreferrer">NAFDAC Greenbook</a> by registration number. To check who issued a GTIN, use <a href="https://www.gs1.org/services/verified-by-gs1" target="_blank" rel="noreferrer">Verified by GS1</a>. Package photos are read on this device and are not sent.</p>
         </>}
         {page === 'barcode' && barcodeReport && <section className={`barcode-lookup-report barcode-lookup-report-${barcodeReport.state}`} aria-labelledby="barcode-result-title">
           <div className="barcode-lookup-report-heading"><span className="barcode-lookup-status">{barcodeReport.state==='match'?'Catalogue match':barcodeReport.state==='saved-reference'?'Saved reference':barcodeReport.state==='existing'?'Already in Products':barcodeReport.state==='unavailable'?'Lookup unavailable':barcodeReport.state==='invalid'?'Code not verified':'No catalogue match'}</span><h2 id="barcode-result-title">{barcodeReport.state==='existing'?barcodeReport.draft.name:barcodeReport.draft.name||'Product details not found'}</h2><p>{barcodeReport.message}</p></div>
-          <dl className="barcode-lookup-facts"><div><dt>Barcode</dt><dd><code>{barcodeReport.barcode}</code></dd></div>{barcodeReport.draft.category&&<div><dt>Category</dt><dd>{barcodeReport.draft.category}</dd></div>}{barcodeReport.draft.catalogueSource&&<div><dt>Source</dt><dd>{barcodeReport.draft.catalogueSource}</dd></div>}{barcodeReport.draft.customValues&&shopProfile?.fields.filter(field=>field.visible&&barcodeReport.draft.customValues?.[field.id]).map(field=><div key={field.id}><dt>{field.label}</dt><dd>{barcodeReport.draft.customValues?.[field.id]}</dd></div>)}</dl>
-          {validGtin(barcodeReport.barcode) && barcodeReport.state !== 'existing' && <div className="barcode-source-check"><label>Check another source<select value={lookupSource} onChange={event=>setLookupSource(event.target.value)}><option value="">Automatic best match</option><option>Open Food Facts</option><option>Open Beauty Facts</option><option>Open Pet Food Facts</option><option>Open Products Facts</option><option>UPCitemdb</option><option>EcomSource</option><option>openFDA Drug NDC Directory</option><option>AccessGUDID medical device registry</option></select></label><button type="button" className="filter-button" disabled={busy} onClick={()=>void run(()=>checkLookupSource(lookupSource))}>Check source</button></div>}
+          <dl className="barcode-lookup-facts"><div><dt>Barcode</dt><dd><code>{barcodeReport.barcode}</code></dd></div>{barcodeReport.draft.category&&<div><dt>Category</dt><dd>{barcodeReport.draft.category}</dd></div>}{barcodeReport.draft.catalogueSource&&<div><dt>Source</dt><dd>{barcodeReport.draft.catalogueSource}{barcodeReport.draft.catalogueUrl&&<> · <a href={barcodeReport.draft.catalogueUrl} target="_blank" rel="noreferrer">Open source page</a></>}</dd></div>}{barcodeReport.draft.customValues&&shopProfile?.fields.filter(field=>field.visible&&barcodeReport.draft.customValues?.[field.id]).map(field=><div key={field.id}><dt>{field.label}</dt><dd>{barcodeReport.draft.customValues?.[field.id]}</dd></div>)}</dl>
+          {validGtin(barcodeReport.barcode) && barcodeReport.state !== 'existing' && <div className="barcode-source-check"><label>Check another source<select value={lookupSource} onChange={event=>setLookupSource(event.target.value)}><option value="">Automatic best match</option><option>Open Food Facts</option><option>Open Beauty Facts</option><option>Open Pet Food Facts</option><option>Open Products Facts</option><option>UPCitemdb</option><option>EcomSource</option><option>openFDA Drug NDC Directory</option><option>AccessGUDID medical device registry</option><option>NAFDAC Greenbook</option></select></label><button type="button" className="filter-button" disabled={busy} onClick={()=>void run(()=>checkLookupSource(lookupSource))}>Check source</button></div>}
+          {barcodeReport.state !== 'match' && barcodeReport.state !== 'saved-reference' && barcodeReport.state !== 'existing' && <div className="barcode-source-check"><a href={`https://www.google.com/search?q=${encodeURIComponent(`"${barcodeReport.barcode}"`)}`} target="_blank" rel="noreferrer">Search the web for this barcode</a></div>}
           {(barcodeReport.state==='match'||barcodeReport.state==='saved-reference')&&<p className="barcode-lookup-note">This is a product identification suggestion. Confirm the exact item and pack. Set your own selling price, cost and stock when you continue.</p>}
           <div className="barcode-lookup-actions">{barcodeReport.state==='existing'?<button type="button" className="primary-button" onClick={()=>navigate('products')}>Open Products</button>:<button type="button" className="primary-button" onClick={continueWithLookupResult}>{barcodeReport.state==='match'||barcodeReport.state==='saved-reference'?'Use these details':'Enter product details'}</button>}<button type="button" className="filter-button" onClick={()=>{setBarcodeReport(null);setBarcode('');setMessage('')}}>Look up another barcode</button></div>
         </section>}

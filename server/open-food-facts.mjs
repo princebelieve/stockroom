@@ -6,6 +6,7 @@ const upcItemDbCache = new Map()
 const ecomSourceCache = new Map()
 const recentUpstreamReads = []
 const recentFoodFactsReads = []
+const recentNafdacReads = []
 let lastUpcItemDbRead = 0
 let lastEcomSourceRead = 0
 
@@ -16,15 +17,16 @@ export function validProductBarcode(value) {
   return (10 - digits.reverse().reduce((sum, digit, index) => sum + digit * (index % 2 ? 1 : 3), 0) % 10) % 10 === check
 }
 
-export async function lookupOpenFoodFacts(barcode, industry = 'general', requestedSource = '') {
+export async function lookupOpenFoodFacts(barcode, industry = 'general', requestedSource = '', searchContext = '') {
   if (!validProductBarcode(barcode)) return { status: 400, body: { error: 'Enter a valid product barcode.' } }
-  const allowedSources = ['', 'Open Food Facts', 'Open Beauty Facts', 'Open Pet Food Facts', 'Open Products Facts', 'UPCitemdb', 'EcomSource', 'openFDA Drug NDC Directory', 'AccessGUDID medical device registry']
+  const allowedSources = ['', 'Open Food Facts', 'Open Beauty Facts', 'Open Pet Food Facts', 'Open Products Facts', 'UPCitemdb', 'EcomSource', 'openFDA Drug NDC Directory', 'AccessGUDID medical device registry', 'NAFDAC Greenbook']
   const source = allowedSources.includes(requestedSource) ? requestedSource : ''
-  const cacheKey = `${industry}:${barcode}:${source}`
+  const registration = String(searchContext || '').toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
+  const cacheKey = `${industry}:${barcode}:${source}:${registration}`
   const cached = responseCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.result
   const cachedCandidates = candidateCache.get(`${industry}:${barcode}`)
-  if (cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
+  if (source !== 'NAFDAC Greenbook' && cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
     const selected = source ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === source) : cachedCandidates.candidates[0]
     return selected?.found || { status: 404, body: { status: 0, error: source ? `No exact barcode match was found in ${source}.` : 'No reliable product details were found in the available catalogues.' } }
   }
@@ -37,7 +39,7 @@ export async function lookupOpenFoodFacts(barcode, industry = 'general', request
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 12000)
   try {
-    const result = await lookupCatalogues(barcode, controller.signal, industry, source)
+    const result = await lookupCatalogues(barcode, controller.signal, industry, source, registration)
     if (result.status === 200 || result.status === 404) {
       // Cache both matches and confirmed misses briefly. Repeated scans of an
       // uncatalogued barcode should not spend provider quota over and over.
@@ -215,7 +217,7 @@ async function lookupEcomSource(barcode, signal) {
 }
 
 function lookupAttributes(values) {
-  const allowed = ['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass','category','weight','dimensions','features']
+  const allowed = ['brand','manufacturer','quantity','description','ingredients','allergens','traces','imageUrl','activeIngredients','strength','dosageForm','route','packageSize','registrationNumber','model','deviceClass','category','weight','dimensions','features','sourceUrl']
   return Object.fromEntries(allowed.flatMap(key => {
     const value = values?.[key]
     const text = Array.isArray(value) ? value.filter(Boolean).join(', ') : String(value || '').replace(/\s+/g, ' ').trim()
@@ -309,9 +311,13 @@ function providerProductType(attributes, name) {
   return ''
 }
 
-async function lookupCatalogues(barcode, signal, industry = 'general', requestedSource = '') {
+async function lookupCatalogues(barcode, signal, industry = 'general', requestedSource = '', searchContext = '') {
   const candidateKey = `${industry}:${barcode}`
   const cachedCandidates = candidateCache.get(candidateKey)
+  if (requestedSource === 'NAFDAC Greenbook') {
+    const result = await lookupNafdacGreenbook(barcode, searchContext, signal)
+    return result || { status: 404, body: { status: 0, error: searchContext ? 'No exact NAFDAC Greenbook registration match was found.' : 'Enter the NAFDAC registration number printed on the package to search the Greenbook.' } }
+  }
   if (cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
     const selected = requestedSource ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === requestedSource) : cachedCandidates.candidates[0]
     return selected?.found || (requestedSource ? { status: 404, body: { status: 0, error: `No exact barcode match was found in ${requestedSource}.` } } : { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues.' } })
@@ -414,7 +420,60 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
     if (requestedSource) return { status: 404, body: { status: 0, error: `No exact barcode match was found in ${requestedSource}.` } }
     return candidates[0].found
   }
+  if (searchContext) {
+    const nafdac = await lookupNafdacGreenbook(barcode, searchContext, signal)
+    if (nafdac) return nafdac
+  }
   return !providerResponded
     ? { status: 503, body: { error: 'Product catalogues are temporarily unreachable. The barcode is saved in the product form, and you can still enter the product details.' } }
     : { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues. The barcode is still valid; enter or photograph the product details.' } }
+}
+
+async function lookupNafdacGreenbook(barcode, registration, signal) {
+  if (!registration) return null
+  const params = new URLSearchParams({
+    draw: '1', start: '0', length: '10000', 'search[value]': registration, 'search[regex]': 'false',
+  })
+  const endpoint = `https://greenbook.nafdac.gov.ng/?${params}`
+  const minuteAgo = Date.now() - 60_000
+  while (recentNafdacReads.length && recentNafdacReads[0] <= minuteAgo) recentNafdacReads.shift()
+  if (recentNafdacReads.length >= 6) return null
+  recentNafdacReads.push(Date.now())
+  const request = providerRequestSignal(signal, 5000)
+  try {
+    const response = await fetch(endpoint, { headers: { 'User-Agent': userAgent, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' }, signal: request.signal })
+    if (!response.ok) return null
+    const payload = await response.json().catch(() => null)
+    const rows = Array.isArray(payload?.data) ? payload.data : []
+    const normalize = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+    const wanted = normalize(registration)
+    const field = (row, names) => {
+      for (const name of names) {
+        const key = Object.keys(row || {}).find(candidate => candidate.toLowerCase() === name.toLowerCase())
+        if (key && row[key] != null) return row[key]
+      }
+      return undefined
+    }
+    const record = rows.find(row => normalize(field(row, ['NRN', 'registrationNumber', 'registration_number', 'registrationNo', 'registration_no'])) === wanted)
+    if (!record) return null
+    const productName = String(field(record, ['productName', 'product_name', 'product', 'name']) || '').trim()
+    if (!productName) return null
+    const pick = (...values) => values.map(value => Array.isArray(value) ? value.filter(Boolean).join(', ') : typeof value === 'object' && value ? value.name || '' : String(value || '')).map(value => value.trim()).find(Boolean) || undefined
+    const applicant = field(record, ['applicantName', 'applicant_name', 'applicant', 'manufacturer'])
+    const detailId = field(record, ['id', 'productId', 'product_id'])
+    const detailUrl = detailId ? `https://greenbook.nafdac.gov.ng/products/details/${encodeURIComponent(detailId)}` : 'https://greenbook.nafdac.gov.ng/'
+    return suggestion(barcode, productName, 'NAFDAC Greenbook', {
+      category: pick(field(record, ['productCategory', 'product_category', 'category'])),
+      activeIngredients: pick(field(record, ['activeIngredients', 'active_ingredients', 'ingredients'])),
+      manufacturer: pick(applicant),
+      dosageForm: pick(field(record, ['form', 'dosageForm', 'dosage_form'])),
+      strength: pick(field(record, ['strengths', 'strength'])),
+      registrationNumber: registration,
+      description: pick(field(record, ['status']) && `Registration status: ${field(record, ['status'])}`, field(record, ['approvalDate', 'approval_date', 'approvedAt']) && `Approved: ${field(record, ['approvalDate', 'approval_date', 'approvedAt'])}`),
+      sourceUrl: detailUrl,
+    })
+  } catch {
+    if (signal.aborted) throw new Error('NAFDAC Greenbook lookup was cancelled.')
+    return null
+  } finally { request.close() }
 }

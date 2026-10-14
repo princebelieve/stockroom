@@ -102,6 +102,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
+import { decodeEanFrame } from './lib/eanBarcode'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, businessModes, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
 import type { CatalogueStarter } from '../server/catalogue-starters.mjs'
@@ -2159,9 +2160,9 @@ function App() {
     const accept = target === 'setup' ? (_code: string) => {} : target === 'intake' ? (value: string) => intake?.(value) : target === 'payment' ? acceptPaymentReference : acceptBarcode
     if (scanning) return
     const Detector = (window as unknown as { BarcodeDetector?: new () => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> } }).BarcodeDetector
-    if (!Detector || !navigator.mediaDevices?.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
-      window.alert('Camera barcode scanning is unavailable in this app environment. The barcode field still accepts a connected keyboard scanner or manual entry.')
+      window.alert('This browser cannot open the camera. Allow camera access in Safari settings, or enter the barcode manually.')
       return undefined
     }
     stopScan()
@@ -2182,6 +2183,7 @@ function App() {
       if (!video) throw new Error('Camera preview is unavailable.')
       video.srcObject = stream
       await video.play()
+      if (!Detector && target === 'payment') throw new Error('This iPhone browser can scan printed UPC/EAN product barcodes. QR payment references need a browser with QR scanning support.')
       if (videoTrack) {
         try {
           await videoTrack.applyConstraints({ advanced: [{ torch: true }] } as unknown as MediaTrackConstraints)
@@ -2202,16 +2204,18 @@ function App() {
           setTorchMessage('This camera does not allow Stockroom to use its flashlight.')
         }
       }
-      const detector = new Detector()
+      const detector = Detector ? new Detector() : undefined
+      const fallbackCanvas = document.createElement('canvas')
       while (session === cameraSession.current) {
-        const codes = await detector.detect(video)
+        const codes = detector ? await detector.detect(video) : []
         if (session !== cameraSession.current) break
         const detected = codes.find(code => target !== 'intake' || validGtin(code.rawValue.trim()))
-        if (detected) { accept(detected.rawValue); stopScan(); return detected.rawValue }
+        const rawValue = detected?.rawValue || (detector ? '' : decodeEanFrame(video, fallbackCanvas))
+        if (rawValue) { accept(rawValue); stopScan(); return rawValue }
         await new Promise(resolve => window.setTimeout(resolve, 150))
       }
     } catch (error) {
-      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; window.alert('Camera unavailable. The barcode field still accepts a connected keyboard scanner or manual entry.'); return undefined }
+      if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; window.alert(target === 'payment' ? (error instanceof Error ? error.message : 'QR scanning is unavailable in this browser.') : 'Camera unavailable. Check Safari camera permission and try again. The barcode field still accepts manual entry.'); return undefined }
     } finally { window.clearTimeout(timeout) }
   }
 
@@ -2572,7 +2576,7 @@ function App() {
     }}><div className="modal-head"><h2>Edit product</h2><button type="button" className="icon-button" onClick={() => setDetailsProduct(null)} aria-label="Close product editor"><X size={19} /></button></div><p>Use the stock controls on the product row to record stock changes.</p><ShopProductFields profile={shopProfile} catalogueWorkspace={businessWorkspace(shopProfile).productSales ? 'product-sales' : 'oil-sales'} readOnlyStock initialDraft={{...detailsProduct,customValues:readCustomValues(detailsProduct.customValues)}} values={detailsProduct.customValues} />
       <div className="task-actions"><button type="button" className="filter-button" onClick={() => setDetailsProduct(null)}>Cancel</button><SubmitButton className="primary-button">Save product changes</SubmitButton></div></AsyncForm></div>}
     {inlinePrompt && <InlinePrompt request={inlinePrompt} onClose={closeInlinePrompt} />}
-    {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><p>Point the camera at a printed barcode. Product lookup accepts valid UPC/EAN barcodes, not package text or photos.</p><div className="scanner-preview-controls"><button type="button" className="filter-button" disabled={!torchSupported} aria-pressed={torchOn} onClick={() => void toggleScannerTorch()}>{torchSupported ? (torchOn ? 'Turn flashlight off' : 'Turn flashlight on') : 'Flashlight unavailable'}</button>{torchMessage && <span role="status">{torchMessage}</span>}</div><video ref={cameraVideo} muted autoPlay playsInline className="barcode-camera-preview" /><button type="button" className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
+    {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><p>Point the camera at a printed UPC/EAN barcode. Hold steady and fill the frame with the bars. Scanning requires camera permission; package text is not read.</p><div className="scanner-preview-controls"><button type="button" className="filter-button" disabled={!torchSupported} aria-pressed={torchOn} onClick={() => void toggleScannerTorch()}>{torchSupported ? (torchOn ? 'Turn flashlight off' : 'Turn flashlight on') : 'Flashlight unavailable'}</button>{torchMessage && <span role="status">{torchMessage}</span>}</div><video ref={cameraVideo} muted autoPlay playsInline className="barcode-camera-preview" /><button type="button" className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
     {orderToPrint && <OrderDocument order={orderToPrint} />}
     {lastReceipt && active === 'Payments' && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
     <datalist id="approved-payment-providers">{extraPaymentPolicy.providers.map(provider => <option key={provider} value={provider} />)}</datalist>

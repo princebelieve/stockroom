@@ -1,6 +1,6 @@
 import type { ShopProfile, CatalogueWorkspace } from '../../server/shop-profile.mjs'
 
-export type ProductDraft = { customValues?: Record<string, string>; name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number; catalogueSource?: string }
+export type ProductDraft = { customValues?: Record<string, string>; name: string; barcode?: string; sku?: string; category?: string; unit?: string; price?: number; cost?: number; stock?: number; reorder?: number; catalogueSource?: string; catalogueUrl?: string }
 
 export function validGtin(value: string) {
   if (!/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(value)) return false
@@ -47,7 +47,7 @@ export function documentSuggestions(text: string): Array<{ draft: ProductDraft; 
   return result.slice(0, 300)
 }
 
-export async function lookupProductBarcode(barcode: string, apiUrl = '', profile?: ShopProfile, workspace: CatalogueWorkspace = 'product-sales', source = ''): Promise<ProductDraft | null> {
+export async function lookupProductBarcode(barcode: string, apiUrl = '', profile?: ShopProfile, workspace: CatalogueWorkspace = 'product-sales', source = '', searchContext = ''): Promise<ProductDraft | null> {
   if (!validGtin(barcode)) return null
   // Product suggestions are mutable and may be corrected upstream. Let the
   // server own its short cache and rate limit; a browser cache could preserve
@@ -57,7 +57,8 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
   const timer = setTimeout(() => controller.abort(), 14000)
   try {
     const base = apiUrl.replace(/\/$/, '')
-    const query = `barcode=${encodeURIComponent(barcode)}&industry=${encodeURIComponent(profile?.industry || 'general')}${source ? `&source=${encodeURIComponent(source)}` : ''}`
+    const safeContext = searchContext.toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
+    const query = `barcode=${encodeURIComponent(barcode)}&industry=${encodeURIComponent(profile?.industry || 'general')}${source ? `&source=${encodeURIComponent(source)}` : ''}${safeContext ? `&context=${encodeURIComponent(safeContext)}` : ''}`
     const endpoint = base === '/api/cloud'
       ? `/api/cloud/v1/public/product-lookup?${query}`
       : base
@@ -90,7 +91,8 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
     const configuredCategories = (categorySettings?.categories || profile?.categories || []).filter(category => !categorySettings?.disabledCategories?.includes(category))
     const fold = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
     const matchedCategory = [...configuredCategories].reverse().find(category => categoryNames.some(name => fold(name) === fold(category) || fold(name).includes(fold(category)) || fold(category).includes(fold(name))))
-    const draft = { name, barcode, ...(matchedCategory || categoryNames.length ? { category: matchedCategory || categoryNames[categoryNames.length - 1] } : {}), ...(Object.keys(customValues).length ? { customValues } : {}), catalogueSource: typeof product.source === 'string' ? product.source : 'Product catalogue' }
+    const catalogueUrl = typeof attributes.sourceUrl === 'string' && /^https:\/\//.test(attributes.sourceUrl) ? attributes.sourceUrl : undefined
+    const draft = { name, barcode, ...(matchedCategory || categoryNames.length ? { category: matchedCategory || categoryNames[categoryNames.length - 1] } : {}), ...(Object.keys(customValues).length ? { customValues } : {}), catalogueSource: typeof product.source === 'string' ? product.source : 'Product catalogue', ...(catalogueUrl ? { catalogueUrl } : {}) }
     return draft
   } catch (error) {
     if (controller.signal.aborted) throw new Error('Online lookup timed out. Use a photo or complete the details yourself.')

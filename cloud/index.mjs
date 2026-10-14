@@ -303,7 +303,7 @@ const server = createServer(async (request, response) => {
     const barcode = String(requestUrl.searchParams.get('barcode') || '').trim()
     const source = String(requestUrl.searchParams.get('source') || '')
     const shared = source && source !== 'Stockroom Global Catalogue' ? null : await findSharedProduct(sharedProductCatalogue, barcode)
-    const result = shared || await lookupOpenFoodFacts(barcode, String(requestUrl.searchParams.get('industry') || 'general'), source)
+    const result = shared || await lookupOpenFoodFacts(barcode, String(requestUrl.searchParams.get('industry') || 'general'), source, String(requestUrl.searchParams.get('context') || ''))
     response.setHeader('Cache-Control', 'no-store')
     return send(response, result.status, result.body)
   }
