@@ -695,9 +695,13 @@ export function recordSaleItemVoid(input, staff, shouldSync = true) {
   return event
 }
 
-export function listSaleItemVoids(limit = 500, branchId = 'main') {
-  return database.prepare('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE organization_id = ? AND branch_id = ? ORDER BY created_at DESC LIMIT ?')
-    .all(organizationId, branchId, Math.min(Math.max(Number(limit) || 500, 1), 1000))
+export function listSaleItemVoids(limit = 500, branchId = 'main', staffId = '') {
+  const staffFilter = staffId ? ' AND staff_id = ?' : ''
+  const params = staffId
+    ? [organizationId, branchId, staffId, Math.min(Math.max(Number(limit) || 500, 1), 1000)]
+    : [organizationId, branchId, Math.min(Math.max(Number(limit) || 500, 1), 1000)]
+  return database.prepare(`SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE organization_id = ? AND branch_id = ?${staffFilter} ORDER BY created_at DESC LIMIT ?`)
+    .all(...params)
 }
 
 export function listMovements(limit = 200, branchId = 'main') {

@@ -225,8 +225,9 @@ const server = createServer(async (request, response) => {
     return sendJson(response, 200, { sales: await listSales(100, requestBranch(request), user.role==='cashier'?user.id:'') })
   }
   if (request.method === 'GET' && request.url === '/api/sales/voids') {
-    if (!canOperate(sessionUser(request))) return sendJson(response, 403, { error: 'Operational access is required.' })
-    return sendJson(response, 200, { voids: await listSaleItemVoids(500, requestBranch(request)) })
+    const user=sessionUser(request)
+    if (!canOperate(user)) return sendJson(response, 403, { error: 'Operational access is required.' })
+    return sendJson(response, 200, { voids: await listSaleItemVoids(500, requestBranch(request), user.role==='cashier'?user.id:'') })
   }
   if (request.method === 'POST' && request.url === '/api/sales/voids') {
     return readJson(request, response, async (input) => {

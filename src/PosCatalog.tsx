@@ -1,35 +1,70 @@
-import { useState } from 'react'
-import { Search, ScanLine, Plus, PackagePlus } from 'lucide-react'
+import { useState, type KeyboardEvent } from 'react'
+import { PackagePlus, Plus, ScanLine, Search } from 'lucide-react'
 import type { Product } from './types'
 import type { ProductDraft } from './lib/productIntake'
 
 export function PosCatalog({ products, matches, query, setQuery, cart, add, scan, scanKey, acceptBarcode, money, options = [], oilMode = false, canAddProduct = false, addMissing, onlineSuggestion = '' }: {
   products: Product[]; matches: Product[]; query: string; setQuery: (value: string) => void; cart: Record<string, number>;
-  add: (product: Product) => void; scan: () => void; scanKey: string; acceptBarcode: (code: string) => void; money: (amount: number) => string;
+  add: (product: Product) => void | Promise<void>; scan: () => void; scanKey: string; acceptBarcode: (code: string) => void; money: (amount: number) => string;
   options?: Array<{ productId: string; variantGroup?: string; variantLabel?: string }>; oilMode?: boolean; canAddProduct?: boolean; addMissing?: (draft: ProductDraft) => void; onlineSuggestion?: string
 }) {
-  const [category, setCategory] = useState('')
-  const [variantGroup, setVariantGroup] = useState('')
-  const categories = [...new Set(products.map(product => product.category).filter(Boolean))].sort()
-  const selectedCategory = categories.includes(category) ? category : ''
-  const visible = matches.filter(product => (!selectedCategory || product.category === selectedCategory) && (!variantGroup || options.find(option => option.productId === product.id)?.variantGroup === variantGroup))
+  const [activeSuggestion, setActiveSuggestion] = useState(0)
+  const term = query.trim()
+  const hasSearch = term.length >= 3
+  const visible = hasSearch ? matches : []
+
+  async function choose(product: Product) {
+    await add(product)
+    setQuery('')
+    setActiveSuggestion(0)
+  }
+
+  function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown' && visible.length) {
+      event.preventDefault()
+      setActiveSuggestion(index => (index + 1) % visible.length)
+      return
+    }
+    if (event.key === 'ArrowUp' && visible.length) {
+      event.preventDefault()
+      setActiveSuggestion(index => (index - 1 + visible.length) % visible.length)
+      return
+    }
+    if (event.key === scanKey && event.key !== 'Enter') {
+      event.preventDefault()
+      acceptBarcode(term)
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      const exact = products.find(product => product.barcode === term || product.sku === term)
+      if (exact || /^\d{8,14}$/.test(term) || !visible.length) acceptBarcode(term)
+      else void choose(visible[activeSuggestion] || visible[0])
+      return
+    }
+  }
+
   return <div className="panel pos-catalog">
-    <div className="pos-catalog-header"><div><span className="pos-section-kicker">{oilMode ? 'OIL SALES' : 'NEW SALE'}</span><h2>{oilMode ? 'Choose oil' : 'Products'}</h2></div><span className="pos-result-count">{visible.length} {visible.length === 1 ? 'item' : 'items'}</span></div>
-    <div className="pos-find"><div className="search-box"><Search size={18} /><input aria-label={oilMode ? 'Search oils for sale' : 'Search products for sale'} placeholder={oilMode ? 'Search oil name or SKU' : 'Search product name or SKU'} value={query} onChange={event => { setQuery(event.target.value); setCategory('') }} onKeyDown={event => { if (event.key === scanKey) { event.preventDefault(); acceptBarcode(query) } }} /></div><button type="button" className="filter-button pos-scan-button" onClick={scan} aria-label="Scan product barcode" title="Scan product barcode"><ScanLine size={19} /><span>Scan product barcode</span></button></div>
-    {categories.length > 0 && <div className="pos-category-chips" role="group" aria-label="Filter products by category"><button type="button" className={!selectedCategory ? 'active' : ''} aria-pressed={!selectedCategory} onClick={() => setCategory('')}>All</button>{categories.map(item => <button type="button" className={selectedCategory === item ? 'active' : ''} aria-pressed={selectedCategory === item} key={item} onClick={() => setCategory(item)}>{item}</button>)}</div>}
-    {options.some(option => option.variantGroup) && <label className="pos-category">Variant<select value={variantGroup} onChange={event => setVariantGroup(event.target.value)}><option value="">All variants</option>{[...new Set(options.map(option => option.variantGroup).filter(Boolean))].map(group => <option key={group}>{group}</option>)}</select></label>}
-    <div className="pos-products">{visible.map(product => {
-      const quantity = cart[product.id] || 0
-      const factor = product.saleFactor || 1
-      const baseId = product.baseProductId || product.id
-      const usedBase = products.filter(line => (line.baseProductId || line.id) === baseId).reduce((sum, line) => sum + (cart[line.id] || 0) * (line.saleFactor || 1), 0)
-      const available = Math.max(0, Math.floor((product.stock - usedBase) / factor * 1000) / 1000)
-      return <button type="button" className={`pos-product${quantity ? ' in-cart' : ''}`} key={product.id} disabled={available < 0.001} onClick={() => add(product)} aria-label={`Add ${product.name}, ${money(product.price)}${available < 0.001 ? ', unavailable' : ''}`}>
-        <span className="pos-product-top"><small>{product.category || 'Uncategorised'}</small>{quantity > 0 && <em>{quantity} in basket</em>}</span>
-        <strong>{product.name}</strong>{options.find(option => option.productId === product.id)?.variantLabel && <small>{options.find(option => option.productId === product.id)?.variantLabel}</small>}<small>{available < 0.001 ? (product.stock < 0.001 ? 'Out of stock' : 'Not enough stock for another pack') : factor > 1 ? `${available} ${product.saleUnit} available · ${factor} ${product.baseUnit} each` : `${Math.round(available * 1000) / 1000} ${product.unit} available`}</small>
-        <span className="pos-product-bottom"><b>{money(product.price)}{factor > 1 ? ` / ${product.saleUnit}` : ''}</b><span aria-hidden="true"><Plus size={17}/></span></span>
-      </button>
-    })}</div>
-    {!visible.length && <div className="empty-state pos-catalog-empty"><PackagePlus size={38} aria-hidden="true"/><strong>{products.length ? query.trim() ? 'New product?' : 'No matching products' : 'No products yet'}</strong><p>{onlineSuggestion?`Online catalogue match: ${onlineSuggestion}. Confirm the exact pack before saving.`:products.length ? query.trim() ? 'Save this item once, then return to the sale with it ready.' : 'Try another name, barcode or category.' : canAddProduct ? 'Add a product to start selling.' : 'Ask a manager to add products before starting a sale.'}</p>{products.length > 0 && query.trim() && canAddProduct && <button type="button" className="primary-button" onClick={() => addMissing?.({ name: '', barcode: query.trim() })}>Add this product <Plus size={17}/></button>}{products.length > 0 && <button type="button" className="filter-button" onClick={() => { setQuery(''); setCategory('') }}>Show all products</button>}{products.length === 0 && canAddProduct && <button type="button" className="primary-button" onClick={() => addMissing?.({name:'',barcode:query.trim()})}>Add product <Plus size={17}/></button>}</div>}
+    <div className="pos-catalog-header"><div><span className="pos-section-kicker">{oilMode ? 'OIL SALES' : 'NEW SALE'}</span><h2>{oilMode ? 'Find oil' : 'Find a product'}</h2></div><span className="pos-result-count">{hasSearch ? `${visible.length} ${visible.length === 1 ? 'match' : 'matches'}` : 'Scan or search'}</span></div>
+    <div className="pos-find">
+      <div className="pos-search-autocomplete">
+        <div className="search-box"><Search size={18} aria-hidden="true"/><input aria-label={oilMode ? 'Search oils for sale' : 'Search products for sale'} aria-autocomplete="list" aria-expanded={visible.length > 0} aria-controls="pos-product-suggestions" placeholder={oilMode ? 'Search oil name or SKU' : 'Search product name or SKU'} value={query} onChange={event => { setQuery(event.target.value); setActiveSuggestion(0) }} onKeyDown={onSearchKeyDown} /></div>
+        {visible.length > 0 && <div className="pos-product-suggestions" id="pos-product-suggestions" role="listbox" aria-label="Matching products">{visible.map((product, index) => {
+          const factor = product.saleFactor || 1
+          const baseId = product.baseProductId || product.id
+          const usedBase = products.filter(line => (line.baseProductId || line.id) === baseId).reduce((sum, line) => sum + (cart[line.id] || 0) * (line.saleFactor || 1), 0)
+          const available = Math.max(0, Math.floor((product.stock - usedBase) / factor * 1000) / 1000)
+          const variant = options.find(option => option.productId === product.id)?.variantLabel
+          const metadata = [product.sku, variant, `${available} ${factor > 1 ? product.saleUnit : product.unit} available`].filter(Boolean).join(' · ')
+          return <button type="button" role="option" aria-selected={index === activeSuggestion} className="pos-product-suggestion" key={product.id} disabled={available < 0.001} onMouseEnter={() => setActiveSuggestion(index)} onClick={() => void choose(product)}>
+            <span className="pos-product-suggestion-copy"><strong>{product.name}</strong><small>{metadata}</small></span><b>{money(product.price)}{factor > 1 ? ` / ${product.saleUnit}` : ''}</b><Plus size={17} aria-hidden="true"/>
+          </button>
+        })}</div>}
+      </div>
+      <button type="button" className="filter-button pos-scan-button" onClick={scan} aria-label="Scan product barcode" title="Scan product barcode"><ScanLine size={19}/><span>Scan product barcode</span></button>
+    </div>
+    {term.length > 0 && !hasSearch && <p className="pos-search-hint" role="status">Type at least 3 characters, or scan a barcode.</p>}
+    {hasSearch && !visible.length && <div className="pos-search-empty" role="status"><strong>{onlineSuggestion ? `Catalogue suggestion: ${onlineSuggestion}` : 'No matching product'}</strong><span>{onlineSuggestion ? 'Confirm the exact item before adding it.' : 'Check the product name, SKU or barcode and try again.'}</span>{/^\d{8,14}$/.test(term) && canAddProduct && <button type="button" className="text-button" onClick={() => addMissing?.({ name: '', barcode: term })}>Add this barcode as a product</button>}</div>}
+    {!products.length && !term && <div className="empty-state pos-catalog-empty"><PackagePlus size={28} aria-hidden="true"/><strong>No products saved yet</strong><p>{canAddProduct ? 'Add a product to start selling.' : 'Ask a manager to add products before starting a sale.'}</p>{canAddProduct && <button type="button" className="primary-button" onClick={() => addMissing?.({ name: '' })}>Add product <Plus size={17}/></button>}</div>}
   </div>
 }

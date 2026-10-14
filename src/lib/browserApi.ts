@@ -740,7 +740,9 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   }
   if (path === '/api/sales/voids' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
-    return json({ voids: (await db.query('SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE branch_id = ? ORDER BY created_at DESC', [branchId])).values || [] })
+    const staffFilter = user.role==='cashier' ? ' AND staff_id = ?' : ''
+    const params = user.role==='cashier' ? [branchId,user.id] : [branchId]
+    return json({ voids: (await db.query(`SELECT id, order_id AS orderId, product_id AS productId, product_name AS productName, quantity, unit_price AS unitPrice, reason, staff_id AS staffId, staff_name AS staffName, created_at AS createdAt FROM sale_item_voids WHERE branch_id = ?${staffFilter} ORDER BY created_at DESC`, params)).values || [] })
   }
   if (path === '/api/movements' && method === 'GET') {
     if (!canOperate(user)) return error('Operational access is required.', 403)
