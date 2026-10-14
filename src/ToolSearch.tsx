@@ -15,11 +15,13 @@ export function ToolSearch({tools}:{tools:ToolDestination[]}) {
    if(!field)return
    const rect=field.getBoundingClientRect()
    const sidebar=container.current?.closest('.sidebar')?.getBoundingClientRect()
-   const width=Math.min(340,Math.max(220,window.innerWidth-24))
-   let left=Math.max(12,(sidebar?.right??rect.right)+8)
+   const mobile=window.matchMedia('(max-width:1023px)').matches
+   const width=Math.min(mobile?360:340,Math.max(220,window.innerWidth-24))
+   let left=mobile?Math.max(12,(window.innerWidth-width)/2):Math.max(12,(sidebar?.right??rect.right)+8)
    if(left+width>window.innerWidth-12)left=Math.max(12,window.innerWidth-width-12)
    const maxHeight=Math.min(360,window.innerHeight-24)
-   setPlacement({top:Math.max(12,Math.min(rect.top,window.innerHeight-maxHeight-12)),left,width:Math.min(width,window.innerWidth-left-12)})
+   const top=mobile?Math.max(12,Math.min(rect.bottom+6,window.innerHeight-maxHeight-12)):Math.max(12,Math.min(rect.top,window.innerHeight-maxHeight-12))
+   setPlacement({top,left,width:Math.min(width,window.innerWidth-left-12)})
   }
   place()
   window.addEventListener('resize',place)
