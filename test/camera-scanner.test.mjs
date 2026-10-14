@@ -6,20 +6,6 @@ import { stripTypeScriptTypes } from 'node:module'
 const source = await readFile(new URL('../src/lib/cameraScanner.ts', import.meta.url), 'utf8')
 const cameraScanner = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`)
 
-test('EAN fallback runs when native detection returns nothing or throws', async () => {
-  const video = {}
-  let fallbackCalls = 0
-  const fallback = () => { fallbackCalls += 1; return '0630902423791' }
-  assert.equal(await cameraScanner.detectBarcodeValue({ detect: async () => [] }, video, fallback), '0630902423791')
-  assert.equal(await cameraScanner.detectBarcodeValue({ detect: async () => { throw new Error('unsupported frame') } }, video, fallback), '0630902423791')
-  assert.equal(fallbackCalls, 2)
-})
-
-test('intake skips non-GTIN native results and uses the EAN fallback', async () => {
-  const result = await cameraScanner.detectBarcodeValue({ detect: async () => [{ rawValue: 'text' }] }, {}, () => '0630902423791', value => value.length === 13)
-  assert.equal(result, '0630902423791')
-})
-
 test('phones request the rear camera and desktops use their available webcam', async () => {
   assert.equal(cameraScanner.requiresRearCamera('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', 'iPhone', 5), true)
   assert.equal(cameraScanner.requiresRearCamera('Mozilla/5.0 (Linux; Android 15)', 'Linux armv8l', 5), true)

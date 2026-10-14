@@ -1,25 +1,4 @@
 type CameraMediaDevices = Pick<MediaDevices, 'getUserMedia'>
-type BarcodeFrameDetector = { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> }
-
-/** Use the browser's decoder first, then the EAN decoder if it has no result. */
-export async function detectBarcodeValue(
-  detector: BarcodeFrameDetector | undefined,
-  video: HTMLVideoElement,
-  fallback: () => string,
-  accepts: (value: string) => boolean = () => true,
-) {
-  if (detector) {
-    try {
-      const codes = await detector.detect(video)
-      const detected = codes.find(code => code.rawValue?.trim() && accepts(code.rawValue.trim()))
-      if (detected) return detected.rawValue
-    } catch {
-      // Native barcode support differs by browser and camera. Keep scanning
-      // frames with the built-in EAN/UPC decoder if native detection fails.
-    }
-  }
-  return fallback()
-}
 
 export function requiresRearCamera(userAgent: string, platform: string, maxTouchPoints: number) {
   // DevTools device emulation can override userAgent without changing the

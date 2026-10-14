@@ -102,8 +102,8 @@ import { ThemeToggle } from './ThemeToggle'
 import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
-import { decodeEanFrame } from './lib/eanBarcode'
-import { cameraAccessUnavailableMessage, cameraFailureMessage, detectBarcodeValue, requestBarcodeCamera, requiresRearCamera, waitForCameraPreview } from './lib/cameraScanner'
+import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, waitForCameraPreview } from './lib/cameraScanner'
+import type { DecodeHintType as ZxingDecodeHintType } from '@zxing/library'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, businessModes, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
 import type { CatalogueStarter } from '../server/catalogue-starters.mjs'
@@ -2099,6 +2099,8 @@ function App() {
   const cameraVideo = useRef<HTMLVideoElement>(null)
   const cameraSession = useRef(0)
   const cameraStream = useRef<MediaStream | null>(null)
+  const cameraDecodeControls = useRef<{ stop: () => void } | null>(null)
+  const cameraScanResolver = useRef<((value?: string) => void) | null>(null)
   useEffect(()=>{
     if(active!=='Inventory'||section!=='new-product')return
     const close=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!scanning&&!inlinePrompt){event.preventDefault();leaveProductEntry()}}
@@ -2107,6 +2109,11 @@ function App() {
   },[active,section,scanning,inlinePrompt])
   function stopScan() {
     cameraSession.current += 1
+    cameraDecodeControls.current?.stop()
+    cameraDecodeControls.current = null
+    const resolveScan = cameraScanResolver.current
+    cameraScanResolver.current = null
+    resolveScan?.(undefined)
     cameraStream.current?.getTracks().forEach(track => track.stop())
     cameraStream.current = null
     setTorchSupported(false)
@@ -2161,7 +2168,6 @@ function App() {
     const accept = target === 'setup' ? (_code: string) => {} : target === 'intake' ? (value: string) => intake?.(value) : target === 'payment' ? acceptPaymentReference : acceptBarcode
     if (scanning) return
     const requireRearCamera = requiresRearCamera(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
-    const Detector = (window as unknown as { BarcodeDetector?: new () => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> } }).BarcodeDetector
     if (!navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
       window.alert(`${cameraAccessUnavailableMessage(window.isSecureContext, Boolean(navigator.mediaDevices), requireRearCamera)} The barcode field still accepts manual entry.`)
@@ -2188,7 +2194,6 @@ function App() {
       if (!video) throw new Error('Camera preview is unavailable.')
       video.srcObject = stream
       await video.play()
-      if (!Detector && target === 'payment') throw new Error('This iPhone browser can scan printed UPC/EAN product barcodes. QR payment references need a browser with QR scanning support.')
       if (videoTrack) {
         try {
           await videoTrack.applyConstraints({ advanced: [{ torch: true }] } as unknown as MediaTrackConstraints)
@@ -2209,16 +2214,28 @@ function App() {
           setTorchMessage('This camera does not allow Stockroom to use its flashlight.')
         }
       }
-      const detector = Detector ? new Detector() : undefined
-      const fallbackCanvas = document.createElement('canvas')
+      const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = await Promise.all([import('@zxing/browser'), import('@zxing/library')])
+      const reader = new BrowserMultiFormatReader(new Map<ZxingDecodeHintType, unknown>([
+        [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.ITF, BarcodeFormat.QR_CODE]],
+        [DecodeHintType.TRY_HARDER, true],
+      ]))
+      const scanResult = new Promise<string | undefined>(resolve => { cameraScanResolver.current = resolve })
+      const controlsPromise = reader.decodeFromVideoElement(video, result => {
+        if (session !== cameraSession.current || !result) return
+        const value = result.getText().trim()
+        if (value && (target !== 'intake' || validGtin(value))) {
+          const resolve = cameraScanResolver.current
+          cameraScanResolver.current = null
+          resolve?.(value)
+        }
+      })
+      const controls = await controlsPromise
+      cameraDecodeControls.current = controls
+      if (session !== cameraSession.current) controls.stop()
+      const rawValue = await scanResult
       while (session === cameraSession.current) {
-        const productBarcode = target === 'product' || target === 'intake'
-        const rawValue = productBarcode
-          ? await detectBarcodeValue(detector, video, () => decodeEanFrame(video, fallbackCanvas), value => target !== 'intake' || validGtin(value))
-          : (await detector?.detect(video))?.[0]?.rawValue || ''
-        if (session !== cameraSession.current) break
         if (rawValue) { accept(rawValue); stopScan(); return rawValue }
-        await new Promise(resolve => window.setTimeout(resolve, 150))
+        break
       }
     } catch (error) {
       if (session === cameraSession.current) { stopScan(); if (target === 'setup') throw error; window.alert(target === 'payment' ? (error instanceof Error ? error.message : 'QR scanning is unavailable in this browser.') : `${cameraFailureMessage(error, requireRearCamera)} The barcode field still accepts manual entry.`); return undefined }
