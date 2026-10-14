@@ -7,6 +7,8 @@ const ecomSourceCache = new Map()
 const recentUpstreamReads = []
 const recentFoodFactsReads = []
 const recentNafdacReads = []
+const recentWebSearchReads = []
+const webSearchCache = new Map()
 let lastUpcItemDbRead = 0
 let lastEcomSourceRead = 0
 
@@ -18,15 +20,15 @@ export function validProductBarcode(value) {
 }
 
 export async function lookupOpenFoodFacts(barcode, industry = 'general', requestedSource = '', searchContext = '') {
-  if (!validProductBarcode(barcode)) return { status: 400, body: { error: 'Enter a valid product barcode.' } }
-  const allowedSources = ['', 'Open Food Facts', 'Open Beauty Facts', 'Open Pet Food Facts', 'Open Products Facts', 'UPCitemdb', 'EcomSource', 'openFDA Drug NDC Directory', 'AccessGUDID medical device registry', 'NAFDAC Greenbook']
+  const allowedSources = ['', 'Open Food Facts', 'Open Beauty Facts', 'Open Pet Food Facts', 'Open Products Facts', 'UPCitemdb', 'EcomSource', 'openFDA Drug NDC Directory', 'AccessGUDID medical device registry', 'NAFDAC Greenbook', 'Web search']
   const source = allowedSources.includes(requestedSource) ? requestedSource : ''
   const registration = String(searchContext || '').toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
+  if (!validProductBarcode(barcode) && !(source === 'NAFDAC Greenbook' && registration)) return { status: 400, body: { error: 'Enter a valid product barcode, or choose NAFDAC Greenbook and enter a valid registration number.' } }
   const cacheKey = `${industry}:${barcode}:${source}:${registration}`
   const cached = responseCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.result
   const cachedCandidates = candidateCache.get(`${industry}:${barcode}`)
-  if (source !== 'NAFDAC Greenbook' && cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
+  if (!['NAFDAC Greenbook', 'Web search'].includes(source) && cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
     const selected = source ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === source) : cachedCandidates.candidates[0]
     return selected?.found || { status: 404, body: { status: 0, error: source ? `No exact barcode match was found in ${source}.` : 'No reliable product details were found in the available catalogues.' } }
   }
@@ -37,7 +39,7 @@ export async function lookupOpenFoodFacts(barcode, industry = 'general', request
   if (recentUpstreamReads.length >= 12) return { status: 429, body: { error: 'The barcode lookup limit was reached. Wait a minute and try again.' } }
   recentUpstreamReads.push(Date.now())
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 12000)
+  const timer = setTimeout(() => controller.abort(), 25000)
   try {
     const result = await lookupCatalogues(barcode, controller.signal, industry, source, registration)
     if (result.status === 200 || result.status === 404) {
@@ -47,8 +49,8 @@ export async function lookupOpenFoodFacts(barcode, industry = 'general', request
       if (responseCache.size > 5000) for (const [key, value] of responseCache) if (value.expiresAt <= Date.now()) responseCache.delete(key)
     }
     return result
-  } catch {
-    return { status: 503, body: { error: controller.signal.aborted ? 'Barcode lookup timed out. You can still enter the product details.' : 'Could not reach the barcode catalogue. Check your connection and enter the product details.' } }
+  } catch (error) {
+    return { status: 503, body: { error: controller.signal.aborted ? 'Barcode lookup timed out. You can still enter the product details.' : error instanceof Error ? error.message : 'Could not reach the barcode catalogue. Check your connection and enter the product details.' } }
   } finally {
     clearTimeout(timer)
   }
@@ -316,7 +318,22 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
   const cachedCandidates = candidateCache.get(candidateKey)
   if (requestedSource === 'NAFDAC Greenbook') {
     const result = await lookupNafdacGreenbook(barcode, searchContext, signal)
-    return result || { status: 404, body: { status: 0, error: searchContext ? 'No exact NAFDAC Greenbook registration match was found.' : 'Enter the NAFDAC registration number printed on the package to search the Greenbook.' } }
+    if (result) return result
+    const webResult = await lookupBarcodeOnWeb(barcode, signal, searchContext)
+    if (webResult.product) return suggestion(barcode, webResult.product.name, 'Web search', webResult.product.attributes)
+    if (webResult.errorStatus) return { status: 503, body: { error: `Brave Search returned HTTP ${webResult.errorStatus}. Check the API credential, billing status, or rate limit.` } }
+    return { status: 404, body: { status: 0, error: searchContext ? `No product details were found for ${searchContext} in the NAFDAC Greenbook${webResult.configured ? ' or exact web results' : ''}.` : 'Enter the NAFDAC registration number printed on the package to search the Greenbook.' } }
+  }
+  if (requestedSource === 'Web search') {
+    const result = await lookupBarcodeOnWeb(barcode, signal, searchContext)
+    if (result.registration) {
+      const registered = await lookupNafdacGreenbook(barcode, result.registration, signal)
+      if (registered) return registered
+    }
+    if (result.product) return suggestion(barcode, result.product.name, 'Web search', result.product.attributes)
+    if (!result.configured) return { status: 503, body: { error: 'Web search is not configured. Add BRAVE_SEARCH_API_KEY to the API service to enable it.' } }
+    if (!result.responded) return { status: 503, body: { error: result.errorStatus ? `Brave Search returned HTTP ${result.errorStatus}. Check the API credential, billing status, or rate limit.` : 'Brave web search is temporarily unavailable. Try again later.' } }
+    return { status: 404, body: { status: 0, error: `No exact product match was found on the web for ${barcode}.` } }
   }
   if (cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
     const selected = requestedSource ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === requestedSource) : cachedCandidates.candidates[0]
@@ -421,9 +438,19 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
     return candidates[0].found
   }
   if (searchContext) {
-    const nafdac = await lookupNafdacGreenbook(barcode, searchContext, signal)
-    if (nafdac) return nafdac
+    try {
+      const nafdac = await lookupNafdacGreenbook(barcode, searchContext, signal)
+      if (nafdac) return nafdac
+    } catch (error) { if (signal.aborted) throw error }
   }
+  const webResult = await lookupBarcodeOnWeb(barcode, signal, searchContext)
+  if (webResult.registration) {
+    const registered = await lookupNafdacGreenbook(barcode, webResult.registration, signal)
+    if (registered) return registered
+  }
+  if (webResult.product) return suggestion(barcode, webResult.product.name, 'Web search', webResult.product.attributes)
+  if (webResult.errorStatus) return { status: 503, body: { error: `Brave Search returned HTTP ${webResult.errorStatus}. Check the API credential, billing status, or rate limit.` } }
+  providerResponded ||= webResult.responded
   return !providerResponded
     ? { status: 503, body: { error: 'Product catalogues are temporarily unreachable. The barcode is saved in the product form, and you can still enter the product details.' } }
     : { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues. The barcode is still valid; enter or photograph the product details.' } }
@@ -432,19 +459,20 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
 async function lookupNafdacGreenbook(barcode, registration, signal) {
   if (!registration) return null
   const params = new URLSearchParams({
-    draw: '1', start: '0', length: '10000', 'search[value]': registration, 'search[regex]': 'false',
+    draw: '1', start: '0', length: '1000', 'search[value]': registration, 'search[regex]': 'false',
   })
   const endpoint = `https://greenbook.nafdac.gov.ng/?${params}`
   const minuteAgo = Date.now() - 60_000
   while (recentNafdacReads.length && recentNafdacReads[0] <= minuteAgo) recentNafdacReads.shift()
-  if (recentNafdacReads.length >= 6) return null
+  if (recentNafdacReads.length >= 6) throw new Error('NAFDAC Greenbook lookup limit reached. Wait a minute and try again.')
   recentNafdacReads.push(Date.now())
   const request = providerRequestSignal(signal, 5000)
   try {
     const response = await fetch(endpoint, { headers: { 'User-Agent': userAgent, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' }, signal: request.signal })
-    if (!response.ok) return null
+    if (!response.ok) throw new Error(`NAFDAC Greenbook returned HTTP ${response.status}.`)
     const payload = await response.json().catch(() => null)
-    const rows = Array.isArray(payload?.data) ? payload.data : []
+    if (!Array.isArray(payload?.data)) throw new Error('NAFDAC Greenbook returned an unexpected response. Its search service may have changed.')
+    const rows = payload.data
     const normalize = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const wanted = normalize(registration)
     const field = (row, names) => {
@@ -472,8 +500,71 @@ async function lookupNafdacGreenbook(barcode, registration, signal) {
       description: pick(field(record, ['status']) && `Registration status: ${field(record, ['status'])}`, field(record, ['approvalDate', 'approval_date', 'approvedAt']) && `Approved: ${field(record, ['approvalDate', 'approval_date', 'approvedAt'])}`),
       sourceUrl: detailUrl,
     })
-  } catch {
+  } catch (error) {
     if (signal.aborted) throw new Error('NAFDAC Greenbook lookup was cancelled.')
-    return null
+    if (error instanceof Error && (error.message.startsWith('NAFDAC Greenbook returned') || error.message.startsWith('NAFDAC Greenbook lookup limit'))) throw error
+    throw new Error('Could not reach the NAFDAC Greenbook search service.')
+  } finally { request.close() }
+}
+
+async function lookupBarcodeOnWeb(barcode, signal, searchContext = '') {
+  const key = process.env.BRAVE_SEARCH_API_KEY?.trim()
+  if (!key) return { configured: false, product: null, registration: '', responded: false }
+  const cacheKey = `${barcode}:${searchContext}`
+  const cached = webSearchCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached
+  const minuteAgo = Date.now() - 60_000
+  while (recentWebSearchReads.length && recentWebSearchReads[0] <= minuteAgo) recentWebSearchReads.shift()
+  if (recentWebSearchReads.length >= 10) return { configured: true, product: null, registration: '', responded: false, errorStatus: 429 }
+  recentWebSearchReads.push(Date.now())
+  const request = providerRequestSignal(signal, 7000)
+  try {
+    const runSearch = async query => {
+      const endpoint = new URL('https://api.search.brave.com/res/v1/web/search')
+      endpoint.searchParams.set('q', `"${query}"`)
+      endpoint.searchParams.set('country', 'NG')
+      endpoint.searchParams.set('search_lang', 'en')
+      endpoint.searchParams.set('count', '8')
+      endpoint.searchParams.set('extra_snippets', 'true')
+      const response = await fetch(endpoint, { headers: { 'X-Subscription-Token': key, Accept: 'application/json' }, signal: request.signal })
+      if (!response.ok) return { ok: false, errorStatus: response.status, rows: [] }
+      const data = await response.json().catch(() => null)
+      return { ok: true, rows: Array.isArray(data?.web?.results) ? data.web.results : [] }
+    }
+    let ok = false
+    let rows = []
+    let errorStatus
+    if (barcode) {
+      const first = await runSearch(barcode)
+      ok = first.ok; rows = first.rows; errorStatus = first.errorStatus
+    }
+    let exact = barcode ? rows.find(row => `${row.title || ''} ${row.description || ''} ${(row.extra_snippets || []).join(' ')} ${row.url || ''}`.replace(/\D/g, '').includes(barcode)) : undefined
+    let registration = ''
+    const resultText = row => `${row.title || ''} ${row.description || ''} ${(row.extra_snippets || []).join(' ')} ${row.url || ''}`
+    const regPattern = /\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/i
+    if (exact) registration = resultText(exact).match(regPattern)?.[0]?.toUpperCase() || ''
+    if (!exact && searchContext) {
+      const contextual = await runSearch(searchContext)
+      ok ||= contextual.ok
+      errorStatus = errorStatus || contextual.errorStatus
+      rows = contextual.rows
+      exact = rows.find(row => resultText(row).toUpperCase().replace(/[^A-Z0-9]/g, '').includes(searchContext.toUpperCase().replace(/[^A-Z0-9]/g, '')))
+      registration = exact ? searchContext : ''
+    }
+    if (!ok) return { configured: true, product: null, registration: '', responded: false, errorStatus }
+    let product = null
+    if (exact) {
+      const title = String(exact.title || '').split(/\s+[|–—]\s+/)[0].trim()
+      let hostname = ''
+      try { hostname = new URL(exact.url).hostname.replace(/^www\./, '') } catch { /* Ignore an invalid result URL. */ }
+      const description = String([exact.description, ...(exact.extra_snippets || [])].filter(Boolean).join(' ')).replace(/\s+/g, ' ').slice(0, 1800)
+      if (title && !/^\d{8,14}$/.test(title)) product = { name: title.slice(0, 180), attributes: { ...(description ? { description } : {}), ...(hostname ? { manufacturer: hostname } : {}), ...(typeof exact.url === 'string' && /^https:\/\//.test(exact.url) ? { sourceUrl: exact.url } : {}) } }
+    }
+    const result = { configured: true, product, registration, responded: true, errorStatus, expiresAt: Date.now() + (product ? 24 * 60 * 60_000 : 60 * 60_000) }
+    webSearchCache.set(cacheKey, result)
+    return result
+  } catch {
+    if (signal.aborted) throw new Error('Brave web search was cancelled.')
+    return { configured: true, product: null, registration: '', responded: false }
   } finally { request.close() }
 }

@@ -24,6 +24,8 @@ services:
         sync: false
       - key: ECOMSOURCE_SECRET_KEY
         sync: false
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false
       - key: DEVELOPER_EMAIL
         sync: false
       - key: PWA_ALLOWED_ORIGINS

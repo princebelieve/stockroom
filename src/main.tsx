@@ -103,6 +103,7 @@ import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
 import { decodeEanFrame } from './lib/eanBarcode'
+import { requestBarcodeCamera, waitForCameraPreview } from './lib/cameraScanner'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, businessModes, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
 import type { CatalogueStarter } from '../server/catalogue-starters.mjs'
@@ -2170,7 +2171,9 @@ function App() {
     setScanning(true)
     const timeout = window.setTimeout(() => { if (session === cameraSession.current) { stopScan(); window.alert('Scan timed out. Try again or enter the barcode.') } }, 30_000)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      // Some iOS WebKit/PWA versions reject a camera-facing constraint even
+      // though they can open the camera. Retry with the browser default.
+      const stream = await requestBarcodeCamera(navigator.mediaDevices)
       if (session !== cameraSession.current) { stream.getTracks().forEach(track => track.stop()); return }
       cameraStream.current = stream
       const videoTrack = stream.getVideoTracks()[0]
@@ -2179,7 +2182,10 @@ function App() {
       // accept torch constraints even when getCapabilities() omits the field.
       setTorchSupported(Boolean(videoTrack))
       setTorchMessage(videoTrack ? 'Turning flashlight on…' : '')
-      const video = cameraVideo.current
+      // setScanning() mounts the modal asynchronously. A fast permission grant
+      // can otherwise beat the React commit and make the scanner close before
+      // its preview element exists.
+      const video = await waitForCameraPreview(() => cameraVideo.current, () => session === cameraSession.current, callback => window.requestAnimationFrame(callback))
       if (!video) throw new Error('Camera preview is unavailable.')
       video.srcObject = stream
       await video.play()

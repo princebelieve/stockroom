@@ -54,7 +54,7 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
   // a wrong catalogue name for weeks or block a legitimate follow-up scan.
   try { localStorage.removeItem(`stockroom-barcode:${barcode}`) } catch { /* Storage is optional. */ }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 14000)
+  const timer = setTimeout(() => controller.abort(), 28000)
   try {
     const base = apiUrl.replace(/\/$/, '')
     const safeContext = searchContext.toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
@@ -96,6 +96,34 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
     return draft
   } catch (error) {
     if (controller.signal.aborted) throw new Error('Online lookup timed out. Use a photo or complete the details yourself.')
+    throw error
+  } finally { clearTimeout(timer) }
+}
+
+export async function lookupProductNafdac(registration: string, apiUrl = '', profile?: ShopProfile): Promise<ProductDraft | null> {
+  const safeRegistration = registration.toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
+  if (!safeRegistration) throw new Error('Enter the NAFDAC registration number, for example A7-102608L.')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 14000)
+  try {
+    const base = apiUrl.replace(/\/$/, '')
+    const query = `barcode=&industry=${encodeURIComponent(profile?.industry || 'general')}&source=${encodeURIComponent('NAFDAC Greenbook')}&context=${encodeURIComponent(safeRegistration)}`
+    const endpoint = base === '/api/cloud' ? `/api/cloud/v1/public/product-lookup?${query}` : base ? `${base}/v1/public/product-lookup?${query}` : `/api/product-lookup?${query}`
+    const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin', cache: 'no-store' })
+    if (response.status === 404) {
+      const failure = await response.json().catch(() => ({}))
+      if (failure?.status === 0) return null
+      throw new Error(failure?.error || 'The NAFDAC Greenbook lookup service returned 404.')
+    }
+    if (!response.ok) { const failure = await response.json().catch(() => ({})); throw new Error(failure.error || 'The NAFDAC Greenbook lookup is unavailable.') }
+    const product = (await response.json()).product
+    if (!product || !['NAFDAC Greenbook', 'Web search'].includes(product.source) || typeof product.product_name !== 'string' || !product.product_name.trim()) return null
+    const attributes = product.attributes && typeof product.attributes === 'object' ? product.attributes as Record<string, unknown> : {}
+    const category = typeof attributes.category === 'string' ? attributes.category : undefined
+    const catalogueUrl = typeof attributes.sourceUrl === 'string' && /^https:\/\//.test(attributes.sourceUrl) ? attributes.sourceUrl : undefined
+    return { name: product.product_name.trim().slice(0, 180), ...(category ? { category } : {}), catalogueSource: product.source, ...(catalogueUrl ? { catalogueUrl } : {}) }
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('NAFDAC Greenbook lookup timed out. Try again or check the Greenbook directly.')
     throw error
   } finally { clearTimeout(timer) }
 }
