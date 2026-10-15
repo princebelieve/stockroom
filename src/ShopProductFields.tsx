@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { catalogueWorkspaces, workspaceCatalogueOptions, workspaceCatalogueSettings, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { readCustomValues, validateCustomValues } from '../server/shop-fields.mjs'
 import type { ProductDraft } from './lib/productIntake'
-import { lookupProductBarcode, validGtin } from './lib/productIntake'
+import { lookupProductBarcode, searchProductNames, validGtin, type ProductNameSuggestion } from './lib/productIntake'
 import { scannerSettings } from './lib/deviceSetup'
 
 function fieldHint(id: string, label: string, type: string) {
@@ -36,6 +36,22 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
   const [categoryChoice, setCategoryChoice] = useState(() => categories.includes(initialCategory) ? initialCategory : initialCategory ? '__custom__' : '')
   const [unitChoice, setUnitChoice] = useState(() => units.includes(initialUnit) ? initialUnit : '__custom__')
   const [barcodeLookupMessage,setBarcodeLookupMessage]=useState('')
+  const [nameLookupQuery,setNameLookupQuery]=useState('')
+  const [nameSuggestions,setNameSuggestions]=useState<ProductNameSuggestion[]>([])
+  const [nameLookupBusy,setNameLookupBusy]=useState(false)
+  const [nameLookupError,setNameLookupError]=useState('')
+  useEffect(()=>{
+    const term=nameLookupQuery.trim()
+    if(term.length<3){setNameSuggestions([]);setNameLookupBusy(false);return}
+    const controller=new AbortController()
+    const timer=window.setTimeout(()=>{
+      setNameLookupBusy(true);setNameLookupError('')
+      void searchProductNames(term,lookupApiUrl,profile,controller.signal).then(setNameSuggestions).catch(error=>{
+        if(!controller.signal.aborted){setNameSuggestions([]);setNameLookupError(error instanceof Error?error.message:'Product suggestions are unavailable.')}
+      }).finally(()=>{if(!controller.signal.aborted)setNameLookupBusy(false)})
+    },500)
+    return()=>{window.clearTimeout(timer);controller.abort()}
+  },[nameLookupQuery,lookupApiUrl,profile])
   const nameFor = (field: string) => field.startsWith('custom_') ? `custom:${field}` : field
   const idFor = (field: string) => `product-entry-${field}`
   async function lookupBarcode(code: string, codeInput: HTMLInputElement) {
@@ -68,6 +84,30 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
     }
   }
 
+  async function chooseNameSuggestion(suggestion: ProductNameSuggestion, formGrid: Element | null) {
+    const nameInput=formGrid?.querySelector<HTMLInputElement|HTMLTextAreaElement>('input[name="name"], textarea[name="name"]')
+    if(nameInput){nameInput.value=suggestion.name;nameInput.dispatchEvent(new Event('input',{bubbles:true}))}
+    const barcodeInput=formGrid?.querySelector<HTMLInputElement>('input[name="barcode"]')
+    if(barcodeInput&&suggestion.barcode&&!barcodeInput.value.trim()){
+      barcodeInput.value=suggestion.barcode
+      barcodeInput.dispatchEvent(new Event('input',{bubbles:true}))
+    }
+    const select=formGrid?.querySelector<HTMLSelectElement>('select[name="category"]')
+    if(select&&suggestion.category&&!select.value){
+      const known=[...select.options].some(option=>option.value.toLocaleLowerCase()===suggestion.category?.toLocaleLowerCase())
+      select.value=known?select.options[[...select.options].findIndex(option=>option.value.toLocaleLowerCase()===suggestion.category?.toLocaleLowerCase())].value:'__custom__'
+      select.dispatchEvent(new Event('change',{bubbles:true}))
+      if(!known){await new Promise(resolve=>requestAnimationFrame(()=>resolve(undefined)));const input=formGrid?.querySelector<HTMLInputElement>('input[name="customCategory"]');if(input&&!input.value)input.value=suggestion.category}
+    }
+    const attributes:Record<string,string>={brand:suggestion.brand||'',quantity:suggestion.quantity||'',packageSize:suggestion.quantity||'',category:suggestion.category||'',imageUrl:suggestion.imageUrl||''}
+    for(const field of profile.fields.filter(item=>item.id.startsWith('custom_')&&item.lookupKey)){
+      const value=attributes[field.lookupKey!]||''
+      const input=formGrid?.querySelector<HTMLInputElement>(`input[name="custom:${field.id}"]`)
+      if(value&&input&&!input.value){input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}))}
+    }
+    setNameSuggestions([]);setNameLookupQuery('');setNameLookupError('')
+  }
+
   return <div className="form-grid">{profile.fields.filter(field => (field.visible || ['category', 'unit'].includes(field.id)) && (!customOnly || field.id.startsWith('custom_'))).map(field => {
     const custom = field.id.startsWith('custom_')
     const defaults: Record<string, string | number | undefined> = { unit: profile.unit, stock: '', reorder: '0', cost: '0', price: '', ...Object.fromEntries(Object.entries(initialDraft || {}).filter(([, value]) => typeof value === 'string' || typeof value === 'number')) }
@@ -92,7 +132,7 @@ export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales
       </select>
       {customUnit && <input aria-label="Specify product unit" name="customUnit" required maxLength={30} defaultValue={initialUnit && !units.includes(initialUnit) ? initialUnit : ''} placeholder="Enter unit, such as roll or hour" />}
     </> : field.type === 'select' ? <select id={inputId} name={name} required={field.required} defaultValue={saved[field.id] || ''}><option value="">{field.placeholder || 'Choose an option'}</option>{field.options.map(option => <option key={option}>{option}</option>)}</select>
-      : field.id === 'name' ? <textarea id={inputId} name={name} required={field.required} maxLength={180} defaultValue={defaults[field.id] ?? ''} rows={2} placeholder={field.placeholder} />
+      : field.id === 'name' ? <><textarea id={inputId} name={name} required={field.required} maxLength={180} defaultValue={defaults[field.id] ?? ''} rows={2} placeholder={field.placeholder} onInput={event=>{setNameLookupQuery(event.currentTarget.value);setNameLookupError('')}} />{nameLookupQuery.trim().length>=3&&(nameLookupBusy||nameLookupError||nameSuggestions.length>0)&&<div className="product-name-suggestions" role="listbox" aria-label="Product suggestions">{nameLookupBusy?<p role="status">Searching product sources…</p>:nameLookupError?<p role="status">{nameLookupError}</p>:nameSuggestions.map((suggestion,index)=><button type="button" role="option" key={`${suggestion.barcode||suggestion.name}-${suggestion.source}-${index}`} onMouseDown={event=>event.preventDefault()} onClick={event=>{const grid=event.currentTarget.closest('.form-grid');void chooseNameSuggestion(suggestion,grid)}}><span><strong>{suggestion.name}</strong><small>{[suggestion.brand,suggestion.quantity,suggestion.barcode].filter(Boolean).join(' · ')}</small></span><small>{suggestion.source}</small></button>)}</div>}</>
       : <><input id={inputId} name={name} type={field.type} required={field.required} readOnly={readOnlyStock && field.id === 'stock'} placeholder={field.placeholder} maxLength={custom ? 2000 : 180} defaultValue={custom ? saved[field.id] || initialDraft?.customValues?.[field.id] || '' : defaults[field.id] ?? ''} min={!custom && field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? (['stock', 'reorder'].includes(field.id) ? '0.001' : 'any') : undefined} onKeyDown={field.id==='barcode'?event=>{if(event.key===scannerSettings().suffix&&event.currentTarget.value.trim()){event.preventDefault();void lookupBarcode(event.currentTarget.value,event.currentTarget)}}:undefined} />{field.id === 'barcode' && scanBarcode && <button type="button" className="filter-button" onClick={async event => { const codeInput=event.currentTarget.parentElement?.querySelector('input'); const code=await scanBarcode(); if(code&&codeInput?.isConnected){codeInput.value=code;codeInput.dispatchEvent(new Event('input',{bubbles:true}));await lookupBarcode(code,codeInput)} }}>Scan product barcode</button>}</>
 
     return <div className="shop-product-field" key={field.id}>

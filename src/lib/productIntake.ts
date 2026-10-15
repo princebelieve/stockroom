@@ -100,6 +100,20 @@ export async function lookupProductBarcode(barcode: string, apiUrl = '', profile
   } finally { clearTimeout(timer) }
 }
 
+export type ProductNameSuggestion = ProductDraft & { brand?: string; quantity?: string; imageUrl?: string; source: string }
+
+export async function searchProductNames(query: string, apiUrl = '', profile?: ShopProfile, signal?: AbortSignal): Promise<ProductNameSuggestion[]> {
+  const term = query.trim().replace(/\s+/g, ' ')
+  if (term.length < 3) return []
+  const base = apiUrl.replace(/\/$/, '')
+  const params = `query=${encodeURIComponent(term)}&industry=${encodeURIComponent(profile?.industry || 'general')}`
+  const endpoint = base === '/api/cloud' ? `/api/cloud/v1/public/product-lookup?${params}` : base ? `${base}/v1/public/product-lookup?${params}` : `/api/product-lookup?${params}`
+  const response = await fetch(endpoint, { signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin', cache: 'no-store' })
+  if (!response.ok) throw new Error('Product suggestions are temporarily unavailable.')
+  const data = await response.json()
+  return Array.isArray(data.suggestions) ? data.suggestions.filter((item: unknown): item is ProductNameSuggestion => Boolean(item && typeof item === 'object' && typeof (item as ProductNameSuggestion).name === 'string' && typeof (item as ProductNameSuggestion).source === 'string')).slice(0, 10) : []
+}
+
 export async function lookupProductNafdac(registration: string, apiUrl = '', profile?: ShopProfile): Promise<ProductDraft | null> {
   const safeRegistration = registration.toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
   if (!safeRegistration) throw new Error('Enter the NAFDAC registration number, for example A7-102608L.')

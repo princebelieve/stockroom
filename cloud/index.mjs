@@ -41,7 +41,7 @@ import { createNotifications } from './notifications.mjs'
 import { createProductFormReader } from './product-form.mjs'
 import { readCustomValues } from '../server/shop-fields.mjs'
 import { posSettings, priceOrder } from '../server/pos-pricing.mjs'
-import { lookupOpenFoodFacts } from '../server/open-food-facts.mjs'
+import { lookupOpenFoodFacts, searchProductNames } from '../server/open-food-facts.mjs'
 import { findSharedProduct, queueSharedProductContribution, processSharedProductContributionQueue, catalogueContributionMode, canonicalProductBarcode, equivalentProductBarcodes } from './shared-product-catalogue.mjs'
 
 const port = Number(process.env.PORT || 8080)
@@ -300,6 +300,12 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   const requestUrl = new URL(request.url || '/', 'http://localhost')
   if (request.method === 'GET' && requestUrl.pathname === '/v1/public/product-lookup') {
+    const query = String(requestUrl.searchParams.get('query') || '').trim()
+    if (query) {
+      const result = await searchProductNames(query, String(requestUrl.searchParams.get('industry') || 'general'))
+      response.setHeader('Cache-Control', 'no-store')
+      return send(response, result.status, result.body)
+    }
     const barcode = String(requestUrl.searchParams.get('barcode') || '').trim()
     const source = String(requestUrl.searchParams.get('source') || '')
     const shared = source && source !== 'Stockroom Global Catalogue' ? null : await findSharedProduct(sharedProductCatalogue, barcode)

@@ -10,7 +10,51 @@ const recentNafdacReads = []
 const recentWebSearchReads = []
 const webSearchCache = new Map()
 let lastUpcItemDbRead = 0
+const nameSearchCache = new Map()
 let lastEcomSourceRead = 0
+
+export async function searchProductNames(rawQuery, industry = 'general') {
+  const query = String(rawQuery || '').trim().replace(/\s+/g, ' ').slice(0, 80)
+  if (query.length < 3) return { status: 200, body: { suggestions: [] } }
+  const cacheKey = `${industry}:${query.toLocaleLowerCase()}`
+  const cached = nameSearchCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return { status: 200, body: cached.body }
+  const fields = 'code,product_name,brands,quantity,categories,image_url'
+  const offUrl = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=8&fields=${fields}`
+  const offPromise = fetch(offUrl, { headers: { 'User-Agent': userAgent, Accept: 'application/json' }, signal: AbortSignal.timeout(5000) })
+    .then(response => response.ok ? response.json() : null).catch(() => null)
+  let upcPromise = Promise.resolve(null)
+  // UPCitemdb's free search and barcode lookup quotas are shared. Keep its
+  // contribution opportunistic and rate limited; Open Food Facts remains the fallback.
+  if (Date.now() - lastUpcItemDbRead >= 10_000) {
+    lastUpcItemDbRead = Date.now()
+    upcPromise = fetch(`https://api.upcitemdb.com/prod/trial/search?s=${encodeURIComponent(query)}`, { headers: { 'User-Agent': userAgent, Accept: 'application/json' }, signal: AbortSignal.timeout(5000) })
+      .then(response => response.ok ? response.json() : null).catch(() => null)
+  }
+  const [off, upc] = await Promise.all([offPromise, upcPromise])
+  const suggestions = []
+  for (const product of Array.isArray(off?.products) ? off.products : []) {
+    const name = String(product.product_name || '').trim()
+    if (!name) continue
+    suggestions.push({ name, barcode: String(product.code || ''), brand: String(product.brands || ''), quantity: String(product.quantity || ''), category: String(product.categories || '').split(',').map(value => value.trim()).filter(Boolean).at(-1) || '', imageUrl: String(product.image_url || ''), source: product.product_type === 'beauty' ? 'Open Beauty Facts' : product.product_type === 'product' ? 'Open Products Facts' : product.product_type === 'petfood' ? 'Open Pet Food Facts' : 'Open Food Facts' })
+  }
+  for (const product of Array.isArray(upc?.items) ? upc.items : []) {
+    const name = String(product.title || product.description || '').trim()
+    if (!name) continue
+    suggestions.push({ name, barcode: String(product.ean || product.upc || product.gtin || ''), brand: String(product.brand || ''), quantity: String(product.size || ''), category: String(product.category || ''), imageUrl: String(product.images?.[0] || ''), source: 'UPCitemdb' })
+  }
+  const seen = new Set()
+  const unique = suggestions.filter(item => {
+    const key = `${item.barcode || item.name.toLocaleLowerCase()}`.toLocaleLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, 10)
+  const body = { suggestions: unique }
+  nameSearchCache.set(cacheKey, { body, expiresAt: Date.now() + 2 * 60_000 })
+  if (nameSearchCache.size > 300) for (const [key, value] of nameSearchCache) if (value.expiresAt <= Date.now()) nameSearchCache.delete(key)
+  return { status: 200, body }
+}
 
 export function validProductBarcode(value) {
   if (!/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(value)) return false
@@ -378,7 +422,11 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
     if (found) candidates.push({ found, rank: catalogueRank(industry, providerProductType(broadProduct.attributes, broadProduct.name)), richness: Object.keys(found.body.product.attributes).length })
   }
   if (universalProduct) {
-    const found = catalogueSuggestion(universalProduct, barcode, sourceByType[universalProduct.product_type] || 'Open product catalogues')
+    // The universal endpoint is hosted by Open Food Facts. Older or sparse
+    // records may omit product_type; keep them selectable as Open Food Facts
+    // instead of assigning a source label that the UI cannot select.
+    const productType = String(universalProduct.product_type || '').toLowerCase()
+    const found = catalogueSuggestion(universalProduct, barcode, sourceByType[productType] || 'Open Food Facts')
     if (found) candidates.push({ found, rank: catalogueRank(industry, universalProduct.product_type), richness: Object.keys(found.body.product.attributes).length })
   }
   for (let index = 0; index < catalogs.length; index++) {

@@ -19,7 +19,7 @@ import { recordStaffRemovalLocal, authenticateUser, adjustCustomerWallet, approv
 import { registerLocalCheckout, getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
 import { cloudRemoveStaff, cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
-import { lookupOpenFoodFacts } from './open-food-facts.mjs'
+import { lookupOpenFoodFacts, searchProductNames } from './open-food-facts.mjs'
 import { businessWorkspace } from './shop-profile.mjs'
 
 const port = Number(process.env.PORT || 8787)
@@ -72,6 +72,12 @@ const server = createServer(async (request, response) => {
   }
   const requestUrl = new URL(request.url || '/', 'http://localhost')
   if (request.method === 'GET' && requestUrl.pathname === '/api/product-lookup') {
+    const query = String(requestUrl.searchParams.get('query') || '').trim()
+    if (query) {
+      const result = await searchProductNames(query, String(requestUrl.searchParams.get('industry') || 'general'))
+      response.setHeader('Cache-Control', 'no-store')
+      return sendJson(response, result.status, result.body)
+    }
     const result = await lookupOpenFoodFacts(String(requestUrl.searchParams.get('barcode') || '').trim(), String(requestUrl.searchParams.get('industry') || 'general'), String(requestUrl.searchParams.get('source') || ''), String(requestUrl.searchParams.get('context') || ''))
     response.setHeader('Cache-Control', 'no-store')
     return sendJson(response, result.status, result.body)

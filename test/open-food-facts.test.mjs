@@ -61,6 +61,18 @@ test('parses the Open Food Facts v3 success status and verifies the exact barcod
   })
 })
 
+test('keeps an exact universal catalogue match selectable from Open Food Facts when product_type is omitted', async () => {
+  const barcode = '6151100001399'
+  await withCatalogueResponses(url => url.includes('world.openfoodfacts.org') && url.includes('product_type=all')
+    ? json({ status: 'success', product: { code: barcode, product_name: 'Ayoola Plantain Flour 900 g', brands: 'Ayoola' } })
+    : json({}, 404), async () => {
+    const result = await lookupOpenFoodFacts(barcode, 'general', 'Open Food Facts')
+    assert.equal(result.status, 200)
+    assert.equal(result.body.product.product_name, 'Ayoola Plantain Flour 900 g')
+    assert.equal(result.body.product.source, 'Open Food Facts')
+  })
+})
+
 test('normalizes an Open Products Facts suggestion into the shared product draft contract', async () => {
   const barcode = '3017620422003'
   await withCatalogueResponses(url => url.includes('/api/v3/product/')

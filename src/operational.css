@@ -95,6 +95,15 @@
 .tool-search-mobile-overlay .tool-search-results button { min-height:54px; padding:14px 12px; border-bottom:1px solid var(--line); border-radius:0; background:transparent; color:inherit; text-align:left; }
 .sidebar-tool-search { position:relative; }
 .sidebar-tool-search .tool-search-results { position:absolute; top:calc(100% + 6px); left:0; width:100%; max-width:none; max-height:min(55dvh,420px); z-index:310; }
+.shop-product-field:has(.product-name-suggestions) { position:relative; z-index:5; }
+.product-name-suggestions { display:grid; max-height:min(320px,45dvh); margin-top:6px; overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--paper); box-shadow:0 12px 30px #14253b22; }
+.product-name-suggestions>p { margin:0; padding:12px 14px; color:var(--muted); font-size:13px; }
+.product-name-suggestions>button { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:14px; padding:11px 13px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; }
+.product-name-suggestions>button:last-child { border-bottom:0; }
+.product-name-suggestions>button:hover,.product-name-suggestions>button:focus-visible { background:color-mix(in srgb,var(--brand-primary) 9%,var(--paper)); }
+.product-name-suggestions>button>span { display:grid; min-width:0; gap:3px; }
+.product-name-suggestions strong,.product-name-suggestions small { overflow:hidden; text-overflow:ellipsis; }
+.product-name-suggestions small { color:var(--muted); font-size:12px; }
 @media screen and (max-width:1023px) {
   .app-shell .sidebar { width:100%; overscroll-behavior:contain; touch-action:pan-y; }
   .app-shell .sidebar .tool-search { display:block; }
