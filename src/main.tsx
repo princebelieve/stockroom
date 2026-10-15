@@ -103,7 +103,6 @@ import { ThemeToggle } from './ThemeToggle'
 import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { canonicalGtin, lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
-import { decodeEanFrame } from './lib/eanBarcode'
 import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, scannerDecodeOptions, waitForCameraPreview } from './lib/cameraScanner'
 import type { DecodeHintType as ZxingDecodeHintType } from '@zxing/library'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
@@ -2222,23 +2221,23 @@ function App() {
         resolve?.(clean)
         return true
       }
-      if (requireRearCamera && target !== 'payment') {
+      const isAndroidCamera = /Android/i.test(navigator.userAgent) && target !== 'payment'
+      if (isAndroidCamera) {
         const detectorWindow = window as unknown as { BarcodeDetector?: new () => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue: string }>> } }
-        let detector: InstanceType<NonNullable<typeof detectorWindow.BarcodeDetector>> | undefined
-        try { detector = detectorWindow.BarcodeDetector ? new detectorWindow.BarcodeDetector() : undefined } catch { detector = undefined }
-        const useEanFallback = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (/^Mac/i.test(navigator.platform) && navigator.maxTouchPoints > 1)
-        const fallbackCanvas = document.createElement('canvas')
-        while (session === cameraSession.current) {
-          const codes = detector ? await detector.detect(video) : []
-          if (session !== cameraSession.current) break
-          const detected = codes.find(code => code.rawValue?.trim() && (target !== 'intake' || validGtin(code.rawValue.trim())))
-          const rawValue = detected?.rawValue || (!detector && useEanFallback ? decodeEanFrame(video, fallbackCanvas) : '')
-          if (rawValue && acceptDetected(rawValue)) break
-          await new Promise(resolve => window.setTimeout(resolve, 150))
+        if (detectorWindow.BarcodeDetector) {
+          try {
+            const detector = new detectorWindow.BarcodeDetector()
+            while (session === cameraSession.current) {
+              let codes: Array<{ rawValue: string }> = []
+              try { codes = await detector.detect(video) } catch { break }
+              if (session !== cameraSession.current) return undefined
+              const rawValue = codes.find(code => code.rawValue?.trim() && (target !== 'intake' || validGtin(code.rawValue.trim())))?.rawValue
+              if (rawValue) { accept(rawValue); stopScan(); return rawValue }
+              await new Promise(resolve => window.setTimeout(resolve, 150))
+            }
+          } catch { /* Fall through to ZXing if native detection cannot start. */ }
+          if (session !== cameraSession.current) return undefined
         }
-        const rawValue = await scanResult
-        if (rawValue) { accept(rawValue); stopScan(); return rawValue }
-        return undefined
       }
       const [browserModule, zxingModule] = await zxingModulesPromise
       if (session !== cameraSession.current) return undefined
