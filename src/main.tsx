@@ -102,7 +102,7 @@ import { TaskPicker, type TaskOption } from './TaskPicker'
 import { ThemeToggle } from './ThemeToggle'
 import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
-import { canonicalGtin, lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
+import { canonicalGtin, isBarcodeInGlobalCatalogue, lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
 import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, scannerDecodeOptions, waitForCameraPreview } from './lib/cameraScanner'
 import type { DecodeHintType as ZxingDecodeHintType } from '@zxing/library'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
@@ -524,7 +524,7 @@ function App() {
   const [settingsMessage, setSettingsMessage] = useState('')
   const [catalogueContributionMode, setCatalogueContributionMode] = useState<'auto' | 'never' | 'ask'>(() => {
     const saved = localStorage.getItem(`stockroom-catalogue-contribution:${localStorage.getItem('stockroom-business-id') || ''}`)
-    return saved === 'auto' || saved === 'ask' ? saved : 'never'
+    return saved === 'auto' || saved === 'never' || saved === 'ask' ? saved : 'ask'
   })
   const [catalogueContributionModeDraft, setCatalogueContributionModeDraft] = useState(catalogueContributionMode)
   const [catalogueModeLoaded, setCatalogueModeLoaded] = useState(false)
@@ -873,6 +873,9 @@ function App() {
     }
     if (mode === 'auto') return true
     if (mode !== 'ask' || !validGtin(barcode)) return false
+    try {
+      if (await isBarcodeInGlobalCatalogue(barcode, subscriptionApiUrl)) return false
+    } catch { return false }
     const choice = await requestInlinePrompt({ title: 'Contribute this product?', message: `Help other Stockroom businesses identify ${name} (${barcode}). Only its name, barcode and recognized general details are shared. Your business prices, stock, SKU, category and unit stay private.`, choices: [{ label: 'No, keep it private', value: 'no' }, { label: 'Yes, contribute', value: 'yes' }] })
     return choice === null ? null : choice === 'yes'
   }

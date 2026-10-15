@@ -20,7 +20,7 @@ export function equivalentProductBarcodes(value) {
 export function catalogueContributionMode(settings) {
   const mode = settings?.catalogueContributionMode || settings?.settings?.catalogueContributionMode
   if (['auto', 'never', 'ask'].includes(mode)) return mode
-  return settings?.catalogueContributionOptIn === true ? 'auto' : 'never'
+  return settings?.catalogueContributionOptIn === true ? 'auto' : 'ask'
 }
 
 function sharedContribution(businessId, product, profile) {

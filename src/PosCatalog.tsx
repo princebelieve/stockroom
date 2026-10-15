@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { PackagePlus, Plus, ScanLine, Search } from 'lucide-react'
+import { ArrowLeft, PackagePlus, Plus, ScanLine, Search } from 'lucide-react'
 import type { Product } from './types'
 import type { ProductDraft } from './lib/productIntake'
 
@@ -10,6 +10,7 @@ export function PosCatalog({ products, matches, query, setQuery, cart, add, scan
   options?: Array<{ productId: string; variantGroup?: string; variantLabel?: string }>; oilMode?: boolean; canAddProduct?: boolean; catalogueHasBarcode?: boolean; addMissing?: (draft: ProductDraft) => void
 }) {
   const [activeSuggestion, setActiveSuggestion] = useState(0)
+  const [mobileSuggestionsDismissed, setMobileSuggestionsDismissed] = useState(false)
   const [suggestionPlacement, setSuggestionPlacement] = useState<{ top: number; left: number; width: number; maxHeight: number }>({ top: 0, left: 12, width: 320, maxHeight: 360 })
   const findRef = useRef<HTMLDivElement>(null)
   const term = query.trim()
@@ -77,8 +78,10 @@ export function PosCatalog({ products, matches, query, setQuery, cart, add, scan
     <div className="pos-catalog-header"><div><span className="pos-section-kicker">{oilMode ? 'OIL SALES' : 'NEW SALE'}</span><h2>{oilMode ? 'Find oil' : 'Find a product'}</h2></div><span className="pos-result-count">{hasSearch ? `${visible.length} ${visible.length === 1 ? 'match' : 'matches'}` : 'Scan or search'}</span></div>
     <div className="pos-find" ref={findRef}>
       <div className="pos-search-autocomplete">
-        <div className="search-box"><Search size={18} aria-hidden="true"/><input aria-label={oilMode ? 'Search oils for sale' : 'Search products for sale'} aria-autocomplete="list" aria-expanded={visible.length > 0} aria-controls="pos-product-suggestions" placeholder={oilMode ? 'Search oil name or SKU' : 'Search product name or SKU'} value={query} onChange={event => { setQuery(event.target.value); setActiveSuggestion(0) }} onKeyDown={onSearchKeyDown} /></div>
-        {visible.length > 0 && createPortal(<div className="pos-product-suggestions" id="pos-product-suggestions" role="listbox" aria-label="Matching products" style={suggestionPlacement}>{visible.map((product, index) => {
+        <div className="search-box"><Search size={18} aria-hidden="true"/><input aria-label={oilMode ? 'Search oils for sale' : 'Search products for sale'} aria-autocomplete="list" aria-expanded={visible.length > 0 && !mobileSuggestionsDismissed} aria-controls="pos-product-suggestions" placeholder={oilMode ? 'Search oil name or SKU' : 'Search product name or SKU'} value={query} onChange={event => { setMobileSuggestionsDismissed(false); setQuery(event.target.value); setActiveSuggestion(0) }} onKeyDown={onSearchKeyDown} /></div>
+        {visible.length > 0 && !mobileSuggestionsDismissed && createPortal(<div className={`pos-product-suggestions${window.matchMedia('(max-width: 1023px)').matches ? ' pos-product-suggestions-mobile' : ''}`} style={window.matchMedia('(max-width: 1023px)').matches ? { top: 0, left: 0, width: '100vw', maxHeight: '100dvh' } : suggestionPlacement}>
+          {window.matchMedia('(max-width: 1023px)').matches && <div className="pos-product-suggestions-top"><button type="button" aria-label="Close suggestions" onClick={() => setMobileSuggestionsDismissed(true)}><ArrowLeft size={21}/></button><label><Search size={18} aria-hidden="true"/><input aria-label="Search products for sale" autoFocus value={query} onChange={event => { setMobileSuggestionsDismissed(false); setQuery(event.target.value); setActiveSuggestion(0) }} onKeyDown={onSearchKeyDown}/></label><button type="button" aria-label="Clear search" onClick={() => { setMobileSuggestionsDismissed(false); setQuery('') }}>×</button></div>}
+          <div id="pos-product-suggestions" role="listbox" aria-label="Matching products">{visible.map((product, index) => {
           const factor = product.saleFactor || 1
           const baseId = product.baseProductId || product.id
           const usedBase = products.filter(line => (line.baseProductId || line.id) === baseId).reduce((sum, line) => sum + (cart[line.id] || 0) * (line.saleFactor || 1), 0)
@@ -88,7 +91,7 @@ export function PosCatalog({ products, matches, query, setQuery, cart, add, scan
           return <button type="button" role="option" aria-selected={index === activeSuggestion} className="pos-product-suggestion" key={product.id} disabled={available < 0.001} onMouseEnter={() => setActiveSuggestion(index)} onClick={() => void choose(product)}>
             <span className="pos-product-suggestion-copy"><strong>{product.name}</strong><small>{metadata}</small></span><b>{money(product.price)}{factor > 1 ? ` / ${product.saleUnit}` : ''}</b><Plus size={17} aria-hidden="true"/>
           </button>
-        })}</div>, document.body)}
+        })}</div></div>, document.body)}
       </div>
       <button type="button" className="filter-button pos-scan-button" onClick={scan} aria-label="Scan product barcode" title="Scan product barcode"><ScanLine size={19}/><span>Scan barcode</span></button>
     </div>

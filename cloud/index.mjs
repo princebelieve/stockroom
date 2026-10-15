@@ -309,6 +309,10 @@ const server = createServer(async (request, response) => {
     const barcode = String(requestUrl.searchParams.get('barcode') || '').trim()
     const source = String(requestUrl.searchParams.get('source') || '')
     const shared = source && source !== 'Stockroom Global Catalogue' ? null : await findSharedProduct(sharedProductCatalogue, barcode)
+    if (requestUrl.searchParams.get('catalogueOnly') === 'true') {
+      response.setHeader('Cache-Control', 'no-store')
+      return send(response, shared?.status === 200 ? shared.status : 404, shared?.status === 200 ? shared.body : { status: 0, error: 'Barcode is not in the Stockroom Global Catalogue.' })
+    }
     const result = shared || await lookupOpenFoodFacts(barcode, String(requestUrl.searchParams.get('industry') || 'general'), source, String(requestUrl.searchParams.get('context') || ''))
     response.setHeader('Cache-Control', 'no-store')
     return send(response, result.status, result.body)

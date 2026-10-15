@@ -15,6 +15,33 @@ export function canonicalGtin(value: string) {
   return validGtin(clean) ? clean.padStart(14, '0') : ''
 }
 
+/** Returns whether this barcode is already present in the Stockroom Global Catalogue. */
+export async function isBarcodeInGlobalCatalogue(barcode: string, apiUrl = ''): Promise<boolean> {
+  if (!validGtin(barcode)) return false
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8000)
+  try {
+    const base = apiUrl.replace(/\/$/, '')
+    const query = `barcode=${encodeURIComponent(barcode)}&source=${encodeURIComponent('Stockroom Global Catalogue')}&catalogueOnly=true`
+    const endpoint = base === '/api/cloud'
+      ? `/api/cloud/v1/public/product-lookup?${query}`
+      : base
+        ? `${base}/v1/public/product-lookup?${query}`
+        : `/api/product-lookup?${query}`
+    const response = await fetch(endpoint, { signal: controller.signal, credentials: base && base !== '/api/cloud' ? 'omit' : 'same-origin', cache: 'no-store' })
+    if (response.status === 404) {
+      const failure = await response.json().catch(() => ({}))
+      if (failure?.status === 0) return false
+      throw new Error('Global catalogue lookup is unavailable.')
+    }
+    if (!response.ok) throw new Error('Global catalogue lookup is unavailable.')
+    const product = (await response.json()).product
+    return product?.source === 'Stockroom Global Catalogue'
+      && typeof product.code === 'string'
+      && canonicalGtin(product.code) === canonicalGtin(barcode)
+  } finally { clearTimeout(timer) }
+}
+
 export function labelSuggestion(text: string): ProductDraft {
   const lines = text.split(/\r?\n/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean)
   const barcodes = [...new Set((text.match(/\b\d{8,14}\b/g) || []).filter(validGtin))]
