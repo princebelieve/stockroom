@@ -73,6 +73,29 @@ test('keeps an exact universal catalogue match selectable from Open Food Facts w
   })
 })
 
+test('queries a selected source that was absent from the automatic lookup cache', async () => {
+  const barcode = '6151100001405'
+  const { lookupOpenFoodFacts: isolatedLookup } = await import('../server/open-food-facts.mjs?selected-source-cache-regression')
+  let beautyReads = 0
+  await withCatalogueResponses(url => {
+    if (url.includes('world.openfoodfacts.org') && url.includes('product_type=all')) return json({ status: 'success', product: { code: barcode, product_name: 'Initial catalogue result', product_type: 'food' } })
+    if (url.includes('world.openbeautyfacts.org')) {
+      beautyReads++
+      return beautyReads === 1 ? json({ status: 0 }) : json({ status: 'success', product: { code: barcode, product_name: 'Beauty source result', product_type: 'beauty' } })
+    }
+    return json({}, 404)
+  }, async () => {
+    const automatic = await isolatedLookup(barcode)
+    assert.equal(automatic.status, 200)
+    assert.equal(automatic.body.product.source, 'Open Food Facts')
+    const selected = await isolatedLookup(barcode, 'general', 'Open Beauty Facts')
+    assert.equal(beautyReads, 2)
+    assert.equal(selected.status, 200)
+    assert.equal(selected.body.product.product_name, 'Beauty source result')
+    assert.equal(selected.body.product.source, 'Open Beauty Facts')
+  })
+})
+
 test('normalizes an Open Products Facts suggestion into the shared product draft contract', async () => {
   const barcode = '3017620422003'
   await withCatalogueResponses(url => url.includes('/api/v3/product/')
@@ -191,6 +214,7 @@ test('normalizes AccessGUDID device records for non-food barcode suggestions', a
     return json({}, 404)
   }, async () => {
     const result = await lookupOpenFoodFacts(barcode)
+    assert.equal(result.status, 200, JSON.stringify(result))
     assert.deepEqual(result.body.product, { code: barcode, product_name: 'Example Monitor Patient monitor', source: 'AccessGUDID medical device registry', attributes: { brand: 'Example Monitor', manufacturer: 'Acme Medical', model: 'Model 1', description: 'Patient monitor' } })
   })
 })

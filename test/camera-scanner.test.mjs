@@ -18,8 +18,9 @@ test('phones request the rear camera and desktops use their available webcam', a
   const desktopConstraints = []
   assert.equal(await cameraScanner.requestBarcodeCamera({ getUserMedia: async value => { mobileConstraints.push(value); return stream } }, true), stream)
   assert.equal(await cameraScanner.requestBarcodeCamera({ getUserMedia: async value => { desktopConstraints.push(value); return stream } }, false), stream)
-  assert.deepEqual(mobileConstraints, [{ video: { facingMode: { exact: 'environment' } } }])
-  assert.deepEqual(desktopConstraints, [{ video: { facingMode: { ideal: 'user' } } }])
+  assert.deepEqual(mobileConstraints, [{ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 60 } } }])
+  assert.deepEqual(desktopConstraints, [{ video: { facingMode: { ideal: 'user' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 60 } } }])
+  assert.deepEqual(cameraScanner.scannerDecodeOptions(), { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 250, tryPlayVideoTimeout: 5000 })
 })
 
 test('camera API absence identifies insecure origin separately from unsupported app context', () => {

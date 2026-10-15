@@ -10,7 +10,18 @@ export function requiresRearCamera(userAgent: string, platform: string, maxTouch
 
 /** Phones require their rear camera; desktops use their available webcam. */
 export async function requestBarcodeCamera(mediaDevices: CameraMediaDevices, requireRearCamera: boolean) {
-  return mediaDevices.getUserMedia({ video: requireRearCamera ? { facingMode: { exact: 'environment' } } : { facingMode: { ideal: 'user' } } })
+  return mediaDevices.getUserMedia({ video: {
+    facingMode: { ideal: requireRearCamera ? 'environment' : 'user' },
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: 30, max: 60 },
+  } })
+}
+
+export function scannerDecodeOptions() {
+  // Keep retry latency low enough for checkout scanning while avoiding a
+  // decode attempt on every camera frame on slower phones.
+  return { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 250, tryPlayVideoTimeout: 5000 }
 }
 
 export function cameraAccessUnavailableMessage(secureContext: boolean, mediaDevicesPresent: boolean, requireRearCamera: boolean) {

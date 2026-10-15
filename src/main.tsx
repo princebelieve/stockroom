@@ -103,7 +103,8 @@ import { ThemeToggle } from './ThemeToggle'
 import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
 import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
-import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, waitForCameraPreview } from './lib/cameraScanner'
+import { decodeEanFrame } from './lib/eanBarcode'
+import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, scannerDecodeOptions, waitForCameraPreview } from './lib/cameraScanner'
 import type { DecodeHintType as ZxingDecodeHintType } from '@zxing/library'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, businessModes, type ShopProfile, type BusinessMode } from '../server/shop-profile.mjs'
@@ -2184,6 +2185,8 @@ function App() {
       window.alert(`${cameraAccessUnavailableMessage(window.isSecureContext, Boolean(navigator.mediaDevices), requireRearCamera)} The barcode field still accepts manual entry.`)
       return undefined
     }
+    // Load the fallback decoder while permission and camera startup are in progress.
+    const zxingModulesPromise = Promise.all([import('@zxing/browser'), import('@zxing/library')])
     stopScan()
     const session = cameraSession.current
     setScanning(true)
@@ -2193,11 +2196,14 @@ function App() {
       if (session !== cameraSession.current) { stream.getTracks().forEach(track => track.stop()); return }
       cameraStream.current = stream
       const videoTrack = stream.getVideoTracks()[0]
-      const capabilities = videoTrack?.getCapabilities() as (MediaTrackCapabilities & { torch?: boolean }) | undefined
-      // Try to enable the rear-camera torch as the scanner opens. Some runtimes
-      // accept torch constraints even when getCapabilities() omits the field.
-      setTorchSupported(Boolean(videoTrack))
-      setTorchMessage(videoTrack ? 'Turning flashlight on…' : '')
+      let capabilities: (MediaTrackCapabilities & { torch?: boolean; focusMode?: string[] }) | undefined
+      try { capabilities = videoTrack?.getCapabilities() as (MediaTrackCapabilities & { torch?: boolean; focusMode?: string[] }) | undefined } catch { capabilities = undefined }
+      setTorchSupported(Boolean(capabilities?.torch))
+      setTorchMessage('')
+      setTorchOn(false)
+      if (videoTrack && capabilities?.focusMode?.includes('continuous')) {
+        try { await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as unknown as MediaTrackConstraints) } catch { /* Camera may manage focus automatically. */ }
+      }
       // setScanning() mounts the modal asynchronously. A fast permission grant
       // can otherwise beat the React commit and make the scanner close before
       // its preview element exists.
@@ -2205,40 +2211,67 @@ function App() {
       if (!video) throw new Error('Camera preview is unavailable.')
       video.srcObject = stream
       await video.play()
-      if (videoTrack) {
-        try {
-          await videoTrack.applyConstraints({ advanced: [{ torch: true }] } as unknown as MediaTrackConstraints)
-          const settings = videoTrack.getSettings() as MediaTrackSettings & { torch?: boolean }
-          const torchActive = capabilities?.torch === true ? settings.torch !== false : settings.torch === true
-          if (torchActive) {
-            setTorchSupported(true)
-            setTorchOn(true)
-            setTorchMessage('')
-          } else {
-            setTorchSupported(false)
-            setTorchOn(false)
-            setTorchMessage('This camera does not allow Stockroom to use its flashlight.')
-          }
-        } catch {
-          setTorchSupported(false)
-          setTorchOn(false)
-          setTorchMessage('This camera does not allow Stockroom to use its flashlight.')
-        }
+      const scanResult = new Promise<string | undefined>(resolve => { cameraScanResolver.current = resolve })
+      const acceptDetected = (value: string) => {
+        const clean = value.trim()
+        if (!clean || (target === 'intake' && !validGtin(clean))) return false
+        const resolve = cameraScanResolver.current
+        cameraScanResolver.current = null
+        resolve?.(clean)
+        return true
       }
-      const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = await Promise.all([import('@zxing/browser'), import('@zxing/library')])
+      const detectorWindow = window as unknown as { BarcodeDetector?: (new (options?: { formats?: string[] }) => { detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>> }) & { getSupportedFormats?: () => Promise<string[]> } }
+      let nativeDetectorActive = false
+      if (detectorWindow.BarcodeDetector) {
+        try {
+          const formats = target === 'payment' ? ['qr_code'] : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf']
+          const supported = await detectorWindow.BarcodeDetector.getSupportedFormats?.().catch(() => formats)
+          const availableFormats = supported ? formats.filter(format => supported.includes(format)) : formats
+          const detector = new detectorWindow.BarcodeDetector(availableFormats.length ? { formats: availableFormats } : undefined)
+          nativeDetectorActive = true
+          void (async () => {
+            while (session === cameraSession.current) {
+              try {
+                const codes = await detector.detect(video)
+                const match = codes.find(code => code.rawValue && (target !== 'intake' || validGtin(code.rawValue.trim())))
+                if (match?.rawValue && acceptDetected(match.rawValue)) return
+              } catch { return }
+              await new Promise(resolve => window.setTimeout(resolve, 80))
+            }
+          })()
+        } catch { /* Use ZXing on browsers with incomplete native detector support. */ }
+      }
+      // Windows laptop webcams frequently expose BarcodeDetector while still
+      // struggling with close-focus EAN/UPC labels. Keep the fast local frame
+      // decoder active there as a second path; ZXing remains available for
+      // barcode formats it does not handle.
+      const isWindowsCamera = /^Win/i.test(navigator.platform)
+      if ((!nativeDetectorActive || isWindowsCamera) && target !== 'payment') {
+        const canvas = document.createElement('canvas')
+        void (async () => {
+          while (session === cameraSession.current) {
+            const value = decodeEanFrame(video, canvas)
+            if (value && acceptDetected(value)) return
+            await new Promise(resolve => window.setTimeout(resolve, 150))
+          }
+        })()
+      }
+      const firstReady = await Promise.race([
+        zxingModulesPromise.then(modules => ({ modules })),
+        scanResult.then(value => ({ value })),
+      ])
+      if ('value' in firstReady) {
+        if (firstReady.value) { accept(firstReady.value); stopScan(); return firstReady.value }
+        return undefined
+      }
+      const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = firstReady.modules
       const reader = new BrowserMultiFormatReader(new Map<ZxingDecodeHintType, unknown>([
         [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.ITF, BarcodeFormat.QR_CODE]],
         [DecodeHintType.TRY_HARDER, true],
-      ]))
-      const scanResult = new Promise<string | undefined>(resolve => { cameraScanResolver.current = resolve })
+      ]), scannerDecodeOptions())
       const controlsPromise = reader.decodeFromVideoElement(video, result => {
         if (session !== cameraSession.current || !result) return
-        const value = result.getText().trim()
-        if (value && (target !== 'intake' || validGtin(value))) {
-          const resolve = cameraScanResolver.current
-          cameraScanResolver.current = null
-          resolve?.(value)
-        }
+        acceptDetected(result.getText())
       })
       const controls = await controlsPromise
       cameraDecodeControls.current = controls
