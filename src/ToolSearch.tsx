@@ -19,11 +19,18 @@ export function ToolSearch({ tools }: { tools: ToolDestination[] }) {
   const matches = useMemo(() => tools.filter(tool => tool.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [tools, query])
 
   useEffect(() => {
-    if (!focused) return
+    if (!focused || mobile) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (container.current && event.target instanceof Node && !container.current.contains(event.target)) close()
+    }
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { setFocused(false); setQuery(''); input.current?.blur() } }
+    document.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [focused])
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [focused, mobile])
 
   function close() { setFocused(false); setQuery(''); input.current?.blur() }
   function openTool(tool: ToolDestination) {
