@@ -4,13 +4,13 @@ import { PackagePlus, Plus, ScanLine, Search } from 'lucide-react'
 import type { Product } from './types'
 import type { ProductDraft } from './lib/productIntake'
 
-export function PosCatalog({ products, matches, query, setQuery, cart, add, scan, scanKey, acceptBarcode, money, options = [], oilMode = false, canAddProduct = false, addMissing, onlineSuggestion = '' }: {
+export function PosCatalog({ products, matches, query, setQuery, cart, add, scan, scanKey, acceptBarcode, money, options = [], oilMode = false, canAddProduct = false, catalogueHasBarcode = false, addMissing }: {
   products: Product[]; matches: Product[]; query: string; setQuery: (value: string) => void; cart: Record<string, number>;
   add: (product: Product) => void | Promise<void>; scan: () => void; scanKey: string; acceptBarcode: (code: string) => void; money: (amount: number) => string;
-  options?: Array<{ productId: string; variantGroup?: string; variantLabel?: string }>; oilMode?: boolean; canAddProduct?: boolean; addMissing?: (draft: ProductDraft) => void; onlineSuggestion?: string
+  options?: Array<{ productId: string; variantGroup?: string; variantLabel?: string }>; oilMode?: boolean; canAddProduct?: boolean; catalogueHasBarcode?: boolean; addMissing?: (draft: ProductDraft) => void
 }) {
   const [activeSuggestion, setActiveSuggestion] = useState(0)
-  const [suggestionPlacement, setSuggestionPlacement] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 12, width: 320 })
+  const [suggestionPlacement, setSuggestionPlacement] = useState<{ top: number; left: number; width: number; maxHeight: number }>({ top: 0, left: 12, width: 320, maxHeight: 360 })
   const findRef = useRef<HTMLDivElement>(null)
   const term = query.trim()
   const hasSearch = term.length >= 3
@@ -28,9 +28,9 @@ export function PosCatalog({ products, matches, query, setQuery, cart, add, scan
       if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12
       left = Math.max(12, left)
       width = Math.min(width, window.innerWidth - left - 12)
-      const maxHeight = Math.min(window.innerHeight * 0.55, 420)
-      const top = Math.max(12, Math.min(anchor.bottom + 6, window.innerHeight - maxHeight - 12))
-      setSuggestionPlacement({ top, left, width })
+      const top = Math.min(anchor.bottom + 6, window.innerHeight - 80)
+      const maxHeight = Math.max(100, Math.min(window.innerHeight * 0.55, 420, window.innerHeight - top - 12))
+      setSuggestionPlacement({ top, left, width, maxHeight })
     }
     placeSuggestions()
     window.addEventListener('resize', placeSuggestions)
@@ -66,8 +66,9 @@ export function PosCatalog({ products, matches, query, setQuery, cart, add, scan
     if (event.key === 'Enter') {
       event.preventDefault()
       const exact = products.find(product => product.barcode === term || product.sku === term)
-      if (exact || /^\d{8,14}$/.test(term) || !visible.length) acceptBarcode(term)
-      else void choose(visible[activeSuggestion] || visible[0])
+      if (exact) { void choose(exact); return }
+      if (visible.length) { void choose(visible[activeSuggestion] || visible[0]); return }
+      acceptBarcode(term)
       return
     }
   }
@@ -92,7 +93,7 @@ export function PosCatalog({ products, matches, query, setQuery, cart, add, scan
       <button type="button" className="filter-button pos-scan-button" onClick={scan} aria-label="Scan product barcode" title="Scan product barcode"><ScanLine size={19}/><span>Scan barcode</span></button>
     </div>
     {term.length > 0 && !hasSearch && <p className="pos-search-hint" role="status">Type at least 3 characters, or scan a barcode.</p>}
-    {hasSearch && !visible.length && <div className="pos-search-empty" role="status"><strong>{onlineSuggestion ? `Catalogue suggestion: ${onlineSuggestion}` : 'No matching product'}</strong><span>{onlineSuggestion ? 'Confirm the exact item before adding it.' : 'Check the product name, SKU or barcode and try again.'}</span>{/^\d{8,14}$/.test(term) && canAddProduct && <button type="button" className="text-button" onClick={() => addMissing?.({ name: '', barcode: term })}>Add this barcode as a product</button>}</div>}
+    {hasSearch && !visible.length && <div className="pos-search-empty" role="status"><strong>No matching product</strong><span>Check the product name, SKU or barcode and try again.</span>{/^\d{8,14}$/.test(term) && canAddProduct && !catalogueHasBarcode && <button type="button" className="text-button" onClick={() => addMissing?.({ name: '', barcode: term })}>Add this barcode as a product</button>}</div>}
     {!products.length && !term && <div className="empty-state pos-catalog-empty"><PackagePlus size={28} aria-hidden="true"/><strong>No products saved yet</strong><p>{canAddProduct ? 'Add a product to start selling.' : 'Ask a manager to add products before starting a sale.'}</p>{canAddProduct && <button type="button" className="primary-button" onClick={() => addMissing?.({ name: '' })}>Add product <Plus size={17}/></button>}</div>}
   </div>
 }

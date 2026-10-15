@@ -21,6 +21,8 @@
   .app-shell .sidebar .tool-search { width:100%; min-width:0; max-width:none; flex:none; order:0; margin:14px 0; }
   .app-shell .sidebar .tool-search label { min-height:40px; padding:8px 11px; border-color:#ffffff35; border-radius:9px; background:#ffffff0d; color:#d9e1ea; }
   .app-shell .sidebar .tool-search input { color:#f7f8fa; }
+  .app-shell .sidebar-tool-search { margin:0 0 8px; }
+  .app-shell .sidebar-tool-search .tool-search-results { position:static; width:auto; max-width:none; max-height:none; margin-top:8px; }
   .app-shell .sidebar .tool-search input::placeholder { color:#b7c1ce; opacity:1; }
   .app-shell .sidebar .logout-button { display:block; color:var(--brand-primary); padding:16px; margin:12px 0; }
   .app-shell .mobile-nav-toggle { display:flex; position:fixed; top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 8px); right:8px; left:auto; z-index:160; width:44px; height:44px; align-items:center; justify-content:center; background:transparent; color:white; border:0; box-shadow:none; }
@@ -36,11 +38,6 @@
   .app-shell .mobile-app-header .notification-center { position:absolute; top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 6px); right:58px; z-index:146; }
   .app-shell .mobile-app-header .notification-center button { color:white; border-color:#ffffff55; background:transparent; }
   .app-shell .mobile-app-actions { display:flex; height:40px; margin-top:2px; align-items:center; justify-content:flex-end; gap:8px; }
-  .app-shell .mobile-app-tool-search { height:36px; margin-top:4px; }
-  .app-shell .mobile-app-tool-search .tool-search { width:100%; min-width:0; max-width:none; }
-  .app-shell .mobile-app-tool-search .tool-search label { height:36px; min-height:36px; box-sizing:border-box; padding:6px 11px; border-color:#ffffff45; border-radius:10px; background:#ffffff12; color:#ffffffc9; }
-  .app-shell .mobile-app-tool-search .tool-search input { min-height:0; padding:0; color:#fff; font-size:14px; }
-  .app-shell .mobile-app-tool-search .tool-search input::placeholder { color:#ffffffb8; opacity:1; }
   .app-shell .mobile-header-sync { display:inline-flex; width:40px; min-width:40px; height:40px; align-items:center; justify-content:center; padding:0; border:1px solid #ffffff75; border-radius:10px; background:#ffffff18; color:white; }
   .app-shell .mobile-header-sync span { display:none; }
   .app-shell .mobile-header-sync:disabled { opacity:.58; }
@@ -87,9 +84,20 @@
   .intro-illustration { width:240px; height:240px; }
   .app-shell .app-copyright { margin-top:48px; text-align:center; }
 }
+
+.tool-search-mobile-overlay { position:fixed; inset:0; z-index:1000; display:flex; flex-direction:column; box-sizing:border-box; padding:calc(env(safe-area-inset-top,0px) + 8px) 12px calc(env(safe-area-inset-bottom,0px) + 12px); overflow:auto; background:var(--paper,#fff); color:var(--ink,#192e49); }
+.tool-search-mobile-top { display:flex; flex:none; align-items:center; gap:8px; min-height:52px; border-bottom:1px solid var(--line); }
+.tool-search-mobile-top>button { display:grid; flex:none; width:40px; height:44px; place-items:center; border:0; background:transparent; color:inherit; }
+.tool-search-mobile-field { display:flex; flex:1; min-width:0; align-items:center; gap:10px; padding:0 10px; border-radius:24px; background:color-mix(in srgb,var(--line) 32%,transparent); }
+.tool-search-mobile-field input { width:100%; min-width:0; height:44px; border:0; outline:0; color:inherit; background:transparent; font:inherit; }
+.tool-search-mobile-overlay .tool-search-results { position:static; display:block; width:100%; max-width:none; max-height:none; margin-top:0; padding:0; overflow:visible; border:0; border-radius:0; box-shadow:none; background:transparent; }
+.tool-search-mobile-overlay .tool-search-results p { padding:12px 8px 6px; }
+.tool-search-mobile-overlay .tool-search-results button { min-height:54px; padding:14px 12px; border-bottom:1px solid var(--line); border-radius:0; background:transparent; color:inherit; text-align:left; }
+.sidebar-tool-search { position:relative; }
+.sidebar-tool-search .tool-search-results { position:absolute; top:calc(100% + 6px); left:0; width:100%; max-width:none; max-height:min(55dvh,420px); z-index:310; }
 @media screen and (max-width:1023px) {
   .app-shell .sidebar { width:100%; overscroll-behavior:contain; touch-action:pan-y; }
-  .app-shell .sidebar .tool-search { display:none; }
+  .app-shell .sidebar .tool-search { display:block; }
   .app-shell .sidebar nav { display:grid; overflow:visible; }
   .app-shell .sidebar .pwa-sync-controls { display:block; }
   .app-shell .mobile-pwa-sync { display:none; }
