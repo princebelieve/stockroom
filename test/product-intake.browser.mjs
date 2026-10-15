@@ -15,12 +15,17 @@ try {
     const { React, createRoot } = await import('/test/shop-setup-harness.ts')
     const { ProductIntake } = await import('/src/ProductIntake.tsx')
     window.saved = []; window.fail = true
-    createRoot(document.getElementById('root')).render(React.createElement(ProductIntake, {
-      products: [], defaultUnit: 'item', scan: async () => '4006381333931',
-      create: async draft => { if (draft.name === 'Soap' && window.fail) throw new Error('Simulated save failure'); window.saved.push(draft) },
-    }))
+    function Harness() {
+      const [screen, setScreen] = React.useState('import')
+      window.setIntakeScreen = setScreen
+      return React.createElement(ProductIntake, {
+        products: [], defaultUnit: 'item', screen, navigate: setScreen, scan: async () => '4006381333931',
+        create: async draft => { if (draft.name === 'Soap' && window.fail) throw new Error('Simulated save failure'); window.saved.push(draft) },
+      })
+    }
+    createRoot(document.getElementById('root')).render(React.createElement(Harness))
   })
-  await page.getByText('Add products from a photo, barcode or file', { exact: true }).click()
+  await page.getByRole('button', { name: 'Read product photo', exact: true }).click()
   // Real local OCR automatically fills review fields after upload.
   const image = await page.evaluate(async () => {
     const canvas = document.createElement('canvas'); canvas.width = 900; canvas.height = 320
@@ -34,11 +39,12 @@ try {
   assert.equal(await page.getByLabel('Selling price row 1').inputValue(), '')
   await page.getByLabel('Remove row 1').click()
   // CSV quoting, explicit zero, and partial failure retry.
+  await page.evaluate(() => window.setIntakeScreen('import-csv'))
   await page.getByLabel('CSV product file').setInputFiles({ name: 'products.csv', mimeType: 'text/csv', buffer: Buffer.from('Name,Price,Stock\n"Juice, orange",10,0\nSoap,20,2') })
-  await page.getByRole('button',{name:'Load mapped products for review'}).click()
+  await page.getByRole('button',{name:'Load products for review'}).click()
   await page.getByLabel('Name row 2', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Import 2 reviewed products' }).click()
-  await page.getByRole('status').filter({ hasText: 'Simulated save failure' }).waitFor()
+  await page.getByRole('alert').filter({ hasText: 'Simulated save failure' }).waitFor()
   assert.equal(await page.getByLabel('Name row 1', { exact: true }).inputValue(), 'Soap')
   assert.equal(await page.getByLabel('Name row 2', { exact: true }).count(), 0)
   await page.evaluate(() => { window.fail = false })
@@ -46,14 +52,17 @@ try {
   await page.getByRole('status').filter({ hasText: 'Imported 1 product.' }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.saved.map(product => product.name)), ['Juice, orange', 'Soap'])
   // Lookup failure still provides an editable barcode row.
-  await page.getByRole('button', { name: 'Scan barcode', exact: true }).click()
+  await page.evaluate(() => window.setIntakeScreen('import'))
+  await page.getByRole('button', { name: 'Find by barcode', exact: true }).click()
+  await page.getByRole('button', { name: 'Scan product barcode', exact: true }).click()
+  await page.getByRole('button', { name: 'Enter product details', exact: true }).click()
   await page.getByLabel('Barcode row 1', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('Barcode row 1', { exact: true }).inputValue(), '4006381333931')
   assert.equal(await page.getByRole('button', { name: 'Import 1 reviewed product', exact: true }).isDisabled(), true)
   await page.getByLabel('Remove row 1').click()
+  await page.evaluate(() => window.setIntakeScreen('import-photo'))
   await page.getByLabel('What are you reading?').selectOption('document')
-  await page.getByText('Paste text or correct the photo text', { exact: true }).click()
-  await page.getByLabel('Read or pasted text').fill('Description | Quantity | Unit cost\nSoap | 12 | 20\nTotal 240')
+  await page.getByLabel('Paste or correct text').fill('Description | Quantity | Unit cost\nSoap | 12 | 20\nTotal 240')
   await page.getByRole('button', { name: 'Suggest products from text' }).click()
   assert.equal(await page.getByLabel('Import row 1', { exact: true }).isChecked(), false)
   assert.equal(await page.getByLabel('Unit cost row 1').inputValue(), '20')

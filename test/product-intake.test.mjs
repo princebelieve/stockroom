@@ -5,7 +5,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { normalizeShopProfile } from '../server/shop-profile.mjs'
 
 const source = await readFile(new URL('../src/lib/productIntake.ts', import.meta.url), 'utf8')
-const { labelSuggestion, documentSuggestions, validGtin, draftProblem, lookupFoodBarcode } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`)
+const { labelSuggestion, documentSuggestions, validGtin, canonicalGtin, draftProblem, lookupFoodBarcode } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`)
 
 test('package text suggests a name and size without inventing commercial values', () => {
   const draft = labelSuggestion('ACME\nOrange Juice\n500 ml\nIngredients: oranges\n4006381333931')
@@ -20,6 +20,8 @@ test('package text suggests a name and size without inventing commercial values'
 test('barcode detection rejects bad checksums and ambiguous labels', () => {
   assert.equal(validGtin('4006381333931'), true)
   assert.equal(validGtin('4006381333932'), false)
+  assert.equal(canonicalGtin('630902423791'), canonicalGtin('0630902423791'))
+  assert.equal(canonicalGtin('615600032291'), '')
   assert.equal(labelSuggestion('Soap\n4006381333931\n3017620422003').barcode, undefined)
   assert.equal(labelSuggestion('Soap\n123456789').barcode, undefined)
 })

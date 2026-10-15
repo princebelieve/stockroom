@@ -102,8 +102,7 @@ import { TaskPicker, type TaskOption } from './TaskPicker'
 import { ThemeToggle } from './ThemeToggle'
 import { ProductIntake } from './ProductIntake'
 import { HandwrittenProductForm } from './HandwrittenProductForm'
-import { lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
-import { decodeEanFrame } from './lib/eanBarcode'
+import { canonicalGtin, lookupProductBarcode, validGtin, type ProductDraft } from './lib/productIntake'
 import { cameraAccessUnavailableMessage, cameraFailureMessage, requestBarcodeCamera, requiresRearCamera, scannerDecodeOptions, waitForCameraPreview } from './lib/cameraScanner'
 import type { DecodeHintType as ZxingDecodeHintType } from '@zxing/library'
 import { workspaceCapabilities, workspaceScreenAvailable } from '../server/workspace-capabilities.mjs'
@@ -1511,7 +1510,8 @@ function App() {
   const totalValue = products.reduce((sum, product) => sum + product.stock * product.price, 0)
   const filteredProducts = useMemo(() => {
     const term = (active === 'Inventory' ? inventoryQuery : query).trim()
-    const exact = term ? products.filter(product=>product.barcode?.trim().toLocaleLowerCase()===term.toLocaleLowerCase()||(product.sku||'').trim().toLocaleLowerCase()===term.toLocaleLowerCase()) : []
+    const termGtin = canonicalGtin(term)
+    const exact = term ? products.filter(product=>(termGtin && canonicalGtin(product.barcode || '')===termGtin)||(product.sku||'').trim().toLocaleLowerCase()===term.toLocaleLowerCase()) : []
     const matches = exact.length ? exact : products.filter(product=>matchesSearchText(term,[product.name,product.sku,product.barcode,product.category]))
     return matches.filter(product=>active!=='Inventory'||productFilter!=='low'||product.stock<=product.reorder).sort((a,b)=>productOrder==='az'?a.name.localeCompare(b.name):productOrder==='za'?b.name.localeCompare(a.name):productOrder==='oldest'?String(a.updated||'').localeCompare(String(b.updated||'')):String(b.updated||'').localeCompare(String(a.updated||'')))
   }, [products, query, inventoryQuery, productOrder, productFilter, active])
@@ -2153,7 +2153,8 @@ function App() {
       try{const measured=weightLabel(value,readWeighing(user!.organizationId),products);if(measured){setWeighedReview(measured);setQuery('');return}}catch(error){pos.setError((error as Error).message);return}
     }
     if (active === 'POS' || active === 'Oil') {
-      const localMatch = products.find(product => product.barcode?.trim() === value || product.sku?.trim() === value)
+      const scannedIdentity = canonicalGtin(value)
+      const localMatch = products.find(product => (scannedIdentity && canonicalGtin(product.barcode || '') === scannedIdentity) || product.sku?.trim().toLocaleLowerCase() === value.toLocaleLowerCase())
       if (localMatch) {
         addToCart(localMatch)
         setQuery('')
@@ -2185,7 +2186,7 @@ function App() {
       window.alert(`${cameraAccessUnavailableMessage(window.isSecureContext, Boolean(navigator.mediaDevices), requireRearCamera)} The barcode field still accepts manual entry.`)
       return undefined
     }
-    // Load the fallback decoder while permission and camera startup are in progress.
+    // Load the same streaming decoder for every platform while the camera starts.
     const zxingModulesPromise = Promise.all([import('@zxing/browser'), import('@zxing/library')])
     stopScan()
     const session = cameraSession.current
@@ -2220,58 +2221,12 @@ function App() {
         resolve?.(clean)
         return true
       }
-      const detectorWindow = window as unknown as { BarcodeDetector?: (new (options?: { formats?: string[] }) => { detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>> }) & { getSupportedFormats?: () => Promise<string[]> } }
-      const isWindowsCamera = /^Win/i.test(navigator.platform)
-      const useLocalEanDecoder = isWindowsCamera && target !== 'payment'
-      let nativeDetectorActive = false
-      if (!useLocalEanDecoder && detectorWindow.BarcodeDetector) {
-        try {
-          const formats = target === 'payment' ? ['qr_code'] : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf']
-          const supported = await detectorWindow.BarcodeDetector.getSupportedFormats?.().catch(() => formats)
-          const availableFormats = supported ? formats.filter(format => supported.includes(format)) : formats
-          const detector = new detectorWindow.BarcodeDetector(availableFormats.length ? { formats: availableFormats } : undefined)
-          nativeDetectorActive = true
-          void (async () => {
-            while (session === cameraSession.current) {
-              try {
-                const codes = await detector.detect(video)
-                const match = codes.find(code => code.rawValue && (target !== 'intake' || validGtin(code.rawValue.trim())))
-                if (match?.rawValue && acceptDetected(match.rawValue)) return
-              } catch { return }
-              await new Promise(resolve => window.setTimeout(resolve, 80))
-            }
-          })()
-        } catch { /* Use ZXing on browsers with incomplete native detector support. */ }
-      }
-      // Windows laptop webcams use the local EAN/UPC decoder as their single
-      // decoding engine; running it alongside native detection and ZXing
-      // needlessly makes each camera frame compete for processing time.
-      if (useLocalEanDecoder) {
-        const canvas = document.createElement('canvas')
-        void (async () => {
-          while (session === cameraSession.current) {
-            const value = decodeEanFrame(video, canvas)
-            if (value && acceptDetected(value)) return
-            await new Promise(resolve => window.setTimeout(resolve, 150))
-          }
-        })()
-      }
-      if (nativeDetectorActive || useLocalEanDecoder) {
-        const rawValue = await scanResult
-        if (rawValue) { accept(rawValue); stopScan(); return rawValue }
-        return undefined
-      }
-      const firstReady = await Promise.race([
-        zxingModulesPromise.then(modules => ({ modules })),
-        scanResult.then(value => ({ value })),
-      ])
-      if ('value' in firstReady) {
-        if (firstReady.value) { accept(firstReady.value); stopScan(); return firstReady.value }
-        return undefined
-      }
-      const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = firstReady.modules
+      const [browserModule, zxingModule] = await zxingModulesPromise
+      if (session !== cameraSession.current) return undefined
+      const { BrowserMultiFormatReader } = browserModule
+      const { BarcodeFormat, DecodeHintType } = zxingModule
       const reader = new BrowserMultiFormatReader(new Map<ZxingDecodeHintType, unknown>([
-        [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.ITF, BarcodeFormat.QR_CODE]],
+        [DecodeHintType.POSSIBLE_FORMATS, target === 'payment' ? [BarcodeFormat.QR_CODE] : [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.ITF]],
         [DecodeHintType.TRY_HARDER, true],
       ]), scannerDecodeOptions())
       const controlsPromise = reader.decodeFromVideoElement(video, result => {

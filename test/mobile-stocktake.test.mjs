@@ -11,7 +11,7 @@ test('Android outbox joins the caller transaction without starting a nested nati
   const source=readFileSync('src/lib/mobileApi.ts','utf8')
   const code=source.slice(source.indexOf('async function queue('),source.indexOf('async function ensureBranches('))
   let calls=0
-  const queue=vm.runInNewContext(stripTypeScriptTypes(`(${code})`),{openMobileDatabase:async()=>({run:async(sql,args,transaction)=>{assert.equal(transaction,false);calls++}}),id:randomUUID,now:()=>new Date().toISOString()})
+  const queue=vm.runInNewContext(stripTypeScriptTypes(`(${code})`),{openMobileDatabase:async()=>({run:async(sql,args,transaction)=>{assert.equal(transaction,false);calls++}}),id:randomUUID,now:()=>new Date().toISOString(),window:{setTimeout:()=>0,dispatchEvent:()=>{}}})
   await queue('stock','milk','adjust',{amount:-1})
   assert.equal(calls,1)
 })

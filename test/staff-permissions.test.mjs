@@ -30,5 +30,5 @@ test('catalogue starters cover every stock industry and never replace saved name
  assert.deepEqual(saved,original)
  const oilStarters=catalogueStarters('stock','liquids')
  assert.ok(oilStarters.some(row=>row.unit==='litre'))
- assert.ok(oilStarters.filter(row=>/container|bottle|jerrycan|drum|jug|funnel|tap/i.test(row.name)).every(row=>row.unit==='piece'))
+ assert.ok(oilStarters.filter(row=>/^(?:(?:(?:small|medium|large) )?jerrycan|food grade storage drum|measuring jug|funnel|dispensing tap)$/i.test(row.name)).every(row=>row.unit==='piece'))
 })

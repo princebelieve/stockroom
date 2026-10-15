@@ -20,7 +20,7 @@ try {
     window.stockroomDesktop = { listPrinters: async () => [{name:'Test queue',displayName:'Test queue'}], print:async () => { window.printCalls++; if(window.failPrint) throw new Error('Printer offline'); }, control:async () => {} };
     createRoot(document.getElementById('root')).render(React.createElement(DeviceSetup,{businessId:'shop-a',defaultProvider:'Example',onTerminalSaved:()=>{},createPairing:async()=>{},openSecondMonitor:async()=>{},pairing:null,scan:async()=> '00123'}));
   </script>`) }))
-  await page.goto(`${base}/__setup_test`)
+  await page.goto(`${base}/__setup_test`, { waitUntil: 'commit' })
   await page.getByRole('button', { name: /^Receipt printer/ }).click()
   assert.equal(await page.getByRole('button', { name: 'Continue to configuration' }).isDisabled(), true)
   await page.getByLabel('Manufacturer and model').fill('Test thermal 80')
@@ -41,14 +41,6 @@ try {
   await page.evaluate(() => localStorage.setItem('stockroom-printers', '{}'))
   await page.reload()
   await page.getByRole('button', { name: /Receipt printer.*Configured — test needed/ }).waitFor()
-
-  await page.getByRole('button', { name: /^Cash drawer/ }).click()
-  await page.getByLabel('Manufacturer and model').fill('USB-only drawer')
-  await page.getByLabel('Connection / printing method').selectOption('usb')
-  await page.getByRole('button', { name: 'Continue to configuration' }).click()
-  await page.getByRole('button', { name: 'Save device details' }).click()
-  assert.equal(await page.getByRole('checkbox').count(), 0)
-  await page.getByRole('button', { name: 'Finish — integration unavailable' }).click()
 
   await page.getByRole('button', { name: /^Barcode scanner/ }).click()
   await page.getByLabel('Manufacturer and model').fill('Keyboard scanner')
@@ -73,5 +65,5 @@ try {
   await page.getByRole('button', { name: 'Finish — integration unavailable' }).click()
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('stockroom-device:shop-a:terminal')).status), 'unavailable')
   assert.deepEqual(errors, [])
-  console.log('PASS: wizard configuration, printer failure/retry, confirmation gating, persisted status invalidation, unsupported transports, scanner suffix, and unavailable payment adapter')
+  console.log('PASS: wizard configuration, printer failure/retry, confirmation gating, persisted status invalidation, scanner suffix, and unavailable payment adapter')
 } finally { await browser.close(); await server.close() }

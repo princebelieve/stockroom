@@ -9,6 +9,12 @@ export function validGtin(value: string) {
   return (10 - digits.reverse().reduce((sum, digit, i) => sum + digit * (i % 2 ? 1 : 3), 0) % 10) % 10 === check
 }
 
+/** Canonical identity shared by UPC-A/EAN-13 and padded GTIN representations. */
+export function canonicalGtin(value: string) {
+  const clean = String(value || '').trim()
+  return validGtin(clean) ? clean.padStart(14, '0') : ''
+}
+
 export function labelSuggestion(text: string): ProductDraft {
   const lines = text.split(/\r?\n/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean)
   const barcodes = [...new Set((text.match(/\b\d{8,14}\b/g) || []).filter(validGtin))]
