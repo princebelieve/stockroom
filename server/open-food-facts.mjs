@@ -65,16 +65,22 @@ export function validProductBarcode(value) {
 
 export async function lookupOpenFoodFacts(barcode, industry = 'general', requestedSource = '', searchContext = '') {
   const allowedSources = ['', 'Open Food Facts', 'Open Beauty Facts', 'Open Pet Food Facts', 'Open Products Facts', 'UPCitemdb', 'EcomSource', 'openFDA Drug NDC Directory', 'AccessGUDID medical device registry', 'NAFDAC Greenbook', 'Web search']
-  const source = allowedSources.includes(requestedSource) ? requestedSource : ''
+  const normalizedSource = requestedSource === 'Web search (Brave)' ? 'Web search' : requestedSource
+  const source = allowedSources.includes(normalizedSource) ? normalizedSource : ''
   const registration = String(searchContext || '').toUpperCase().match(/\b[A-Z]\d{1,2}-\d{4,7}[A-Z]?\b/)?.[0] || ''
   if (!validProductBarcode(barcode) && !(source === 'NAFDAC Greenbook' && registration)) return { status: 400, body: { error: 'Enter a valid product barcode, or choose NAFDAC Greenbook and enter a valid registration number.' } }
+  if (source === 'EcomSource' && (!process.env.ECOMSOURCE_ACCESS_KEY?.trim() || !process.env.ECOMSOURCE_SECRET_KEY?.trim())) return { status: 503, body: { error: 'EcomSource is not configured on this lookup service. Add its access and secret keys to the server environment.' } }
   const cacheKey = `${industry}:${barcode}:${source}:${registration}`
   const cached = responseCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.result
   const cachedCandidates = candidateCache.get(`${industry}:${barcode}`)
   if (!['NAFDAC Greenbook', 'Web search'].includes(source) && cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
     const selected = source ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === source) : cachedCandidates.candidates[0]
-    return selected?.found || { status: 404, body: { status: 0, error: source ? `No exact barcode match was found in ${source}.` : 'No reliable product details were found in the available catalogues.' } }
+    if (selected) return selected.found
+    // A cached automatic lookup only proves that the sources in its candidate
+    // list matched. An absent source has not been checked yet; let that lookup
+    // reach its provider instead of turning a cache miss into a catalogue miss.
+    if (!source) return { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues.' } }
   }
   const minuteAgo = Date.now() - 60_000
   while (recentUpstreamReads.length && recentUpstreamReads[0] <= minuteAgo) recentUpstreamReads.shift()
@@ -147,7 +153,7 @@ async function lookupUpcItemDb(barcode, signal) {
   // UPCitemdb's no-key plan is shared per IP and documents one sustained
   // request every ten seconds. Skip rather than queueing owners behind a
   // provider throttle; cache both hits and misses to preserve the allowance.
-  if (Date.now() - lastUpcItemDbRead < 10_000) return { product: null, responded: false }
+  if (Date.now() - lastUpcItemDbRead < 10_000) return { product: null, responded: false, rateLimited: true }
   lastUpcItemDbRead = Date.now()
   const hasKey = Boolean(process.env.UPCITEMDB_USER_KEY)
   const url = hasKey
@@ -209,7 +215,7 @@ async function lookupEcomSource(barcode, signal) {
   // The free sandbox is limited to ten calls per day and asks clients to wait
   // at least one second between calls. Skip a busy slot; UPCitemdb/Open Facts
   // remain available as fallbacks instead of delaying product entry.
-  if (Date.now() - lastEcomSourceRead < 1_000) return { product: null, responded: false }
+  if (Date.now() - lastEcomSourceRead < 1_000) return { product: null, responded: false, rateLimited: true }
   lastEcomSourceRead = Date.now()
   let data
   let httpStatus = 0
@@ -381,7 +387,8 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
   }
   if (cachedCandidates && cachedCandidates.expiresAt > Date.now()) {
     const selected = requestedSource ? cachedCandidates.candidates.find(candidate => candidate.found.body.product.source === requestedSource) : cachedCandidates.candidates[0]
-    return selected?.found || (requestedSource ? { status: 404, body: { status: 0, error: `No exact barcode match was found in ${requestedSource}.` } } : { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues.' } })
+    if (selected) return selected.found
+    if (!requestedSource) return { status: 404, body: { status: 0, error: 'No reliable product details were found in the available catalogues.' } }
   }
   let providerResponded = false
   // The universal endpoint follows Open Food Facts' cross-catalogue redirect
@@ -397,6 +404,8 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
   providerResponded ||= broadLookup.responded || ecomLookup.responded
   providerResponded ||= universal?.__lookupUnavailable !== true
   const universalProduct = productRecord(universal, barcode)
+  if (requestedSource === 'UPCitemdb' && !broadLookup.responded) return { status: 503, body: { error: broadLookup.rateLimited ? 'UPCitemdb is temporarily rate-limited because its search and barcode lookup share a request limit. Wait a few seconds and try again.' : 'UPCitemdb is temporarily unavailable. Try again shortly.' } }
+  if (requestedSource === 'EcomSource' && !ecomLookup.responded) return { status: 503, body: { error: ecomLookup.rateLimited ? 'EcomSource is temporarily rate-limited. Wait a second and try again.' : 'EcomSource is temporarily unavailable. Check its server credentials and try again.' } }
 
   // The universal product_type=all request already covers Open Food Facts and
   // redirects across the four product databases. Do not request the food
@@ -434,7 +443,9 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
     providerResponded ||= data?.__lookupUnavailable !== true
     const product = productRecord(data, barcode)
     if (product) {
-      const found = catalogueSuggestion(product, barcode, sourceByType[product.product_type] || catalogs[index][1])
+      const endpointSource = catalogs[index][1]
+      const attributedSource = requestedSource === endpointSource ? endpointSource : sourceByType[String(product.product_type || '').toLowerCase()] || endpointSource
+      const found = catalogueSuggestion(product, barcode, attributedSource)
       if (found) candidates.push({ found, rank: catalogueRank(industry, product.product_type || catalogs[index][1]), richness: Object.keys(found.body.product.attributes).length })
     }
   }
@@ -477,6 +488,7 @@ async function lookupCatalogues(barcode, signal, industry = 'general', requested
     })
     if (found) candidates.push({ found, rank: industry === 'electronics' || industry === 'medical' || industry === 'healthcare' ? 0 : 4, richness: Object.keys(found.body.product.attributes).length })
   }
+  if (broadLookup.rateLimited && !candidates.length) return { status: 503, body: { error: 'UPCitemdb is temporarily rate-limited because its search and barcode lookup share a request limit. Wait a few seconds and try again.' } }
   if (candidates.length) {
     candidates.sort((a, b) => a.rank - b.rank || b.richness - a.richness)
     candidateCache.set(candidateKey, { candidates, expiresAt: Date.now() + 60_000 })
