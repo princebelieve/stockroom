@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { catalogueWorkspaces, workspaceCatalogueOptions, workspaceCatalogueSettings, type ShopProfile, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { readCustomValues, validateCustomValues } from '../server/shop-fields.mjs'
 import type { ProductDraft } from './lib/productIntake'
@@ -22,7 +22,16 @@ function fieldHint(id: string, label: string, type: string) {
 }
 
 function FieldInfo({ label, description }: { label: string; description: string }) {
-  return <details className="product-field-info"><summary aria-label={`What to enter for ${label}`} title={`What to enter for ${label}`}>(i)</summary><div className="product-field-info-copy" role="note">{description}</div></details>
+  const info = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      const details = info.current
+      if (details?.open && event.target instanceof Node && !details.contains(event.target)) details.open = false
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [])
+  return <details ref={info} className="product-field-info"><summary aria-label={`What to enter for ${label}`} title={`What to enter for ${label}`}>(i)</summary><div className="product-field-info-copy" role="note">{description}</div></details>
 }
 
 export function ShopProductFields({ profile, catalogueWorkspace = 'product-sales', customOnly = false, readOnlyStock = false, values, initialDraft, scanBarcode, lookupApiUrl = '' }: { profile: ShopProfile; catalogueWorkspace?: CatalogueWorkspace; customOnly?: boolean; readOnlyStock?: boolean; values?: unknown; initialDraft?: ProductDraft; scanBarcode?: () => Promise<string | undefined>; lookupApiUrl?: string }) {
