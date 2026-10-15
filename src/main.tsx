@@ -2221,8 +2221,10 @@ function App() {
         return true
       }
       const detectorWindow = window as unknown as { BarcodeDetector?: (new (options?: { formats?: string[] }) => { detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>> }) & { getSupportedFormats?: () => Promise<string[]> } }
+      const isWindowsCamera = /^Win/i.test(navigator.platform)
+      const useLocalEanDecoder = isWindowsCamera && target !== 'payment'
       let nativeDetectorActive = false
-      if (detectorWindow.BarcodeDetector) {
+      if (!useLocalEanDecoder && detectorWindow.BarcodeDetector) {
         try {
           const formats = target === 'payment' ? ['qr_code'] : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf']
           const supported = await detectorWindow.BarcodeDetector.getSupportedFormats?.().catch(() => formats)
@@ -2241,12 +2243,10 @@ function App() {
           })()
         } catch { /* Use ZXing on browsers with incomplete native detector support. */ }
       }
-      // Windows laptop webcams frequently expose BarcodeDetector while still
-      // struggling with close-focus EAN/UPC labels. Keep the fast local frame
-      // decoder active there as a second path; ZXing remains available for
-      // barcode formats it does not handle.
-      const isWindowsCamera = /^Win/i.test(navigator.platform)
-      if ((!nativeDetectorActive || isWindowsCamera) && target !== 'payment') {
+      // Windows laptop webcams use the local EAN/UPC decoder as their single
+      // decoding engine; running it alongside native detection and ZXing
+      // needlessly makes each camera frame compete for processing time.
+      if (useLocalEanDecoder) {
         const canvas = document.createElement('canvas')
         void (async () => {
           while (session === cameraSession.current) {
@@ -2255,6 +2255,11 @@ function App() {
             await new Promise(resolve => window.setTimeout(resolve, 150))
           }
         })()
+      }
+      if (nativeDetectorActive || useLocalEanDecoder) {
+        const rawValue = await scanResult
+        if (rawValue) { accept(rawValue); stopScan(); return rawValue }
+        return undefined
       }
       const firstReady = await Promise.race([
         zxingModulesPromise.then(modules => ({ modules })),
