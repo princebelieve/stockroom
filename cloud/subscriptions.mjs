@@ -58,6 +58,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       ...(workspace.oil ? ['Oil sales'] : []),
       ...(workspace.fastFood ? ['Order counter'] : []),
       ...(workspace.restaurant ? ['Tables & tabs'] : []),
+      ...(workspace.hospitalityOperations ? ['Hospitality operations'] : []),
     ]
     return { count: names.length, names, addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }
   }

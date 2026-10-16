@@ -26,7 +26,14 @@ function TablesWorkspace(props:Props) {
   const selectionKey=props.storageKey+':restaurant-selection'
   const [selected,setSelected] = useState<{id:string;sessionId:string}|null>(()=>{try{const saved=JSON.parse(localStorage.getItem(selectionKey)||'null');return typeof saved?.id==='string' && typeof saved?.sessionId==='string' ? saved : null}catch{return null}})
   useEffect(()=>{try{localStorage.setItem(selectionKey,JSON.stringify(selected))}catch{setMessage('The selected bill could not be remembered on this device. Saved orders and receipts are still available.')}},[selectionKey,selected])
-  const [view,setView]=useState<'tables'|'orders'|'preparation'|'setup'|'history'|'reservations'>(props.configuration?'setup':'tables')
+  const viewKey=props.storageKey+':restaurant-view'
+  const [view,setView]=useState<'tables'|'orders'|'preparation'|'setup'|'history'|'reservations'>(()=>{
+    if(props.configuration)return 'setup'
+    try { const saved=localStorage.getItem(viewKey); if(['tables','orders','preparation','history','reservations'].includes(saved||''))return saved as 'tables'|'orders'|'preparation'|'history'|'reservations' }
+    catch { /* Use the default screen when local storage is unavailable. */ }
+    return 'tables'
+  })
+  useEffect(()=>{try{localStorage.setItem(viewKey,view)}catch{/* The current screen remains usable without saved preference. */}},[viewKey,view])
   const [layout,setLayout] = useState<Data['layout'] | null>(null)
   const [open,setOpen] = useState<{id:string;sessionId:string;commandId:string;expectedUpdatedAt:string;tableId:string;name:string;guests:string;reservationId?:string}|null>(()=>{try{return JSON.parse(localStorage.getItem(props.storageKey+':restaurant-open')||'null')}catch{return null}})
   useEffect(()=>{try{if(open)localStorage.setItem(props.storageKey+':restaurant-open',JSON.stringify(open));else localStorage.removeItem(props.storageKey+':restaurant-open')}catch{setMessage('This open-bill draft could not be saved. Keep this screen open.')}},[open,props.storageKey])

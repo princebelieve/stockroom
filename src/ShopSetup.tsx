@@ -9,7 +9,7 @@ import { ShopProductFields } from './ShopProductFields'
 import { BlankProductForm } from './BlankProductForm'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
-export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, subscriptionAccess, onSubscriptionRequired }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; subscriptionAccess: SubscriptionAccess; onSubscriptionRequired: () => void }) {
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, subscriptionAccess, refreshSubscriptionAccess, onSubscriptionRequired }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; subscriptionAccess: SubscriptionAccess; refreshSubscriptionAccess: () => Promise<SubscriptionAccess>; onSubscriptionRequired: () => void }) {
   const [view,setView]=useState('type')
   const [draft, setDraft] = useState(value)
   const [step, setStep] = useState(0)
@@ -87,7 +87,9 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
       const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant, current.hospitalityOperations].filter(Boolean).length
       const entitlement = subscriptionAccess.entitledWorkspaces ?? subscriptionAccess.workspacePricing?.count ?? 0
       if (!unrestricted && (subscriptionAccess.blocked || paidCount >= entitlement)) {
-        setProblem(`Please subscribe to a plan to enable ${workspaceLabels[key]}.`)
+        setProblem(subscriptionAccess.blocked
+          ? `Your current subscription does not cover this workspace selection. Keep to your subscribed workspaces, or view plans to add ${workspaceLabels[key]}.`
+          : `Your plan covers ${entitlement} selling workspace${entitlement === 1 ? '' : 's'}. Keep to your subscribed workspaces, or view plans to add ${workspaceLabels[key]}.`)
         setSubscriptionPrompt(true)
         return
       }
@@ -99,6 +101,23 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     }
     const workflows: ShopProfile['workflows'] = next.productSales && next.payments ? 'both' : next.productSales ? 'stock' : next.payments ? 'payments' : next.fastFood ? 'fast-food' : next.restaurant ? 'restaurant' : 'stock'
     change({ ...draft, workspaceSelectionVersion: 1, workflows, fastFood: next.fastFood, restaurant: next.restaurant, features: { ...draft.features, services: draft.features?.services ?? true, productSales: next.productSales, oilSales: next.oilSales } })
+  }
+  async function saveWorkspaces() {
+    const next = businessWorkspace(draft)
+    const count = [next.productSales, next.oil, next.fastFood, next.restaurant, next.hospitalityOperations].filter(Boolean).length
+    const currentAccess = await refreshSubscriptionAccess()
+    const unrestricted = currentAccess.testMode === true || currentAccess.status === 'test'
+    const entitlement = currentAccess.entitledWorkspaces ?? currentAccess.workspacePricing?.count ?? 0
+    if (!unrestricted && count > entitlement) {
+      setProblem(`This selection has ${count} selling workspaces, but your plan covers ${entitlement}. Keep only Payments & receipts or the workspaces included in your plan, or view plans to add the extra workspace${count - entitlement === 1 ? '' : 's'}.`)
+      setSubscriptionPrompt(true)
+      return
+    }
+    try {
+      const valid = validateShopProfile(draft)
+      await save(valid)
+      setDraft(valid); setDirty(false); setMessage('Workspaces saved.'); setProblem('')
+    } catch (error) { setProblem(error instanceof Error ? error.message : 'Workspaces could not be saved.') }
   }
   function go(next: number) {
     try { if (next > step) { const fields = draft.fields.map(field => ({ ...field, options: field.options.map(item => item.trim()).filter(Boolean) })); validateFields(fields); setDraft({ ...draft, fields }) }; setStep(next); setProblem('') }
@@ -121,7 +140,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
       <label><input type="checkbox" checked={businessWorkspace(draft).hotelOperations} onChange={event=>setHospitalityModuleEnabled('hotelOperations',event.target.checked)}/> Hotel operations</label>
       <label><input type="checkbox" checked={businessWorkspace(draft).nightlifeOperations} onChange={event=>setHospitalityModuleEnabled('nightlifeOperations',event.target.checked)}/> Nightlife operations</label>
     </div></div>
-    <AsyncButton className="primary-button" busyLabel="Saving workspaces..." onClick={async()=>{const valid=validateShopProfile(draft);await save(valid);setDraft(valid);setDirty(false);setMessage('Workspaces saved.')}}>Save workspaces</AsyncButton>
+    <AsyncButton className="primary-button" busyLabel="Saving workspaces..." onClick={saveWorkspaces}>Save workspaces</AsyncButton>
     </section><section hidden={view!=='timezone'}><h2>Reporting timezone</h2><p>Used to group sales and reports by business day.</p>
     <TimeZoneSelect value={draft.reportingTimeZone || 'UTC'} onChange={reportingTimeZone => change({ ...draft, reportingTimeZone })} />
     <AsyncButton className="primary-button" busyLabel="Saving timezone..." onClick={async () => { const reportingTimeZone = validateShopProfile({ ...value, reportingTimeZone: draft.reportingTimeZone }).reportingTimeZone; const otherChanges = JSON.stringify({ ...draft, reportingTimeZone: value.reportingTimeZone }) !== JSON.stringify(value); await save({ ...value, reportingTimeZone }); setDraft(current => ({ ...current, reportingTimeZone })); setDirty(otherChanges); setMessage('Reporting timezone saved.') }}>Save reporting timezone</AsyncButton>
