@@ -63,10 +63,11 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     const current = businessWorkspace(draft)
     const hotelOperations = key === 'hotelOperations' ? enabled : current.hotelOperations
     const nightlifeOperations = key === 'nightlifeOperations' ? enabled : current.nightlifeOperations
+    const unrestricted = subscriptionAccess.testMode === true || subscriptionAccess.status === 'test'
     if (enabled && !current.hospitalityOperations) {
       const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant].filter(Boolean).length
       const entitlement = subscriptionAccess.entitledWorkspaces ?? subscriptionAccess.workspacePricing?.count ?? 0
-      if (subscriptionAccess.status !== 'test' && (subscriptionAccess.blocked || paidCount >= entitlement)) {
+      if (!unrestricted && (subscriptionAccess.blocked || paidCount >= entitlement)) {
         setProblem(`Please subscribe to a plan to enable Hospitality operations.`)
         setSubscriptionPrompt(true)
         return
@@ -81,10 +82,10 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   function setWorkspaceEnabled(key: 'productSales'|'oilSales'|'payments'|'fastFood'|'restaurant', enabled: boolean) {
     const current = businessWorkspace(draft)
     const workspaceLabels = { productSales: 'Product sales', oilSales: 'Oil sales', payments: 'Payments & receipts', fastFood: 'Order counter', restaurant: 'Tables & tabs' }
+    const unrestricted = subscriptionAccess.testMode === true || subscriptionAccess.status === 'test'
     if (enabled && key !== 'payments') {
       const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant, current.hospitalityOperations].filter(Boolean).length
       const entitlement = subscriptionAccess.entitledWorkspaces ?? subscriptionAccess.workspacePricing?.count ?? 0
-      const unrestricted = subscriptionAccess.status === 'test'
       if (!unrestricted && (subscriptionAccess.blocked || paidCount >= entitlement)) {
         setProblem(`Please subscribe to a plan to enable ${workspaceLabels[key]}.`)
         setSubscriptionPrompt(true)
