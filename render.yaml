@@ -36,3 +36,5 @@ services:
         sync: false
       - key: GMAIL_REFRESH_TOKEN
         sync: false
+      - key: PAYSTACK_CREDENTIALS_ENCRYPTION_KEY
+        sync: false

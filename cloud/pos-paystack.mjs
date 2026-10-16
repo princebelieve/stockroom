@@ -6,6 +6,12 @@ export function paystackShopConfig(businessId, env = process.env) {
   const config = configurations?.[businessId]
   return config && /^sk_(test|live)_/.test(config.secretKey || '') && config.terminalId && config.customerCode ? config : null
 }
+export function paystackHostedConfig(businessId, env = process.env) {
+  let configurations
+  try { configurations = JSON.parse(env.POS_PAYSTACK_CONFIG_JSON || '{}') } catch { throw new Error('Paystack shop configuration is invalid.') }
+  const config = configurations?.[businessId]
+  return config && /^sk_(test|live)_/.test(config.secretKey || '') ? config : null
+}
 export function terminalFingerprint(input) {
   return createHash('sha256').update(JSON.stringify({ orderId: input.orderId, amount: input.amount, currency: input.currency, branchId: input.branchId })).digest('hex')
 }
@@ -33,7 +39,7 @@ export async function createPosPaystack({ database, configFor = paystackShopConf
   await requests.createIndex({ businessId: 1, orderId: 1 }, { unique: true })
   const view = record => ({ orderId: record.orderId, amount: record.amount / 100, currency: record.currency, reference: record.requestCode || '', status: record.status, paid: record.status === 'paid', terminalId: record.terminalId })
   return async function handle({ businessId, path, method, input = {} }) {
-    const config = configFor(businessId)
+    const config = await configFor(businessId)
     if (path === '/v1/pos-paystack/config') return { configured: Boolean(config), terminalId: config?.terminalId || '', testMode: config?.secretKey.startsWith('sk_test_') || false }
     if (!config) throw new Error('Paystack Terminal is not connected for this shop. Ask the owner to complete setup.')
     const client = createPaystackClient(config, fetcher)

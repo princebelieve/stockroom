@@ -18,10 +18,14 @@ export function validateHospitalityInvoice(job,record){
       return job
     }
     if(job.hospitality.chargeType)throw new Error('Unsupported hotel folio charge type.')
-    const nights=(Date.parse(`${record.checkOut}T00:00:00Z`)-Date.parse(`${record.checkIn}T00:00:00Z`))/86400000
-    if(!Number.isInteger(nights)||nights<1||!Number.isFinite(record.nightlyRate)||record.nightlyRate<=0||job.lines.length!==1||job.lines[0].description!==`Accommodation: ${record.roomName}`||job.lines[0].quantity!==nights||cents(job.lines[0].price)!==cents(record.nightlyRate))throw new Error('The hotel invoice must match the saved room, number of nights and nightly rate.')
+    const nights=(Date.parse(`${record.checkOut}T00:00:00Z`)-Date.parse(`${record.checkIn}T00:00:00Z`))/86400000,breakdown=record.rateBreakdown||[{nightlyRate:record.nightlyRate,nights}],expected=breakdown.map((row,index)=>({id:index===0?record.id:`${record.id}:rate:${index}`,description:`Accommodation: ${record.roomName}`,quantity:row.nights,price:row.nightlyRate}))
+    if(!Number.isInteger(nights)||nights<1||!Number.isFinite(record.nightlyRate)||record.nightlyRate<=0||expected.reduce((sum,row)=>sum+row.quantity,0)!==nights||job.lines.length!==expected.length||expected.some((row,index)=>job.lines[index]?.id!==row.id||job.lines[index]?.description!==row.description||job.lines[index]?.quantity!==row.quantity||cents(job.lines[index]?.price)!==cents(row.price)))throw new Error('The hotel invoice must match the saved room, stay dates and rate schedule.')
   } else if(record.kind==='nightclub-entry'){
+    if(record.status==='waitlisted')throw new Error('Promote the guest from the waitlist before creating an admission invoice.')
     if(!Number.isFinite(record.admissionPrice)||record.admissionPrice<=0||job.lines.length!==1||job.lines[0].description!==`Admission: ${record.eventName}`.slice(0,150)||job.lines[0].quantity!==1||cents(job.lines[0].price)!==cents(record.admissionPrice))throw new Error('The admission invoice must match the event entry price.')
+  } else if(record.kind==='nightclub-inquiry'){
+    const description=`Private event: ${record.eventType}`.slice(0,150)
+    if(!['quoted','confirmed'].includes(record.status)||!Number.isFinite(record.quotedTotal)||record.quotedTotal<=0||job.lines.length!==1||job.lines[0].description!==description||job.lines[0].quantity!==1||cents(job.lines[0].price)!==cents(record.quotedTotal))throw new Error('The private-event estimate must match an active quoted inquiry.')
   } else throw new Error('Unsupported hospitality invoice link.')
   return job
 }
@@ -30,12 +34,28 @@ export function serviceJobBalance(job, returns = []) {
   const refunded = returns.filter(record => job.payments.some(entry => entry.sale.id === record.saleId)).reduce((n, record) => n + cents(record.total), 0)
   return { paid: paid / 100, refunded: refunded / 100, netPaid: (paid - refunded) / 100, due: job.status==='cancelled'?0:Math.max(0, cents(job.pricing.total) - paid + refunded) / 100 }
 }
+export function createHostedServiceJobPayment(job, { amount, reference, transactionId, createdAt = new Date().toISOString() }) {
+  const balance=serviceJobBalance(job),amountCents=cents(amount)
+  if(!Number.isSafeInteger(amountCents)||amountCents<=0||amountCents>cents(balance.due)||!String(reference||'').trim()||!String(transactionId||'').trim())throw new Error('The hosted payment amount or reference is invalid for this invoice balance.')
+  const id=`service-payment:paystack-${String(transactionId).replace(/[^a-zA-Z0-9_-]/g,'').slice(0,100)}`
+  const link={...(job.church?{church:job.church}:{}),...(job.hospitality?{hospitality:job.hospitality}:{}),id:job.id,number:job.id.slice(-8).toUpperCase(),title:job.title,invoiceTotal:job.pricing.total,balanceDue:(cents(balance.due)-amountCents)/100}
+  let sale=recordPayment({id,branchId:job.branchId,businessName:job.businessName,currency:job.currency,createdAt,staffId:`paystack:${transactionId}`,staffName:'Paystack online',items:[{productId:'service:'+job.id,productName:`${balance.netPaid===0&&amountCents<cents(balance.due)?'Deposit':'Payment'} - ${job.title}`.slice(0,200),quantity:1,price:amountCents/100}],total:amountCents/100,paymentMethod:'external-pos',paymentReference:String(reference).slice(0,200),terminalProvider:'Paystack',paymentDetails:{amountReceived:amountCents/100,serviceJob:link,servicePayment:{customerName:job.customerName,customerPhone:job.customerPhone}}})
+  const allocatedTax=(Math.round(cents(job.pricing.tax)*(cents(balance.netPaid)+amountCents)/cents(job.pricing.total))-Math.round(cents(job.pricing.tax)*cents(balance.netPaid)/cents(job.pricing.total)))
+  const subtotal=(amountCents-allocatedTax)/100
+  sale.paymentDetails.pos={tillId:job.tillId,pricing:{subtotal,discount:0,tax:allocatedTax/100,total:amountCents/100,taxSettings:posSettings({...job.profile,taxIncluded:false}),lines:[{productId:'service:'+job.id,quantity:1,subtotal,discount:0,tax:allocatedTax/100,total:amountCents/100}]}}
+  sale.paymentDetails.receipt={address:job.profile.address,phone:job.profile.phone,email:job.profile.email,footer:job.profile.footer,number:'REC-'+id.slice(-8).toUpperCase(),transactionType:job.hospitality?.chargeType==='extra'?'Hotel folio payment':job.hospitality?.recordKind==='hotel-stay'?'Hotel accommodation payment':job.hospitality?.recordKind==='nightclub-entry'?'Nightclub admission payment':job.hospitality?.recordKind==='nightclub-inquiry'?'Private event payment':'Invoice payment',cardType:''}
+  const updatedAt=createdAt,commandId=`paystack-${transactionId}`,request=JSON.stringify({provider:'Paystack',reference:String(reference),transactionId:String(transactionId),amount:amountCents/100})
+  const updated={...job,updatedAt,expectedUpdatedAt:job.updatedAt,lastCommandId:commandId,lastRequest:request,payments:[...job.payments,{sale,request}]}
+  validateServiceJob(updated,job,false)
+  return {job:updated,sale,request}
+}
 export function validateServiceJob(job, previous, snapshot = false, refunds = []) {
   if (job.kind !== 'service-job' || !String(job.id).startsWith('service-job:') || !['estimate','new','in-progress','ready','completed','cancelled'].includes(job.status) || !job.branchId || !job.tillId || !Number.isFinite(Date.parse(job.updatedAt)) || !Number.isFinite(Date.parse(job.createdAt))) throw new Error('Invalid service job.')
   if (!job.customerName?.trim() || !job.title?.trim()) throw new Error('Enter a customer and job description.')
   if(job.church){validateChurchLink(job.church);if(!['new','cancelled'].includes(job.status)||job.profile.taxEnabled||job.pricing.tax!==0||job.customerName!==job.church.donorName||job.customerPhone!==job.church.donorPhone)throw new Error('Church contributions must preserve donor identity and have no sales tax.')}
   if (job.customerId !== undefined) text(job.customerId,150)
-  if(job.hospitality){if(job.church||!['hotel-stay','nightclub-entry'].includes(job.hospitality.recordKind)||!String(job.hospitality.recordId||'').startsWith(`${job.hospitality.recordKind}:`)||job.hospitality.chargeType!==undefined&&!(job.hospitality.recordKind==='hotel-stay'&&job.hospitality.chargeType==='extra'))throw new Error('Invalid hospitality invoice link.');text(job.hospitality.recordId,150);text(job.hospitality.recordKind,40)}
+  if (job.customerPortalId !== undefined) text(job.customerPortalId,150)
+  if(job.hospitality){if(job.church||!['hotel-stay','nightclub-entry','nightclub-inquiry'].includes(job.hospitality.recordKind)||!String(job.hospitality.recordId||'').startsWith(`${job.hospitality.recordKind}:`)||job.hospitality.chargeType!==undefined&&!(job.hospitality.recordKind==='hotel-stay'&&job.hospitality.chargeType==='extra'))throw new Error('Invalid hospitality invoice link.');text(job.hospitality.recordId,150);text(job.hospitality.recordKind,40)}
   text(job.id,150);text(job.tillId,100);text(job.branchId,100);text(job.customerName); text(job.customerPhone, 80); text(job.title); text(job.note, 1000); text(job.businessName, 100)
   if (!/^[A-Z]{3}$/.test(job.currency) || (job.dueDate && (!/^\d{4}-\d{2}-\d{2}$/.test(job.dueDate) || new Date(job.dueDate).toISOString().slice(0,10) !== job.dueDate))) throw new Error('Enter a valid currency and due date.')
   if (!Array.isArray(job.lines) || !job.lines.length || job.lines.length > 100 || new Set(job.lines.map(line=>line.id)).size !== job.lines.length) throw new Error('Add 1 to 100 job items.')
@@ -50,7 +70,7 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
     if (seen.has(sale.id) || sale.paymentDetails.serviceJob.id!==job.id || sale.branchId!==job.branchId || sale.currency!==job.currency || sale.businessName!==job.businessName) throw new Error('Invalid invoice payment link.')
     if(!same(sale.paymentDetails.serviceJob.church,job.church))throw new Error('Preserve the contribution fund and donor.');
     if(!same(sale.paymentDetails.serviceJob.hospitality||null,job.hospitality||null))throw new Error('Preserve the hotel stay or admission linked to this invoice.')
-    const receiptType=job.church?'Collection / donation':job.hospitality?.chargeType==='extra'?'Hotel folio payment':job.hospitality?.recordKind==='hotel-stay'?'Hotel accommodation payment':job.hospitality?.recordKind==='nightclub-entry'?'Nightclub admission payment':'Invoice payment'
+    const receiptType=job.church?'Collection / donation':job.hospitality?.chargeType==='extra'?'Hotel folio payment':job.hospitality?.recordKind==='hotel-stay'?'Hotel accommodation payment':job.hospitality?.recordKind==='nightclub-entry'?'Nightclub admission payment':job.hospitality?.recordKind==='nightclub-inquiry'?'Private event payment':'Invoice payment'
     if(sale.paymentDetails.receipt?.transactionType!==receiptType)throw new Error('The receipt type must match the invoice.')
     seen.add(sale.id)
     if(sale.paymentDetails.pos?.tillId!==job.tillId || sale.paymentDetails.servicePayment?.customerName!==job.customerName || sale.paymentDetails.servicePayment?.customerPhone!==job.customerPhone || sale.paymentDetails.serviceJob.title!==job.title)throw new Error('Payment must match the saved customer and till.')
@@ -58,7 +78,7 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
   }
   if (!snapshot && previous) {
     if (job.expectedUpdatedAt!==previous.updatedAt) throw new Error('This job changed. Refresh before continuing.')
-    for (const key of ['church','hospitality','id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','customerId','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
+    for (const key of ['church','hospitality','id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','customerId','customerPortalId','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
     if (!same(job.payments.slice(0,previous.payments.length),previous.payments) || job.payments.length<previous.payments.length || job.payments.length>previous.payments.length+1) throw new Error('Preserve saved invoice payments.')
     if (job.payments.length>previous.payments.length && (job.status!==previous.status || ['estimate','cancelled'].includes(job.status))) throw new Error('Issue the invoice before taking payment.')
     const balance = serviceJobBalance(previous, refunds)
@@ -119,7 +139,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
   if ((previous?.updatedAt||'')!==input.expectedUpdatedAt) throw new Error('This job changed. Refresh before continuing.')
   const updatedAt=new Date(Math.max(Date.now(),Date.parse(previous?.updatedAt||'')+1||0)).toISOString()
   const stamp={updatedAt,expectedUpdatedAt:previous?.updatedAt||'',lastCommandId:input.commandId,lastRequest:request,staffId:user.id,staffName:user.name}
-  let job, sale, pendingHospitalityStock
+  let job, sale, pendingHospitalityStock, hospitalityCustomerPortalId=''
   if (!previous) {
     if (path!=='/api/pos/service-jobs') throw new Error('Create the job first.')
     const settings=(await db.query(`SELECT app_name AS businessName,currency FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`,organizationId?[organizationId]:[])).values[0]
@@ -141,7 +161,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
     if(input.hospitality){
       const recordRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,input.hospitality.recordId])).values[0]
       const record=recordRow?JSON.parse(recordRow.payload):null
-      if(!record||record.kind!==input.hospitality.recordKind||record.branchId!==branchId)throw new Error('Choose an existing hotel stay or nightclub admission in this branch.')
+      if(!record||record.kind!==input.hospitality.recordKind||record.branchId!==branchId)throw new Error('Choose an existing hotel stay, nightclub admission or quoted private event in this branch.')
       if(record.kind==='nightclub-entry'){const eventRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.eventId])).values[0];const event=eventRow&&JSON.parse(eventRow.payload);if(!event||event.kind!=='nightclub-event'||!['scheduled','closed'].includes(event.status))throw new Error('This event is unavailable for admission billing.')}
       const chargeType=input.hospitality.chargeType==='extra'?'extra':undefined
       if(!chargeType&&(await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='service-job' AND branch_id=?",[scope,branchId])).values.some(row=>{const job=JSON.parse(row.payload);return job.hospitality?.recordId===record.id&&!job.hospitality.chargeType&&job.status!=='cancelled'}))throw new Error('This stay or admission already has an active invoice.')
@@ -150,10 +170,14 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       hospitality={recordId:record.id,recordKind:record.kind,...(chargeType?{chargeType}:{})}
       if(record.kind==='hotel-stay'){
         if(chargeType){input={...input,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Hotel folio - ${record.roomName}`.slice(0,200),note:`Additional guest charges for ${record.guestName}; stay ${record.checkIn} to ${record.checkOut}.`};if(input.hospitalityStock){const quantity=Number(input.hospitalityStock.quantity),productId=text(input.hospitalityStock.productId,150),product=(await db.query(`SELECT p.id,p.name,p.unit,p.price,i.stock FROM products p JOIN branch_inventory i ON i.product_id=p.id WHERE p.id=? AND i.branch_id=?${organizationId?' AND p.organization_id=?':''}`,[productId,branchId,...(organizationId?[organizationId]:[])])).values[0];if(!product||!validQuantity(quantity,0.001)||Number(product.stock)<quantity||Number(product.price)<=0)throw new Error('Choose a stocked product with a valid price and enough available quantity.');pendingHospitalityStock={productId,quantity};input={...input,lines:[{id:`hotel-stock:${product.id}`,description:`Room service: ${product.name}`,quantity,price:Number(product.price)}]}}}
-        else {const nights=(Date.parse(`${record.checkOut}T00:00:00Z`)-Date.parse(`${record.checkIn}T00:00:00Z`))/86400000;input={...input,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Hotel stay - ${record.roomName}`,note:`Room ${record.roomName}; ${record.checkIn} to ${record.checkOut} (${nights} night${nights===1?'':'s'}).`,lines:[{id:record.id,description:`Accommodation: ${record.roomName}`,quantity:nights,price:record.nightlyRate}]}}
+        else {const nights=(Date.parse(`${record.checkOut}T00:00:00Z`)-Date.parse(`${record.checkIn}T00:00:00Z`))/86400000,breakdown=record.rateBreakdown||[{nightlyRate:record.nightlyRate,nights}],lines=breakdown.map((row,index)=>({id:index===0?record.id:`${record.id}:rate:${index}`,description:`Accommodation: ${record.roomName}`,quantity:row.nights,price:row.nightlyRate}));input={...input,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Hotel stay - ${record.roomName}`,note:`Room ${record.roomName}; ${record.checkIn} to ${record.checkOut} (${nights} night${nights===1?'':'s'}).`,lines}}
       }else if(record.kind==='nightclub-entry'){
         input={...input,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Nightclub admission - ${record.eventName}`.slice(0,200),note:`Admission for ${record.eventName}.`,lines:[{id:record.id,description:`Admission: ${record.eventName}`.slice(0,150),quantity:1,price:record.admissionPrice}]}
-      }else throw new Error('Only hotel stays and nightclub guest entries can be invoiced.')
+      }else if(record.kind==='nightclub-inquiry'){
+        if(!['quoted','confirmed'].includes(record.status)||!record.proposal||!Number.isFinite(record.quotedTotal)||record.quotedTotal<=0)throw new Error('Prepare a valid quote for this private event before creating an estimate.')
+        input={...input,estimate:true,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Private event proposal - ${record.eventType}`.slice(0,200),note:record.proposal,lines:[{id:record.id,description:`Private event: ${record.eventType}`.slice(0,150),quantity:1,price:record.quotedTotal}]}
+      }else throw new Error('Only hotel stays, nightclub guest entries and quoted private event inquiries can be invoiced.')
+      if(record.customerPortalId)hospitalityCustomerPortalId=record.customerPortalId
       if(record.customerId){if(input.customerId&&input.customerId!==record.customerId)throw new Error('Use the customer account linked to this hospitality booking.');const customer=(await db.query(`SELECT id,name,phone FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[record.customerId,...(organizationId?[organizationId]:[])])).values[0];if(!customer)throw new Error('Sync the customer account linked to this booking before invoicing.');input={...input,customerId:record.customerId,customerName:customer.name,customerPhone:customer.phone||''}}
     }
     const lines=input.lines.map(line=>({id:text(line.id,100),description:text(line.description,150),quantity:Number(line.quantity),price:Number(line.price)}))
@@ -161,7 +185,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       const customer=(await db.query(`SELECT id,name,phone,balance FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[input.customerId,...(organizationId?[organizationId]:[])])).values[0]
       if(!customer || customer.name.trim()!==String(input.customerName||'').trim() || String(customer.phone||'').trim()!==String(input.customerPhone||'').trim())throw new Error('Choose the matching customer account or enter this customer manually.')
     }
-    job={...stamp,...(church?{church}:{}),...(hospitality?{hospitality}:{}),...(input.customerId?{customerId:text(input.customerId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
+    job={...stamp,...(church?{church}:{}),...(hospitality?{hospitality}:{}),...(input.customerId?{customerId:text(input.customerId,150)}:{}),...(hospitalityCustomerPortalId?{customerPortalId:text(hospitalityCustomerPortalId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
     if(hospitality){const linked=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,hospitality.recordId])).values[0];validateHospitalityInvoice(job,linked&&JSON.parse(linked.payload))}
   } else {
     job={...previous,...stamp}
@@ -186,7 +210,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       const subtotal=(cents(amount)-cents(allocatedTax))/100
       const register=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='register' AND branch_id=?",[scope,branchId])).values.map(row=>JSON.parse(row.payload)).find(session=>!session.closedAt && session.staffId===user.id && (!session.tillId||session.tillId===tillId))
       sale.paymentDetails.pos={tillId,registerId:register?.id,pricing:{subtotal,discount:0,tax:allocatedTax,total:amount,taxSettings:posSettings({...job.profile,taxIncluded:false}),lines:[{productId:'service:'+job.id,quantity:1,subtotal,discount:0,tax:allocatedTax,total:amount}]}}
-      sale.paymentDetails.receipt={address:job.profile.address,phone:job.profile.phone,email:job.profile.email,footer:job.profile.footer,number:'REC-'+id.slice(-8).toUpperCase(),transactionType:job.church?'Collection / donation':job.hospitality?.chargeType==='extra'?'Hotel folio payment':job.hospitality?.recordKind==='hotel-stay'?'Hotel accommodation payment':job.hospitality?.recordKind==='nightclub-entry'?'Nightclub admission payment':'Invoice payment',cardType:''}
+      sale.paymentDetails.receipt={address:job.profile.address,phone:job.profile.phone,email:job.profile.email,footer:job.profile.footer,number:'REC-'+id.slice(-8).toUpperCase(),transactionType:job.church?'Collection / donation':job.hospitality?.chargeType==='extra'?'Hotel folio payment':job.hospitality?.recordKind==='hotel-stay'?'Hotel accommodation payment':job.hospitality?.recordKind==='nightclub-entry'?'Nightclub admission payment':job.hospitality?.recordKind==='nightclub-inquiry'?'Private event payment':'Invoice payment',cardType:''}
       job.payments=[...job.payments,{sale,request}]
     } else throw new Error('Unknown service job action.')
   }

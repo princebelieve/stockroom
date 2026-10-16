@@ -8,7 +8,8 @@ Set these Render environment variables:
 - `JWT_SECRET`: a long random secret. Render can generate it from `render.yaml`.
 - `ADMIN_API_KEY`: a long random secret used only by you to enroll a device.
 - `MONGODB_DATABASE`: optional; defaults to `stockroom_sync`.
-- `GMAIL_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: optional Gmail API OAuth 2.0 credentials. All four are required before registration-key, reset, receipt and staff-invitation emails are delivered.
+- `GMAIL_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: optional Gmail API OAuth 2.0 credentials for Stockroom account, support, receipt and hospitality guest email.
+- `PAYSTACK_CREDENTIALS_ENCRYPTION_KEY`: one base64 encoded 32-byte application encryption key. It encrypts each business's Paystack secret key in MongoDB. Generate once with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`; keep it private and back it up securely. It is not a merchant Paystack key.
 
 After deployment, verify `https://YOUR-RENDER-URL/health` returns `{"ok":true}`.
 
@@ -39,6 +40,8 @@ Email password recovery uses `POST /v1/auth/password-reset/request` and `POST /v
 The existing sender also handles in-app support requests from enrolled devices. Requests are saved in the `support_requests` collection with a business-scoped reference, Gmail message/thread IDs and send status. Successful retries reuse the saved reference without sending again; a timeout after Gmail accepts a message can still cause a repeated email on retry, with the same reference. Five new requests per business per hour are allowed. No Gmail inbox-reading permission is used.
 
 `SUPPORT_EMAIL` optionally changes the request destination (default `support@sbi.globalcreest.com`). `SUPPORT_REPLY_TO` optionally changes the Reply-To for ordinary platform emails (same default). A support request uses the submitter's validated contact email as Reply-To, so support can reply from its normal mailbox. These are cloud environment settings. Ensure the destination mailbox receives mail; the sender remains the configured `GMAIL_USER`, not an unconfigured alias. Users find the form under How to use the app; drafts stay on their device while offline and are sent explicitly when connected.
+
+Business-specific Paystack credentials and hospitality guest-email preferences are managed by the business owner in Stockroom under **Business settings → Paystack and guest email**. Merchant keys are validated and encrypted in MongoDB with `PAYSTACK_CREDENTIALS_ENCRYPTION_KEY`; they are not placed in Render settings. Hospitality messages use the existing Gmail API sender configured above. `POS_PAYSTACK_CONFIG_JSON` remains a temporary migration fallback for businesses already configured before owner-managed connections were added. Remove that legacy setting after the affected businesses reconnect and confirm their payment setup.
 
 Create a Google Cloud project, enable the Gmail API, configure the OAuth consent screen, create a **Web application** OAuth client, and obtain a refresh token for the Gmail account that will send Stockroom messages. The token must include Gmail send permission (the existing `https://mail.google.com/` scope also works). Store only the resulting values in Render environment variables—never in the desktop app, `sync-config.json`, Git, or MongoDB. The service sends through the Gmail API over HTTPS using OAuth 2.0. It does not require a Gmail password or app password.
 

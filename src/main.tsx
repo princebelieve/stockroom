@@ -39,6 +39,7 @@ const CustomerPortal=lazy(()=>import('./CustomerPortal').then(module=>({default:
 const Receipt=lazy(()=>import('./Receipt').then(module=>({default:module.Receipt})))
 const BrandAppearance=lazy(()=>import('./BrandAppearance').then(module=>({default:module.BrandAppearance})))
 const BusinessBackup=lazy(()=>import('./BusinessBackup').then(module=>({default:module.BusinessBackup})))
+const BusinessConnections=lazy(()=>import('./BusinessConnections').then(module=>({default:module.BusinessConnections})))
 const TillRecovery=lazy(()=>import('./TillRecovery').then(module=>({default:module.TillRecovery})))
 const StaffPermissions=lazy(()=>import('./StaffPermissions').then(module=>({default:module.StaffPermissions})))
 const SyncIssues=lazy(()=>import('./SyncIssues').then(module=>({default:module.SyncIssues})))
@@ -1871,6 +1872,7 @@ function App() {
   const settingsSlides: TaskOption[] = [
     ...(user?.role==='owner' ? [
       {id:'business.identity',label:'Business identity',hint:'Set the business name and currency used throughout Stockroom.'},
+      {id:'business.connections',label:'Paystack and guest email',hint:'Connect this business’s Paystack account and manage guest email replies, wording and message activity.'},
       {id:'business.catalogue-contribution',label:'Product catalogue sharing',hint:'Choose whether new product details are shared with Stockroom businesses.'},
       {id:'business.payment-methods',label:'Payment methods',hint:'Choose which payment methods your team can use.'},
       {id:'business.branches',label:'Branches',hint:'Add locations and control where staff work.'},
@@ -1997,7 +1999,7 @@ function App() {
     if (password !== passwordConfirmation) { setSettingsMessage('Temporary passwords do not match. No staff account was created.'); return }
     const username = (await requestInlinePrompt({ title: 'Choose staff username', message: 'Enter a unique username (3–32 characters; letters, numbers, dots, hyphens, and underscores).', minLength: 3 }))?.trim().toLowerCase()
     if (!username) return
-    setSettingsMessage('Creating the staff accountâ€¦')
+    setSettingsMessage('Creating the staff account...')
     try {
       // The desktop API has a local app session and a separate cloud owner
       // credential. Refresh it before creating staff so an old access token does not interrupt the action.
@@ -2605,6 +2607,7 @@ function App() {
 
       {active === 'Settings' && user.role === 'owner' && settingsTab === 'business' && ['identity','payment-methods','password'].includes(section) && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Business settings</h2><p>Customize the identity your team sees across the app.</p></div><Settings2 size={20} /></div>{section!=='password' && <AsyncForm className="settings-form" busyLabel="Saving settings..." onSubmit={saveAppName}>{section==='identity' && <><label>App name<input value={appName} maxLength={60} onChange={(event) => { setAppName(event.target.value); setSettingsMessage('') }} /></label><label>Currency<select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="USD">USD - US Dollar</option><option value="NGN">NGN - Nigerian Naira</option><option value="GHS">GHS - Ghanaian Cedi</option><option value="KES">KES - Kenyan Shilling</option><option value="GBP">GBP - Pound Sterling</option><option value="EUR">EUR - Euro</option></select></label></>}{section==='payment-methods' && <PaymentPolicySettings profile={shopProfile} products={products} value={extraPaymentPolicy} onChange={(policy) => { setExtraPaymentPolicy(policy); setPosProvider(policy.providers[0] || ''); setSettingsMessage('') }} />}<SubmitButton className="primary-button">Save business settings <ArrowUpToLine size={17} /></SubmitButton>{settingsMessage && <p className="settings-message">{settingsMessage}</p>}</AsyncForm>}{section==='password' && !isBrowserPwa() && <AsyncForm className="settings-form" busyLabel="Updating password..." onSubmit={changePassword}><h3>Change password</h3><label>Current password<input name="currentPassword" type="password" placeholder="Current password" /></label><label>New password<input name="newPassword" type="password" minLength={6} maxLength={256} placeholder="At least 6 characters" /></label><label>Confirm password<input name="confirmPassword" type="password" minLength={6} maxLength={256} placeholder="Confirm new password" /></label><SubmitButton className="primary-button" type="submit">Update password</SubmitButton>{passwordMessage && <p className="settings-message">{passwordMessage}</p>}</AsyncForm>}{section==='password' && isBrowserPwa() && <WorkspaceHelp title="Workspace help"><p className="settings-message">To reset your cloud password, log out and choose Forgot password on the sign-in screen.</p></WorkspaceHelp>}</section>}
       {active === 'Settings' && user.role === 'owner' && settingsTab === 'business' && section==='catalogue-contribution' && <section className="panel full-panel settings-panel"><div className="panel-heading"><div><h2>Product catalogue sharing</h2><p>Choose what happens when this business adds a product with a valid barcode.</p></div><Settings2 size={20}/></div><WorkspaceHelp title="Shared product details"><p>Only the product name, valid barcode and recognized general details such as brand or package size are shared. Business SKU, category, unit, prices, costs, stock and other fields remain private. Turning sharing off stops future contributions; it does not remove earlier contributions.</p></WorkspaceHelp><AsyncForm className="settings-form" busyLabel="Saving preference..." onSubmit={saveCatalogueContributionMode}><label>New product contribution<select name="catalogueContributionMode" value={catalogueContributionModeDraft} onChange={event=>setCatalogueContributionModeDraft(event.target.value as 'auto'|'never'|'ask')}><option value="auto">Automatically contribute new products</option><option value="never">Do not contribute new products</option><option value="ask">Ask for each new product</option></select></label><p className="settings-message">{catalogueModeLoaded ? 'This preference applies to the whole business.' : 'Loading this business’s saved preference…'}</p><SubmitButton className="primary-button">Save sharing preference</SubmitButton>{settingsMessage&&<p className="settings-message" role="status">{settingsMessage}</p>}</AsyncForm></section>}
+      {active === 'Settings' && user.role === 'owner' && settingsTab === 'business' && section==='connections' && <BusinessConnections apiUrl={subscriptionApiUrl} businessId={user.organizationId} token={cloudAccessToken} onToken={(nextToken,refreshToken)=>{setCloudAccessToken(nextToken);localStorage.setItem('stockroom-cloud-access-token',nextToken);localStorage.setItem('stockroom-cloud-refresh-token',refreshToken)}}/>}
       </Suspense></div><div className="project-copyright app-copyright">S. B. Ibhadode Technologies Copyright, 2026 | <a href="privacy.html">Privacy Policy</a> | <a href="terms.html">Terms and Conditions</a></div>
     </main>
     {detailsProduct && <div className="modal-backdrop"><AsyncForm key={detailsProduct.id} className="modal product-edit-modal" busyLabel="Saving product..." onSubmit={async event => {
@@ -2670,7 +2673,7 @@ function LoginScreen({ onLogin, error, setError, onRegister }: { onRegister?: ()
       const response = await fetch('/api/auth/password-reset/request', { method: 'POST', signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to request a reset email.')
-      if (data.delivered !== true) throw new Error('No reset email was sent, and your password has not changed. If this is the ownerâ€™s correct email, ask the service administrator to check the Render log for this attempt.')
+      if (data.delivered !== true) throw new Error('No reset email was sent, and your password has not changed. If this is the owner\'s correct email, ask the service administrator to check the Render log for this attempt.')
       setMessage(`The mail service accepted a reset email for ${email}. Check your inbox and spam folder. The code expires in 30 minutes. If it does not arrive, contact support to check email delivery.`)
       setMode('confirm')
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to request a reset email.') } finally { setSubmitting(false) }
@@ -2836,9 +2839,9 @@ function TeamManagement({ profile, view, navigate, removeStaff, staff, loaded, a
   const [showConfirmation, setShowConfirmation] = useState(false)
   const title = view==='team-add-staff'?'Add staff member':view==='team-access'?'Access permissions':'Team members'
   const formatCreatedDate = (value?: string) => {
-    if (!value) return 'â€”'
+    if (!value) return '—'
     const parsed = new Date(value)
-    if (Number.isNaN(parsed.getTime())) return 'â€”'
+    if (Number.isNaN(parsed.getTime())) return '—'
     return parsed.toLocaleDateString()
   }
   return <section id="team-members" className="panel full-panel team-management"><div className="panel-heading"><div><h2>{title}</h2><WorkspaceHelp title="Staff access"><p>Staff sign in with their username. Choose allowed tasks in Access permissions; new accounts have no operational access until you save their permissions.</p></WorkspaceHelp></div><UserRoundCog size={20} /></div>
@@ -2861,7 +2864,7 @@ function StaffPasswordReset({ staff, resetStaffPassword }: { staff: StaffUser[];
   const [staffId, setStaffId] = useState('')
   useEffect(() => { if (!staffAccounts.some(member => member.id === staffId)) setStaffId(staffAccounts[0]?.id || '') }, [staffId, staffAccounts])
   if (!staffAccounts.length) return null
-  return <section id="team-password-recovery" className="panel full-panel cashier-password-control"><div className="panel-heading"><div><h2>Staff password recovery</h2><WorkspaceHelp title="Workspace help"><p>Reset an admin or cashier password here. Staff email addresses are contact details; staff sign in with their username.</p></WorkspaceHelp></div></div><label>Staff member<select value={staffId} onChange={(event) => setStaffId(event.target.value)}>{staffAccounts.map((member) => <option key={member.id} value={member.id}>{member.name} (@{member.username || 'username unavailable'}) â€” {member.role}</option>)}</select></label><button type="button" className="primary-button" onClick={() => { const member = staffAccounts.find((item) => item.id === staffId); if (member) void resetStaffPassword(member) }}>Reset staff password</button></section>
+  return <section id="team-password-recovery" className="panel full-panel cashier-password-control"><div className="panel-heading"><div><h2>Staff password recovery</h2><WorkspaceHelp title="Workspace help"><p>Reset an admin or cashier password here. Staff email addresses are contact details; staff sign in with their username.</p></WorkspaceHelp></div></div><label>Staff member<select value={staffId} onChange={(event) => setStaffId(event.target.value)}>{staffAccounts.map((member) => <option key={member.id} value={member.id}>{member.name} (@{member.username || 'username unavailable'}) — {member.role}</option>)}</select></label><button type="button" className="primary-button" onClick={() => { const member = staffAccounts.find((item) => item.id === staffId); if (member) void resetStaffPassword(member) }}>Reset staff password</button></section>
 }
 
 function activityDate(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }

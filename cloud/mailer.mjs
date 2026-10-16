@@ -17,6 +17,12 @@ export function mailDiagnostics() {
 export function mailConfigured() {
   return mailDiagnostics().configured
 }
+export function hospitalityMailConfigured() {
+  return mailConfigured()
+}
+export function hospitalityMailProvider() {
+  return mailConfigured() ? 'gmail-api' : 'unconfigured'
+}
 const configured = mailConfigured
 
 export async function sendSubscriptionReminder({ to, expiresAt, url, autoRenew = false }) {
@@ -116,19 +122,19 @@ async function sendMail({ to, subject, text, html, replyTo }) {
   let response, result
   for (let attempt=0;attempt<2;attempt++) {
   const token = await gmailAccessToken()
-  response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+  try { response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ raw }),
     signal: AbortSignal.timeout(12_000),
-  })
+  }) } catch (error) { throw Object.assign(new Error('Gmail API send result is uncertain.'), { mailStage:'send', mailCode:'send_uncertain', mailUncertain:true, cause:error }) }
   result = await response.json().catch(() => ({}))
   // A 401 explicitly rejected the request, so refreshing cannot duplicate an
   // accepted email. Never automatically resend after an uncertain timeout.
   if(response.status===401 && attempt===0){cachedAccessToken='';accessTokenExpiresAt=0;continue}
   break
   }
-  if (!response.ok || !result.id) throw Object.assign(new Error(`Gmail API send failed (${response.status}).`), { mailStage:'send', responseCode:response.status, mailCode:response.status===403?'gmail_permission':response.status===429?'gmail_rate_limit':'send_failed' })
+  if (!response.ok || !result.id) throw Object.assign(new Error(`Gmail API send failed (${response.status}).`), { mailStage:'send', responseCode:response.status, mailCode:response.status===403?'gmail_permission':response.status===429?'gmail_rate_limit':'send_failed', mailUncertain:response.status>=500 || response.ok })
   return { messageId: result.id, threadId: result.threadId || '' }
 }
 
@@ -162,4 +168,26 @@ export async function sendPosReceipt({ to, sale }) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || '')) || String(to).length > 254) throw new Error('Enter a valid customer email.')
   const text = receiptText(sale)
   await sendMail({ to, subject: `Receipt from ${sale.businessName || 'Shop'} - ${sale.id}`, text })
+}
+
+export async function sendHospitalityBookingNotice({ to, businessName, booking, reminder = false, noticeType = '', emailSettings = {} }) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || ''))) throw new Error('A valid guest email address is required.')
+  if (!configured()) throw new Error('Email is not configured.')
+  const hotel = booking.kind === 'hotel-stay'
+  const table = booking.kind === 'nightlife-table'
+  const title = hotel ? `Stay at ${booking.roomName}` : table ? `Event table: ${booking.eventName}` : `Admission: ${booking.eventName}`
+  const when = hotel ? `Check-in: ${booking.checkIn}\nCheck-out: ${booking.checkOut}` : `Date and time: ${new Date(table ? booking.startAt : booking.startsAt).toLocaleString('en-GB', { timeZone: 'UTC', timeZoneName: 'short' })} UTC`
+  const ticket = !hotel && !table ? `Ticket: ${booking.ticketTypeName || 'General'}\nPrice after promotion: ${booking.currency || ''} ${Number(booking.admissionPrice || 0).toFixed(2)}${booking.promoCode ? `\nPromotion applied: ${booking.promoCode}` : ''}` : ''
+  const packageInfo = table && booking.tablePackageName ? `\nPackage: ${booking.tablePackageName}\nMinimum spend: ${booking.currency || ''} ${Number(booking.minimumSpend || 0).toFixed(2)}` : ''
+  const policy = [booking.cancellationPolicy ? `Cancellation policy: ${booking.cancellationPolicy}` : '', booking.noShowPolicy ? `No-show policy: ${booking.noShowPolicy}` : ''].filter(Boolean).join('\n')
+  const type=noticeType|| (reminder?'reminder':'confirmation')
+  const copy={confirmation:['Booking confirmed', 'Your booking has been recorded.'],reminder:['Booking reminder', 'Your booking is coming up.'],cancelled:['Booking cancelled', 'Your booking has been cancelled.'],'no-show':['No-show recorded', 'The venue recorded that you did not arrive for this booking. Contact the venue if this is incorrect.'],'waitlist-offer':['A place is available', 'A place has opened and the venue has moved your admission from the waitlist to the guest list.']}
+  const [subjectText,defaultGreeting]=copy[type]||copy.confirmation
+  const displayName = String(emailSettings.businessDisplayName || businessName || 'Business').replace(/[\r\n]+/g, ' ').trim().slice(0, 100)
+  const greeting = String(emailSettings.templates?.[type] || defaultGreeting).replace(/\{guestName\}/g, booking.guestName || 'Guest').replace(/\{businessName\}/g, displayName).replace(/[\r\n]+/g, ' ').trim().slice(0, 1000)
+  const subject=`${subjectText}: ${title}`
+  const text = `Hello ${booking.guestName || 'Guest'},\n\n${greeting}\n${displayName}\n${title}\n${when}\n${ticket}${packageInfo}${policy ? `\n${policy}` : ''}\n\nFor changes, reply to this email or contact the business directly. This is an automated booking message.`
+  const replyTo = emailSettings.replyToEmail ? `${String(emailSettings.replyToName || displayName).replace(/[\r\n<>]+/g, ' ').trim()} <${emailSettings.replyToEmail}>` : undefined
+  const sent = await sendMail({ to, subject, text, ...(replyTo ? { replyTo } : {}) })
+  return { ...sent, provider: 'gmail-api', subject, text }
 }

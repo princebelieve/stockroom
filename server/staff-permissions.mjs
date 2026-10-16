@@ -69,7 +69,7 @@ export function operationPermission(operation){
  if(operation.entityType==='pos_record'){
   if(kind==='service-job')return 'serviceJobs'
   if(['hotel-room','hotel-stay'].includes(kind))return 'hotelOperations'
-  if(['nightclub-event','nightclub-entry'].includes(kind))return 'nightlifeOperations'
+  if(['nightclub-event','nightclub-entry','nightclub-inquiry'].includes(kind))return 'nightlifeOperations'
   if(kind==='return')return 'refunds'
   if(kind==='register')return 'register'
   if(kind==='product')return 'inventory'

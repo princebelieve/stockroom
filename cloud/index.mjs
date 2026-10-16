@@ -14,7 +14,9 @@ import { createTillRecovery } from './till-recovery.mjs'
 import { authorizeCustomerOrder, customerOrderLines, publishCustomerOrder as publishOrder, acceptCustomerOrder } from './customer-orders.mjs'
 import { createStaffRemoval } from './staff-removal.mjs'
 import { validateServiceJob, validateHospitalityInvoice, serviceJobBalance, requiresServiceJobSync } from '../server/service-jobs.mjs'
-import { validateHospitalityRecord, requiresHospitalitySync } from '../server/hospitality-operations.mjs'
+import { validateHospitalityRecord, requiresHospitalitySync, hotelRateBreakdown } from '../server/hospitality-operations.mjs'
+import { hotelCalendarIcs } from '../server/hotel-calendar.mjs'
+import { fetchHotelCalendar, validateHotelCalendarUrl } from '../server/hotel-calendar-import.mjs'
 import { floorId,restaurantTabs,billContains,validateRestaurantFloor } from '../server/restaurant-floor.mjs'
 import { validateRestaurantLedger, restaurantLedgerId, restaurantReceiptHash, restaurantOrderPayment } from '../server/restaurant-payments.mjs'
 import { recordPayment } from '../server/payment.mjs'
@@ -24,11 +26,13 @@ import { createSupermarketCoordinator } from './supermarket-coordination.mjs'
 import { validateRetailRecord } from '../server/retail.mjs'
 import { validateCounterRecord, validateCounterPayment, validateCounterRetry, counterItems, counterSaleId } from '../server/counter-service.mjs'
 import { createPosPaystack } from './pos-paystack.mjs'
+import { createTenantIntegrations } from './tenant-integrations.mjs'
+import { createHospitalityPayments } from './hospitality-payments.mjs'
 import { createServer } from 'node:http'
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { MongoClient, ObjectId } from 'mongodb'
 import { identicalSettings, isNewerMutableOperation, mutableEntities, operationUpdatedAt } from './conflict-policy.mjs'
-import { checkMailAuthorization, mailConfigured, mailDiagnostics, sendPosReceipt, sendBusinessRegistrationKey, sendPasswordReset, sendSupportRequest } from './mailer.mjs'
+import { checkMailAuthorization, mailConfigured, mailDiagnostics, hospitalityMailConfigured, hospitalityMailProvider, sendPosReceipt, sendBusinessRegistrationKey, sendPasswordReset, sendSupportRequest, sendHospitalityBookingNotice } from './mailer.mjs'
 import { submitSupportRequest } from './support-requests.mjs'
 import { corsHeadersFor } from './cors.mjs'
 import { createSubscriptions } from './subscriptions.mjs'
@@ -42,6 +46,7 @@ import { createNotifications } from './notifications.mjs'
 import { createProductFormReader } from './product-form.mjs'
 import { readCustomValues } from '../server/shop-fields.mjs'
 import { posSettings, priceOrder } from '../server/pos-pricing.mjs'
+import { receiptSettings } from '../server/receipts.mjs'
 import { lookupOpenFoodFacts, searchProductNames } from '../server/open-food-facts.mjs'
 import { findSharedProduct, queueSharedProductContribution, processSharedProductContributionQueue, catalogueContributionMode, canonicalProductBarcode, equivalentProductBarcodes } from './shared-product-catalogue.mjs'
 
@@ -58,6 +63,9 @@ const operations = database.collection('sync_operations')
 const coordinateSupermarket=createSupermarketCoordinator(database,client)
 const entityHeads = database.collection('sync_entity_heads')
 const businessSettings = database.collection('business_settings')
+const hotelCalendarSources = database.collection('hotel_calendar_sources')
+const hospitalityEmailLog = database.collection('hospitality_email_log')
+const tenantIntegrations = createTenantIntegrations({ database })
 const sharedProductCatalogue = database.collection('shared_product_catalogue_contributions')
 const sharedProductCatalogueQueue = database.collection('shared_product_catalogue_queue')
 const inventoryAlertState = database.collection('inventory_alert_state')
@@ -108,6 +116,29 @@ await refreshTokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 await referralVisitors.createIndex({ email: 1 }, { unique: true })
 await customerPortalAccounts.createIndex({ businessId: 1, customerId: 1 }, { unique: true })
 await customerPortalAccounts.createIndex({ businessId: 1, username: 1 }, { unique: true })
+await entityHeads.createIndex({ 'payload.calendarFeedToken': 1 }, { sparse: true })
+await hotelCalendarSources.createIndex({ businessId: 1, roomId: 1, sourceId: 1 }, { unique: true })
+await hospitalityEmailLog.createIndex({ businessId: 1, bookingId: 1, messageType: 1 }, { unique: true })
+await hospitalityEmailLog.createIndex({ businessId: 1, createdAt: -1 })
+
+async function refreshHotelCalendarSource(source) {
+  try {
+    const blocks = await fetchHotelCalendar(source.url)
+    await hotelCalendarSources.updateOne({ _id: source._id }, { $set: { blocks, lastSyncedAt: new Date(), nextSyncAt: new Date(Date.now() + 15 * 60_000), syncError: '' } })
+    return { ...source, blocks, lastSyncedAt: new Date(), syncError: '' }
+  } catch (error) {
+    await hotelCalendarSources.updateOne({ _id: source._id }, { $set: { nextSyncAt: new Date(Date.now() + 5 * 60_000), syncError: String(error?.message || 'Calendar sync failed.').slice(0, 240) } })
+    throw error
+  }
+}
+async function hotelCalendarBlocks(businessId, roomId) {
+  const sources = await hotelCalendarSources.find({ businessId, roomId }).toArray()
+  return sources.flatMap(source => Array.isArray(source.blocks) ? source.blocks.map(block => ({ ...block, id: `${source.sourceId}:${block.id}` })) : [])
+}
+setInterval(async () => {
+  const due = await hotelCalendarSources.find({ nextSyncAt: { $lte: new Date() } }).limit(30).toArray().catch(() => [])
+  for (const source of due) await refreshHotelCalendarSource(source).catch(() => {})
+}, 60_000).unref()
 
 // Sales, stock movements, wallet adjustments, expenses, and audit events are
 // immutable financial/inventory events: accept once by operation ID. Mutable
@@ -229,6 +260,51 @@ async function notifyBirthdays(){
 const birthdayTimer=setInterval(()=>{void notifyBirthdays().catch(error=>console.error('Birthday reminders failed.',error.message))},60*60*1000);birthdayTimer.unref()
 void notifyBirthdays().catch(error=>console.error('Birthday reminders failed.',error.message))
 
+let hospitalityMailRunning=false
+async function dispatchHospitalityEmails(){
+ if(hospitalityMailRunning||!hospitalityMailConfigured())return
+ hospitalityMailRunning=true
+ try{
+  const now=Date.now(),businesses=await businessSettings.find({}).toArray()
+  for(const business of businesses){
+   const businessId=business.businessId,heads=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':{$in:['hotel-stay','nightclub-entry','nightclub-event','restaurant-reservations']}}).toArray(),businessName=business.settings?.appName||'Stockroom business',currency=business.settings?.currency||'USD',emailSettings=await tenantIntegrations.emailSettings(businessId)
+   const sendOnce=async(booking,messageType,email)=>{
+    if(!email||!/^\S+@\S+\.\S+$/.test(email))return
+    const filter={businessId,bookingId:booking.id,messageType},old=await hospitalityEmailLog.findOne(filter)
+    if(['accepted','sent','delivered','uncertain'].includes(old?.status))return
+    if(old?.status==='sending'){
+     if(now-Date.parse(old.startedAt)<10*60_000)return
+     await hospitalityEmailLog.updateOne({_id:old._id,status:'sending'},{$set:{status:'uncertain',lastError:'The sender stopped before recording a result. Check with Stockroom support before sending again.'}})
+     return
+    }
+    if(old){const claimed=await hospitalityEmailLog.updateOne({_id:old._id,status:old.status},{$set:{status:'sending',startedAt:new Date(now),lastError:''}});if(!claimed.modifiedCount)return}
+    else {try{await hospitalityEmailLog.insertOne({...filter,status:'sending',to:email,createdAt:new Date(now),provider:hospitalityMailProvider()})}catch(error){if(error?.code===11000)return;throw error}}
+    try{const sent=await sendHospitalityBookingNotice({to:email,businessName,booking:{...booking,currency},noticeType:messageType,emailSettings});await hospitalityEmailLog.updateOne(filter,{$set:{status:'accepted',acceptedAt:new Date(),provider:sent.provider,providerMessageId:sent.messageId||'',to:email,subject:sent.subject||'',body:sent.text||'',replyTo:emailSettings.replyToEmail||'',lastError:''}})}
+    catch(error){const uncertain=error?.mailUncertain===true;await hospitalityEmailLog.updateOne(filter,{$set:{status:uncertain?'uncertain':'failed',lastError:uncertain?'Gmail may have accepted this message, but Stockroom did not receive a confirmation. Check with Stockroom support before sending again.':String(error?.message||error).slice(0,240),to:email,provider:hospitalityMailProvider()}});console.error('Hospitality guest email failed.',businessId,booking.id,error?.message)}
+   }
+   for(const head of heads){
+    if(head.payload.kind==='restaurant-reservations'){
+     for(const entry of head.payload.entries||[]){if(!entry.nightlifeEventId)continue;const event=heads.find(row=>row.payload.kind==='nightclub-event'&&row.entityId===entry.nightlifeEventId);const booking={...entry,id:entry.id,kind:'nightlife-table',eventName:entry.nightlifeEventName||event?.payload.name||'Nightlife event',startsAt:event?.payload.startsAt||entry.startAt,tablePackageName:entry.tablePackageName,minimumSpend:entry.minimumSpend,cancellationPolicy:event?.payload.cancellationPolicy||'',noShowPolicy:event?.payload.noShowPolicy||''};const guestEmail=entry.guestEmail||'';if(entry.status==='cancelled'){await sendOnce(booking,'cancelled',guestEmail);continue}if(entry.status==='no-show'){await sendOnce(booking,'no-show',guestEmail);continue}if(!['confirmed','arrived','seated'].includes(entry.status))continue;await sendOnce(booking,'confirmation',guestEmail);const start=Date.parse(booking.startsAt);if(start>now&&start-now<=24*60*60_000)await sendOnce(booking,'reminder',guestEmail)}
+     continue
+    }
+    const booking=head.payload;let guestEmail=booking.guestEmail||''
+    if(!guestEmail&&booking.customerId){const customer=await entityHeads.findOne({businessId,entityType:'customer',entityId:booking.customerId});guestEmail=String(customer?.payload?.email||'').trim()}
+    const event=booking.eventId?heads.find(row=>row.entityId===booking.eventId&&row.payload.kind==='nightclub-event')?.payload:null
+    const startsAt=booking.kind==='hotel-stay'?`${booking.checkIn}T12:00:00.000Z`:booking.startsAt||event?.startsAt||''
+    const notice={...booking,startsAt}
+    if(booking.status==='cancelled'){await sendOnce(notice,'cancelled',guestEmail);continue}
+    if(booking.status==='no-show'){await sendOnce(notice,'no-show',guestEmail);continue}
+    if(booking.kind==='nightclub-entry'&&booking.guestNotice==='waitlist-promoted'){await sendOnce(notice,'waitlist-offer',guestEmail);continue}
+    if(!['booked','expected'].includes(booking.status))continue
+    await sendOnce(notice,'confirmation',guestEmail)
+    const start=Date.parse(startsAt);if(start>now&&start-now<=24*60*60_000)await sendOnce(notice,'reminder',guestEmail)
+   }
+  }
+ }finally{hospitalityMailRunning=false}
+}
+const hospitalityMailTimer=setInterval(()=>{void dispatchHospitalityEmails().catch(error=>console.error('Hospitality guest communication dispatch failed.',error.message))},5*60_000);hospitalityMailTimer.unref()
+void dispatchHospitalityEmails().catch(error=>console.error('Hospitality guest communication dispatch failed.',error.message))
+
 async function notifyInventoryTeam(businessId, message) {
   const team = await accounts.find({ businessId, $or: [{ role: { $in: ['owner', 'admin'] } }, { role: 'cashier', operationalAccess: true }] }).project({ _id: 1 }).toArray()
   await Promise.all(team.map(account => notifications.notifyAccount(account._id.toString(), message)))
@@ -257,7 +333,7 @@ const referralWallet = await createReferralWallet({ database, accounts, verifyTo
 const googlePlayBilling = createGooglePlayBilling({ database, accounts, verifyToken })
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook, notifications })
 const productFormReader = await createProductFormReader({ database, accounts, verifyToken, readJson, send })
-const posPaystack = await createPosPaystack({ database })
+const posPaystack = await createPosPaystack({ database, configFor: tenantIntegrations.paystackConfig })
 // Keep dependent floor, payment-allocation and bill-close operations in order
 // across simultaneous pushes to this existing sync server.
 const businessSyncJobs=new Map()
@@ -267,6 +343,8 @@ async function serializeBusinessSync(businessId,job) {
   businessSyncJobs.set(businessId,next)
   try{return await next}finally{if(businessSyncJobs.get(businessId)===next)businessSyncJobs.delete(businessId)}
 }
+const hospitalityPayments=createHospitalityPayments({database,entityHeads,operations,businessSettings,accounts,customerPortalAccounts,verifyToken,readJson,send,serialize:serializeBusinessSync,configFor:tenantIntegrations.paystackConfig,ObjectId})
+await hospitalityPayments.ensure()
 async function queueProductCatalogueContribution(businessId, document) {
   if (document?.entityType !== 'product' || document.action !== 'upsert') return
   const preferences = await businessSettings.findOne({ businessId }, { projection: { catalogueContributionMode: 1, catalogueContributionOptIn: 1, 'settings.catalogueContributionMode': 1, 'settings.shopProfile': 1 } })
@@ -292,7 +370,7 @@ const server = createServer(async (request, response) => {
   }
   // Referral percentages are intentionally public. They are displayed on the
   // marketing site, whose origin can differ from configured app origins.
-  if (request.url?.startsWith('/v1/visitors/') || request.method === 'GET' && request.url === '/v1/public/landing') {
+  if (request.url?.startsWith('/v1/visitors/') || request.url?.startsWith('/v1/public/hotel-calendar/') || request.method === 'GET' && request.url === '/v1/public/landing') {
     corsHeaders['Access-Control-Allow-Origin'] = '*'
     corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
   }
@@ -300,6 +378,21 @@ const server = createServer(async (request, response) => {
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   const requestUrl = new URL(request.url || '/', 'http://localhost')
+  const hotelCalendarMatch = requestUrl.pathname.match(/^\/v1\/public\/hotel-calendar\/([A-Za-z0-9_-]{40,80})\.ics$/)
+  if (request.method === 'GET' && hotelCalendarMatch) {
+    const roomHead = await entityHeads.findOne({ entityType: 'pos_record', 'payload.kind': 'hotel-room', 'payload.calendarFeedToken': hotelCalendarMatch[1] })
+    const room = roomHead?.payload
+    if (!room) { response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end('Calendar feed not found.') }
+    const settings = await businessSettings.findOne({ businessId: roomHead.businessId })
+    const profile = normalizeShopProfile(settings?.settings?.shopProfile)
+    if (!profile.features?.hotelOperations || await database.collection('account_deletion_requests').findOne({ type: 'business', businessId: roomHead.businessId, status: { $in: ['pending', 'processing'] } })) { response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end('Calendar feed not found.') }
+    const today = businessDate(new Date(), profile.reportingTimeZone || 'UTC')
+    const stays = await entityHeads.find({ businessId: roomHead.businessId, entityType: 'pos_record', 'payload.kind': 'hotel-stay', 'payload.branchId': room.branchId, 'payload.status': { $in: ['booked', 'checked-in'] }, 'payload.checkOut': { $gte: today } }).toArray()
+    const roomStays = stays.map(row => row.payload).filter(stay => stay.roomId === roomHead.entityId || !stay.roomId && stay.roomName === room.roomName)
+    const importedStays = await hotelCalendarBlocks(roomHead.businessId, roomHead.entityId)
+    response.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' })
+    return response.end(hotelCalendarIcs(room, [...roomStays, ...importedStays]))
+  }
   if (request.method === 'GET' && requestUrl.pathname === '/v1/public/product-lookup') {
     const query = String(requestUrl.searchParams.get('query') || '').trim()
     if (query) {
@@ -319,6 +412,7 @@ const server = createServer(async (request, response) => {
     return send(response, result.status, result.body)
   }
   try {
+    if(await hospitalityPayments.handle(request,response,requestUrl)||response.writableEnded)return
     if (await staffRemoval.blocked(request)) return send(response, 403, { error: 'Your staff access has been removed by the owner.' })
     if (await staffRemoval.handle(request, response)) return
     if (await accountDeletion.handle(request, response)) return
@@ -365,15 +459,17 @@ const server = createServer(async (request, response) => {
       if(hospitalityMode){
         const enabled=hospitalityMode==='hotel'?profile.features?.hotelOperations:profile.features?.nightlifeOperations
         if(!enabled)return send(response,403,{error:`${hospitalityMode==='hotel'?'Hotel':'Nightlife'} customer booking is not enabled for this business.`})
+        let onlinePaymentEnabled=false;try{onlinePaymentEnabled=Boolean(await tenantIntegrations.paystackConfig(businessId))}catch{}
         const heads=await entityHeads.find({businessId,entityType:'pos_record'}).toArray(),now=new Date().toISOString()
         if(hospitalityMode==='hotel'){
           const checkIn=String(query.get('checkIn')||''),checkOut=String(query.get('checkOut')||''),validDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(`${value}T00:00:00.000Z`).toISOString().slice(0,10)===value
           const datesProvided=Boolean(checkIn||checkOut),datesValid=validDate(checkIn)&&validDate(checkOut)&&checkOut>checkIn
-          const rooms=heads.filter(row=>row.payload.kind==='hotel-room'&&row.payload.status==='active').map(row=>{const occupied=datesValid&&heads.some(stay=>stay.payload.kind==='hotel-stay'&&stay.payload.branchId===row.payload.branchId&&stay.payload.roomId===row.entityId&&['booked','checked-in'].includes(stay.payload.status)&&checkIn<stay.payload.checkOut&&checkOut>stay.payload.checkIn);return {id:row.entityId,branchId:row.payload.branchId,name:row.payload.roomName,nightlyRate:row.payload.nightlyRate,housekeepingStatus:row.payload.housekeepingStatus||'ready',available:!occupied&&(!datesProvided||datesValid)}})
-          return send(response,200,{businessId,businessName:settings.appName||'Business',logoData:/^data:image\/(png|jpeg|webp);base64,/.test(settings.logoData||'')?settings.logoData:'',brandColor:profile.brandColor||'',currency:settings.currency||'USD',mode:'hotel',menu:null,rooms})
+          const rooms=await Promise.all(heads.filter(row=>row.payload.kind==='hotel-room'&&row.payload.status==='active').map(async row=>{const imported=await hotelCalendarBlocks(businessId,row.entityId),occupied=datesValid&&(heads.some(stay=>stay.payload.kind==='hotel-stay'&&stay.payload.branchId===row.payload.branchId&&stay.payload.roomId===row.entityId&&['booked','checked-in'].includes(stay.payload.status)&&checkIn<stay.payload.checkOut&&checkOut>stay.payload.checkIn)||imported.some(stay=>checkIn<stay.checkOut&&checkOut>stay.checkIn)),rateBreakdown=datesValid?hotelRateBreakdown(row.payload,checkIn,checkOut):[];return {id:row.entityId,branchId:row.payload.branchId,name:row.payload.roomName,roomType:row.payload.roomType||'Standard',bedConfiguration:row.payload.bedConfiguration||'',maxGuests:Number(row.payload.maxGuests||2),amenities:Array.isArray(row.payload.amenities)?row.payload.amenities:[],nightlyRate:row.payload.nightlyRate,ratePeriods:row.payload.ratePeriods||[],rateBreakdown,quoteTotal:rateBreakdown.reduce((sum,rate)=>sum+rate.nightlyRate*rate.nights,0),cancellationHours:Number(row.payload.cancellationHours||0),cancellationPolicy:row.payload.cancellationPolicy||'',noShowPolicy:row.payload.noShowPolicy||'',housekeepingStatus:row.payload.housekeepingStatus||'ready',available:!occupied&&(!datesProvided||datesValid)}}))
+          return send(response,200,{businessId,businessName:settings.appName||'Business',logoData:/^data:image\/(png|jpeg|webp);base64,/.test(settings.logoData||'')?settings.logoData:'',brandColor:profile.brandColor||'',currency:settings.currency||'USD',mode:'hotel',onlinePaymentEnabled,guestMessagingEnabled:hospitalityMailConfigured(),menu:null,rooms})
         }
-        const events=heads.filter(row=>row.payload.kind==='nightclub-event'&&row.payload.status==='scheduled'&&row.payload.startsAt>now).map(row=>{const entries=heads.filter(entry=>entry.payload.kind==='nightclub-entry'&&entry.payload.eventId===row.entityId&&entry.payload.status!=='cancelled'),reservedGuests=heads.filter(book=>book.payload.kind==='restaurant-reservations').flatMap(book=>book.payload.entries||[]).filter(entry=>entry.nightlifeEventId===row.entityId&&!['cancelled','no-show'].includes(entry.status)).reduce((sum,entry)=>sum+entry.guests,0),layout=heads.find(item=>item.payload.kind==='restaurant-layout'&&item.payload.branchId===row.payload.branchId);return {id:row.entityId,branchId:row.payload.branchId,name:row.payload.name,startsAt:row.payload.startsAt,capacity:row.payload.capacity,admissionPrice:row.payload.admissionPrice||0,spotsRemaining:row.payload.capacity?Math.max(0,row.payload.capacity-entries.length-reservedGuests):null,tables:profile.restaurant?(layout?.payload?.tables||[]).map(table=>({id:table.id,name:table.name,seats:table.seats})):[]}}).filter(event=>event.spotsRemaining===null||event.spotsRemaining>0)
-        return send(response,200,{businessId,businessName:settings.appName||'Business',logoData:/^data:image\/(png|jpeg|webp);base64,/.test(settings.logoData||'')?settings.logoData:'',brandColor:profile.brandColor||'',currency:settings.currency||'USD',mode:'nightlife',tableReservationsEnabled:profile.restaurant===true,menu:null,events})
+        const events=heads.filter(row=>row.payload.kind==='nightclub-event'&&row.payload.status==='scheduled'&&row.payload.startsAt>now).map(row=>{const entries=heads.filter(entry=>entry.payload.kind==='nightclub-entry'&&entry.payload.eventId===row.entityId&&['expected','checked-in'].includes(entry.payload.status)),reservedGuests=heads.filter(book=>book.payload.kind==='restaurant-reservations').flatMap(book=>book.payload.entries||[]).filter(entry=>entry.nightlifeEventId===row.entityId&&!['cancelled','no-show'].includes(entry.status)).reduce((sum,entry)=>sum+entry.guests,0),layout=heads.find(item=>item.payload.kind==='restaurant-layout'&&item.payload.branchId===row.payload.branchId),ticketTypes=row.payload.ticketTypes||[{id:'general',name:'General',price:Number(row.payload.admissionPrice||0),capacity:0}],reservations=heads.filter(book=>book.payload.kind==='restaurant-reservations').flatMap(book=>book.payload.entries||[]);return {id:row.entityId,branchId:row.payload.branchId,name:row.payload.name,description:row.payload.description||'',startsAt:row.payload.startsAt,capacity:row.payload.capacity,admissionPrice:row.payload.admissionPrice||0,spotsRemaining:row.payload.capacity?Math.max(0,row.payload.capacity-entries.length-reservedGuests):null,ticketTypes:ticketTypes.map(ticket=>({id:ticket.id,name:ticket.name,price:ticket.price,spotsRemaining:ticket.capacity?Math.max(0,ticket.capacity-entries.filter(entry=>entry.payload.ticketTypeId===ticket.id).length):null})),ticketPromotions:row.payload.ticketPromotions||[],attendeeFields:row.payload.attendeeFields||[],tablePackages:(row.payload.tablePackages||[]).map(item=>({...item,spotsRemaining:item.limit?Math.max(0,item.limit-reservations.filter(entry=>entry.nightlifeEventId===row.entityId&&entry.tablePackageId===item.id&&!['cancelled','no-show'].includes(entry.status)).length):null})),cancellationHours:Number(row.payload.cancellationHours||0),cancellationPolicy:row.payload.cancellationPolicy||'',noShowPolicy:row.payload.noShowPolicy||'',tables:profile.restaurant?(layout?.payload?.tables||[]).map(table=>({id:table.id,name:table.name,seats:table.seats})):[]}})
+        const branchHeads=await entityHeads.find({businessId,entityType:'branch'}).toArray(),activeBranches=branchHeads.filter(row=>row.payload?.isActive!==false),branches=activeBranches.length?activeBranches.map(row=>({id:row.entityId,name:String(row.payload?.name||row.entityId)})):[{id:'main',name:'Main branch'}]
+        return send(response,200,{businessId,businessName:settings.appName||'Business',logoData:/^data:image\/(png|jpeg|webp);base64,/.test(settings.logoData||'')?settings.logoData:'',brandColor:profile.brandColor||'',currency:settings.currency||'USD',mode:'nightlife',onlinePaymentEnabled,guestMessagingEnabled:hospitalityMailConfigured(),tableReservationsEnabled:profile.restaurant===true,inquiriesEnabled:true,branches,menu:null,events})
       }
       const retail=customerOrderSettings(settings.paymentPolicy?.customerOrdering).retailEnabled && (query.get('mode')==='retail' || (!profile.fastFood&&!profile.restaurant))
       const menuId = retail ? 'retail-catalogue' : profile.restaurant ? 'restaurant-menu' : profile.fastFood ? 'counter-menu' : ''
@@ -409,22 +505,41 @@ const server = createServer(async (request, response) => {
       const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
       if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
       const rows=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record',$or:[{'payload.customerPortalId':claims.customerId},{'payload.customerId':claims.customerId},{'payload.entries.customerPortalId':claims.customerId}]}).toArray()
-      const hospitality=await Promise.all(rows.filter(row=>['hotel-stay','nightclub-entry'].includes(row.payload.kind)).map(async row=>{const jobs=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':row.entityId}).toArray(),saleIds=jobs.flatMap(job=>(job.payload.payments||[]).map(entry=>entry.sale.id)),refunds=saleIds.length?await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:saleIds}}).toArray():[];return {...row.payload,invoices:jobs.map(job=>({id:job.entityId,title:job.payload.title,status:job.payload.status,total:job.payload.pricing.total,...serviceJobBalance(job.payload,refunds.map(refund=>refund.payload))}))}}))
+      const hospitality=await Promise.all(rows.filter(row=>['hotel-stay','nightclub-entry','nightclub-inquiry'].includes(row.payload.kind)).map(async row=>{const {staffNotes,...customerPayload}=row.payload,jobs=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':row.entityId}).toArray(),saleIds=jobs.flatMap(job=>(job.payload.payments||[]).map(entry=>entry.sale.id)),refunds=saleIds.length?await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:saleIds}}).toArray():[];return {...customerPayload,invoices:jobs.map(job=>({id:job.entityId,title:job.payload.title,status:job.payload.status,total:job.payload.pricing.total,onlinePayable:(job.payload.customerId===claims.customerId||job.payload.customerPortalId===claims.customerId)&&job.payload.status!=='estimate',...serviceJobBalance(job.payload,refunds.map(refund=>refund.payload))}))}}))
       const tableReservations=rows.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>(row.payload.entries||[]).filter(entry=>entry.customerPortalId===claims.customerId&&entry.nightlifeEventId).map(entry=>({...entry,id:entry.id,kind:'nightlife-table',recordId:row.entityId,eventName:entry.nightlifeEventName,tableName:entry.tableName,updatedAt:row.payload.updatedAt,invoices:[]})))
       const bookings=[...hospitality,...tableReservations]
       return send(response,200,{bookings:bookings.sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))})
+    }
+    if(request.method==='POST'&&request.url==='/v1/customer-portal/hospitality/inquiries'){
+      const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
+      if(claims.guest&&claims.hospitalityMode!=='nightlife')return send(response,403,{error:'Open the nightlife customer portal to request a private event.'})
+      if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
+      const input=await readJson(request,8192),requestId=String(input.requestId||''),branchId=String(input.branchId||''),eventType=String(input.eventType||'').trim().slice(0,80),preferredDate=String(input.preferredDate||''),guestCount=Number(input.guestCount),guestEmail=String(input.email||'').trim().toLowerCase(),guestPhone=String(input.phone||'').trim().slice(0,80),notes=String(input.notes||'').trim().slice(0,2000)
+      if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)||!branchId||!eventType||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)||guestEmail.length>254||guestPhone.length<6||!Number.isInteger(guestCount)||guestCount<1||guestCount>10000||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(preferredDate))return send(response,400,{error:'Enter a branch, event type, preferred date, guest count, email and reachable phone.'})
+      if(await database.collection('account_deletion_requests').findOne({type:'business',businessId:claims.businessId,status:{$in:['pending','processing']}}))return send(response,403,{error:'This business is currently closed for customer bookings.'})
+      const rateKey=`hospitality-inquiry:${String(request.socket.remoteAddress||'')}:${claims.businessId}:${claims.customerId}`,rateNow=Date.now(),priorRate=customerPortalLoginLimits.get(rateKey),rateWindow=priorRate?.until>rateNow?priorRate:{count:0,until:rateNow+15*60*1000};if(customerPortalLoginLimits.size>10000)for(const [key,value] of customerPortalLoginLimits)if(value.until<=rateNow)customerPortalLoginLimits.delete(key);if(rateWindow.count>=30)return send(response,429,{error:'Too many event requests. Wait fifteen minutes before trying again.'});customerPortalLoginLimits.set(rateKey,{...rateWindow,count:rateWindow.count+1})
+      const recordId=`nightclub-inquiry:portal-${requestId}`
+      try{const inquiry=await serializeBusinessSync(claims.businessId,async()=>{
+        const prior=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(prior){if(prior.payload.customerPortalId!==claims.customerId)throw Object.assign(new Error('This request ID is already in use.'),{statusCode:409});return prior.payload}
+        const saved=await businessSettings.findOne({businessId:claims.businessId}),profile=normalizeShopProfile(saved?.settings?.shopProfile);if(!saved||!profile.features?.nightlifeOperations)throw Object.assign(new Error('Private event requests are unavailable for this business.'),{statusCode:403})
+        const today=new Intl.DateTimeFormat('en-CA',{timeZone:profile.reportingTimeZone||'UTC',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),dateCheck=new Date(`${preferredDate}T00:00:00.000Z`);if(!Number.isFinite(dateCheck.getTime())||dateCheck.toISOString().slice(0,10)!==preferredDate||preferredDate<today)throw new Error('Choose a valid date today or later.')
+        const branchHeads=await entityHeads.find({businessId:claims.businessId,entityType:'branch'}).toArray(),activeBranches=branchHeads.filter(row=>row.payload?.isActive!==false),allowedBranches=new Set(activeBranches.length?activeBranches.map(row=>row.entityId):['main']);if(!allowedBranches.has(branchId))throw new Error('Choose an active venue branch.')
+        const customer=claims.guest?null:await entityHeads.findOne({businessId:claims.businessId,entityType:'customer',entityId:claims.customerId}),guestName=claims.guest?String(claims.name||'').trim().slice(0,100):String(customer?.payload?.name||'').trim().slice(0,100);if(!guestName)throw new Error('Your customer profile needs a name before you can send an inquiry.')
+        const now=new Date().toISOString(),record={id:recordId,kind:'nightclub-inquiry',branchId,guestName,guestEmail,guestPhone,eventType,preferredDate,guestCount,notes,status:'new',proposal:'',quotedTotal:0,staffNotes:'',createdAt:now,updatedAt:now,source:'customer-portal',customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{}),staffId:`customer:${claims.customerId}`}
+        validateHospitalityRecord(record);const operationId=`customer-hospitality:${recordId}`,head={businessId:claims.businessId,entityType:'pos_record',entityId:recordId,operationId,deviceId:'customer-portal',payload:record,updatedAt:now},inserted=await entityHeads.updateOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId},{$setOnInsert:head},{upsert:true});if(!inserted.upsertedCount){const existing=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(existing?.payload.customerPortalId!==claims.customerId)throw Object.assign(new Error('This request ID is already in use.'),{statusCode:409});return existing.payload}await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:{...head,action:'upsert',createdAt:now,receivedAt:new Date()}},{upsert:true});return record
+      });return send(response,201,{inquiry})}catch(error){return send(response,error.statusCode||400,{error:error.message||'Could not submit this event request.'})}
     }
     if(request.method==='POST'&&request.url==='/v1/customer-portal/hospitality/bookings'){
       const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
       if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
       if(await database.collection('account_deletion_requests').findOne({type:'business',businessId:claims.businessId,status:{$in:['pending','processing']}}))return send(response,403,{error:'This business is currently closed for customer bookings.'})
-      const input=await readJson(request,8192),requestId=String(input.requestId||''),type=String(input.type||'')
-      if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)||!['hotel','nightlife'].includes(type))return send(response,400,{error:'Booking details are invalid.'})
+      const input=await readJson(request,8192),requestId=String(input.requestId||''),type=String(input.type||''),guestEmail=String(input.email||'').trim().slice(0,254)
+      if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)||!['hotel','nightlife'].includes(type)||!/^\S+@\S+\.\S+$/.test(guestEmail))return send(response,400,{error:'Enter a valid email address for your confirmation and reminder.'})
       const rateKey=`hospitality-booking:${String(request.socket.remoteAddress||'')}:${claims.businessId}:${claims.customerId}`,rateNow=Date.now(),rate=customerPortalLoginLimits.get(rateKey),window=rate?.until>rateNow?rate:{count:0,until:rateNow+15*60*1000};if(window.count>=60)return send(response,429,{error:'Too many booking requests. Wait fifteen minutes before trying again.'});customerPortalLoginLimits.set(rateKey,{...window,count:window.count+1})
       const recordId=`${type==='hotel'?'hotel-stay':'nightclub-entry'}:portal-${requestId}`
       try{
         const payload=await serializeBusinessSync(claims.businessId,async()=>{
-          const prior=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(prior){if(prior.payload.customerPortalId!==claims.customerId)return null;return prior.payload}
+          const prior=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(prior){if(prior.payload.customerPortalId!==claims.customerId)return null;const invoice=prior.payload.kind==='nightclub-entry'?await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':recordId,'payload.status':{$ne:'cancelled'}}):null;return {...prior.payload,...(invoice?{ticketInvoiceId:invoice.entityId}:{})}}
           const saved=await businessSettings.findOne({businessId:claims.businessId}),profile=normalizeShopProfile(saved?.settings?.shopProfile),enabled=type==='hotel'?profile.features?.hotelOperations:profile.features?.nightlifeOperations
           if(!saved||!enabled)throw Object.assign(new Error('This booking type is no longer available.'),{statusCode:403})
           const now=new Date().toISOString(),all=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record'}).toArray(),name=claims.guest?claims.name:String((await entityHeads.findOne({businessId:claims.businessId,entityType:'customer',entityId:claims.customerId}))?.payload?.name||'').trim(),phone=String(input.phone||'').trim().slice(0,80)
@@ -436,18 +551,28 @@ const server = createServer(async (request, response) => {
             const todayInBusinessTimeZone=new Intl.DateTimeFormat('en-CA',{timeZone:profile.reportingTimeZone||'UTC',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
             if(!validStayDate(checkIn)||!validStayDate(checkOut)||checkIn<todayInBusinessTimeZone)throw new Error('Choose valid future stay dates.')
             if(!room||!/^\d{4}-\d{2}-\d{2}$/.test(checkIn)||!/^\d{4}-\d{2}-\d{2}$/.test(checkOut)||checkOut<=checkIn||checkIn<now.slice(0,10)||Date.parse(checkOut)-Date.parse(checkIn)>31*86400000)throw new Error('Choose an active room and valid dates within the next 31 nights.')
+            const guestCount=Number(input.guestCount||1)
+            if(!Number.isInteger(guestCount)||guestCount<1||guestCount>Number(room.payload.maxGuests||2))throw new Error(`This room accommodates up to ${Number(room.payload.maxGuests||2)} guests.`)
             if(all.some(row=>row.payload.kind==='hotel-stay'&&row.payload.branchId===room.payload.branchId&&row.payload.roomId===room.entityId&&['booked','checked-in'].includes(row.payload.status)&&checkIn<row.payload.checkOut&&checkOut>row.payload.checkIn))throw Object.assign(new Error('Those dates are no longer available for this room. Choose another room or dates.'),{statusCode:409})
-            record={id:recordId,kind:'hotel-stay',branchId:room.payload.branchId,roomId:room.entityId,roomName:room.payload.roomName,guestName:name,guestPhone:phone,checkIn,checkOut,nightlyRate:Number(room.payload.nightlyRate),status:'booked',checkInToken:randomBytes(24).toString('base64url'),createdAt:now,updatedAt:now,source:'customer-portal',customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{}),staffId:`customer:${claims.customerId}`}
+            if((await hotelCalendarBlocks(claims.businessId,room.entityId)).some(stay=>checkIn<stay.checkOut&&checkOut>stay.checkIn))throw Object.assign(new Error('That room has a reservation from a connected booking channel for those dates.'),{statusCode:409})
+            record={id:recordId,kind:'hotel-stay',branchId:room.payload.branchId,roomId:room.entityId,roomName:room.payload.roomName,guestName:name,guestPhone:phone,guestEmail,guestCount,checkIn,checkOut,nightlyRate:Number(room.payload.nightlyRate),rateBreakdown:hotelRateBreakdown(room.payload,checkIn,checkOut),cancellationHours:Number(room.payload.cancellationHours||0),cancellationPolicy:room.payload.cancellationPolicy||'',noShowPolicy:room.payload.noShowPolicy||'',status:'booked',checkInToken:randomBytes(24).toString('base64url'),createdAt:now,updatedAt:now,source:'customer-portal',customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{}),staffId:`customer:${claims.customerId}`}
           }else{
             const event=all.find(row=>row.entityId===String(input.eventId||'')&&row.payload.kind==='nightclub-event'&&row.payload.status==='scheduled'&&row.payload.startsAt>now)
             if(!event)throw new Error('Choose an upcoming event that is still open for bookings.')
-            const entries=all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===event.entityId&&row.payload.status!=='cancelled'),reservedGuests=all.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>row.payload.entries||[]).filter(entry=>entry.nightlifeEventId===event.entityId&&!['cancelled','no-show'].includes(entry.status)).reduce((sum,entry)=>sum+entry.guests,0);if(event.payload.capacity&&entries.length+reservedGuests>=event.payload.capacity)throw Object.assign(new Error('This event has sold out.'),{statusCode:409})
-            record={id:recordId,kind:'nightclub-entry',branchId:event.payload.branchId,eventId:event.entityId,eventName:event.payload.name,guestName:name,guestPhone:phone,admissionPrice:Number(event.payload.admissionPrice||0),status:'expected',checkInToken:randomBytes(24).toString('base64url'),createdAt:now,updatedAt:now,source:'customer-portal',customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{}),staffId:`customer:${claims.customerId}`}
+            const entries=all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===event.entityId&&['expected','checked-in'].includes(row.payload.status)),reservedGuests=all.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>row.payload.entries||[]).filter(entry=>entry.nightlifeEventId===event.entityId&&!['cancelled','no-show'].includes(entry.status)).reduce((sum,entry)=>sum+entry.guests,0),waitlisted=Boolean(event.payload.capacity&&entries.length+reservedGuests>=event.payload.capacity)
+            const ticket=(event.payload.ticketTypes||[{id:'general',name:'General',price:Number(event.payload.admissionPrice||0),capacity:0}]).find(row=>row.id===String(input.ticketTypeId||'general'));if(!ticket)throw new Error('Choose a ticket type offered for this event.');const promoCode=String(input.promoCode||'').trim().toUpperCase(),promo=promoCode?(event.payload.ticketPromotions||[]).find(item=>item.code===promoCode&&(!item.ticketTypeId||item.ticketTypeId===ticket.id)):null;if(promoCode&&!promo)throw new Error('That promotion code is not valid for this ticket.');const promoUses=promo?all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===event.entityId&&row.payload.promoCode===promo.code&&['expected','checked-in','waitlisted'].includes(row.payload.status)).length:0;if(promo?.limit&&promoUses>=promo.limit)throw new Error('That promotion has reached its use limit.');const attendeeAnswers=input.attendeeAnswers&&typeof input.attendeeAnswers==='object'&&!Array.isArray(input.attendeeAnswers)?input.attendeeAnswers:{},fields=event.payload.attendeeFields||[],answers={};for(const field of fields){const value=String(attendeeAnswers[field.id]||'').trim().slice(0,500);if(field.required&&!value)throw new Error(`Complete ${field.label}.`);if(value&&field.type==='email'&&!/^\S+@\S+\.\S+$/.test(value))throw new Error(`Enter a valid ${field.label}.`);if(value&&field.type==='number'&&!Number.isFinite(Number(value)))throw new Error(`Enter a number for ${field.label}.`);if(value)answers[field.id]=value}const extra=Object.keys(attendeeAnswers).some(key=>!fields.some(field=>field.id===key));if(extra)throw new Error('Refresh the event form and re-enter the attendee details.');const listPrice=Math.round(Number(ticket.price)*100)/100,admissionPrice=promo?Math.round(listPrice*(100-promo.percentOff))/100:listPrice,tierSales=all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===event.entityId&&row.payload.ticketTypeId===ticket.id&&['expected','checked-in'].includes(row.payload.status)).length,tierFull=Boolean(ticket.capacity&&tierSales>=ticket.capacity);record={id:recordId,kind:'nightclub-entry',branchId:event.payload.branchId,eventId:event.entityId,eventName:event.payload.name,ticketTypeId:ticket.id,ticketTypeName:ticket.name,guestName:name,guestPhone:phone,guestEmail,listPrice,admissionPrice,...(promo?{promoCode:promo.code}:{}),...(Object.keys(answers).length?{attendeeAnswers:answers}:{}),cancellationHours:Number(event.payload.cancellationHours||0),cancellationPolicy:event.payload.cancellationPolicy||'',noShowPolicy:event.payload.noShowPolicy||'',status:waitlisted||tierFull?'waitlisted':'expected',...(waitlisted||tierFull?{}:{checkInToken:randomBytes(24).toString('base64url')}),createdAt:now,updatedAt:now,source:'customer-portal',customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{}),staffId:`customer:${claims.customerId}`}
           }
           validateHospitalityRecord(record)
           const operationId=`customer-hospitality:${recordId}`,head={businessId:claims.businessId,entityType:'pos_record',entityId:recordId,operationId,deviceId:'customer-portal',payload:record,updatedAt:now}
           const inserted=await entityHeads.updateOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId},{$setOnInsert:head},{upsert:true});if(!inserted.upsertedCount){const existing=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(existing?.payload.customerPortalId!==claims.customerId)throw Object.assign(new Error('This booking request ID is already used.'),{statusCode:409});return existing.payload}
-          await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:{...head,action:'upsert',createdAt:now,receivedAt:new Date()}},{upsert:true});return record
+          await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:{...head,action:'upsert',createdAt:now,receivedAt:new Date()}},{upsert:true})
+          let ticketInvoiceId=''
+          if(record.kind==='nightclub-entry'&&record.status==='expected'&&record.admissionPrice>0){
+            const receiptHead=all.find(row=>row.entityId==='receipt-settings'&&row.payload.kind==='receipt-settings'),profileSettings=receiptSettings(receiptHead?.payload?.value||{}),invoiceId=`service-job:ticket-${recordId.slice('nightclub-entry:'.length)}`,lines=[{id:record.id,description:`Admission: ${record.eventName}`.slice(0,150),quantity:1,price:record.admissionPrice}],pricing=priceOrder(lines.map(line=>({productId:`service:${line.id}`,quantity:line.quantity,price:line.price})),{tax:profileSettings}),invoiceNow=new Date().toISOString(),job={id:invoiceId,kind:'service-job',branchId:record.branchId,tillId:'customer-portal',status:'new',createdAt:invoiceNow,updatedAt:invoiceNow,expectedUpdatedAt:'',lastCommandId:`ticket-invoice:${record.id}`,lastRequest:JSON.stringify({recordId:record.id}),staffId:`customer:${claims.customerId}`,staffName:'Customer portal',businessName:profileSettings.businessName||saved.settings.appName||'Business',currency:saved.settings.currency||'USD',customerName:name,customerPhone:phone,title:`Nightclub admission - ${record.eventName}`.slice(0,200),note:`Admission ticket for ${record.eventName}.`,dueDate:'',lines,profile:profileSettings,pricing,payments:[],hospitality:{recordId:record.id,recordKind:'nightclub-entry'},customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{})}
+            validateServiceJob(job,undefined,false);validateHospitalityInvoice(job,record)
+            const invoiceOperationId=`customer-hospitality-ticket-invoice:${record.id}`,invoiceHead={businessId:claims.businessId,entityType:'pos_record',entityId:invoiceId,operationId:invoiceOperationId,deviceId:'customer-portal',payload:job,updatedAt:invoiceNow},invoiceInsert=await entityHeads.updateOne({businessId:claims.businessId,entityType:'pos_record',entityId:invoiceId},{$setOnInsert:invoiceHead},{upsert:true});if(invoiceInsert.upsertedCount){await operations.updateOne({businessId:claims.businessId,operationId:invoiceOperationId},{$setOnInsert:{...invoiceHead,action:'upsert',createdAt:invoiceNow,receivedAt:new Date()}},{upsert:true})}ticketInvoiceId=invoiceId
+          }
+          return {...record,...(ticketInvoiceId?{ticketInvoiceId}:{})}
         })
         if(!payload)return send(response,403,{error:'This booking belongs to another customer.'})
         return send(response,201,{booking:payload})
@@ -457,8 +582,8 @@ const server = createServer(async (request, response) => {
       const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
       if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
       if(await database.collection('account_deletion_requests').findOne({type:'business',businessId:claims.businessId,status:{$in:['pending','processing']}}))return send(response,403,{error:'This business is currently closed for customer bookings.'})
-      const input=await readJson(request,8192),requestId=String(input.requestId||''),eventId=String(input.eventId||''),tableId=String(input.tableId||''),guests=Number(input.guests),phone=String(input.phone||'').trim().slice(0,80)
-      if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)||!eventId||!tableId||!Number.isInteger(guests)||guests<1||guests>100||!phone)return send(response,400,{error:'Table reservation details are invalid.'})
+      const input=await readJson(request,8192),requestId=String(input.requestId||''),eventId=String(input.eventId||''),tableId=String(input.tableId||''),tablePackageId=String(input.tablePackageId||''),guests=Number(input.guests),phone=String(input.phone||'').trim().slice(0,80),guestEmail=String(input.email||'').trim().slice(0,254)
+      if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)||!eventId||!tableId||!Number.isInteger(guests)||guests<1||guests>100||!phone||!/^\S+@\S+\.\S+$/.test(guestEmail))return send(response,400,{error:'Enter valid table, guest and email details.'})
       const tableRateKey=`hospitality-table:${String(request.socket.remoteAddress||'')}:${claims.businessId}:${claims.customerId}`,tableRateNow=Date.now(),tableRate=customerPortalLoginLimits.get(tableRateKey),tableWindow=tableRate?.until>tableRateNow?tableRate:{count:0,until:tableRateNow+15*60*1000};if(tableWindow.count>=30)return send(response,429,{error:'Too many table reservation requests. Wait fifteen minutes before trying again.'});customerPortalLoginLimits.set(tableRateKey,{...tableWindow,count:tableWindow.count+1})
       try{const result=await serializeBusinessSync(claims.businessId,async()=>{
         const saved=await businessSettings.findOne({businessId:claims.businessId}),profile=normalizeShopProfile(saved?.settings?.shopProfile);if(!profile.restaurant)return {error:'Enable Tables & tabs to offer event table reservations.',statusCode:403}
@@ -467,11 +592,11 @@ const server = createServer(async (request, response) => {
         const bookId=reservationBookId(eventHead.payload.branchId),previous=all.find(row=>row.entityId===bookId&&row.payload.kind==='restaurant-reservations'),reservationId=`reservation:portal-${requestId}`
         if(previous?.payload.entries?.some(row=>row.id===reservationId)){const existing=previous.payload.entries.find(row=>row.id===reservationId);if(existing.customerPortalId!==claims.customerId)return {error:'This request ID is already used.',statusCode:409};return {booking:existing}}
         const table=(layoutHead?.payload?.tables||[]).find(row=>row.id===tableId);if(!table)throw new Error('Choose a table that is still available for this venue.')
-        const sold=all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===eventId&&row.payload.status!=='cancelled').length,reserved=all.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>row.payload.entries||[]).filter(row=>row.nightlifeEventId===eventId&&!['cancelled','no-show'].includes(row.status)).reduce((sum,row)=>sum+row.guests,0);if(eventHead.payload.capacity&&sold+reserved+guests>eventHead.payload.capacity)throw Object.assign(new Error('This event does not have enough capacity for that table booking.'),{statusCode:409})
+        const sold=all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===eventId&&['expected','checked-in'].includes(row.payload.status)).length,reserved=all.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>row.payload.entries||[]).filter(row=>row.nightlifeEventId===eventId&&!['cancelled','no-show'].includes(row.status)).reduce((sum,row)=>sum+row.guests,0);if(eventHead.payload.capacity&&sold+reserved+guests>eventHead.payload.capacity)throw Object.assign(new Error('This event does not have enough capacity for that table booking.'),{statusCode:409})
         const guestName=claims.guest?claims.name:String((await entityHeads.findOne({businessId:claims.businessId,entityType:'customer',entityId:claims.customerId}))?.payload?.name||'').trim()
         if(!guestName)throw new Error('Customer profile is unavailable.')
         const timeZone=profile.reportingTimeZone||'UTC',local=(instant)=>{const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(instant)).map(part=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`},startAt=eventHead.payload.startsAt,endAt=new Date(Date.parse(startAt)+2*60*60*1000).toISOString(),now=new Date().toISOString(),user={id:`customer:${claims.customerId}`,name:guestName}
-        const reservationInput={action:'create',id:reservationId,commandId:`portal-${requestId}`,expectedUpdatedAt:previous?.payload.updatedAt||'',name:guestName,phone,guests,tableId,startLocal:local(startAt),endLocal:local(endAt),timeZone,occurrence:'earlier',endOccurrence:'earlier',note:'',nightlifeEventId:eventId,customerPortalId:claims.customerId}
+        const reservationInput={action:'create',id:reservationId,commandId:`portal-${requestId}`,expectedUpdatedAt:previous?.payload.updatedAt||'',name:guestName,phone,guestEmail,guests,tableId,startLocal:local(startAt),endLocal:local(endAt),timeZone,occurrence:'earlier',endOccurrence:'earlier',note:'',nightlifeEventId:eventId,...(tablePackageId?{tablePackageId}:{}),customerPortalId:claims.customerId}
         const tabs=all.filter(row=>row.payload.kind==='restaurant-tab'&&row.payload.branchId===eventHead.payload.branchId).map(row=>row.payload),nightlifeEvents=all.filter(row=>row.payload.kind==='nightclub-event'&&row.payload.branchId===eventHead.payload.branchId).map(row=>row.payload)
         const record=reservationChange(previous?.payload,reservationInput,{branchId:eventHead.payload.branchId,user,updatedAt:now,timeZone,layout:layoutHead?.payload||{tables:[]},tabs,nightlifeEvents}),operationId=`customer-hospitality-table:${requestId}`,filter={businessId:claims.businessId,entityType:'pos_record',entityId:bookId}
         const update=await entityHeads.updateOne(previous?{...filter,operationId:previous.operationId}:filter,previous?{$set:{payload:record,updatedAt:now,operationId,deviceId:'customer-portal'}}:{$setOnInsert:{businessId:claims.businessId,entityType:'pos_record',entityId:bookId,operationId,deviceId:'customer-portal',payload:record,updatedAt:now}},{upsert:!previous})
@@ -495,11 +620,12 @@ const server = createServer(async (request, response) => {
           if(saved.status==='cancelled')return saved
           if(!['confirmed','arrived'].includes(saved.status))throw new Error('This table booking can no longer be cancelled from the customer app.')
           const all=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.branchId':head.payload.branchId}).toArray(),settings=await businessSettings.findOne({businessId:claims.businessId}),profile=normalizeShopProfile(settings?.settings?.shopProfile),layout=all.find(row=>row.payload.kind==='restaurant-layout')?.payload||{tables:[]},tabs=all.filter(row=>row.payload.kind==='restaurant-tab').map(row=>row.payload),hotelStays=all.filter(row=>row.payload.kind==='hotel-stay').map(row=>row.payload),nightlifeEvents=all.filter(row=>row.payload.kind==='nightclub-event').map(row=>row.payload),user={id:`customer:${claims.customerId}`,name:saved.name}
+          const linkedEvent=nightlifeEvents.find(event=>event.id===saved.nightlifeEventId),eventStart=linkedEvent?.startsAt,cutoffHours=Number(linkedEvent?.cancellationHours||0);if(eventStart&&Date.now()>=Date.parse(eventStart)-cutoffHours*3600000)throw new Error(`The venue cancellation cutoff is ${cutoffHours} hours before the event. Contact the venue to change this reservation.`)
           const record=reservationChange(head.payload,{action:'cancel',id:bookingId,commandId:`portal-cancel-${randomBytes(12).toString('hex')}`,expectedUpdatedAt:head.payload.updatedAt,reason:'Cancelled by customer'}, {branchId:head.payload.branchId,user,updatedAt:now,timeZone:profile.reportingTimeZone||saved.timeZone||'UTC',layout,tabs,hotelStays,nightlifeEvents})
           const operationId=`customer-hospitality-table-cancel:${bookingId}:${now}`,changed=await entityHeads.updateOne({...filter,operationId:head.operationId},{$set:{payload:record,updatedAt:now,operationId,deviceId:'customer-portal'}});if(!changed.modifiedCount)throw new Error('Venue reservations changed. Refresh and retry.')
           await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:{businessId:claims.businessId,operationId,deviceId:'customer-portal',entityType:'pos_record',entityId:head.entityId,action:'upsert',payload:record,createdAt:now,receivedAt:new Date()}},{upsert:true});return record.entries.find(row=>row.id===bookingId)
         }
-        const filter={businessId:claims.businessId,entityType:'pos_record',entityId:bookingId},head=await entityHeads.findOne(filter);if(!head||!['hotel-stay','nightclub-entry'].includes(head.payload.kind)||head.payload.customerPortalId!==claims.customerId&&head.payload.customerId!==claims.customerId)throw new Error('This booking cannot be cancelled from this account.');if(head.payload.status==='cancelled')return head.payload;if(!['booked','expected'].includes(head.payload.status))throw new Error('This booking cannot be cancelled from this account.')
+        const filter={businessId:claims.businessId,entityType:'pos_record',entityId:bookingId},head=await entityHeads.findOne(filter);if(!head||!['hotel-stay','nightclub-entry','nightclub-inquiry'].includes(head.payload.kind)||head.payload.customerPortalId!==claims.customerId&&head.payload.customerId!==claims.customerId)throw new Error('This booking cannot be cancelled from this account.');if(head.payload.status==='cancelled')return head.payload;if(!['booked','expected','waitlisted','new','contacted','quoted'].includes(head.payload.status))throw new Error('This booking cannot be cancelled from this account.');if(['hotel-stay','nightclub-entry'].includes(head.payload.kind)){const startsAt=head.payload.kind==='hotel-stay'?`${head.payload.checkIn}T12:00:00.000Z`:head.payload.startsAt||String(head.payload.eventId?((await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:head.payload.eventId}))?.payload?.startsAt||''):'');const cutoffHours=Number(head.payload.cancellationHours||0);if(startsAt&&Date.now()>=Date.parse(startsAt)-cutoffHours*3600000)throw new Error(`The cancellation cutoff is ${cutoffHours} hours before arrival. Contact the business to change this booking.`)}
         const jobs=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':bookingId,'payload.status':{$ne:'cancelled'}}).toArray();if(jobs.length)throw new Error('Contact the business to cancel this booking because an invoice has already been issued. Any payment must be reviewed before cancellation.')
         const payload={...head.payload,status:'cancelled',updatedAt:now,expectedUpdatedAt:head.updatedAt,staffId:`customer:${claims.customerId}`};validateHospitalityRecord(payload,head.payload)
         const operationId=`customer-hospitality-cancel:${bookingId}:${now}`,changed=await entityHeads.updateOne({...filter,operationId:head.operationId},{$set:{payload,updatedAt:now,operationId,deviceId:'customer-portal'}});if(!changed.modifiedCount)throw new Error('This booking changed. Refresh and retry.')
@@ -767,6 +893,73 @@ const server = createServer(async (request, response) => {
     if (!claims) return send(response, 401, { error: 'Unauthorized.' })
     const device = isDevice(claims) ? await devices.findOne({ businessId: claims.businessId, deviceId: claims.deviceId }) : null
     if (isDevice(claims) && (!device || device.revokedAt || device.recoveryRetiredAt)) return send(response, 401, { error: 'This device has been revoked.' })
+    if(requestUrl.pathname.startsWith('/v1/business/integrations/')||requestUrl.pathname.startsWith('/v1/business/hospitality/email-activity')){
+      if(!isAccess(claims)||!['owner','admin'].includes(claims.role)||!ObjectId.isValid(claims.sub))return send(response,403,{error:'Business owner or administrator sign-in required.'})
+      const manager=await accounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,role:{$in:['owner','admin']},removedAt:{$exists:false}})
+      if(!manager)return send(response,403,{error:'Your active business account could not be confirmed.'})
+      const ownerOnly=async()=>claims.role==='owner'&&manager.role==='owner'
+      if(requestUrl.pathname==='/v1/business/integrations/paystack'&&request.method==='GET')return send(response,200,{...await tenantIntegrations.publicPaystack(claims.businessId),encryptionConfigured:tenantIntegrations.encryptionReady()})
+      if(requestUrl.pathname==='/v1/business/integrations/paystack'&&['PUT','DELETE'].includes(request.method)){
+        if(!await ownerOnly())return send(response,403,{error:'Only the business owner can connect or remove Paystack.'})
+        const input=await readJson(request,8192);if(!await ownerPasswordIsValid(claims,input.ownerPassword))return send(response,401,{error:'Confirm the owner password to change Paystack connection.'})
+        try{return send(response,200,request.method==='DELETE'?await tenantIntegrations.disconnectPaystack(claims.businessId):await tenantIntegrations.connectPaystack(claims.businessId,input))}catch(error){return send(response,400,{error:error.message||'Could not connect Paystack.'})}
+      }
+      if(requestUrl.pathname==='/v1/business/integrations/hospitality-email'&&request.method==='GET')return send(response,200,{settings:await tenantIntegrations.emailSettings(claims.businessId),provider:hospitalityMailProvider(),configured:hospitalityMailConfigured()})
+      if(requestUrl.pathname==='/v1/business/integrations/hospitality-email'&&request.method==='PUT'){
+        if(!await ownerOnly())return send(response,403,{error:'Only the business owner can change guest email settings.'})
+        const input=await readJson(request,8192);if(!await ownerPasswordIsValid(claims,input.ownerPassword))return send(response,401,{error:'Confirm the owner password to change guest email settings.'})
+        try{return send(response,200,{settings:await tenantIntegrations.saveEmailSettings(claims.businessId,input)})}catch(error){return send(response,400,{error:error.message||'Could not save guest email settings.'})}
+      }
+      if(requestUrl.pathname==='/v1/business/hospitality/email-activity'&&request.method==='GET'){
+        const limit=Math.min(200,Math.max(1,Number(requestUrl.searchParams.get('limit'))||100)),rows=await hospitalityEmailLog.find({businessId:claims.businessId}).sort({createdAt:-1}).limit(limit).toArray()
+        return send(response,200,{messages:rows.map(row=>({bookingId:row.bookingId,messageType:row.messageType,to:row.to||'',subject:row.subject||'',body:row.body||'',replyTo:row.replyTo||'',status:row.status,provider:row.provider||'',createdAt:row.createdAt||row.startedAt||null,acceptedAt:row.acceptedAt||null,deliveredAt:row.deliveredAt||null,openedAt:row.openedAt||null,bouncedAt:row.bouncedAt||null,lastError:row.deliveryError||row.lastError||''}))})
+      }
+      return send(response,404,{error:'Business integration route not found.'})
+    }
+    if (requestUrl.pathname === '/v1/hotel-calendar-sources' && ['GET', 'POST'].includes(request.method)) {
+      if (!isDevice(claims) && !(isAccess(claims) && ['owner', 'admin'].includes(claims.role))) return send(response, 403, { error: 'Sign in with a business account or enrolled business device.' })
+      if (isAccess(claims) && (!ObjectId.isValid(claims.sub) || !await accounts.findOne({ _id: new ObjectId(claims.sub), businessId: claims.businessId, role: { $in: ['owner', 'admin'] }, removedAt: { $exists: false } }))) return send(response, 403, { error: 'An active business owner or administrator must manage booking-channel calendars.' })
+      const profileSettings = await businessSettings.findOne({ businessId: claims.businessId })
+      if (!normalizeShopProfile(profileSettings?.settings?.shopProfile).features?.hotelOperations) return send(response, 403, { error: 'Enable Hotel operations before connecting booking calendars.' })
+      if (request.method === 'GET') {
+        const roomId = String(requestUrl.searchParams.get('roomId') || '')
+        const sources = await hotelCalendarSources.find({ businessId: claims.businessId, roomId }).toArray()
+        return send(response, 200, { sources: sources.map(source => ({ id: source.sourceId, name: source.name, lastSyncedAt: source.lastSyncedAt || null, syncError: source.syncError || '', reservationCount: (source.blocks || []).length, blocks: (source.blocks || []).map(block => ({ id: block.id, checkIn: block.checkIn, checkOut: block.checkOut })) })) })
+      }
+      const input = await readJson(request, 8192)
+      const roomId = String(input.roomId || '').trim()
+      const roomHead = await entityHeads.findOne({ businessId: claims.businessId, entityType: 'pos_record', entityId: roomId, 'payload.kind': 'hotel-room' })
+      if (!roomHead) return send(response, 404, { error: 'Choose a registered hotel room.' })
+      const action = String(input.action || '')
+      if (action === 'connect') {
+        const name = String(input.name || '').trim().slice(0, 80)
+        if (!name) return send(response, 400, { error: 'Enter a channel name such as Airbnb.' })
+        let url
+        try { url = validateHotelCalendarUrl(input.url) } catch (error) { return send(response, 400, { error: error.message }) }
+        const sourceId = randomBytes(16).toString('hex')
+        const source = { businessId: claims.businessId, roomId, branchId: roomHead.payload.branchId, sourceId, name, url, blocks: [], createdAt: new Date(), nextSyncAt: new Date() }
+        await hotelCalendarSources.insertOne(source)
+        try {
+          const refreshed = await refreshHotelCalendarSource(source)
+          return send(response, 201, { source: { id: sourceId, name, lastSyncedAt: refreshed.lastSyncedAt, reservationCount: refreshed.blocks.length, syncError: '' } })
+        } catch (error) {
+          const current = await hotelCalendarSources.findOne({ businessId: claims.businessId, roomId, sourceId })
+          return send(response, 200, { source: { id: sourceId, name, lastSyncedAt: null, reservationCount: 0, syncError: String(error.message || 'Calendar sync failed.').slice(0, 240) } })
+        }
+      }
+      const sourceId = String(input.sourceId || '')
+      const source = await hotelCalendarSources.findOne({ businessId: claims.businessId, roomId, sourceId })
+      if (!source) return send(response, 404, { error: 'That booking-channel calendar is not connected.' })
+      if (action === 'remove') {
+        await hotelCalendarSources.deleteOne({ _id: source._id })
+        return send(response, 200, { removed: true })
+      }
+      if (action === 'refresh') {
+        try { const refreshed = await refreshHotelCalendarSource(source); return send(response, 200, { source: { id: sourceId, name: source.name, lastSyncedAt: refreshed.lastSyncedAt, reservationCount: refreshed.blocks.length, syncError: '' } }) }
+        catch (error) { const current = await hotelCalendarSources.findOne({ _id: source._id }); return send(response, 502, { error: current?.syncError || error.message, source: { id: sourceId, name: source.name, lastSyncedAt: source.lastSyncedAt || null, reservationCount: (source.blocks || []).length, syncError: current?.syncError || error.message } }) }
+      }
+      return send(response, 400, { error: 'Choose connect, refresh, or remove.' })
+    }
     if (request.url === '/v1/business/catalogue-contribution' && request.method === 'GET') {
       const settings = await businessSettings.findOne({ businessId: claims.businessId })
       return send(response, 200, { mode: catalogueContributionMode(settings) })
@@ -803,7 +996,7 @@ const server = createServer(async (request, response) => {
       if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access token required.' })
       const input = await readJson(request)
       const name = String(input.name || '').trim(); const email = String(input.email || '').trim().toLowerCase(); const staffUsername = username(input.username); const password = String(input.password || ''); const role = String(input.role || '')
-      if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 4 || password.length > 256 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“32 character username, and a password of 4–256 characters.' })
+      if (!name || (email && !/^\S+@\S+\.\S+$/.test(email)) || !validUsername(staffUsername) || password.length < 4 || password.length > 256 || !['admin', 'cashier'].includes(role)) return send(response, 400, { error: 'Provide valid staff details, a 3–32 character username, and a password of 4–256 characters.' })
       const savedSettings = await businessSettings.findOne({ businessId: claims.businessId }, { projection: { 'settings.shopProfile': 1 } })
       const permissions = role === 'cashier' ? defaultCashierPermissions(normalizeShopProfile(savedSettings?.settings?.shopProfile)) : {}
       const staff = { businessId: claims.businessId, name, ...(email ? { email } : {}), username: staffUsername, role, permissions, operationalAccess:Object.values(permissions).some(Boolean), passwordHash: hashPassword(password), createdAt: new Date() }
@@ -973,15 +1166,24 @@ const server = createServer(async (request, response) => {
             continue
           }
         }
-        if(document.entityType==='pos_record'&&['hotel-room','hotel-stay','nightclub-event','nightclub-entry'].includes(document.payload.kind)) {
+        if(document.entityType==='pos_record'&&['hotel-room','hotel-stay','nightclub-event','nightclub-entry','nightclub-inquiry'].includes(document.payload.kind)) {
           try {
             if(document.action!=='upsert'||document.entityId!==document.payload.id)throw new Error('Invalid hospitality operation.')
             const current=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.entityId})
             if(current?.operationId!==document.operationId&&(document.payload.expectedUpdatedAt||'')!==(current?.payload.updatedAt||''))throw new Error('This record changed on another device. Refresh and review before continuing.')
             validateHospitalityRecord(document.payload,current?.payload)
+            if(document.payload.kind==='hotel-stay'&&document.payload.status==='no-show'&&(!current||current.payload.status!=='booked'||document.payload.checkIn>new Date().toISOString().slice(0,10)))throw new Error('Mark a booked stay as no-show on or after its check-in date.')
+            if(document.payload.kind==='nightclub-entry'&&document.payload.status==='no-show'){
+              const event=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.eventId})
+              if(!current||current.payload.status!=='expected'||!event||Date.parse(event.payload.startsAt)>Date.now())throw new Error('Mark an expected guest as no-show after the event starts.')
+            }
+            if(document.payload.kind==='nightclub-inquiry'&&current){const activeQuotes=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':document.entityId,'payload.status':{$ne:'cancelled'}}).toArray();if(activeQuotes.length&&(document.payload.quotedTotal!==current.payload.quotedTotal||document.payload.proposal!==current.payload.proposal||['declined','cancelled'].includes(document.payload.status)))throw new Error('Cancel the linked estimate or invoice before changing this proposal or closing its inquiry.')}
             if(document.payload.kind==='hotel-room') {
+              if(document.payload.housekeepingStatus==='ready'&&(document.payload.housekeepingChecklist||[]).some(task=>!task.completed))throw new Error('Complete every room checklist task before marking this room ready.')
               const rooms=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'hotel-room','payload.branchId':document.payload.branchId,entityId:{$ne:document.entityId}}).toArray()
               if(rooms.some(row=>row.payload.roomName.toLocaleLowerCase()===document.payload.roomName.toLocaleLowerCase()))throw new Error('A room with this name already exists in the register.')
+              const activeStays=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'hotel-stay','payload.branchId':document.payload.branchId,'payload.roomId':document.entityId,'payload.status':{$in:['booked','checked-in']}}).toArray()
+              if(activeStays.some(stay=>Number(stay.payload.guestCount||1)>Number(document.payload.maxGuests||2)))throw new Error('The room guest limit is below an active booking.')
               if(document.payload.status!=='active') {
                 const stays=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'hotel-stay','payload.branchId':document.payload.branchId,'payload.status':{$in:['booked','checked-in']}}).toArray()
                 if(stays.some(row=>(row.payload.roomId?row.payload.roomId===document.entityId:row.payload.roomName.toLocaleLowerCase()===document.payload.roomName.toLocaleLowerCase())&&row.payload.checkOut>new Date().toISOString().slice(0,10)))throw new Error('This room has an active or upcoming stay.')
@@ -990,13 +1192,19 @@ const server = createServer(async (request, response) => {
             if(document.payload.kind==='hotel-stay'&&document.payload.status==='booked') {
               if(document.payload.roomId) {
                 const room=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.roomId})
-                if(!room||room.payload.kind!=='hotel-room'||room.payload.branchId!==document.payload.branchId||room.payload.roomName!==document.payload.roomName||Math.round(room.payload.nightlyRate*100)!==Math.round(document.payload.nightlyRate*100)||!current&&room.payload.status!=='active')throw new Error('Choose an active registered room with the saved nightly rate.')
+                if(!room||room.payload.kind!=='hotel-room'||room.payload.branchId!==document.payload.branchId||room.payload.roomName!==document.payload.roomName||Math.round(room.payload.nightlyRate*100)!==Math.round(document.payload.nightlyRate*100)||Number(document.payload.guestCount||1)>Number(room.payload.maxGuests||20)||!current&&room.payload.status!=='active')throw new Error('Choose an active registered room with the saved nightly rate and occupancy.')
+                if(!current&&document.payload.rateBreakdown&&JSON.stringify(hotelRateBreakdown(room.payload,document.payload.checkIn,document.payload.checkOut))!==JSON.stringify(document.payload.rateBreakdown))throw new Error('The saved hotel quote does not match the room rates for these dates. Refresh availability and create a new booking.')
               } else {
                 const rooms=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'hotel-room','payload.branchId':document.payload.branchId}).toArray()
                 if(rooms.length)throw new Error('Choose a room from the room register.')
               }
               const stays=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'hotel-stay','payload.branchId':document.payload.branchId,'payload.status':{$in:['booked','checked-in']},entityId:{$ne:document.entityId}}).toArray()
               if(stays.some(row=>(row.payload.roomId&&document.payload.roomId?row.payload.roomId===document.payload.roomId:row.payload.roomName.toLocaleLowerCase()===document.payload.roomName.toLocaleLowerCase())&&document.payload.checkIn<row.payload.checkOut&&document.payload.checkOut>row.payload.checkIn))throw new Error('That room already has an overlapping booking.')
+              if(!current&&(await hotelCalendarBlocks(businessId,document.payload.roomId)).some(stay=>document.payload.checkIn<stay.checkOut&&document.payload.checkOut>stay.checkIn))throw new Error('That room has a reservation from a connected booking channel for those dates.')
+            }
+            if(document.payload.kind==='hotel-stay'&&document.payload.status==='checked-in'&&current?.payload.status!=='checked-in') {
+              const room=document.payload.roomId?await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.roomId}):await entityHeads.findOne({businessId,entityType:'pos_record','payload.kind':'hotel-room','payload.branchId':document.payload.branchId,'payload.roomName':document.payload.roomName})
+              if(room&&(room.payload.kind!=='hotel-room'||room.payload.status!=='active'||(room.payload.housekeepingStatus||'ready')!=='ready'))throw new Error('The assigned room must be active and housekeeping must mark it ready before check-in.')
             }
             if(document.payload.kind==='hotel-stay'&&document.payload.status==='checked-out') {
               const linked=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':document.entityId}).toArray()
@@ -1012,8 +1220,9 @@ const server = createServer(async (request, response) => {
               if(!event||event.payload.kind!=='nightclub-event'||event.payload.branchId!==document.payload.branchId||!['scheduled','closed'].includes(event.payload.status))throw new Error('Choose an event that is still open for guest check-in.')
               if(document.payload.status==='checked-in'&&!['scheduled','closed'].includes(event.payload.status))throw new Error('This event is cancelled or unavailable.')
               if(document.payload.status==='expected'&&event.payload.capacity) {
-                const entries=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'nightclub-entry','payload.eventId':event.entityId,'payload.status':{$ne:'cancelled'},entityId:{$ne:document.entityId}}).toArray()
-                if(entries.length>=event.payload.capacity)throw new Error('This event has reached its guest capacity.')
+                const entries=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'nightclub-entry','payload.eventId':event.entityId,'payload.status':{$in:['expected','checked-in']},entityId:{$ne:document.entityId}}).toArray()
+                const books=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'restaurant-reservations','payload.branchId':event.payload.branchId}).toArray(),reserved=books.flatMap(book=>book.payload.entries||[]).filter(entry=>entry.nightlifeEventId===event.entityId&&['confirmed','arrived','seated'].includes(entry.status)).reduce((sum,entry)=>sum+Number(entry.guests||0),0)
+                if(entries.length+reserved>=event.payload.capacity)throw new Error('This event has reached its guest capacity.')
               }
             }
           } catch(error) { conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload});continue }
@@ -1042,7 +1251,7 @@ const server = createServer(async (request, response) => {
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
           if(document.entityType==='customer' && current?.payload && document.payload.birthday===undefined)document.payload={...document.payload,birthday:current.payload.birthday||'',birthdayReminders:current.payload.birthdayReminders||false}
-          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || ['hotel-room','hotel-stay','nightclub-event','nightclub-entry'].includes(document.payload.kind) || document.payload.kind==='register' || document.payload.kind==='product' && Boolean(document.payload.oilPricing) || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
+          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || ['hotel-room','hotel-stay','nightclub-event','nightclub-entry','nightclub-inquiry'].includes(document.payload.kind) || document.payload.kind==='register' || document.payload.kind==='product' && Boolean(document.payload.oilPricing) || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
             if(JSON.stringify(current.payload)!==JSON.stringify(document.payload)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This operation ID already has different details.'});continue}
             // Recover a response/database interruption between storing the
             // accepted head and appending its downloadable operation.

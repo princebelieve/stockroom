@@ -31,7 +31,7 @@ export async function applyPosRecord(db, scope, record, organizationId) {
   if(record.kind==='service-job') await applyServiceJob(db,scope,record,organizationId)
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
   if(record.kind?.startsWith('church-'))validateChurchRecord(record,undefined,true)
-  if(['hotel-room','hotel-stay','nightclub-event','nightclub-entry'].includes(record.kind))validateHospitalityRecord(record,found?JSON.parse(found.payload):undefined)
+  if(['hotel-room','hotel-stay','nightclub-event','nightclub-entry','nightclub-inquiry'].includes(record.kind))validateHospitalityRecord(record,found?JSON.parse(found.payload):undefined)
   if(record.kind==='restaurant-reservations')validateReservationBook(record,undefined,true)
   if(record.kind==='restaurant-reservation-archive')validateReservationArchive(record,undefined,found?JSON.parse(found.payload):undefined)
   if(isStockWork(record)){validateStockWork(record,found?JSON.parse(found.payload):undefined);await applyStockWork(db,record,organizationId)}
