@@ -9,6 +9,8 @@ import { stockSchema } from '../server/stock-ledger.mjs'
 function fixture() {
  const sql=new DatabaseSync(':memory:')
  sql.exec(vm.runInNewContext(readFileSync('src/lib/browserSchema.ts','utf8').split('export const browserSchema = ')[1].trim()))
+ if(!sql.prepare('PRAGMA table_info(users)').all().some(row=>row.name==='permissions'))sql.exec('ALTER TABLE users ADD COLUMN permissions TEXT')
+ if(!sql.prepare('PRAGMA table_info(users)').all().some(row=>row.name==='operational_access'))sql.exec('ALTER TABLE users ADD COLUMN operational_access INTEGER NOT NULL DEFAULT 0')
  sql.exec("INSERT INTO app_settings(id,app_name,currency,updated_at) VALUES(1,'Print Shop','USD','2026-01-01');")
  const db={query:(s,p=[])=>({values:sql.prepare(s).all(...p)}),run:(s,p=[])=>sql.prepare(s).run(...p),beginTransaction:()=>sql.exec('BEGIN'),commitTransaction:()=>sql.exec('COMMIT'),rollbackTransaction:()=>sql.exec('ROLLBACK')}
  let fail=false;const published=[]

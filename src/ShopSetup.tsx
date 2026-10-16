@@ -2,6 +2,7 @@ import { ScreenPicker } from './EmptyScreen'
 import { WorkspaceHelp } from './WorkspaceHelp'
 import { TimeZoneSelect } from './TimeZoneSelect'
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { AsyncForm, SubmitButton, AsyncButton } from './AsyncControls'
 import { businessModes, businessWorkspace, catalogueWorkspaces, workspaceCatalogueSettings, normalizeShopProfile, validateShopProfile, type ShopProfile, type BusinessMode, type CatalogueWorkspace } from '../server/shop-profile.mjs'
 import { validateFields, type ShopField } from '../server/shop-fields.mjs'
@@ -9,7 +10,7 @@ import { ShopProductFields } from './ShopProductFields'
 import { BlankProductForm } from './BlankProductForm'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
-export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, subscriptionAccess, refreshSubscriptionAccess, onSubscriptionRequired }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; subscriptionAccess: SubscriptionAccess; refreshSubscriptionAccess: () => Promise<SubscriptionAccess>; onSubscriptionRequired: () => void }) {
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, refreshSubscriptionAccess, onSubscriptionRequired, onReturnOverview }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; refreshSubscriptionAccess: () => Promise<SubscriptionAccess>; onSubscriptionRequired: () => void; onReturnOverview: () => void }) {
   const [view,setView]=useState('type')
   const [draft, setDraft] = useState(value)
   const [step, setStep] = useState(0)
@@ -17,6 +18,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   const [message, setMessage] = useState('')
   const [problem, setProblem] = useState('')
   const [subscriptionPrompt, setSubscriptionPrompt] = useState(false)
+  const [showWorkspaceSubscriptionDialog, setShowWorkspaceSubscriptionDialog] = useState(false)
   const [catalogueWorkspace, setCatalogueWorkspace] = useState<CatalogueWorkspace>('product-sales')
   const [newCategory, setNewCategory] = useState('')
   const [newUnit, setNewUnit] = useState('')
@@ -63,16 +65,6 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     const current = businessWorkspace(draft)
     const hotelOperations = key === 'hotelOperations' ? enabled : current.hotelOperations
     const nightlifeOperations = key === 'nightlifeOperations' ? enabled : current.nightlifeOperations
-    const unrestricted = subscriptionAccess.testMode === true || subscriptionAccess.status === 'test'
-    if (enabled && !current.hospitalityOperations) {
-      const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant].filter(Boolean).length
-      const entitlement = subscriptionAccess.entitledWorkspaces ?? subscriptionAccess.workspacePricing?.count ?? 0
-      if (!unrestricted && (subscriptionAccess.blocked || paidCount >= entitlement)) {
-        setProblem(`Please subscribe to a plan to enable Hospitality operations.`)
-        setSubscriptionPrompt(true)
-        return
-      }
-    }
     if (!hotelOperations && !nightlifeOperations && !current.productSales && !current.oil && !current.payments && !current.fastFood && !current.restaurant) {
       setProblem('Keep at least one workspace enabled.')
       return
@@ -81,19 +73,6 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   }
   function setWorkspaceEnabled(key: 'productSales'|'oilSales'|'payments'|'fastFood'|'restaurant', enabled: boolean) {
     const current = businessWorkspace(draft)
-    const workspaceLabels = { productSales: 'Product sales', oilSales: 'Oil sales', payments: 'Payments & receipts', fastFood: 'Order counter', restaurant: 'Tables & tabs' }
-    const unrestricted = subscriptionAccess.testMode === true || subscriptionAccess.status === 'test'
-    if (enabled && key !== 'payments') {
-      const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant, current.hospitalityOperations].filter(Boolean).length
-      const entitlement = subscriptionAccess.entitledWorkspaces ?? subscriptionAccess.workspacePricing?.count ?? 0
-      if (!unrestricted && (subscriptionAccess.blocked || paidCount >= entitlement)) {
-        setProblem(subscriptionAccess.blocked
-          ? `Your current subscription does not cover this workspace selection. Keep to your subscribed workspaces, or view plans to add ${workspaceLabels[key]}.`
-          : `Your plan covers ${entitlement} selling workspace${entitlement === 1 ? '' : 's'}. Keep to your subscribed workspaces, or view plans to add ${workspaceLabels[key]}.`)
-        setSubscriptionPrompt(true)
-        return
-      }
-    }
     const next = { productSales: current.productSales, oilSales: current.oil, payments: current.payments, fastFood: current.fastFood, restaurant: current.restaurant, [key]: enabled }
     if (!next.productSales && !next.oilSales && !next.payments && !next.fastFood && !next.restaurant && !current.hospitalityOperations) {
       setProblem('Keep at least one workspace enabled.')
@@ -105,12 +84,25 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   async function saveWorkspaces() {
     const next = businessWorkspace(draft)
     const count = [next.productSales, next.oil, next.fastFood, next.restaurant, next.hospitalityOperations].filter(Boolean).length
-    const currentAccess = await refreshSubscriptionAccess()
+    let currentAccess: SubscriptionAccess
+    try { currentAccess = await refreshSubscriptionAccess() }
+    catch (error) {
+      setProblem(error instanceof Error ? `Could not verify the subscription. Connect to the internet and try again. ${error.message}` : 'Could not verify the subscription. Connect to the internet and try again.')
+      setSubscriptionPrompt(false)
+      return
+    }
     const unrestricted = currentAccess.testMode === true || currentAccess.status === 'test'
     const entitlement = currentAccess.entitledWorkspaces ?? currentAccess.workspacePricing?.count ?? 0
     if (!unrestricted && count > entitlement) {
-      setProblem(`This selection has ${count} selling workspaces, but your plan covers ${entitlement}. Keep only Payments & receipts or the workspaces included in your plan, or view plans to add the extra workspace${count - entitlement === 1 ? '' : 's'}.`)
+      const additional = count - entitlement
+      const enabledNames = [
+        ...(next.productSales ? ['Product sales'] : []), ...(next.oil ? ['Oil sales'] : []),
+        ...(next.fastFood ? ['Order counter'] : []), ...(next.restaurant ? ['Tables & tabs'] : []),
+        ...(next.hospitalityOperations ? ['Hospitality operations'] : []),
+      ]
+      setProblem(`Your plan includes ${entitlement} selling workspace${entitlement === 1 ? '' : 's'}, but this selection has ${count}: ${enabledNames.join(', ')}. Add ${additional} workspace${additional === 1 ? '' : 's'} to your subscription, or return to Overview with your currently available workspaces.`)
       setSubscriptionPrompt(true)
+      setShowWorkspaceSubscriptionDialog(true)
       return
     }
     try {
@@ -136,11 +128,9 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).payments} onChange={event=>setWorkspaceEnabled('payments',event.target.checked)}/><span><strong>Payments &amp; receipts</strong><small>Record service payments without changing stock.</small></span></label>
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).fastFood} onChange={event=>setWorkspaceEnabled('fastFood',event.target.checked)}/><span><strong>Order counter</strong><small>Take menu orders for a counter, cafe or takeaway.</small></span></label>
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).restaurant} onChange={event=>setWorkspaceEnabled('restaurant',event.target.checked)}/><span><strong>Tables &amp; tabs</strong><small>Manage table orders and customer tabs.</small></span></label>
-    <div className="settings-workspace-option"><span><strong>Hospitality operations</strong><small>Enable the hotel and/or nightlife tools this business needs. This group uses one workspace entitlement.</small></span><div>
-      <label><input type="checkbox" checked={businessWorkspace(draft).hotelOperations} onChange={event=>setHospitalityModuleEnabled('hotelOperations',event.target.checked)}/> Hotel operations</label>
-      <label><input type="checkbox" checked={businessWorkspace(draft).nightlifeOperations} onChange={event=>setHospitalityModuleEnabled('nightlifeOperations',event.target.checked)}/> Nightlife operations</label>
-    </div></div>
-    <AsyncButton className="primary-button" busyLabel="Saving workspaces..." onClick={saveWorkspaces}>Save workspaces</AsyncButton>
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).hotelOperations} onChange={event=>setHospitalityModuleEnabled('hotelOperations',event.target.checked)}/><span><strong>Hotel operations</strong><small>Manage rooms, stays and guest charges.</small></span></label>
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).nightlifeOperations} onChange={event=>setHospitalityModuleEnabled('nightlifeOperations',event.target.checked)}/><span><strong>Nightlife operations</strong><small>Manage events, admissions and venue service.</small></span></label>
+    <AsyncButton className="primary-button" busyLabel="Saving workspaces..." disabled={!dirty} onClick={saveWorkspaces}>Save workspaces</AsyncButton>
     </section><section hidden={view!=='timezone'}><h2>Reporting timezone</h2><p>Used to group sales and reports by business day.</p>
     <TimeZoneSelect value={draft.reportingTimeZone || 'UTC'} onChange={reportingTimeZone => change({ ...draft, reportingTimeZone })} />
     <AsyncButton className="primary-button" busyLabel="Saving timezone..." onClick={async () => { const reportingTimeZone = validateShopProfile({ ...value, reportingTimeZone: draft.reportingTimeZone }).reportingTimeZone; const otherChanges = JSON.stringify({ ...draft, reportingTimeZone: value.reportingTimeZone }) !== JSON.stringify(value); await save({ ...value, reportingTimeZone }); setDraft(current => ({ ...current, reportingTimeZone })); setDirty(otherChanges); setMessage('Reporting timezone saved.') }}>Save reporting timezone</AsyncButton>
@@ -205,6 +195,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     </div>}
     <div className="shop-steps">{step > 0 && <button type="button" className="filter-button" onClick={() => go(step - 1)}>Back</button>}{step < 2 && <button type="button" className="primary-button" onClick={() => go(step + 1)}>Continue</button>}</div>
     </>}
-    </section>{problem && <p role="alert">{problem} {subscriptionPrompt && <button type="button" className="text-button" onClick={onSubscriptionRequired}>View plans</button>}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted" role="status">Unsaved changes.</p>}
+    </section>{problem && !showWorkspaceSubscriptionDialog && <p role="alert">{problem} {subscriptionPrompt && <button type="button" className="text-button" onClick={onSubscriptionRequired}>View plans</button>}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted" role="status">Unsaved changes.</p>}
+    {showWorkspaceSubscriptionDialog && <div className="modal-backdrop workspace-subscription-backdrop"><section className="modal workspace-subscription-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-subscription-title"><div className="modal-head"><h2 id="workspace-subscription-title">Workspace subscription limit</h2><button type="button" className="icon-button" aria-label="Cancel" title="Cancel" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);setProblem('');setSubscriptionPrompt(false)}}><X size={19}/></button></div><p>{problem}</p><div className="workspace-subscription-actions"><button type="button" className="filter-button" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);setProblem('');setDirty(false);setDraft(value);onReturnOverview()}}>Return to Overview</button><button type="button" className="primary-button" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);onSubscriptionRequired()}}>Add to subscription</button></div></section></div>}
   </section>
 }

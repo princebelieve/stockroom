@@ -1,10 +1,10 @@
 export const staffCapabilities = {
- productSales:'Product sales', oilSales:'Oil sales', payments:'Payments & receipts', counter:'Order counter', restaurant:'Tables & tabs', hospitality:'Hotel stays and nightlife events', register:'Cash register', customers:'Customer accounts', inventory:'Inventory and product changes', purchasing:'Purchasing and suppliers', stocktake:'Stock counts', movements:'Stock movements', sales:'Sales history', refunds:'Refunds and returns', serviceJobs:'Jobs and invoices', production:'Preparation and production', church:'Church collections', reports:'Reports and profit', activity:'Staff activity', configuration:'Workspace and device configuration'
+ productSales:'Product sales', oilSales:'Oil sales', payments:'Payments & receipts', counter:'Order counter', restaurant:'Tables & tabs', hotelOperations:'Hotel operations', nightlifeOperations:'Nightlife operations', register:'Cash register', customers:'Customer accounts', inventory:'Inventory and product changes', purchasing:'Purchasing and suppliers', stocktake:'Stock counts', movements:'Stock movements', sales:'Sales history', refunds:'Refunds and returns', serviceJobs:'Jobs and invoices', production:'Preparation and production', church:'Church collections', reports:'Reports and profit', activity:'Staff activity', configuration:'Workspace and device configuration'
 }
-export function parsePermissions(value) { if(value==null||value==='null'||value==='')return null; const input=typeof value==='string'?JSON.parse(value):value; if(!input||Array.isArray(input)||typeof input!=='object')throw new Error('Choose staff access using the checkboxes.'); const result={};for(const key of Object.keys(input)){if(!Object.hasOwn(staffCapabilities,key)||typeof input[key]!=='boolean')throw new Error('Invalid staff permission.');result[key]=input[key]}return result }
+export function parsePermissions(value) { if(value==null||value==='null'||value==='')return null; const input=typeof value==='string'?JSON.parse(value):value; if(!input||Array.isArray(input)||typeof input!=='object')throw new Error('Choose staff access using the checkboxes.'); const result={};for(const key of Object.keys(input)){if(!Object.hasOwn(staffCapabilities,key)&&key!=='hospitality'||typeof input[key]!=='boolean')throw new Error('Invalid staff permission.');if(key!=='hospitality')result[key]=input[key]}if(typeof input.hospitality==='boolean'){if(result.hotelOperations===undefined)result.hotelOperations=input.hospitality;if(result.nightlifeOperations===undefined)result.nightlifeOperations=input.hospitality}return result }
 export function effectivePermissions(user) {
  const explicit=parsePermissions(user?.permissions);if(explicit)return explicit
- const all=user?.role==='owner'||user?.role==='admin'; const operational=all||user?.operationalAccess; const selling=['productSales','oilSales','payments','counter','restaurant','register'];return Object.fromEntries(Object.keys(staffCapabilities).map(key=>[key,Boolean(all||selling.includes(key)||(operational&&!['reports','activity','configuration'].includes(key)))]))
+ const all=user?.role==='owner'||user?.role==='admin'; const operational=all||user?.operationalAccess; const selling=['productSales','oilSales','payments','counter','restaurant','hotelOperations','nightlifeOperations','register'];return Object.fromEntries(Object.keys(staffCapabilities).map(key=>[key,Boolean(all||selling.includes(key)||(operational&&!['reports','activity','configuration'].includes(key)))]))
 }
 export function hasPermission(user,key){return Boolean(user&&(user.role==='owner'||effectivePermissions(user)[key]))}
 export function ownStaffActivity(activity,staffId){return {...activity,staff:activity.staff.filter(row=>row.staffId===staffId),events:activity.events.filter(row=>row.staffId===staffId)}}
@@ -54,6 +54,7 @@ export function canRequest(user,path,method='GET',input={}){
  if(!user)return false;if(user.role==='owner')return true
  const key=routePermission(path,method,input);if(key==='owner')return false
  if(!parsePermissions(user.permissions))return true
+ if(key==='hospitality')return hasPermission(user,'hotelOperations')||hasPermission(user,'nightlifeOperations')
  if(key==='retailSelling')return hasPermission(user,'productSales')||hasPermission(user,'oilSales')
  if(key==='posRead')return Object.values(effectivePermissions(user)).some(Boolean)
  if(key==='checkoutRead')return ['productSales','oilSales','payments','counter','restaurant','serviceJobs','sales','refunds'].some(key=>hasPermission(user,key))
@@ -67,7 +68,8 @@ export function operationPermission(operation){
  if(operation.entityType==='sale')return routePermission('/api/sales','POST',p)
  if(operation.entityType==='pos_record'){
   if(kind==='service-job')return 'serviceJobs'
-  if(['hotel-room','hotel-stay','nightclub-event','nightclub-entry'].includes(kind))return 'hospitality'
+  if(['hotel-room','hotel-stay'].includes(kind))return 'hotelOperations'
+  if(['nightclub-event','nightclub-entry'].includes(kind))return 'nightlifeOperations'
   if(kind==='return')return 'refunds'
   if(kind==='register')return 'register'
   if(kind==='product')return 'inventory'

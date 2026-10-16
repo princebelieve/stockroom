@@ -7,8 +7,8 @@ import { validateReservationBook, validateReservationArchive, checkReservationOp
 
 function fixture(timeZone='UTC') {
   const sql=new DatabaseSync(':memory:')
-  sql.exec("CREATE TABLE app_settings(id INTEGER PRIMARY KEY,shop_profile TEXT,app_name TEXT,currency TEXT);CREATE TABLE customers(id TEXT,name TEXT,phone TEXT,balance REAL);CREATE TABLE users(id TEXT,organization_id TEXT,name TEXT);CREATE TABLE branches(id TEXT,assigned_user_ids TEXT);")
-  sql.prepare('INSERT INTO users VALUES(?,?,?)').run('owner','business','Owner');sql.prepare('INSERT INTO users VALUES(?,?,?)').run('cleaner','business','Cleaner');sql.prepare('INSERT INTO branches VALUES(?,?)').run('main','[]')
+  sql.exec("CREATE TABLE app_settings(id INTEGER PRIMARY KEY,shop_profile TEXT,app_name TEXT,currency TEXT);CREATE TABLE customers(id TEXT,name TEXT,phone TEXT,balance REAL);CREATE TABLE users(id TEXT,organization_id TEXT,name TEXT,role TEXT,permissions TEXT,operational_access INTEGER);CREATE TABLE staff_removals(id TEXT PRIMARY KEY,removed_at TEXT NOT NULL);CREATE TABLE branches(id TEXT,assigned_user_ids TEXT);")
+  sql.prepare('INSERT INTO users VALUES(?,?,?,?,?,?)').run('owner','business','Owner','owner',null,1);sql.prepare('INSERT INTO users VALUES(?,?,?,?,?,?)').run('cleaner','business','Cleaner','cashier',JSON.stringify({hotelOperations:true}),1);sql.prepare('INSERT INTO branches VALUES(?,?)').run('main','[]')
   sql.prepare('INSERT INTO app_settings VALUES(1,?,?,?)').run(JSON.stringify({restaurant:true,reportingTimeZone:timeZone,features:{hospitalityOperations:true}}),'Cafe','USD')
   const db={query:(s,p=[])=>({values:sql.prepare(s).all(...p)}),run:(s,p=[])=>sql.prepare(s).run(...p),beginTransaction:()=>sql.exec('BEGIN'),commitTransaction:()=>sql.exec('COMMIT'),rollbackTransaction:()=>sql.exec('ROLLBACK')}
   const published=[]

@@ -655,6 +655,12 @@ body { background: var(--brand-wash,#dfece5); }
 .settings-workspace-option input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent, #1760bd); }
 .settings-workspace-option span { display: grid; gap: 3px; }
 .settings-workspace-option small { color: var(--muted); line-height: 1.45; }
+.workspace-subscription-backdrop { z-index: 300; }
+.workspace-subscription-dialog { display: grid; gap: 18px; }
+.workspace-subscription-dialog .modal-head { align-items: center; }
+.workspace-subscription-dialog > p { margin: 0; line-height: 1.55; }
+.workspace-subscription-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.workspace-subscription-actions button { min-height: 44px; min-width: 0; flex: 1 1 0; white-space: normal; }
 .settings-workspace-fixed { background: var(--soft, #f4f7fa); cursor: default; }
 .product-intake { margin-top: 14px; }
 .shop-wizard { max-width: 1000px; }

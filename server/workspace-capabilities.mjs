@@ -9,7 +9,7 @@ export function workspaceCapabilities(profile) {
     purchasing:w.stock || w.payments, stocktake:w.stock, movements:w.stock,
     serviceJobs:w.payments, production:w.fastFood || w.restaurant || w.payments,
     church:w.payments && p.industry === 'services',
-    hospitality:w.hospitalityOperations,
+    hotelOperations:w.hotelOperations, nightlifeOperations:w.nightlifeOperations,
   }
   const labels = { ...staffCapabilities }
   if (!w.stock && w.payments) {
@@ -22,7 +22,7 @@ export function workspaceCapabilities(profile) {
 
 export function defaultCashierPermissions(profile) {
   const available = workspaceCapabilities(profile)
-  const selling = new Set(['productSales', 'oilSales', 'payments', 'counter', 'restaurant', 'hospitality'])
+  const selling = new Set(['productSales', 'oilSales', 'payments', 'counter', 'restaurant', 'hotelOperations', 'nightlifeOperations'])
   return Object.fromEntries(Object.keys(available).map(key => [key, key === 'register' || key === 'sales' || key === 'activity' || selling.has(key)]))
 }
 

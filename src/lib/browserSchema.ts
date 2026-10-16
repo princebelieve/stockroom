@@ -45,6 +45,10 @@ export const browserSchema = `
       operational_access INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS staff_removals (
+      id TEXT PRIMARY KEY,
+      removed_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS app_settings (
       payment_policy TEXT NOT NULL DEFAULT '{}',
       id INTEGER PRIMARY KEY CHECK(id = 1),

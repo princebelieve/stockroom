@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { canRequest,hasPermission,parsePermissions,staffCapabilities } from '../server/staff-permissions.mjs'
 import { catalogueStarters,missingStarters } from '../server/catalogue-starters.mjs'
+import { workspaceCapabilities,defaultCashierPermissions } from '../server/workspace-capabilities.mjs'
 import { businessModes } from '../server/shop-profile.mjs'
 test('individual permissions deny other workspaces and owner-only actions, including restricted admins',()=>{
  for(const role of ['cashier','admin']){
@@ -20,7 +21,20 @@ test('individual permissions deny other workspaces and owner-only actions, inclu
  assert.equal(canRequest({role:'cashier',permissions:{counter:true}},'/api/pos/counter/status','POST',{status:'ready',deliveryAction:'dispatch'}),true)
  assert.equal(canRequest({role:'cashier',permissions:{production:true}},'/api/pos/counter/status','POST',{status:'ready',deliveryAction:'dispatch'}),false)
  assert.equal(canRequest({role:'cashier',permissions:{}},'/api/integrations/support/requests','POST'),true)
- assert.equal(Object.keys(staffCapabilities).length,20)
+ assert.equal(Object.keys(staffCapabilities).length,21)
+})
+test('hotel and nightlife staff access are separate and migrate old hospitality grants safely',()=>{
+ const legacy=parsePermissions({hospitality:true,restaurant:true})
+ assert.deepEqual({hotelOperations:legacy.hotelOperations,nightlifeOperations:legacy.nightlifeOperations},{hotelOperations:true,nightlifeOperations:true})
+ const hotelOnly={role:'cashier',permissions:{hotelOperations:true}}
+ assert.equal(hasPermission(hotelOnly,'hotelOperations'),true)
+ assert.equal(hasPermission(hotelOnly,'nightlifeOperations'),false)
+ assert.equal(canRequest(hotelOnly,'/api/pos/hospitality','GET'),true)
+ const profile={features:{hotelOperations:true,nightlifeOperations:false}}
+ assert.ok(Object.hasOwn(workspaceCapabilities(profile),'hotelOperations'))
+ assert.equal(Object.hasOwn(workspaceCapabilities(profile),'nightlifeOperations'),false)
+ const defaults=defaultCashierPermissions({features:{hotelOperations:true,nightlifeOperations:false}})
+ assert.equal(defaults.hotelOperations,true);assert.equal(defaults.nightlifeOperations,undefined)
 })
 test('catalogue starters cover every stock industry and never replace saved names',()=>{
  for(const industry of Object.keys(businessModes))assert.ok(catalogueStarters('stock',industry).length,industry)
