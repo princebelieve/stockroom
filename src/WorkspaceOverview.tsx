@@ -5,7 +5,7 @@ import { restaurantBillLines } from '../server/restaurant-payments.mjs'
 import { ScreenPicker } from './EmptyScreen'
 import type { Sale } from './types'
 
-type Workspace = { stock:boolean; productSales?:boolean; oil?:boolean; payments:boolean; fastFood:boolean; restaurant:boolean; hospitalityOperations?:boolean }
+type Workspace = { stock:boolean; productSales?:boolean; oil?:boolean; payments:boolean; fastFood:boolean; restaurant:boolean; hospitalityOperations?:boolean; hotelOperations?:boolean; nightlifeOperations?:boolean }
 type SellingScreen = 'Oil' | 'POS' | 'Payments' | 'Counter' | 'Restaurant' | 'Hospitality'
 export function WorkspaceOverview({workspace,headers,receipts,money,open,configure,openRecords,openCustomers,openExpenses,scanProducts,readProductList,hasProducts=true,timeZone='UTC',subscriptionExpired=false,onSubscriptionRequired,businessPerformance}:{configure?:(tab:'food'|'restaurant'|'products'|'starters'|'import'|'handwritten')=>void;openRecords?:()=>void;openCustomers?:()=>void;openExpenses?:()=>void;scanProducts?:()=>void;readProductList?:()=>void;hasProducts?:boolean;timeZone?:string;workspace:Workspace;headers:Record<string,string>;receipts:Sale[];money:(n:number)=>string;open:(screen:SellingScreen)=>void;subscriptionExpired?:boolean;onSubscriptionRequired?:()=>void;businessPerformance?:ReactNode}) {
   const choices:{id:SellingScreen;label:string;action:string}[] = [
@@ -14,7 +14,7 @@ export function WorkspaceOverview({workspace,headers,receipts,money,open,configu
     ...(workspace.payments?[{id:'Payments' as const,label:'Payments & receipts',action:'Record payment'}]:[]),
     ...(workspace.fastFood?[{id:'Counter' as const,label:'Order counter',action:'New order'}]:[]),
     ...(workspace.restaurant?[{id:'Restaurant' as const,label:'Tables & tabs',action:'Open tables & tabs'}]:[]),
-    ...(workspace.hospitalityOperations?[{id:'Hospitality' as const,label:'Hotel & nightlife',action:'Open hotel & nightlife'}]:[]),
+    ...(workspace.hospitalityOperations?[{id:'Hospitality' as const,label:workspace.hotelOperations&&workspace.nightlifeOperations?'Hotel & nightlife':workspace.hotelOperations?'Hotel operations':'Nightlife operations',action:workspace.hotelOperations&&workspace.nightlifeOperations?'Open hotel & nightlife':workspace.hotelOperations?'Open hotel operations':'Open nightlife operations'}]:[]),
   ]
   const [selected,setSelected] = useState('')
   const [subscriptionPrompt,setSubscriptionPrompt] = useState('')
