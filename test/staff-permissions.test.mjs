@@ -20,7 +20,7 @@ test('individual permissions deny other workspaces and owner-only actions, inclu
  assert.equal(canRequest({role:'cashier',permissions:{counter:true}},'/api/pos/counter/status','POST',{status:'ready',deliveryAction:'dispatch'}),true)
  assert.equal(canRequest({role:'cashier',permissions:{production:true}},'/api/pos/counter/status','POST',{status:'ready',deliveryAction:'dispatch'}),false)
  assert.equal(canRequest({role:'cashier',permissions:{}},'/api/integrations/support/requests','POST'),true)
- assert.equal(Object.keys(staffCapabilities).length,19)
+ assert.equal(Object.keys(staffCapabilities).length,20)
 })
 test('catalogue starters cover every stock industry and never replace saved names',()=>{
  for(const industry of Object.keys(businessModes))assert.ok(catalogueStarters('stock',industry).length,industry)

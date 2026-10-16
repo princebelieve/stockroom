@@ -67,7 +67,7 @@ export function operationPermission(operation){
  if(operation.entityType==='sale')return routePermission('/api/sales','POST',p)
  if(operation.entityType==='pos_record'){
   if(kind==='service-job')return 'serviceJobs'
-  if(['hotel-stay','nightclub-event','nightclub-entry'].includes(kind))return 'hospitality'
+  if(['hotel-room','hotel-stay','nightclub-event','nightclub-entry'].includes(kind))return 'hospitality'
   if(kind==='return')return 'refunds'
   if(kind==='register')return 'register'
   if(kind==='product')return 'inventory'

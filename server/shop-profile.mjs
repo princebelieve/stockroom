@@ -172,7 +172,11 @@ export function normalizeShopProfile(input) {
     // the signal for Oil sales. Preserve that legacy state while new choices
     // can enable the workspace independently of business type.
     oilSales: workspaceSelectionVersion === 1 && typeof input.features?.oilSales === 'boolean' ? input.features.oilSales : industry === 'liquids',
-    hospitalityOperations: input.features?.hospitalityOperations === true,
+    hotelOperations: typeof input.features?.hotelOperations === 'boolean' ? input.features.hotelOperations : input.features?.hospitalityOperations === true,
+    nightlifeOperations: typeof input.features?.nightlifeOperations === 'boolean' ? input.features.nightlifeOperations : input.features?.hospitalityOperations === true,
+    hospitalityOperations: (typeof input.features?.hotelOperations === 'boolean' || typeof input.features?.nightlifeOperations === 'boolean')
+      ? (input.features.hotelOperations === true || input.features.nightlifeOperations === true)
+      : input.features?.hospitalityOperations === true,
   }
   value.workflows = ['stock', 'payments', 'both', 'fast-food', 'restaurant'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
   value.fastFood = input.fastFood === true || value.workflows === 'fast-food'
@@ -203,6 +207,8 @@ export function businessWorkspace(profile) {
     fastFood: value.fastFood,
     restaurant: value.restaurant,
     hospitalityOperations: value.features.hospitalityOperations,
+    hotelOperations: value.features.hotelOperations,
+    nightlifeOperations: value.features.nightlifeOperations,
   }
 }
 

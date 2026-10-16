@@ -10,6 +10,7 @@ import { registerCheckoutTill } from '../../server/till-binding.mjs'
 import { salesHistory } from '../../server/sales-history.mjs'
 import { ensureStaffRemovals, recordStaffRemoval } from '../../server/staff-removal.mjs'
 import { requiresServiceJobSync } from '../../server/service-jobs.mjs'
+import { requiresHospitalitySync } from '../../server/hospitality-operations.mjs'
 import { restaurantPaymentFingerprint } from '../../server/restaurant-payments.mjs'
 import { validateLoyaltyBalance, validateCheckoutSettings } from '../../server/pos-pricing.mjs'
 import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../server/stock-ledger.mjs'
@@ -240,6 +241,10 @@ async function syncNowImpl() {
       const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
       if(!support.ok || !(await support.json()).capabilities?.includes('service-jobs-v1'))throw new Error('Update the existing sync server before sharing service jobs. Records remain on this device.')
     }
+    if(operations.some(requiresHospitalitySync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('hospitality-operations-v1'))throw new Error('Update the cloud server before synchronizing hotel and nightlife operations. Records remain on this device.')
+    }
     if (operations.some(requiresRestaurantSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
       if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Tables & tabs. Records remain on this device.')
@@ -286,7 +291,7 @@ async function pullLatestImpl(configInput?: MobileSyncConfiguration | null) {
     let cursor = await setting('syncCursor')
     let more = true
     while (more) {
-    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&staffPermissionsCapability=staff-permissions-v1&serviceJobWalletCapability=service-jobs-wallet-v1&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&churchCapability=church-collections-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&retailOrderCapability=retail-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
+    const response = await originalFetch(`${config.syncApiUrl}/v1/sync/pull?protocol=retail-v3&capabilities=counter-v3&restaurantCapability=restaurant-v2&staffPermissionsCapability=staff-permissions-v1&serviceJobWalletCapability=service-jobs-wallet-v1&serviceJobCapability=service-jobs-v1&stockWorkCapability=stock-work-v1&reservationCapability=restaurant-reservations-v1&hospitalityCapability=hospitality-operations-v1&churchCapability=church-collections-v1&staffCapability=staff-removal-v1&customerOrderCapability=customer-orders-v1&retailOrderCapability=retail-orders-v1&businessId=${encodeURIComponent(config.businessId)}&deviceId=${encodeURIComponent(config.deviceId)}&includeOwn=1&cursor=${encodeURIComponent(cursor)}`, { headers: { Authorization: `Bearer ${config.deviceToken}` } })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Cloud pull failed.')
     for (const operation of result.operations || []) {

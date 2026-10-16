@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { handlePos,ensurePos,applyPosRecord } from '../server/pos-service.mjs'
 import { validateServiceJob,serviceJobBalance } from '../server/service-jobs.mjs'
+import { stockSchema } from '../server/stock-ledger.mjs'
 function fixture() {
  const sql=new DatabaseSync(':memory:')
  sql.exec(vm.runInNewContext(readFileSync('src/lib/browserSchema.ts','utf8').split('export const browserSchema = ')[1].trim()))
@@ -115,5 +116,21 @@ test('wallet invoice deposits are linked, atomic, idempotent, replay-safe and re
  assert.equal(refund.total,30);assert.equal(f.sql.prepare("SELECT balance FROM customers WHERE id='ada'").get().balance,35)
  await f.pos('/api/pos/returns',{id:'wallet-invoice-refund',saleId:result.sale.id,reason:'Deposit returned',method:'wallet',items:[{lineIndex:0,quantity:1,restock:false}]})
  assert.equal(f.sql.prepare("SELECT balance FROM customers WHERE id='ada'").get().balance,35)
+ }finally{f.sql.close()}
+})
+
+test('hotel folio stock charges snapshot the item, deduct once, and replay idempotently',async()=>{
+ const f=fixture();try{
+  const stay={id:'hotel-stay:guest001',kind:'hotel-stay',branchId:'main',roomName:'Room 4',guestName:'Ada',guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',nightlyRate:100,status:'checked-in',createdAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-01T00:00:00.000Z'}
+  const addStay=target=>target.sql.prepare("INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES('business',?,'hotel-stay','main',?,?)").run(stay.id,JSON.stringify(stay),stay.updatedAt)
+  const addStock=target=>{target.sql.prepare("INSERT INTO products(id,name,sku,category,price,cost_price,unit,updated_at) VALUES('water','Water','WATER','Drinks',3,1,'bottle','2026-01-01')").run();target.sql.prepare("INSERT INTO branch_inventory(branch_id,product_id,stock,reorder_point,updated_at) VALUES('main','water',5,0,'2026-01-01')").run()}
+  await ensurePos(f.db);f.sql.exec(stockSchema);addStay(f);addStock(f)
+  const input={...f.create,id:'service-job:folio',commandId:'folio',hospitality:{recordId:stay.id,recordKind:'hotel-stay',chargeType:'extra'},hospitalityStock:{productId:'water',quantity:2}}
+  const {job}=await f.call('',input)
+  assert.equal(job.lines[0].description,'Room service: Water');assert.equal(job.lines[0].quantity,2);assert.equal(job.lines[0].price,3)
+  assert.equal(f.sql.prepare("SELECT stock FROM branch_inventory WHERE product_id='water'").get().stock,3)
+  assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE id LIKE '%hospitality-stock%'").get().n,1)
+  const synced=fixture();try{await ensurePos(synced.db);synced.sql.exec(stockSchema);addStay(synced);addStock(synced);await applyPosRecord(synced.db,'business',job);await applyPosRecord(synced.db,'business',job);assert.equal(synced.sql.prepare("SELECT stock FROM branch_inventory WHERE product_id='water'").get().stock,3);assert.equal(synced.sql.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n,1)}finally{synced.sql.close()}
+  const failed=fixture();try{await ensurePos(failed.db);failed.sql.exec(stockSchema);addStay(failed);addStock(failed);failed.setFail(true);await assert.rejects(failed.call('',input),/outbox/);assert.equal(failed.sql.prepare("SELECT stock FROM branch_inventory WHERE product_id='water'").get().stock,5);assert.equal(failed.sql.prepare('SELECT COUNT(*) AS n FROM pos_records').get().n,1)}finally{failed.sql.close()}
  }finally{f.sql.close()}
 })

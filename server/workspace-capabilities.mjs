@@ -9,7 +9,7 @@ export function workspaceCapabilities(profile) {
     purchasing:w.stock || w.payments, stocktake:w.stock, movements:w.stock,
     serviceJobs:w.payments, production:w.fastFood || w.restaurant || w.payments,
     church:w.payments && p.industry === 'services',
-    hospitality:p.features.hospitalityOperations,
+    hospitality:w.hospitalityOperations,
   }
   const labels = { ...staffCapabilities }
   if (!w.stock && w.payments) {

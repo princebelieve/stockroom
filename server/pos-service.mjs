@@ -31,7 +31,7 @@ export async function applyPosRecord(db, scope, record, organizationId) {
   if(record.kind==='service-job') await applyServiceJob(db,scope,record,organizationId)
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
   if(record.kind?.startsWith('church-'))validateChurchRecord(record,undefined,true)
-  if(['hotel-stay','nightclub-event','nightclub-entry'].includes(record.kind))validateHospitalityRecord(record,found?JSON.parse(found.payload):undefined)
+  if(['hotel-room','hotel-stay','nightclub-event','nightclub-entry'].includes(record.kind))validateHospitalityRecord(record,found?JSON.parse(found.payload):undefined)
   if(record.kind==='restaurant-reservations')validateReservationBook(record,undefined,true)
   if(record.kind==='restaurant-reservation-archive')validateReservationArchive(record,undefined,found?JSON.parse(found.payload):undefined)
   if(isStockWork(record)){validateStockWork(record,found?JSON.parse(found.payload):undefined);await applyStockWork(db,record,organizationId)}
@@ -76,7 +76,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   if(path==='/api/pos/restaurant/reservations')return handleReservations({db,scope,organizationId,branchId,tillId,user,method,input,publish,saveRecord:savePosRecord})
   if(path==='/api/pos/church')return handleChurch({db,scope,organizationId,branchId,user,method,input,tillId,publish,saveRecord:savePosRecord})
   if(path==='/api/pos/hospitality/invoice'){if(!hasPermission(user,'serviceJobs'))throw new Error('The owner must grant Jobs & invoices access before you can bill this stay or admission.');return handleServiceJobs({db,scope,organizationId,branchId,user,path:'/api/pos/service-jobs',method,input,tillId,sales,publish,saveRecord:savePosRecord})}
-  if(path==='/api/pos/hospitality')return handleHospitality({db,scope,branchId,user,method,input,publish,saveRecord:savePosRecord})
+  if(path==='/api/pos/hospitality')return handleHospitality({db,scope,organizationId,branchId,user,method,input,publish,saveRecord:savePosRecord})
   if(path==='/api/pos/stock-work')return handleStockWork({db,scope,organizationId,branchId,tillId,user,method,input,publish,saveRecord:savePosRecord})
   if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close','/api/pos/restaurant/settle','/api/pos/restaurant/arrange'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   if(path.startsWith('/api/pos/service-jobs')) return handleServiceJobs({db,scope,organizationId,branchId,user,path,method,input,tillId,sales,publish,saveRecord:savePosRecord})

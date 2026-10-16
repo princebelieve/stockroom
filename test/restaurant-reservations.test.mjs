@@ -8,7 +8,7 @@ import { validateReservationBook, validateReservationArchive, checkReservationOp
 function fixture(timeZone='UTC') {
   const sql=new DatabaseSync(':memory:')
   sql.exec("CREATE TABLE app_settings(id INTEGER PRIMARY KEY,shop_profile TEXT,app_name TEXT,currency TEXT);CREATE TABLE customers(id TEXT,name TEXT,phone TEXT,balance REAL);")
-  sql.prepare('INSERT INTO app_settings VALUES(1,?,?,?)').run(JSON.stringify({restaurant:true,reportingTimeZone:timeZone}),'Cafe','USD')
+  sql.prepare('INSERT INTO app_settings VALUES(1,?,?,?)').run(JSON.stringify({restaurant:true,reportingTimeZone:timeZone,features:{hospitalityOperations:true}}),'Cafe','USD')
   const db={query:(s,p=[])=>({values:sql.prepare(s).all(...p)}),run:(s,p=[])=>sql.prepare(s).run(...p),beginTransaction:()=>sql.exec('BEGIN'),commitTransaction:()=>sql.exec('COMMIT'),rollbackTransaction:()=>sql.exec('ROLLBACK')}
   const published=[]
   const options={db,scope:'business',branchId:'main',tillId:'till',user:{id:'owner',name:'Owner',role:'owner'},sales:()=>[],publish:record=>published.push(record)}
@@ -109,5 +109,23 @@ test('business timezone changes require review and failed saves do not create re
     assert.equal((await f.call()).book.entries.length,0)
     const result=await f.call({...create,timeZone:'Africa/Lagos'})
     assert.equal(result.entry.startAt,'2099-05-01T17:00:00.000Z')
+  }finally{f.sql.close()}
+})
+
+test('hotel guests can link their restaurant reservation and the opened table bill keeps the stay link',async()=>{
+  const f=fixture();try{
+    await f.setup()
+    const arrival=new Date(Date.now()+20*60000),departure=new Date(Date.now()+90*60000)
+    const startLocal=reservationLocalTime(arrival.toISOString(),'UTC'),endLocal=reservationLocalTime(departure.toISOString(),'UTC')
+    const stay={id:'hotel-stay:guest001',kind:'hotel-stay',branchId:'main',roomName:'Room 4',guestName:'Ada',guestPhone:'555',checkIn:startLocal.slice(0,10),checkOut:new Date(Date.parse(startLocal.slice(0,10)+'T00:00:00Z')+86400000).toISOString().slice(0,10),nightlyRate:100,status:'checked-in',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}
+    await ensurePos(f.db);await f.db.run('INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES(?,?,?,?,?,?)',['business',stay.id,stay.kind,'main',JSON.stringify(stay),stay.updatedAt])
+    const request={...create,id:'reservation:hotelguest',commandId:'book-hotelguest',startLocal,endLocal,name:'Ada',phone:'555',hotelStayId:stay.id}
+    await assert.rejects(f.call({...request,name:'Different guest'}),/match the hotel guest/)
+    let {book,entry}=await f.call(request)
+    assert.equal(entry.hotelStayId,stay.id)
+    book=(await f.call({action:'arrive',id:entry.id,commandId:'hotel-arrive',expectedUpdatedAt:book.updatedAt})).book
+    const bill=await f.command('open',{id:'restaurant-tab:main:one',tableId:'one',sessionId:'hotel-guest-bill',guests:2,reservationId:entry.id})
+    assert.equal(bill.hotelStayId,stay.id)
+    assert.equal((await f.call()).hotelStays[0].id,stay.id)
   }finally{f.sql.close()}
 })
