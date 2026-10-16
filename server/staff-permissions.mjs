@@ -1,5 +1,5 @@
 export const staffCapabilities = {
- productSales:'Product sales', oilSales:'Oil sales', payments:'Payments & receipts', counter:'Order counter', restaurant:'Tables & tabs', register:'Cash register', customers:'Customer accounts', inventory:'Inventory and product changes', purchasing:'Purchasing and suppliers', stocktake:'Stock counts', movements:'Stock movements', sales:'Sales history', refunds:'Refunds and returns', serviceJobs:'Jobs and invoices', production:'Preparation and production', church:'Church collections', reports:'Reports and profit', activity:'Staff activity', configuration:'Workspace and device configuration'
+ productSales:'Product sales', oilSales:'Oil sales', payments:'Payments & receipts', counter:'Order counter', restaurant:'Tables & tabs', hospitality:'Hotel stays and nightlife events', register:'Cash register', customers:'Customer accounts', inventory:'Inventory and product changes', purchasing:'Purchasing and suppliers', stocktake:'Stock counts', movements:'Stock movements', sales:'Sales history', refunds:'Refunds and returns', serviceJobs:'Jobs and invoices', production:'Preparation and production', church:'Church collections', reports:'Reports and profit', activity:'Staff activity', configuration:'Workspace and device configuration'
 }
 export function parsePermissions(value) { if(value==null||value==='null'||value==='')return null; const input=typeof value==='string'?JSON.parse(value):value; if(!input||Array.isArray(input)||typeof input!=='object')throw new Error('Choose staff access using the checkboxes.'); const result={};for(const key of Object.keys(input)){if(!Object.hasOwn(staffCapabilities,key)||typeof input[key]!=='boolean')throw new Error('Invalid staff permission.');result[key]=input[key]}return result }
 export function effectivePermissions(user) {
@@ -8,7 +8,7 @@ export function effectivePermissions(user) {
 }
 export function hasPermission(user,key){return Boolean(user&&(user.role==='owner'||effectivePermissions(user)[key]))}
 export function ownStaffActivity(activity,staffId){return {...activity,staff:activity.staff.filter(row=>row.staffId===staffId),events:activity.events.filter(row=>row.staffId===staffId)}}
-export function screenPermission(screen){return {POS:'productSales',RetailOrders:'productSales',Oil:'oilSales',Payments:'payments',Counter:'counter',Restaurant:'restaurant',Register:'register',Wallet:'customers',Inventory:'inventory',Stocktake:'stocktake',Movements:'movements',Sales:'sales',Reports:'reports',Activity:'activity',Settings:'configuration',Device:'configuration',Sync:'configuration',Owner:'reports',Display:'productSales'}[screen]}
+export function screenPermission(screen){return {POS:'productSales',RetailOrders:'productSales',Oil:'oilSales',Payments:'payments',Counter:'counter',Restaurant:'restaurant',Hospitality:'hospitality',Register:'register',Wallet:'customers',Inventory:'inventory',Stocktake:'stocktake',Movements:'movements',Sales:'sales',Reports:'reports',Activity:'activity',Settings:'configuration',Device:'configuration',Sync:'configuration',Owner:'reports',Display:'productSales'}[screen]}
 export function routePermission(path,method='GET',input={}){
  path=path.split('?')[0]
  if(path==='/api/integrations/support/requests')return null
@@ -25,6 +25,7 @@ export function routePermission(path,method='GET',input={}){
  if(path==='/api/pos/receipt-settings'&&method==='GET')return null
  if(path.startsWith('/api/pos/returns'))return 'refunds'
  if(path.startsWith('/api/pos/service-jobs'))return 'serviceJobs'
+ if(path==='/api/pos/hospitality')return 'hospitality'
  if(path.startsWith('/api/pos/stock-work'))return 'production'
  if(path.startsWith('/api/pos/church'))return 'church'
  if(path.endsWith('/counter/status')&&input.deliveryAction)return path.startsWith('/api/pos/restaurant')?'restaurant':'counter'
@@ -66,6 +67,7 @@ export function operationPermission(operation){
  if(operation.entityType==='sale')return routePermission('/api/sales','POST',p)
  if(operation.entityType==='pos_record'){
   if(kind==='service-job')return 'serviceJobs'
+  if(['hotel-stay','nightclub-event','nightclub-entry'].includes(kind))return 'hospitality'
   if(kind==='return')return 'refunds'
   if(kind==='register')return 'register'
   if(kind==='product')return 'inventory'

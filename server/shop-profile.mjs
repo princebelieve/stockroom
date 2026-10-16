@@ -11,7 +11,8 @@ export const businessModes = {
   'food-manufacturing': { label: 'Food ingredients and finished goods', unit: 'kg', note: 'For ingredient and finished-goods stock. Optional single-output food batches track material use, yield and cost; production scheduling is not provided.' },
   bakery: { label: 'Bakery and confectionery', unit: 'piece', note: 'For baked goods and ingredients. Enable Order counter for optional single-output food batches with recorded yield and cost.' },
   drinks: { label: 'Drinks and beverage business', unit: 'bottle', note: 'For bottled, canned, and packaged beverages.' },
-  hotel: { label: 'Hotel supplies and amenities', unit: 'piece', note: 'For food, amenities and hotel supplies. Room bookings, occupancy and accommodation billing are not provided.' },
+  hotel: { label: 'Hotel', unit: 'piece', note: 'Manage hotel stays and occupancy alongside the Stockroom workspaces you enable.' },
+  nightclub: { label: 'Nightclub', unit: 'bottle', note: 'Manage nightlife events and guest entry alongside bar tabs, payments and receipts.' },
   pharmacy: { label: 'Pharmacy stock and medical supplies', unit: 'pack', note: 'For medicine and health-product stock; follow the unit on each item. Prescription and dispensing workflows are not provided.' },
   'health-beauty': { label: 'Beauty, cosmetics, and personal care', unit: 'piece', note: 'For cosmetics, toiletries, and personal care goods.' },
   clothing: { label: 'Clothing, footwear, and accessories', unit: 'piece', note: 'For garments, shoes and accessories. Configure size/colour variants explicitly; selecting this template does not create them.' },
@@ -171,6 +172,7 @@ export function normalizeShopProfile(input) {
     // the signal for Oil sales. Preserve that legacy state while new choices
     // can enable the workspace independently of business type.
     oilSales: workspaceSelectionVersion === 1 && typeof input.features?.oilSales === 'boolean' ? input.features.oilSales : industry === 'liquids',
+    hospitalityOperations: input.features?.hospitalityOperations === true,
   }
   value.workflows = ['stock', 'payments', 'both', 'fast-food', 'restaurant'].includes(input.workflows) ? input.workflows : (value.features.services ? 'both' : 'stock')
   value.fastFood = input.fastFood === true || value.workflows === 'fast-food'
@@ -200,6 +202,7 @@ export function businessWorkspace(profile) {
     payments: ['payments', 'both'].includes(value.workflows),
     fastFood: value.fastFood,
     restaurant: value.restaurant,
+    hospitalityOperations: value.features.hospitalityOperations,
   }
 }
 

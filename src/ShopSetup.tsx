@@ -59,11 +59,11 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     const current = businessWorkspace(draft)
     change({ ...draft, mode: 'custom', industry, workspaceSelectionVersion: 1, features: { ...draft.features, services: draft.features?.services ?? true, productSales: current.productSales, oilSales: current.oil } })
   }
-  function setWorkspaceEnabled(key: 'productSales'|'oilSales'|'payments'|'fastFood'|'restaurant', enabled: boolean) {
+  function setWorkspaceEnabled(key: 'productSales'|'oilSales'|'payments'|'fastFood'|'restaurant'|'hospitalityOperations', enabled: boolean) {
     const current = businessWorkspace(draft)
-    const workspaceLabels = { productSales: 'Product sales', oilSales: 'Oil sales', payments: 'Payments & receipts', fastFood: 'Order counter', restaurant: 'Tables & tabs' }
+    const workspaceLabels = { productSales: 'Product sales', oilSales: 'Oil sales', payments: 'Payments & receipts', fastFood: 'Order counter', restaurant: 'Tables & tabs', hospitalityOperations: 'Hotel & nightlife operations' }
     if (enabled && key !== 'payments') {
-      const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant].filter(Boolean).length
+      const paidCount = [current.productSales, current.oil, current.fastFood, current.restaurant, current.hospitalityOperations].filter(Boolean).length
       const entitlement = subscriptionAccess.entitledWorkspaces ?? subscriptionAccess.workspacePricing?.count ?? 0
       const unrestricted = subscriptionAccess.status === 'test'
       if (!unrestricted && (subscriptionAccess.blocked || paidCount >= entitlement)) {
@@ -72,13 +72,13 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
         return
       }
     }
-    const next = { productSales: current.productSales, oilSales: current.oil, payments: current.payments, fastFood: current.fastFood, restaurant: current.restaurant, [key]: enabled }
-    if (!next.productSales && !next.oilSales && !next.payments && !next.fastFood && !next.restaurant) {
+    const next = { productSales: current.productSales, oilSales: current.oil, payments: current.payments, fastFood: current.fastFood, restaurant: current.restaurant, hospitalityOperations:current.hospitalityOperations, [key]: enabled }
+    if (!next.productSales && !next.oilSales && !next.payments && !next.fastFood && !next.restaurant && !next.hospitalityOperations) {
       setProblem('Keep at least one workspace enabled.')
       return
     }
     const workflows: ShopProfile['workflows'] = next.productSales && next.payments ? 'both' : next.productSales ? 'stock' : next.payments ? 'payments' : next.fastFood ? 'fast-food' : next.restaurant ? 'restaurant' : 'stock'
-    change({ ...draft, workspaceSelectionVersion: 1, workflows, fastFood: next.fastFood, restaurant: next.restaurant, features: { ...draft.features, services: draft.features?.services ?? true, productSales: next.productSales, oilSales: next.oilSales } })
+    change({ ...draft, workspaceSelectionVersion: 1, workflows, fastFood: next.fastFood, restaurant: next.restaurant, features: { ...draft.features, services: draft.features?.services ?? true, productSales: next.productSales, oilSales: next.oilSales, hospitalityOperations:next.hospitalityOperations } })
   }
   function go(next: number) {
     try { if (next > step) { const fields = draft.fields.map(field => ({ ...field, options: field.options.map(item => item.trim()).filter(Boolean) })); validateFields(fields); setDraft({ ...draft, fields }) }; setStep(next); setProblem('') }
@@ -97,6 +97,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).payments} onChange={event=>setWorkspaceEnabled('payments',event.target.checked)}/><span><strong>Payments &amp; receipts</strong><small>Record service payments without changing stock.</small></span></label>
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).fastFood} onChange={event=>setWorkspaceEnabled('fastFood',event.target.checked)}/><span><strong>Order counter</strong><small>Take menu orders for a counter, cafe or takeaway.</small></span></label>
     <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).restaurant} onChange={event=>setWorkspaceEnabled('restaurant',event.target.checked)}/><span><strong>Tables &amp; tabs</strong><small>Manage table orders and customer tabs.</small></span></label>
+    <label className="settings-workspace-option"><input type="checkbox" checked={businessWorkspace(draft).hospitalityOperations} onChange={event=>setWorkspaceEnabled('hospitalityOperations',event.target.checked)}/><span><strong>Hotel &amp; nightlife operations</strong><small>Manage room stays, events, guest lists and check-ins.</small></span></label>
     <AsyncButton className="primary-button" busyLabel="Saving workspaces..." onClick={async()=>{const valid=validateShopProfile(draft);await save(valid);setDraft(valid);setDirty(false);setMessage('Workspaces saved.')}}>Save workspaces</AsyncButton>
     </section><section hidden={view!=='timezone'}><h2>Reporting timezone</h2><p>Used to group sales and reports by business day.</p>
     <TimeZoneSelect value={draft.reportingTimeZone || 'UTC'} onChange={reportingTimeZone => change({ ...draft, reportingTimeZone })} />

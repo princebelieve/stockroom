@@ -14,6 +14,7 @@ import { createTillRecovery } from './till-recovery.mjs'
 import { authorizeCustomerOrder, customerOrderLines, publishCustomerOrder as publishOrder, acceptCustomerOrder } from './customer-orders.mjs'
 import { createStaffRemoval } from './staff-removal.mjs'
 import { validateServiceJob, requiresServiceJobSync } from '../server/service-jobs.mjs'
+import { validateHospitalityRecord, requiresHospitalitySync } from '../server/hospitality-operations.mjs'
 import { floorId,restaurantTabs,billContains,validateRestaurantFloor } from '../server/restaurant-floor.mjs'
 import { validateRestaurantLedger, restaurantLedgerId, restaurantReceiptHash, restaurantOrderPayment } from '../server/restaurant-payments.mjs'
 import { recordPayment } from '../server/payment.mjs'
@@ -779,7 +780,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1','service-jobs-wallet-v1','staff-permissions-v1', 'customer-orders-v1', 'retail-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1', 'church-collections-v1'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2', 'service-jobs-v1','service-jobs-wallet-v1','staff-permissions-v1', 'customer-orders-v1', 'retail-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1', 'church-collections-v1','hospitality-operations-v1'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
@@ -854,6 +855,26 @@ const server = createServer(async (request, response) => {
             continue
           }
         }
+        if(document.entityType==='pos_record'&&requiresHospitalitySync(document)) {
+          try {
+            if(document.action!=='upsert'||document.entityId!==document.payload.id)throw new Error('Invalid hospitality operation.')
+            const current=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.entityId})
+            if(current?.operationId!==document.operationId&&(document.payload.expectedUpdatedAt||'')!==(current?.payload.updatedAt||''))throw new Error('This record changed on another device. Refresh and review before continuing.')
+            validateHospitalityRecord(document.payload,current?.payload)
+            if(document.payload.kind==='hotel-stay'&&document.payload.status==='booked') {
+              const stays=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'hotel-stay','payload.branchId':document.payload.branchId,'payload.status':{$in:['booked','checked-in']},entityId:{$ne:document.entityId}}).toArray()
+              if(stays.some(row=>row.payload.roomName.toLocaleLowerCase()===document.payload.roomName.toLocaleLowerCase()&&document.payload.checkIn<row.payload.checkOut&&document.payload.checkOut>row.payload.checkIn))throw new Error('That room already has an overlapping booking.')
+            }
+            if(document.payload.kind==='nightclub-entry') {
+              const event=await entityHeads.findOne({businessId,entityType:'pos_record',entityId:document.payload.eventId})
+              if(!event||event.payload.kind!=='nightclub-event'||event.payload.branchId!==document.payload.branchId||event.payload.status!=='scheduled')throw new Error('Choose a scheduled event in this branch.')
+              if(document.payload.status==='expected'&&event.payload.capacity) {
+                const entries=await entityHeads.find({businessId,entityType:'pos_record','payload.kind':'nightclub-entry','payload.eventId':event.entityId,'payload.status':{$ne:'cancelled'},entityId:{$ne:document.entityId}}).toArray()
+                if(entries.length>=event.payload.capacity)throw new Error('This event has reached its guest capacity.')
+              }
+            }
+          } catch(error) { conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:error.message,localPayload:document.payload});continue }
+        }
         if(document.entityType==='retail_record' && document.payload.kind==='pricing'){
           const filter={businessId,entityType:'product',entityId:document.payload.productId}
           const product=await entityHeads.findOne(filter)
@@ -878,7 +899,7 @@ const server = createServer(async (request, response) => {
           const filter = { businessId, entityType: document.entityType, entityId: document.entityId }
           const current = await entityHeads.findOne(filter)
           if(document.entityType==='customer' && current?.payload && document.payload.birthday===undefined)document.payload={...document.payload,birthday:current.payload.birthday||'',birthdayReminders:current.payload.birthdayReminders||false}
-          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || document.payload.kind==='register' || document.payload.kind==='product' && Boolean(document.payload.oilPricing) || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
+          if(document.entityType==='pos_record' && (document.payload.kind?.startsWith('restaurant-') || document.payload.kind==='service-job' || ['hotel-stay','nightclub-event','nightclub-entry'].includes(document.payload.kind) || document.payload.kind==='register' || document.payload.kind==='product' && Boolean(document.payload.oilPricing) || document.payload.kind?.startsWith('church-') || ['restaurant-reservations','restaurant-reservation-archive'].includes(document.payload.kind) || isStockWork(document.payload)) && current?.operationId===document.operationId) {
             if(JSON.stringify(current.payload)!==JSON.stringify(document.payload)){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This operation ID already has different details.'});continue}
             // Recover a response/database interruption between storing the
             // accepted head and appending its downloadable operation.

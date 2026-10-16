@@ -4,6 +4,7 @@ import { requiresReservationSync } from './restaurant-reservations.mjs'
 import { requiresStockWorkSync } from './stock-work.mjs'
 import { registerCheckoutTill } from './till-binding.mjs'
 import { requiresServiceJobSync } from './service-jobs.mjs'
+import { requiresHospitalitySync } from './hospitality-operations.mjs'
 import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markKnownLocalOperationsApplied, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -138,6 +139,10 @@ export async function syncNow(tillId) {
       if(pending.some(requiresServiceJobSync)) {
         const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
         if(!support.ok || !(await support.json()).capabilities?.includes('service-jobs-v1'))throw new Error('Update the existing sync server before sharing service jobs. Records remain on this device.')
+      }
+      if(pending.some(requiresHospitalitySync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('hospitality-operations-v1'))throw new Error('Update the cloud server before synchronizing hotel and nightlife operations. Records remain on this device.')
       }
       if (pending.some(requiresRestaurantSync)) {
         const support = await fetch(`${url}/v1/sync/capabilities`, { headers })

@@ -9,6 +9,7 @@ export function workspaceCapabilities(profile) {
     purchasing:w.stock || w.payments, stocktake:w.stock, movements:w.stock,
     serviceJobs:w.payments, production:w.fastFood || w.restaurant || w.payments,
     church:w.payments && p.industry === 'services',
+    hospitality:p.features.hospitalityOperations,
   }
   const labels = { ...staffCapabilities }
   if (!w.stock && w.payments) {
@@ -21,14 +22,14 @@ export function workspaceCapabilities(profile) {
 
 export function defaultCashierPermissions(profile) {
   const available = workspaceCapabilities(profile)
-  const selling = new Set(['productSales', 'oilSales', 'payments', 'counter', 'restaurant'])
+  const selling = new Set(['productSales', 'oilSales', 'payments', 'counter', 'restaurant', 'hospitality'])
   return Object.fromEntries(Object.keys(available).map(key => [key, key === 'register' || key === 'sales' || key === 'activity' || selling.has(key)]))
 }
 
 export function workspaceScreenAvailable(profile, screen) {
   const w = businessWorkspace(profile)
   const available = { POS:w.productSales, Oil:w.oil, Payments:w.payments,
-    Counter:w.fastFood, Restaurant:w.restaurant, RetailOrders:w.productSales || w.oil,
+    Counter:w.fastFood, Restaurant:w.restaurant, Hospitality:w.hospitalityOperations, RetailOrders:w.productSales || w.oil,
     Inventory:w.stock, Stocktake:w.stock, Movements:w.stock, Display:w.productSales || w.oil }
   return available[screen] !== false
 }
