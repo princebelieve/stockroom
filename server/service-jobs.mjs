@@ -7,6 +7,17 @@ import { saveRestaurantSale } from './restaurant-payments.mjs'
 const cents = value => Math.round(Number(value) * 100)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const text = (value, max = 200) => { if (typeof value !== 'string' || value.length > max) throw new Error('Enter valid job details.'); return value.trim() }
+export function validateHospitalityInvoice(job,record){
+  if(!job.hospitality)return job
+  if(!record||record.id!==job.hospitality.recordId||record.kind!==job.hospitality.recordKind||record.branchId!==job.branchId||record.status==='cancelled'&&job.status!=='cancelled')throw new Error('The linked hotel stay or guest entry is unavailable for billing.')
+  if(record.kind==='hotel-stay'){
+    const nights=(Date.parse(`${record.checkOut}T00:00:00Z`)-Date.parse(`${record.checkIn}T00:00:00Z`))/86400000
+    if(!Number.isInteger(nights)||nights<1||!Number.isFinite(record.nightlyRate)||record.nightlyRate<=0||job.lines.length!==1||job.lines[0].description!==`Accommodation: ${record.roomName}`||job.lines[0].quantity!==nights||cents(job.lines[0].price)!==cents(record.nightlyRate))throw new Error('The hotel invoice must match the saved room, number of nights and nightly rate.')
+  } else if(record.kind==='nightclub-entry'){
+    if(!Number.isFinite(record.admissionPrice)||record.admissionPrice<=0||job.lines.length!==1||job.lines[0].description!==`Admission: ${record.eventName}`.slice(0,150)||job.lines[0].quantity!==1||cents(job.lines[0].price)!==cents(record.admissionPrice))throw new Error('The admission invoice must match the event entry price.')
+  } else throw new Error('Unsupported hospitality invoice link.')
+  return job
+}
 export function serviceJobBalance(job, returns = []) {
   const paid = job.payments.reduce((n, entry) => n + cents(entry.sale.total), 0)
   const refunded = returns.filter(record => job.payments.some(entry => entry.sale.id === record.saleId)).reduce((n, record) => n + cents(record.total), 0)
@@ -17,6 +28,7 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
   if (!job.customerName?.trim() || !job.title?.trim()) throw new Error('Enter a customer and job description.')
   if(job.church){validateChurchLink(job.church);if(!['new','cancelled'].includes(job.status)||job.profile.taxEnabled||job.pricing.tax!==0||job.customerName!==job.church.donorName||job.customerPhone!==job.church.donorPhone)throw new Error('Church contributions must preserve donor identity and have no sales tax.')}
   if (job.customerId !== undefined) text(job.customerId,150)
+  if(job.hospitality){if(job.church||!['hotel-stay','nightclub-entry'].includes(job.hospitality.recordKind)||!String(job.hospitality.recordId||'').startsWith(`${job.hospitality.recordKind}:`))throw new Error('Invalid hospitality invoice link.');text(job.hospitality.recordId,150);text(job.hospitality.recordKind,40)}
   text(job.id,150);text(job.tillId,100);text(job.branchId,100);text(job.customerName); text(job.customerPhone, 80); text(job.title); text(job.note, 1000); text(job.businessName, 100)
   if (!/^[A-Z]{3}$/.test(job.currency) || (job.dueDate && (!/^\d{4}-\d{2}-\d{2}$/.test(job.dueDate) || new Date(job.dueDate).toISOString().slice(0,10) !== job.dueDate))) throw new Error('Enter a valid currency and due date.')
   if (!Array.isArray(job.lines) || !job.lines.length || job.lines.length > 100 || new Set(job.lines.map(line=>line.id)).size !== job.lines.length) throw new Error('Add 1 to 100 job items.')
@@ -30,13 +42,16 @@ export function validateServiceJob(job, previous, snapshot = false, refunds = []
     if(sale.paymentMethod==='wallet'&&(!job.customerId||sale.paymentDetails.customerId!==job.customerId))throw new Error('Wallet payment must match the invoice-linked customer.')
     if (seen.has(sale.id) || sale.paymentDetails.serviceJob.id!==job.id || sale.branchId!==job.branchId || sale.currency!==job.currency || sale.businessName!==job.businessName) throw new Error('Invalid invoice payment link.')
     if(!same(sale.paymentDetails.serviceJob.church,job.church))throw new Error('Preserve the contribution fund and donor.');
+    if(!same(sale.paymentDetails.serviceJob.hospitality||null,job.hospitality||null))throw new Error('Preserve the hotel stay or admission linked to this invoice.')
+    const receiptType=job.church?'Collection / donation':job.hospitality?.recordKind==='hotel-stay'?'Hotel accommodation payment':job.hospitality?.recordKind==='nightclub-entry'?'Nightclub admission payment':'Invoice payment'
+    if(sale.paymentDetails.receipt?.transactionType!==receiptType)throw new Error('The receipt type must match the invoice.')
     seen.add(sale.id)
     if(sale.paymentDetails.pos?.tillId!==job.tillId || sale.paymentDetails.servicePayment?.customerName!==job.customerName || sale.paymentDetails.servicePayment?.customerPhone!==job.customerPhone || sale.paymentDetails.serviceJob.title!==job.title)throw new Error('Payment must match the saved customer and till.')
     if (cents(sale.paymentDetails.serviceJob.invoiceTotal)!==cents(job.pricing.total)) throw new Error('Invalid invoice total.')
   }
   if (!snapshot && previous) {
     if (job.expectedUpdatedAt!==previous.updatedAt) throw new Error('This job changed. Refresh before continuing.')
-    for (const key of ['church','id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','customerId','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
+    for (const key of ['church','hospitality','id','kind','branchId','tillId','currency','businessName','createdAt','customerName','customerPhone','customerId','title','note','dueDate','lines','pricing','profile']) if (!same(job[key], previous[key])) throw new Error('Issued job details and prices cannot be overwritten. Cancel and create a replacement.')
     if (!same(job.payments.slice(0,previous.payments.length),previous.payments) || job.payments.length<previous.payments.length || job.payments.length>previous.payments.length+1) throw new Error('Preserve saved invoice payments.')
     if (job.payments.length>previous.payments.length && (job.status!==previous.status || ['estimate','cancelled'].includes(job.status))) throw new Error('Issue the invoice before taking payment.')
     const balance = serviceJobBalance(previous, refunds)
@@ -69,6 +84,7 @@ export function validateServiceJobPayment(sale) {
 }
 export async function applyServiceJob(db, scope, job, organizationId) {
   validateServiceJob(job, undefined, true)
+  if(job.hospitality){const linked=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,job.hospitality.recordId])).values[0];const record=linked&&JSON.parse(linked.payload);validateHospitalityInvoice(job,record);if(record.kind==='nightclub-entry'){const eventRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.eventId])).values[0];const event=eventRow&&JSON.parse(eventRow.payload);if(!event||event.kind!=='nightclub-event'||event.status==='cancelled')throw new Error('The linked nightclub event is unavailable.') }}
   for (const entry of job.payments) await saveRestaurantSale(db,entry.sale,organizationId)
 }
 export const requiresServiceJobSync = operation => operation.payload?.kind==='service-job' || Boolean(operation.payload?.paymentDetails?.serviceJob)
@@ -105,12 +121,28 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       profile={...profile,taxEnabled:false,taxRate:0,taxIncluded:false}
       if(input.estimate)throw new Error('Pledges are commitments, not estimates.')
     }
+    let hospitality
+    if(input.hospitality){
+      const recordRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,input.hospitality.recordId])).values[0]
+      const record=recordRow?JSON.parse(recordRow.payload):null
+      if(!record||record.kind!==input.hospitality.recordKind||record.branchId!==branchId)throw new Error('Choose an existing hotel stay or nightclub admission in this branch.')
+      if(record.kind==='nightclub-entry'){const eventRow=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,record.eventId])).values[0];const event=eventRow&&JSON.parse(eventRow.payload);if(!event||event.kind!=='nightclub-event'||!['scheduled','closed'].includes(event.status))throw new Error('This event is unavailable for admission billing.')}
+      if((await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='service-job' AND branch_id=?",[scope,branchId])).values.some(row=>{const job=JSON.parse(row.payload);return job.hospitality?.recordId===record.id&&job.status!=='cancelled'}))throw new Error('This stay or admission already has an active invoice.')
+      hospitality={recordId:record.id,recordKind:record.kind}
+      if(record.kind==='hotel-stay'){
+        const nights=(Date.parse(`${record.checkOut}T00:00:00Z`)-Date.parse(`${record.checkIn}T00:00:00Z`))/86400000
+        input={...input,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Hotel stay - ${record.roomName}`,note:`Room ${record.roomName}; ${record.checkIn} to ${record.checkOut} (${nights} night${nights===1?'':'s'}).`,lines:[{id:record.id,description:`Accommodation: ${record.roomName}`,quantity:nights,price:record.nightlyRate}]}
+      }else if(record.kind==='nightclub-entry'){
+        input={...input,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Nightclub admission - ${record.eventName}`.slice(0,200),note:`Admission for ${record.eventName}.`,lines:[{id:record.id,description:`Admission: ${record.eventName}`.slice(0,150),quantity:1,price:record.admissionPrice}]}
+      }else throw new Error('Only hotel stays and nightclub guest entries can be invoiced.')
+    }
     const lines=input.lines.map(line=>({id:text(line.id,100),description:text(line.description,150),quantity:Number(line.quantity),price:Number(line.price)}))
     if(input.customerId) {
       const customer=(await db.query(`SELECT id,name,phone,balance FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[input.customerId,...(organizationId?[organizationId]:[])])).values[0]
       if(!customer || customer.name.trim()!==String(input.customerName||'').trim() || String(customer.phone||'').trim()!==String(input.customerPhone||'').trim())throw new Error('Choose the matching customer account or enter this customer manually.')
     }
-    job={...stamp,...(church?{church}:{}),...(input.customerId?{customerId:text(input.customerId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
+    job={...stamp,...(church?{church}:{}),...(hospitality?{hospitality}:{}),...(input.customerId?{customerId:text(input.customerId,150)}:{}),id:input.id,kind:'service-job',branchId,tillId,status:input.estimate?'estimate':'new',createdAt:updatedAt,businessName:profile.businessName||settings.businessName,currency:settings.currency,customerName:text(input.customerName),customerPhone:text(input.customerPhone||'',80),title:text(input.title),note:text(input.note||'',1000),dueDate:text(input.dueDate||'',10),lines,profile,pricing:priceOrder(lines.map(line=>({productId:'service:'+line.id,quantity:line.quantity,price:line.price})),{tax:profile}),payments:[]}
+    if(hospitality){const linked=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,hospitality.recordId])).values[0];validateHospitalityInvoice(job,linked&&JSON.parse(linked.payload))}
   } else {
     job={...previous,...stamp}
     const balance=serviceJobBalance(previous,await returns())
@@ -126,7 +158,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       if(input.method==='wallet'&&(!job.customerId||input.customerId!==job.customerId))throw new Error('Use the invoice-linked customer wallet.')
       const id='service-payment:'+input.commandId
       if((await db.query('SELECT id FROM sales WHERE id=?',[id])).values[0])throw new Error('This payment ID is already used by another job.')
-      const link={...(job.church?{church:job.church}:{}),id:job.id,number:job.id.slice(-8).toUpperCase(),title:job.title,invoiceTotal:job.pricing.total,balanceDue:(cents(balance.due)-cents(amount))/100}
+      const link={...(job.church?{church:job.church}:{}),...(job.hospitality?{hospitality:job.hospitality}:{}),id:job.id,number:job.id.slice(-8).toUpperCase(),title:job.title,invoiceTotal:job.pricing.total,balanceDue:(cents(balance.due)-cents(amount))/100}
       const policyRow=(await db.query(`SELECT payment_policy FROM app_settings ${organizationId?'WHERE organization_id=?':'WHERE id=1'}`,organizationId?[organizationId]:[])).values[0]
       sale=recordPayment({id,branchId,organizationId,businessName:job.businessName,currency:job.currency,createdAt:updatedAt,staffId:user.id,staffName:user.name,items:[{productId:'service:'+job.id,productName:`${balance.netPaid===0 && amount<balance.due?'Deposit':'Payment'} - ${job.title}`.slice(0,200),quantity:1,price:amount}],total:amount,paymentMethod:input.method,paymentReference:text(input.reference||''),terminalProvider:text(input.provider||''),paymentDetails:{...(input.method==='wallet'?{customerId:job.customerId}:{}),...(input.method==='multiple'?{allocations:input.parts?.map(part=>({...part,amount:Number(part.amount)})),cashReceived:input.cash||undefined}:{}),amountReceived:input.method==='cash'?(input.cash||amount):amount,serviceJob:link,servicePayment:{customerName:job.customerName,customerPhone:job.customerPhone}}},policyRow?.payment_policy)
       const tax=cents(job.pricing.tax)*(cents(balance.netPaid)+cents(amount))/cents(job.pricing.total)
@@ -134,7 +166,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       const subtotal=(cents(amount)-cents(allocatedTax))/100
       const register=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND kind='register' AND branch_id=?",[scope,branchId])).values.map(row=>JSON.parse(row.payload)).find(session=>!session.closedAt && session.staffId===user.id && (!session.tillId||session.tillId===tillId))
       sale.paymentDetails.pos={tillId,registerId:register?.id,pricing:{subtotal,discount:0,tax:allocatedTax,total:amount,taxSettings:posSettings({...job.profile,taxIncluded:false}),lines:[{productId:'service:'+job.id,quantity:1,subtotal,discount:0,tax:allocatedTax,total:amount}]}}
-      sale.paymentDetails.receipt={address:job.profile.address,phone:job.profile.phone,email:job.profile.email,footer:job.profile.footer,number:'REC-'+id.slice(-8).toUpperCase(),transactionType:job.church?'Collection / donation':'Invoice payment',cardType:''}
+      sale.paymentDetails.receipt={address:job.profile.address,phone:job.profile.phone,email:job.profile.email,footer:job.profile.footer,number:'REC-'+id.slice(-8).toUpperCase(),transactionType:job.church?'Collection / donation':job.hospitality?.recordKind==='hotel-stay'?'Hotel accommodation payment':job.hospitality?.recordKind==='nightclub-entry'?'Nightclub admission payment':'Invoice payment',cardType:''}
       job.payments=[...job.payments,{sale,request}]
     } else throw new Error('Unknown service job action.')
   }

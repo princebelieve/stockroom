@@ -25,7 +25,7 @@ export function routePermission(path,method='GET',input={}){
  if(path==='/api/pos/receipt-settings'&&method==='GET')return null
  if(path.startsWith('/api/pos/returns'))return 'refunds'
  if(path.startsWith('/api/pos/service-jobs'))return 'serviceJobs'
- if(path==='/api/pos/hospitality')return 'hospitality'
+ if(path.startsWith('/api/pos/hospitality'))return 'hospitality'
  if(path.startsWith('/api/pos/stock-work'))return 'production'
  if(path.startsWith('/api/pos/church'))return 'church'
  if(path.endsWith('/counter/status')&&input.deliveryAction)return path.startsWith('/api/pos/restaurant')?'restaurant':'counter'

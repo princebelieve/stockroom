@@ -75,6 +75,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   await ensurePos(db)
   if(path==='/api/pos/restaurant/reservations')return handleReservations({db,scope,organizationId,branchId,tillId,user,method,input,publish,saveRecord:savePosRecord})
   if(path==='/api/pos/church')return handleChurch({db,scope,organizationId,branchId,user,method,input,tillId,publish,saveRecord:savePosRecord})
+  if(path==='/api/pos/hospitality/invoice'){if(!hasPermission(user,'serviceJobs'))throw new Error('The owner must grant Jobs & invoices access before you can bill this stay or admission.');return handleServiceJobs({db,scope,organizationId,branchId,user,path:'/api/pos/service-jobs',method,input,tillId,sales,publish,saveRecord:savePosRecord})}
   if(path==='/api/pos/hospitality')return handleHospitality({db,scope,branchId,user,method,input,publish,saveRecord:savePosRecord})
   if(path==='/api/pos/stock-work')return handleStockWork({db,scope,organizationId,branchId,tillId,user,method,input,publish,saveRecord:savePosRecord})
   if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close','/api/pos/restaurant/settle','/api/pos/restaurant/arrange'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
