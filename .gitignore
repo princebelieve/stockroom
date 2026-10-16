@@ -35,5 +35,3 @@ Thumbs.db
 node_modules/.tmp/
 !/.env.pwa
 
-# The public book is a separate project and must not ship with the Stockroom app
-/Stockroom Business App Book/
