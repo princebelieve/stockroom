@@ -154,6 +154,7 @@ export async function handleServiceJobs({db,scope,organizationId,branchId,user,p
       }else if(record.kind==='nightclub-entry'){
         input={...input,customerName:record.guestName,customerPhone:record.guestPhone||'',title:`Nightclub admission - ${record.eventName}`.slice(0,200),note:`Admission for ${record.eventName}.`,lines:[{id:record.id,description:`Admission: ${record.eventName}`.slice(0,150),quantity:1,price:record.admissionPrice}]}
       }else throw new Error('Only hotel stays and nightclub guest entries can be invoiced.')
+      if(record.customerId){if(input.customerId&&input.customerId!==record.customerId)throw new Error('Use the customer account linked to this hospitality booking.');const customer=(await db.query(`SELECT id,name,phone FROM customers WHERE id=?${organizationId?' AND organization_id=?':''}`,[record.customerId,...(organizationId?[organizationId]:[])])).values[0];if(!customer)throw new Error('Sync the customer account linked to this booking before invoicing.');input={...input,customerId:record.customerId,customerName:customer.name,customerPhone:customer.phone||''}}
     }
     const lines=input.lines.map(line=>({id:text(line.id,100),description:text(line.description,150),quantity:Number(line.quantity),price:Number(line.price)}))
     if(input.customerId) {

@@ -6,7 +6,7 @@ import { defaultCashierPermissions } from '../server/workspace-capabilities.mjs'
 import { normalizeShopProfile, validateShopProfile } from '../server/shop-profile.mjs'
 import { oilPricing } from '../server/oil-pricing.mjs'
 import { validateChurchRecord, requiresChurchSync } from '../server/church-ledger.mjs'
-import { reservationBookId, validateReservationBook, validateReservationArchive, checkReservationOpening, requiresReservationSync } from '../server/restaurant-reservations.mjs'
+import { reservationBookId, reservationChange, validateReservationBook, validateReservationArchive, checkReservationOpening, requiresReservationSync } from '../server/restaurant-reservations.mjs'
 import { isStockWork, validateStockWork } from '../server/stock-work.mjs'
 import { createPreparationPrint } from './preparation-print.mjs'
 import { customerOrderSettings, customerHandoff } from '../server/customer-order-settings.mjs'
@@ -361,6 +361,20 @@ const server = createServer(async (request, response) => {
       if (!saved) return send(response, 404, { error: 'Business customer ordering is not available.' })
       const settings = saved.settings || {}
       const profile = normalizeShopProfile(settings.shopProfile)
+      const hospitalityMode=query.get('mode')==='hotel'||query.get('mode')==='nightlife'?query.get('mode'):''
+      if(hospitalityMode){
+        const enabled=hospitalityMode==='hotel'?profile.features?.hotelOperations:profile.features?.nightlifeOperations
+        if(!enabled)return send(response,403,{error:`${hospitalityMode==='hotel'?'Hotel':'Nightlife'} customer booking is not enabled for this business.`})
+        const heads=await entityHeads.find({businessId,entityType:'pos_record'}).toArray(),now=new Date().toISOString()
+        if(hospitalityMode==='hotel'){
+          const checkIn=String(query.get('checkIn')||''),checkOut=String(query.get('checkOut')||''),validDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(`${value}T00:00:00.000Z`).toISOString().slice(0,10)===value
+          const datesProvided=Boolean(checkIn||checkOut),datesValid=validDate(checkIn)&&validDate(checkOut)&&checkOut>checkIn
+          const rooms=heads.filter(row=>row.payload.kind==='hotel-room'&&row.payload.status==='active').map(row=>{const occupied=datesValid&&heads.some(stay=>stay.payload.kind==='hotel-stay'&&stay.payload.branchId===row.payload.branchId&&stay.payload.roomId===row.entityId&&['booked','checked-in'].includes(stay.payload.status)&&checkIn<stay.payload.checkOut&&checkOut>stay.payload.checkIn);return {id:row.entityId,branchId:row.payload.branchId,name:row.payload.roomName,nightlyRate:row.payload.nightlyRate,housekeepingStatus:row.payload.housekeepingStatus||'ready',available:!occupied&&(!datesProvided||datesValid)}})
+          return send(response,200,{businessId,businessName:settings.appName||'Business',logoData:/^data:image\/(png|jpeg|webp);base64,/.test(settings.logoData||'')?settings.logoData:'',brandColor:profile.brandColor||'',currency:settings.currency||'USD',mode:'hotel',menu:null,rooms})
+        }
+        const events=heads.filter(row=>row.payload.kind==='nightclub-event'&&row.payload.status==='scheduled'&&row.payload.startsAt>now).map(row=>{const entries=heads.filter(entry=>entry.payload.kind==='nightclub-entry'&&entry.payload.eventId===row.entityId&&entry.payload.status!=='cancelled'),reservedGuests=heads.filter(book=>book.payload.kind==='restaurant-reservations').flatMap(book=>book.payload.entries||[]).filter(entry=>entry.nightlifeEventId===row.entityId&&!['cancelled','no-show'].includes(entry.status)).reduce((sum,entry)=>sum+entry.guests,0),layout=heads.find(item=>item.payload.kind==='restaurant-layout'&&item.payload.branchId===row.payload.branchId);return {id:row.entityId,branchId:row.payload.branchId,name:row.payload.name,startsAt:row.payload.startsAt,capacity:row.payload.capacity,admissionPrice:row.payload.admissionPrice||0,spotsRemaining:row.payload.capacity?Math.max(0,row.payload.capacity-entries.length-reservedGuests):null,tables:profile.restaurant?(layout?.payload?.tables||[]).map(table=>({id:table.id,name:table.name,seats:table.seats})):[]}}).filter(event=>event.spotsRemaining===null||event.spotsRemaining>0)
+        return send(response,200,{businessId,businessName:settings.appName||'Business',logoData:/^data:image\/(png|jpeg|webp);base64,/.test(settings.logoData||'')?settings.logoData:'',brandColor:profile.brandColor||'',currency:settings.currency||'USD',mode:'nightlife',tableReservationsEnabled:profile.restaurant===true,menu:null,events})
+      }
       const retail=customerOrderSettings(settings.paymentPolicy?.customerOrdering).retailEnabled && (query.get('mode')==='retail' || (!profile.fastFood&&!profile.restaurant))
       const menuId = retail ? 'retail-catalogue' : profile.restaurant ? 'restaurant-menu' : profile.fastFood ? 'counter-menu' : ''
       if (!menuId) return send(response, 200, { businessId, businessName: settings.appName || 'Business', logoData: /^data:image\/(png|jpeg|webp);base64,/.test(settings.logoData||'') ? settings.logoData : '', brandColor: profile.brandColor || '', currency: settings.currency || 'USD', mode: 'account', menu: null })
@@ -380,14 +394,118 @@ const server = createServer(async (request, response) => {
       const closing = await database.collection('account_deletion_requests').findOne({ type: 'business', businessId, status: { $in: ['pending', 'processing'] } })
       const saved = await businessSettings.findOne({ businessId })
       const profile = normalizeShopProfile(saved?.settings?.shopProfile)
-      if (closing || !saved || (!profile.fastFood && !profile.restaurant && !customerOrderSettings(saved?.settings?.paymentPolicy?.customerOrdering).retailEnabled)) return send(response, 403, { error: 'Guest ordering is not available for this business.' })
+      const hospitalityMode=input.mode==='hotel'||input.mode==='nightlife'?input.mode:''
+      const hospitalityEnabled=hospitalityMode==='hotel'?profile.features?.hotelOperations:hospitalityMode==='nightlife'?profile.features?.nightlifeOperations:false
+      if (closing || !saved || (!hospitalityEnabled&&!profile.fastFood&&!profile.restaurant&&!customerOrderSettings(saved?.settings?.paymentPolicy?.customerOrdering).retailEnabled)) return send(response, 403, { error: 'Customer booking is not available for this business.' })
       const rateKey = `guest-entry:${String(request.socket.remoteAddress || '')}:${businessId}`
       const rateNow = Date.now(), rate = customerPortalLoginLimits.get(rateKey)
       const window = rate?.until > rateNow ? rate : { count: 0, until: rateNow + 15 * 60 * 1000 }
       if (window.count >= 60) return send(response, 429, { error: 'Too many ordering requests. Wait fifteen minutes before trying again.' })
       customerPortalLoginLimits.set(rateKey, { ...window, count: window.count + 1 })
       const customerId = `guest-${randomBytes(24).toString('hex')}`
-      return send(response, 201, { accessToken: signToken({ kind: 'customer', guest: true, customerId, name, businessId, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 }) })
+      return send(response, 201, { accessToken: signToken({ kind: 'customer', guest: true, customerId, name, businessId, ...(hospitalityMode?{hospitalityMode}:{}), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 }) })
+    }
+    if(request.method==='GET'&&request.url==='/v1/customer-portal/hospitality/bookings'){
+      const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
+      if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
+      const rows=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record',$or:[{'payload.customerPortalId':claims.customerId},{'payload.customerId':claims.customerId},{'payload.entries.customerPortalId':claims.customerId}]}).toArray()
+      const hospitality=await Promise.all(rows.filter(row=>['hotel-stay','nightclub-entry'].includes(row.payload.kind)).map(async row=>{const jobs=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':row.entityId}).toArray(),saleIds=jobs.flatMap(job=>(job.payload.payments||[]).map(entry=>entry.sale.id)),refunds=saleIds.length?await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'return','payload.saleId':{$in:saleIds}}).toArray():[];return {...row.payload,invoices:jobs.map(job=>({id:job.entityId,title:job.payload.title,status:job.payload.status,total:job.payload.pricing.total,...serviceJobBalance(job.payload,refunds.map(refund=>refund.payload))}))}}))
+      const tableReservations=rows.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>(row.payload.entries||[]).filter(entry=>entry.customerPortalId===claims.customerId&&entry.nightlifeEventId).map(entry=>({...entry,id:entry.id,kind:'nightlife-table',recordId:row.entityId,eventName:entry.nightlifeEventName,tableName:entry.tableName,updatedAt:row.payload.updatedAt,invoices:[]})))
+      const bookings=[...hospitality,...tableReservations]
+      return send(response,200,{bookings:bookings.sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))})
+    }
+    if(request.method==='POST'&&request.url==='/v1/customer-portal/hospitality/bookings'){
+      const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
+      if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
+      if(await database.collection('account_deletion_requests').findOne({type:'business',businessId:claims.businessId,status:{$in:['pending','processing']}}))return send(response,403,{error:'This business is currently closed for customer bookings.'})
+      const input=await readJson(request,8192),requestId=String(input.requestId||''),type=String(input.type||'')
+      if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)||!['hotel','nightlife'].includes(type))return send(response,400,{error:'Booking details are invalid.'})
+      const rateKey=`hospitality-booking:${String(request.socket.remoteAddress||'')}:${claims.businessId}:${claims.customerId}`,rateNow=Date.now(),rate=customerPortalLoginLimits.get(rateKey),window=rate?.until>rateNow?rate:{count:0,until:rateNow+15*60*1000};if(window.count>=60)return send(response,429,{error:'Too many booking requests. Wait fifteen minutes before trying again.'});customerPortalLoginLimits.set(rateKey,{...window,count:window.count+1})
+      const recordId=`${type==='hotel'?'hotel-stay':'nightclub-entry'}:portal-${requestId}`
+      try{
+        const payload=await serializeBusinessSync(claims.businessId,async()=>{
+          const prior=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(prior){if(prior.payload.customerPortalId!==claims.customerId)return null;return prior.payload}
+          const saved=await businessSettings.findOne({businessId:claims.businessId}),profile=normalizeShopProfile(saved?.settings?.shopProfile),enabled=type==='hotel'?profile.features?.hotelOperations:profile.features?.nightlifeOperations
+          if(!saved||!enabled)throw Object.assign(new Error('This booking type is no longer available.'),{statusCode:403})
+          const now=new Date().toISOString(),all=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record'}).toArray(),name=claims.guest?claims.name:String((await entityHeads.findOne({businessId:claims.businessId,entityType:'customer',entityId:claims.customerId}))?.payload?.name||'').trim(),phone=String(input.phone||'').trim().slice(0,80)
+          if(!name||!phone)throw new Error('Enter the guest name and a reachable phone number.')
+          let record
+          if(type==='hotel'){
+            const checkIn=String(input.checkIn||''),checkOut=String(input.checkOut||''),room=all.find(row=>row.entityId===String(input.roomId||'')&&row.payload.kind==='hotel-room'&&row.payload.status==='active')
+            const validStayDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(`${value}T00:00:00.000Z`).toISOString().slice(0,10)===value
+            const todayInBusinessTimeZone=new Intl.DateTimeFormat('en-CA',{timeZone:profile.reportingTimeZone||'UTC',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
+            if(!validStayDate(checkIn)||!validStayDate(checkOut)||checkIn<todayInBusinessTimeZone)throw new Error('Choose valid future stay dates.')
+            if(!room||!/^\d{4}-\d{2}-\d{2}$/.test(checkIn)||!/^\d{4}-\d{2}-\d{2}$/.test(checkOut)||checkOut<=checkIn||checkIn<now.slice(0,10)||Date.parse(checkOut)-Date.parse(checkIn)>31*86400000)throw new Error('Choose an active room and valid dates within the next 31 nights.')
+            if(all.some(row=>row.payload.kind==='hotel-stay'&&row.payload.branchId===room.payload.branchId&&row.payload.roomId===room.entityId&&['booked','checked-in'].includes(row.payload.status)&&checkIn<row.payload.checkOut&&checkOut>row.payload.checkIn))throw Object.assign(new Error('Those dates are no longer available for this room. Choose another room or dates.'),{statusCode:409})
+            record={id:recordId,kind:'hotel-stay',branchId:room.payload.branchId,roomId:room.entityId,roomName:room.payload.roomName,guestName:name,guestPhone:phone,checkIn,checkOut,nightlyRate:Number(room.payload.nightlyRate),status:'booked',checkInToken:randomBytes(24).toString('base64url'),createdAt:now,updatedAt:now,source:'customer-portal',customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{}),staffId:`customer:${claims.customerId}`}
+          }else{
+            const event=all.find(row=>row.entityId===String(input.eventId||'')&&row.payload.kind==='nightclub-event'&&row.payload.status==='scheduled'&&row.payload.startsAt>now)
+            if(!event)throw new Error('Choose an upcoming event that is still open for bookings.')
+            const entries=all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===event.entityId&&row.payload.status!=='cancelled'),reservedGuests=all.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>row.payload.entries||[]).filter(entry=>entry.nightlifeEventId===event.entityId&&!['cancelled','no-show'].includes(entry.status)).reduce((sum,entry)=>sum+entry.guests,0);if(event.payload.capacity&&entries.length+reservedGuests>=event.payload.capacity)throw Object.assign(new Error('This event has sold out.'),{statusCode:409})
+            record={id:recordId,kind:'nightclub-entry',branchId:event.payload.branchId,eventId:event.entityId,eventName:event.payload.name,guestName:name,guestPhone:phone,admissionPrice:Number(event.payload.admissionPrice||0),status:'expected',checkInToken:randomBytes(24).toString('base64url'),createdAt:now,updatedAt:now,source:'customer-portal',customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{}),staffId:`customer:${claims.customerId}`}
+          }
+          validateHospitalityRecord(record)
+          const operationId=`customer-hospitality:${recordId}`,head={businessId:claims.businessId,entityType:'pos_record',entityId:recordId,operationId,deviceId:'customer-portal',payload:record,updatedAt:now}
+          const inserted=await entityHeads.updateOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId},{$setOnInsert:head},{upsert:true});if(!inserted.upsertedCount){const existing=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(existing?.payload.customerPortalId!==claims.customerId)throw Object.assign(new Error('This booking request ID is already used.'),{statusCode:409});return existing.payload}
+          await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:{...head,action:'upsert',createdAt:now,receivedAt:new Date()}},{upsert:true});return record
+        })
+        if(!payload)return send(response,403,{error:'This booking belongs to another customer.'})
+        return send(response,201,{booking:payload})
+      }catch(error){return send(response,error.statusCode||400,{error:error.message||'Could not save this booking.'})}
+    }
+    if(request.method==='POST'&&request.url==='/v1/customer-portal/hospitality/table-reservations'){
+      const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
+      if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
+      if(await database.collection('account_deletion_requests').findOne({type:'business',businessId:claims.businessId,status:{$in:['pending','processing']}}))return send(response,403,{error:'This business is currently closed for customer bookings.'})
+      const input=await readJson(request,8192),requestId=String(input.requestId||''),eventId=String(input.eventId||''),tableId=String(input.tableId||''),guests=Number(input.guests),phone=String(input.phone||'').trim().slice(0,80)
+      if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)||!eventId||!tableId||!Number.isInteger(guests)||guests<1||guests>100||!phone)return send(response,400,{error:'Table reservation details are invalid.'})
+      const tableRateKey=`hospitality-table:${String(request.socket.remoteAddress||'')}:${claims.businessId}:${claims.customerId}`,tableRateNow=Date.now(),tableRate=customerPortalLoginLimits.get(tableRateKey),tableWindow=tableRate?.until>tableRateNow?tableRate:{count:0,until:tableRateNow+15*60*1000};if(tableWindow.count>=30)return send(response,429,{error:'Too many table reservation requests. Wait fifteen minutes before trying again.'});customerPortalLoginLimits.set(tableRateKey,{...tableWindow,count:tableWindow.count+1})
+      try{const result=await serializeBusinessSync(claims.businessId,async()=>{
+        const saved=await businessSettings.findOne({businessId:claims.businessId}),profile=normalizeShopProfile(saved?.settings?.shopProfile);if(!profile.restaurant)return {error:'Enable Tables & tabs to offer event table reservations.',statusCode:403}
+        const all=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record'}).toArray(),eventHead=all.find(row=>row.entityId===eventId&&row.payload.kind==='nightclub-event'&&row.payload.status==='scheduled'),layoutHead=all.find(row=>row.payload.kind==='restaurant-layout'&&row.payload.branchId===eventHead?.payload.branchId)
+        if(!eventHead||eventHead.payload.startsAt<=new Date().toISOString())throw new Error('Choose an upcoming nightlife event.')
+        const bookId=reservationBookId(eventHead.payload.branchId),previous=all.find(row=>row.entityId===bookId&&row.payload.kind==='restaurant-reservations'),reservationId=`reservation:portal-${requestId}`
+        if(previous?.payload.entries?.some(row=>row.id===reservationId)){const existing=previous.payload.entries.find(row=>row.id===reservationId);if(existing.customerPortalId!==claims.customerId)return {error:'This request ID is already used.',statusCode:409};return {booking:existing}}
+        const table=(layoutHead?.payload?.tables||[]).find(row=>row.id===tableId);if(!table)throw new Error('Choose a table that is still available for this venue.')
+        const sold=all.filter(row=>row.payload.kind==='nightclub-entry'&&row.payload.eventId===eventId&&row.payload.status!=='cancelled').length,reserved=all.filter(row=>row.payload.kind==='restaurant-reservations').flatMap(row=>row.payload.entries||[]).filter(row=>row.nightlifeEventId===eventId&&!['cancelled','no-show'].includes(row.status)).reduce((sum,row)=>sum+row.guests,0);if(eventHead.payload.capacity&&sold+reserved+guests>eventHead.payload.capacity)throw Object.assign(new Error('This event does not have enough capacity for that table booking.'),{statusCode:409})
+        const guestName=claims.guest?claims.name:String((await entityHeads.findOne({businessId:claims.businessId,entityType:'customer',entityId:claims.customerId}))?.payload?.name||'').trim()
+        if(!guestName)throw new Error('Customer profile is unavailable.')
+        const timeZone=profile.reportingTimeZone||'UTC',local=(instant)=>{const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(instant)).map(part=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`},startAt=eventHead.payload.startsAt,endAt=new Date(Date.parse(startAt)+2*60*60*1000).toISOString(),now=new Date().toISOString(),user={id:`customer:${claims.customerId}`,name:guestName}
+        const reservationInput={action:'create',id:reservationId,commandId:`portal-${requestId}`,expectedUpdatedAt:previous?.payload.updatedAt||'',name:guestName,phone,guests,tableId,startLocal:local(startAt),endLocal:local(endAt),timeZone,occurrence:'earlier',endOccurrence:'earlier',note:'',nightlifeEventId:eventId,customerPortalId:claims.customerId}
+        const tabs=all.filter(row=>row.payload.kind==='restaurant-tab'&&row.payload.branchId===eventHead.payload.branchId).map(row=>row.payload),nightlifeEvents=all.filter(row=>row.payload.kind==='nightclub-event'&&row.payload.branchId===eventHead.payload.branchId).map(row=>row.payload)
+        const record=reservationChange(previous?.payload,reservationInput,{branchId:eventHead.payload.branchId,user,updatedAt:now,timeZone,layout:layoutHead?.payload||{tables:[]},tabs,nightlifeEvents}),operationId=`customer-hospitality-table:${requestId}`,filter={businessId:claims.businessId,entityType:'pos_record',entityId:bookId}
+        const update=await entityHeads.updateOne(previous?{...filter,operationId:previous.operationId}:filter,previous?{$set:{payload:record,updatedAt:now,operationId,deviceId:'customer-portal'}}:{$setOnInsert:{businessId:claims.businessId,entityType:'pos_record',entityId:bookId,operationId,deviceId:'customer-portal',payload:record,updatedAt:now}},{upsert:!previous})
+        if(previous?!update.modifiedCount:!update.upsertedCount)throw Object.assign(new Error('Venue reservations changed. Refresh and try again.'),{statusCode:409})
+        const operation={businessId:claims.businessId,operationId,deviceId:'customer-portal',entityType:'pos_record',entityId:bookId,action:'upsert',payload:record,createdAt:now,receivedAt:new Date()};await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:operation},{upsert:true})
+        return {booking:record.entries.find(row=>row.id===reservationId)}
+      })
+      if(result.error)return send(response,result.statusCode||400,{error:result.error})
+      return send(response,201,result)
+      }catch(error){return send(response,error.statusCode||400,{error:error.message||'Could not save this table booking.'})}
+    }
+    if(request.method==='POST'&&request.url==='/v1/customer-portal/hospitality/cancel'){
+      const claims=verifyToken(request);if(claims?.kind!=='customer')return send(response,401,{error:'Customer sign-in required.'})
+      if(!claims.guest){const account=ObjectId.isValid(claims.sub)&&await customerPortalAccounts.findOne({_id:new ObjectId(claims.sub),businessId:claims.businessId,customerId:claims.customerId,active:true});if(!account||claims.authVersion!==new Date(account.updatedAt||account.createdAt).getTime())return send(response,401,{error:'Customer account is no longer available. Sign in again.'})}
+      const input=await readJson(request,4096),bookingId=String(input.bookingId||'')
+      try{const booking=await serializeBusinessSync(claims.businessId,async()=>{
+        const now=new Date().toISOString()
+        if(bookingId.startsWith('reservation:')){
+          const filter={businessId:claims.businessId,entityType:'pos_record','payload.kind':'restaurant-reservations','payload.entries.id':bookingId},head=await entityHeads.findOne(filter),saved=head?.payload.entries?.find(row=>row.id===bookingId)
+          if(!head||saved?.customerPortalId!==claims.customerId)throw new Error('This booking cannot be cancelled from this account.')
+          if(saved.status==='cancelled')return saved
+          if(!['confirmed','arrived'].includes(saved.status))throw new Error('This table booking can no longer be cancelled from the customer app.')
+          const all=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.branchId':head.payload.branchId}).toArray(),settings=await businessSettings.findOne({businessId:claims.businessId}),profile=normalizeShopProfile(settings?.settings?.shopProfile),layout=all.find(row=>row.payload.kind==='restaurant-layout')?.payload||{tables:[]},tabs=all.filter(row=>row.payload.kind==='restaurant-tab').map(row=>row.payload),hotelStays=all.filter(row=>row.payload.kind==='hotel-stay').map(row=>row.payload),nightlifeEvents=all.filter(row=>row.payload.kind==='nightclub-event').map(row=>row.payload),user={id:`customer:${claims.customerId}`,name:saved.name}
+          const record=reservationChange(head.payload,{action:'cancel',id:bookingId,commandId:`portal-cancel-${randomBytes(12).toString('hex')}`,expectedUpdatedAt:head.payload.updatedAt,reason:'Cancelled by customer'}, {branchId:head.payload.branchId,user,updatedAt:now,timeZone:profile.reportingTimeZone||saved.timeZone||'UTC',layout,tabs,hotelStays,nightlifeEvents})
+          const operationId=`customer-hospitality-table-cancel:${bookingId}:${now}`,changed=await entityHeads.updateOne({...filter,operationId:head.operationId},{$set:{payload:record,updatedAt:now,operationId,deviceId:'customer-portal'}});if(!changed.modifiedCount)throw new Error('Venue reservations changed. Refresh and retry.')
+          await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:{businessId:claims.businessId,operationId,deviceId:'customer-portal',entityType:'pos_record',entityId:head.entityId,action:'upsert',payload:record,createdAt:now,receivedAt:new Date()}},{upsert:true});return record.entries.find(row=>row.id===bookingId)
+        }
+        const filter={businessId:claims.businessId,entityType:'pos_record',entityId:bookingId},head=await entityHeads.findOne(filter);if(!head||!['hotel-stay','nightclub-entry'].includes(head.payload.kind)||head.payload.customerPortalId!==claims.customerId&&head.payload.customerId!==claims.customerId)throw new Error('This booking cannot be cancelled from this account.');if(head.payload.status==='cancelled')return head.payload;if(!['booked','expected'].includes(head.payload.status))throw new Error('This booking cannot be cancelled from this account.')
+        const jobs=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':bookingId,'payload.status':{$ne:'cancelled'}}).toArray();if(jobs.length)throw new Error('Contact the business to cancel this booking because an invoice has already been issued. Any payment must be reviewed before cancellation.')
+        const payload={...head.payload,status:'cancelled',updatedAt:now,expectedUpdatedAt:head.updatedAt,staffId:`customer:${claims.customerId}`};validateHospitalityRecord(payload,head.payload)
+        const operationId=`customer-hospitality-cancel:${bookingId}:${now}`,changed=await entityHeads.updateOne({...filter,operationId:head.operationId},{$set:{payload,updatedAt:now,operationId,deviceId:'customer-portal'}});if(!changed.modifiedCount)throw new Error('This booking changed. Refresh and retry.')
+        const operation={businessId:claims.businessId,operationId,deviceId:'customer-portal',entityType:'pos_record',entityId:bookingId,action:'upsert',payload,createdAt:now,receivedAt:new Date()};await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:operation},{upsert:true});return payload})
+        return send(response,200,{booking})
+      }catch(error){return send(response,error.statusCode||400,{error:error.message||'Could not cancel this booking.'})}
     }
     if (request.method === 'POST' && request.url === '/v1/customer-portal/accept') {
       const claims = verifyToken(request)

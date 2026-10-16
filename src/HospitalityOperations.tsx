@@ -14,7 +14,7 @@ const dateTimeInputIso=(value:string)=>value?new Date(value).toISOString():''
 type Data = { rooms: Room[]; stays: RecordRow[]; events: RecordRow[]; entries: RecordRow[]; invoices: Invoice[]; stockItems:StockItem[]; tableReservations:TableReservation[]; venueTabs:VenueTab[]; housekeepingStaff:HousekeepingStaff[] }
 const empty: Data = { rooms: [], stays: [], events: [], entries: [], invoices: [], stockItems:[], tableReservations:[], venueTabs:[], housekeepingStaff:[] }
 
-export function HospitalityOperations({ headers, billingEnabled, openInvoice, money, restaurantEnabled, openTables, hotelEnabled, nightlifeEnabled }: { headers: Record<string, string>; billingEnabled: boolean; openInvoice: (id: string) => void; money: (value:number)=>string; restaurantEnabled: boolean; openTables: () => void; hotelEnabled: boolean; nightlifeEnabled: boolean }) {
+export function HospitalityOperations({ headers, billingEnabled, openInvoice, money, restaurantEnabled, openTables, hotelEnabled, nightlifeEnabled, scanTicket }: { headers: Record<string, string>; billingEnabled: boolean; openInvoice: (id: string) => void; money: (value:number)=>string; restaurantEnabled: boolean; openTables: () => void; hotelEnabled: boolean; nightlifeEnabled: boolean; scanTicket:(eventId?:string)=>Promise<void> }) {
   const [data, setData] = useState<Data>(empty)
   const [tab, setTab] = useState<'hotel' | 'nightlife'>('hotel')
   const activeTab = hotelEnabled && (tab === 'hotel' || !nightlifeEnabled) ? 'hotel' : 'nightlife'
@@ -49,7 +49,7 @@ export function HospitalityOperations({ headers, billingEnabled, openInvoice, mo
   async function createInvoice(record: RecordRow) {
     setError('')
     try {
-      const result = await posRequest('/api/pos/hospitality/invoice', headers, { id: 'service-job:' + crypto.randomUUID(), commandId: crypto.randomUUID(), expectedUpdatedAt: '', estimate: false, hospitality: { recordId: record.id, recordKind: record.kind } })
+      const result = await posRequest('/api/pos/hospitality/invoice', headers, { id: 'service-job:' + crypto.randomUUID(), commandId: crypto.randomUUID(), expectedUpdatedAt: '', estimate: false, ...(record.customerId?{customerId:record.customerId}:{}), hospitality: { recordId: record.id, recordKind: record.kind } })
       await reload()
       window.dispatchEvent(new Event('stockroom-data-refreshed'))
       openInvoice(result.job.id)
@@ -58,7 +58,7 @@ export function HospitalityOperations({ headers, billingEnabled, openInvoice, mo
   async function createFolioCharge(record: RecordRow, description: string, quantity: number, price: number): Promise<boolean> {
     setError('')
     try {
-      const result = await posRequest('/api/pos/hospitality/invoice', headers, { id: 'service-job:' + crypto.randomUUID(), commandId: crypto.randomUUID(), expectedUpdatedAt: '', estimate: false, title: `Hotel folio - ${record.roomName}`, lines: [{ id: 'folio:' + crypto.randomUUID(), description, quantity, price }], hospitality: { recordId: record.id, recordKind: record.kind, chargeType: 'extra' } })
+      const result = await posRequest('/api/pos/hospitality/invoice', headers, { id: 'service-job:' + crypto.randomUUID(), commandId: crypto.randomUUID(), expectedUpdatedAt: '', estimate: false, ...(record.customerId?{customerId:record.customerId}:{}), title: `Hotel folio - ${record.roomName}`, lines: [{ id: 'folio:' + crypto.randomUUID(), description, quantity, price }], hospitality: { recordId: record.id, recordKind: record.kind, chargeType: 'extra' } })
       await reload()
       window.dispatchEvent(new Event('stockroom-data-refreshed'))
       openInvoice(result.job.id)
@@ -68,7 +68,7 @@ export function HospitalityOperations({ headers, billingEnabled, openInvoice, mo
   async function createFolioStockCharge(record: RecordRow, productId:string, quantity:number): Promise<boolean> {
     setError('')
     try {
-      const result = await posRequest('/api/pos/hospitality/invoice', headers, { id:'service-job:'+crypto.randomUUID(), commandId:crypto.randomUUID(), expectedUpdatedAt:'', estimate:false, hospitalityStock:{productId,quantity}, hospitality:{recordId:record.id,recordKind:record.kind,chargeType:'extra'} })
+      const result = await posRequest('/api/pos/hospitality/invoice', headers, { id:'service-job:'+crypto.randomUUID(), commandId:crypto.randomUUID(), expectedUpdatedAt:'', estimate:false, ...(record.customerId?{customerId:record.customerId}:{}), hospitalityStock:{productId,quantity}, hospitality:{recordId:record.id,recordKind:record.kind,chargeType:'extra'} })
       await reload(); window.dispatchEvent(new Event('stockroom-data-refreshed')); openInvoice(result.job.id); return true
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not charge this stocked product to the guest folio.'); return false }
   }
@@ -110,12 +110,12 @@ export function HospitalityOperations({ headers, billingEnabled, openInvoice, mo
         const form = event.currentTarget, fields = new FormData(form)
         const room = data.rooms.find(row => row.id === String(fields.get('roomId')))
         if(!room) { setError('Add and select an active room before booking a stay.'); return }
-        if(await act({ action: 'book-stay', roomId: room.id, guestName: String(fields.get('guest')), guestPhone: String(fields.get('phone')), checkIn: String(fields.get('checkin')), checkOut: String(fields.get('checkout')), note: String(fields.get('note')) })) form.reset()
+        if(await act({ action: 'book-stay', roomId: room.id, guestName: String(fields.get('guest')), guestPhone: String(fields.get('phone')), checkIn: String(fields.get('checkin')), checkOut: String(fields.get('checkout')), note: String(fields.get('note')), assignedStaffId:String(fields.get('assignedStaffId')||'') })) form.reset()
       }}>
         <label>Room<select name="roomId" required defaultValue=""><option value="" disabled>{data.rooms.some(room => room.status === 'active') ? 'Choose an available room' : 'Add an active room first'}</option>{data.rooms.filter(room => room.status === 'active').map(room => <option key={room.id} value={room.id}>{room.roomName} · {money(room.nightlyRate)} / night</option>)}</select></label><label>Guest name<input name="guest" required maxLength={200} /></label>
         <label>Phone<input name="phone" maxLength={80} /></label><label>Check in<input type="date" name="checkin" required /></label>
         <label>Check out<input type="date" name="checkout" required /></label>
-        <label>Notes<input name="note" maxLength={500} /></label><SubmitButton className="primary-button">Save booking</SubmitButton>
+        <label>Notes<input name="note" maxLength={500} /></label><label>Stay manager<select name="assignedStaffId" defaultValue=""><option value="">Unassigned</option>{data.housekeepingStaff.map(member=><option key={member.id} value={member.id}>{member.name}</option>)}</select></label><SubmitButton className="primary-button">Save booking</SubmitButton>
       </AsyncForm>
       <h3>Room stays</h3>
       <section className="panel" aria-label="Room availability calendar">
@@ -135,7 +135,7 @@ export function HospitalityOperations({ headers, billingEnabled, openInvoice, mo
           {row.status === 'checked-in' && billingEnabled && <AsyncForm className="form-grid" onSubmit={async event => { const form=event.currentTarget,fields=new FormData(form);if(await createFolioStockCharge(row,String(fields.get('productId')),Number(fields.get('quantity'))))form.reset() }}><label>Stocked product<select name="productId" required defaultValue=""><option value="">Choose stocked product</option>{data.stockItems.filter(item=>item.stock>0).map(item=><option key={item.id} value={item.id}>{item.name} · {item.stock} {item.unit} available · {money(item.price)} / {item.unit}</option>)}</select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" defaultValue="1" required /></label><SubmitButton className="filter-button" disabled={!data.stockItems.some(item=>item.stock>0)}>Charge product and deduct stock</SubmitButton><small>Uses the saved product price. Stock is deducted when this folio invoice is created; payment can be collected later through Jobs &amp; invoices.</small></AsyncForm>}
           {!row.nightlyRate && <small>No nightly rate is saved for this booking.</small>}
         </div>
-          {row.status === 'booked' && <AsyncButton className="filter-button" disabled={!roomReady} onClick={() => { void act({ action: 'status', id: row.id, expectedUpdatedAt: row.updatedAt, status: 'checked-in' }) }}>Check in</AsyncButton>}
+          {row.status === 'booked' && <><AsyncButton className="filter-button" disabled={!roomReady} onClick={() => { void act({ action: 'status', id: row.id, expectedUpdatedAt: row.updatedAt, status: 'checked-in' }) }}>Check in</AsyncButton>{row.checkInToken&&<AsyncButton className="filter-button" disabled={!roomReady} onClick={()=>void scanTicket()}>Scan guest QR</AsyncButton>}</>}
           {row.status === 'checked-in' && <AsyncButton className="filter-button" onClick={() => { void act({ action: 'status', id: row.id, expectedUpdatedAt: row.updatedAt, status: 'checked-out' }) }}>Check out</AsyncButton>}
           {row.status === 'booked' && <AsyncButton className="filter-button" onClick={() => { void act({ action: 'status', id: row.id, expectedUpdatedAt: row.updatedAt, status: 'cancelled' }) }}>Cancel</AsyncButton>}
         </article>
@@ -145,16 +145,20 @@ export function HospitalityOperations({ headers, billingEnabled, openInvoice, mo
       {restaurantEnabled ? <section className="panel"><h3>Venue tables and tabs</h3><p>Use the existing table reservations, open tabs, menu orders and settlement for this venue.</p><button type="button" className="primary-button" onClick={openTables}>Open venue tables &amp; tabs</button></section> : <p>Enable the existing Tables &amp; tabs workspace in business setup to manage venue reservations, orders and tabs.</p>}
       <AsyncForm className="form-grid" onSubmit={async event => {
         const form = event.currentTarget, fields = new FormData(form)
-        if(await act({ action: 'create-event', name: String(fields.get('name')), startsAt: new Date(String(fields.get('startsAt'))).toISOString(), capacity: Number(fields.get('capacity')), admissionPrice: Number(fields.get('admissionPrice')) })) form.reset()
+        if(await act({ action: 'create-event', name: String(fields.get('name')), startsAt: new Date(String(fields.get('startsAt'))).toISOString(), capacity: Number(fields.get('capacity')), admissionPrice: Number(fields.get('admissionPrice')), hostStaffId:String(fields.get('hostStaffId')||''), doorStaffId:String(fields.get('doorStaffId')||'') })) form.reset()
       }}>
         <label>Event name<input name="name" required maxLength={200} /></label><label>Starts<input type="datetime-local" name="startsAt" required /></label>
         <label>Guest capacity<input type="number" name="capacity" min="0" max="100000" defaultValue="0" /></label>
         <label>Admission price<input type="number" name="admissionPrice" min="0" step="0.01" defaultValue="0" required /></label>
+        <label>Event host<select name="hostStaffId" defaultValue=""><option value="">Unassigned</option>{data.housekeepingStaff.map(member=><option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+        <label>Door staff lead<select name="doorStaffId" defaultValue=""><option value="">Unassigned</option>{data.housekeepingStaff.map(member=><option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
         <SubmitButton className="primary-button">Create event</SubmitButton>
       </AsyncForm>
       <h3>Events and guest list</h3>
       {data.events.map(event => <article className="panel" key={event.id}>
         <strong>{event.name}</strong><p>{new Date(event.startsAt).toLocaleString()} · {data.entries.filter(row => row.eventId === event.id && row.status !== 'cancelled').length}{event.capacity ? ` / ${event.capacity}` : ''} guests · Admission {money(event.admissionPrice || 0)} · {event.status}</p>
+        <AsyncButton className="filter-button" onClick={()=>void scanTicket(event.id)}>Scan admission QR</AsyncButton>
+        <AsyncForm className="form-grid" onSubmit={async formEvent=>{const fields=new FormData(formEvent.currentTarget);await act({action:'assign-event-staff',id:event.id,expectedUpdatedAt:event.updatedAt,hostStaffId:String(fields.get('hostStaffId')||''),doorStaffId:String(fields.get('doorStaffId')||'')})}}><label>Event host<select name="hostStaffId" defaultValue={event.staffAssignments?.host||''}><option value="">Unassigned</option>{data.housekeepingStaff.map(member=><option key={member.id} value={member.id}>{member.name}</option>)}</select></label><label>Door staff lead<select name="doorStaffId" defaultValue={event.staffAssignments?.door||''}><option value="">Unassigned</option>{data.housekeepingStaff.map(member=><option key={member.id} value={member.id}>{member.name}</option>)}</select></label><SubmitButton className="filter-button">Save staff assignments</SubmitButton></AsyncForm>
         {(data.tableReservations.some(row=>row.nightlifeEventId===event.id)||data.venueTabs.some(row=>row.nightlifeEventId===event.id))&&<section className="panel" aria-label={`${event.name} venue bookings`}><h4>Venue table bookings and tabs</h4>{data.tableReservations.filter(row=>row.nightlifeEventId===event.id).map(row=><p key={row.id}>{row.name} · {row.guests} guests · {row.tableName||'Unassigned'} · {new Date(row.startAt).toLocaleString()} · {row.status}</p>)}{data.venueTabs.filter(row=>row.nightlifeEventId===event.id).map(row=><p key={row.id}>Open tab: {row.name} · {row.guests} guests · {row.sessionId.slice(0,8).toUpperCase()}</p>)}</section>}
         {event.status === 'scheduled' && <><AsyncForm onSubmit={async formEvent => { const form = formEvent.currentTarget, fields = new FormData(form); if(await act({ action: 'add-guest', eventId: event.id, guestName: String(fields.get('guest')), guestPhone: String(fields.get('phone')) })) form.reset() }}>
           <label>Guest<input name="guest" required maxLength={200} /></label><label>Phone<input name="phone" maxLength={80} /></label><SubmitButton className="filter-button">Add guest</SubmitButton>

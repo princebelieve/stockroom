@@ -18,6 +18,7 @@ function canonical(input) {
     Object.assign(value,{name:text(input.name,'the guest name',100),phone:text(input.phone||'','a phone number',80,true),guests:Number(input.guests),tableId:text(input.tableId||'','a table ID',60,true),startLocal:text(input.startLocal,'the arrival time',16),endLocal:text(input.endLocal,'the departure time',16),timeZone:reportTimeZone(input.timeZone||'UTC'),occurrence:input.occurrence||'earlier',endOccurrence:input.endOccurrence||input.occurrence||'earlier',note:text(input.note||'','a reservation note',1000,true)})
     if(input.hotelStayId)value.hotelStayId=text(input.hotelStayId,'a hotel stay',160)
     if(input.nightlifeEventId)value.nightlifeEventId=text(input.nightlifeEventId,'a nightlife event',160)
+    if(input.customerPortalId)value.customerPortalId=text(input.customerPortalId,'a customer portal ID',150)
   }
   else if(['cancel','no-show'].includes(value.action))value.reason=text(input.reason,'a cancellation or no-show reason',300)
   else if(value.action==='seat')Object.assign(value,{billId:text(input.billId,'the opened bill',150),sessionId:text(input.sessionId,'the bill session',100)})
@@ -57,7 +58,7 @@ export function reservationChange(previous,input,{branchId,user,updatedAt,timeZo
     const nightlifeEvent=request.nightlifeEventId?nightlifeEvents.find(item=>item.id===request.nightlifeEventId):null
     if(request.nightlifeEventId&&(!nightlifeEvent||nightlifeEvent.kind!=='nightclub-event'||nightlifeEvent.branchId!==branchId||nightlifeEvent.status!=='scheduled'))throw new Error('Choose a scheduled nightlife event from this branch.')
     if(nightlifeEvent&&businessDate(startAt,zone)!==businessDate(nightlifeEvent.startsAt,zone))throw new Error('The table reservation must be on the nightlife event date.')
-    Object.assign(row,{name:request.name,phone:request.phone,guests:request.guests,tableId:request.tableId,tableName:table?.name||'',...(stay?{hotelStayId:stay.id}:{hotelStayId:undefined}),...(nightlifeEvent?{nightlifeEventId:nightlifeEvent.id,nightlifeEventName:nightlifeEvent.name}:{nightlifeEventId:undefined,nightlifeEventName:undefined}),startAt,endAt,timeZone:zone,occurrence:request.occurrence,endOccurrence:request.endOccurrence,note:request.note})
+    Object.assign(row,{name:request.name,phone:request.phone,guests:request.guests,tableId:request.tableId,tableName:table?.name||'',...(stay?{hotelStayId:stay.id}:{hotelStayId:undefined}),...(nightlifeEvent?{nightlifeEventId:nightlifeEvent.id,nightlifeEventName:nightlifeEvent.name}:{nightlifeEventId:undefined,nightlifeEventName:undefined}),...(request.customerPortalId?{customerPortalId:request.customerPortalId}:{}),startAt,endAt,timeZone:zone,occurrence:request.occurrence,endOccurrence:request.endOccurrence,note:request.note})
   } else {
     const allowed={arrive:['confirmed'],seat:['confirmed','arrived'],complete:['seated'],cancel:['confirmed','arrived'],'no-show':['confirmed','arrived']}
     if(!allowed[request.action].includes(row.status))throw new Error('Follow the reservation stages.')
@@ -87,6 +88,7 @@ export function validateReservationBook(record,previous,snapshot=false,layout,ta
     text(row.name,'a guest name',100);text(row.phone,'a phone number',80,true);text(row.note,'a reservation note',1000,true)
     if(!/^reservation:[a-zA-Z0-9_-]{3,80}$/.test(row.id)||ids.has(row.id)||!states.includes(row.status)||!Number.isInteger(row.guests)||row.guests<1||row.guests>100||!Number.isFinite(Date.parse(row.createdAt))||!Array.isArray(row.events)||!row.events.length||row.events.length>100)throw new Error('Invalid reservation details.')
     ids.add(row.id);reportTimeZone(row.timeZone)
+    if(row.customerPortalId!==undefined)text(row.customerPortalId,'a customer portal ID',150)
     if(!['earlier','later'].includes(row.occurrence)||!['earlier','later'].includes(row.endOccurrence)||!Number.isFinite(Date.parse(row.startAt))||Date.parse(row.endAt)<=Date.parse(row.startAt)||!Number.isFinite(Date.parse(row.endAt))||Date.parse(row.endAt)-Date.parse(row.startAt)>86400000)throw new Error('Invalid reservation interval.')
     text(row.tableId,'a table ID',60,true);text(row.tableName,'a table name',60,true);if(row.hotelStayId!==undefined&&!/^hotel-stay:[a-zA-Z0-9_-]{3,100}$/.test(row.hotelStayId))throw new Error('Invalid linked hotel stay.');if(row.nightlifeEventId!==undefined&&(!/^nightclub-event:[a-zA-Z0-9_-]{3,100}$/.test(row.nightlifeEventId)||!row.nightlifeEventName))throw new Error('Invalid linked nightlife event.')
     if(['seated','completed'].includes(row.status)){text(row.billId,'a bill ID',150);text(row.sessionId,'a bill session',100)}
