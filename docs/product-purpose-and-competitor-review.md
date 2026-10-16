@@ -1,5 +1,7 @@
 # Product purpose, duplication and competitor review
 
+**Historical notice, 2026-10-16:** This 2026-10-06 research snapshot predates Hotel and Nightlife operations and customer booking. Its older sector gaps and recommendations are not the current product inventory. Follow [workspace scope](workspaces.md), [hotel/nightlife operations](hospitality-workspace.md), and [capabilities](product-capabilities-and-expectations.md) for current implementation facts.
+
 Review date: 2026-10-06. This is the original audit snapshot; the implementation update at the end supersedes its documentation/timezone findings. Competitors: Square, Loyverse and Odoo (interpreting “Oddo” as Odoo).
 
 ## Conclusion

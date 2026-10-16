@@ -1,16 +1,16 @@
 # Documentation alignment
 
-Original full review: 2026-10-06. Incremental screen/subscription review: 2026-10-12 against the current repository implementation. The October 6 inventory remains useful for backend/product behavior; the October 12 pass corrects the navigation and subscription claims affected by the Settings, Inventory, Staff & access and Subscription refactors. Generated builds, dependencies and release artifacts are not documentation authorities.
+Original full review: 2026-10-06. Incremental screen/subscription review: 2026-10-12. Current implementation reconciliation: 2026-10-16. The dated inventories below are snapshots, not permanent authorities. Generated builds, dependencies and release artifacts are not documentation authorities; current source code is.
 
 ## Current authority
 
-Use [README](../README.md) for product scope, [workspaces](workspaces.md) for workflow choice, [user guide](user-guide.md) for staff instructions, and [report calculations](report-calculations.md) for financial treatment. Historical research and audit documents are explicitly marked; their proposals and original findings do not override current operational guides.
+Use [README](../README.md) for product scope, [workspaces](workspaces.md) for workspace choice, [user guide](user-guide.md) and its paired [in-app guide source](../src/user-guide.json) for staff instructions, [hospitality operations](hospitality-workspace.md) for hotel/nightlife workflows, and [report calculations](report-calculations.md) for financial treatment. Historical research and audits are snapshots; their old proposals or findings do not override these current guides.
 
 The Markdown user-guide chapters match `src/user-guide.json`, which supplies Help and its downloadable text guide. When changing a user instruction, update both representations.
 
 ## Corrections made
 
-- README now includes service jobs/invoices/deposits, Tables & tabs, recipe consumption, current cashier scope, reporting timezone and local development requirements.
+- README now includes service jobs/invoices/deposits, Tables & tabs, Hospitality, recipe consumption, current cashier scope, reporting timezone and local development requirements.
 - Prepared food with recipes consumes ingredients at preparation; counter packaged goods consume stock at payment; restaurant packaged goods consume stock at preparation. Refunds do not recreate cooked ingredients.
 - Setup paths point to the focused Settings task selector: Available workspaces, Sales tasks, Receipt details, Service catalogue, and Devices. Product options and daily Cash register remain operationally separate.
 - Reports use a synchronized business timezone, defaulting to UTC. Their expired-stock summary uses that calendar; inventory batch alerts and stock allocation still use UTC dates. The profit formula includes consumed recipe ingredients.
@@ -24,7 +24,9 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 
 | Document | Areas checked |
 | --- | --- |
-| `README.md` | Product purpose, five selling workspaces, platforms, roles, registration, reports and build commands. |
+| `README.md` | Product purpose, six workspace choices and shared Hospitality entitlement, platforms, roles, registration, reports and build commands. |
+| `docs/hospitality-workspace.md` | Current hotel, nightlife and customer portal workflows; staff/branch reuse, invoice integration and limits. |
+| `features.html` / `workspaces.html` | Public-facing descriptions of workspace choices and sector workflows. |
 | `PWA-DEPLOYMENT.md` | Browser adapter, enrollment, cached offline session, sync/refresh, printing and release compatibility. |
 | `cloud/README.md` | Authentication/enrollment endpoints, mail configuration, sync, subscription enforcement and capabilities. |
 | `docs/app-updates.md` | Installed-client version notices and PWA service-worker updates. |
@@ -41,7 +43,7 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 | `docs/paystack-terminal.md` | Product-sales controls, business-scoped credentials, verification and manual refunds. |
 | `docs/pos-workflows.md` | Basket, cash register, returns, tax/rewards and optional stock allocation. |
 | `docs/product-migration.md` | CSV mapping, duplicate handling, opening stock and excluded historical data. |
-| `docs/product-purpose-and-competitor-review.md` | Original audit distinguished from subsequently completed documentation/timezone work. |
+| `docs/product-purpose-and-competitor-review.md` | Historical research notice and current guide links; old sector-scope statements are not operational guidance. |
 | `docs/report-calculations.md` | Report periods, taxes, receipt/refund costs, ingredients, losses and expenses. |
 | `docs/restaurant-and-bar-workspace.md` | Bill sessions, rounds, station progress, partial settlement, moves/merges and stock effects. |
 | `docs/service-payment-research.md` | Historical research/proposals clearly separated from implemented service jobs. |
@@ -49,7 +51,7 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 | `docs/subscriptions.md` | Renewal, configurable access/grace, referrals and payout handling. |
 | `docs/supermarket-receiving.md` | Receiving, pack conversion, supplier accounts, batches and migration persistence. |
 | `docs/supermarket-workspace.md` | Stock allocation, FEFO, restock-dependent refunds, reports and deployment limits. |
-| `docs/universal-business-audit.md` | Present workspace scope, invoices/deposits, restaurant splitting and current navigation. |
+| `docs/universal-business-audit.md` | Historical notice; old workspace and hospitality statements are superseded by current guides. |
 | `docs/user-guide.md` / `src/user-guide.json` | Matching staff instructions, settings, reporting timezone and recipe terminology. |
 | `docs/workspaces.md` | Presets, workflow boundaries, service jobs, provider defaults and data updates. |
 | `public/privacy.html` | Described storage/providers, optional OCR/notifications and account-deletion default. |
@@ -71,7 +73,17 @@ The October 6 review confirms the implementation facts listed in its coverage ta
 
 ## Verification results
 
-The initial October 6 review inventoried 29 project Markdown documents. The October 12 incremental pass reconciled the listed task-navigation and subscription guides against the current source; relative-link and guide-pair checks are recorded only when rerun for the current working tree. This pass changes documentation only; it does not change app code or rerun physical-device/provider acceptance.
+The initial October 6 review inventoried 29 project Markdown documents. The October 12 incremental pass reconciled task-navigation and subscription guides against that source snapshot. Relative-link and guide-pair checks are only claimed when rerun. That historical pass changed documentation only; it did not certify physical-device/provider acceptance.
+
+## Current implementation reconciliation: 2026-10-16
+
+- The app offers six workspace choices: Product sales, Oil sales, Payments & receipts, Order counter, Tables & tabs, and Hospitality operations. Payments & receipts is the free workspace. Hotel operations and Nightlife operations are independent settings that open the same Hospitality destination and count together as one subscription entitlement. Overview labels the destination according to the selected option(s).
+- Hotel implementation includes room records/rates/status, overlap-checked stay bookings, a monthly availability calendar, housekeeping state/staff assignment/schedule, invoice and folio charges, stocked-product charges, payment-gated check-out, customer booking and QR passes.
+- Nightlife implementation includes events, capacity, assigned host/door lead, guest entries, admission invoices, paid check-in, customer event/table bookings and QR passes. Event table reservations and tabs reuse Tables & tabs; that workspace retains its own food/drink ordering and settlement.
+- Customer portal booking is online. It can link to a signed-in customer account and show linked invoice balances/wallet balance; invoice payment is recorded by business staff through Jobs & invoices. Staff roles use existing staff accounts and branch permissions.
+- Workspace subscription decisions follow the developer enforcement switch. With enforcement on, Save workspaces compares the selection against current entitlement; with enforcement off it does not block the save. The over-limit dialog carries the pending workspace count and names to Subscription, prices the requested count, and preserves the selection across checkout. Confirmed payment grants the requested count; the owner then returns to Business settings and saves the workspace selection. The application build passed after this reconciliation; production deployment and payment-provider acceptance remain separate.
+- Historical documents with obsolete hotel/nightlife claims are marked or corrected: [universal business audit](universal-business-audit.md), [product purpose review](product-purpose-and-competitor-review.md), [business completion plan](business-completion-plan.md), [restaurant guide](restaurant-and-bar-workspace.md), and [supermarket guide](supermarket-workspace.md).
+- This is a source-to-document review, not proof of production deployment or an end-to-end acceptance run. The build verifies documentation-source compilation; QR camera behavior, customer booking on live services, deployed hospitality sync compatibility, and real business workflows require their own checks.
 
 ## Account closure and removal controls
 

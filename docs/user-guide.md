@@ -32,16 +32,17 @@ This guide follows the current app screens. Availability depends on your workspa
 26. Tables & tabs > Tables and tabs
 27. Tables & tabs > Take payment and close a bill
 28. Tables & tabs > Bill actions, History and refunds
-29. Cash register
-30. Sales history: receipts, voids and customer history
-31. Stock count and Stock movements
-32. Customer display
-33. Customer accounts
-34. Business performance and Reports
-35. Staff & access and Staff activity
-36. Sync now and Sync issues
-37. Close your account, exports and referrals
-38. End-of-day checklist and when help is needed
+29. Hospitality operations: hotels and nightlife
+30. Cash register
+31. Sales history: receipts, voids and customer history
+32. Stock count and Stock movements
+33. Customer display
+34. Customer accounts
+35. Business performance and Reports
+36. Staff & access and Staff activity
+37. Sync now and Sync issues
+38. Close your account, exports and referrals
+39. End-of-day checklist and when help is needed
 
 ## Start here: install, register and sign in
 
@@ -56,12 +57,12 @@ This guide follows the current app screens. Availability depends on your workspa
 ## Subscription: activate and renew access
 
 1. Sign in as the owner and open Subscription, or use Subscribe in the sidebar. Use the task selector to switch between Plan and renewal, Referral rewards, and Export or close business.
-2. Review the current access status, enabled selling workspaces, and the plans and prices displayed. One paid plan covers the enabled selling workspaces; Payments & receipts is free. Additional selling workspaces may change the quoted price shown before checkout.
+2. Review the current access status, saved selling workspaces, and the plans and prices displayed. One paid plan covers the enabled selling workspaces; Payments & receipts is free. The displayed quote is based on saved workspace choices, not an unsaved selection in Available workspaces.
 3. Choose a paid plan and renewal option, then complete checkout. Play Store subscriptions use the purchase flow in that build. Return to Stockroom and refresh if the access status does not update.
 4. To use only the free workspace, choose Free plan and confirm. This turns off paid selling workspaces in the saved workspace setup, while keeping their records. It does not cancel or refund a current paid subscription.
 5. To stop future renewal, use **Manage or cancel subscription** on the Plan and renewal task. On Android, manage it in the app store where you subscribed. Cancelling renewal does not end already-paid access immediately; the displayed expiry and any configured grace period still apply.
 
-**Remember:** The configured free-trial duration, plan prices and grace periods are shown by the app. A free trial ends at its expiry; it does not receive paid-plan grace. Paid-plan access continues through its configured grace period. After access is blocked, Stockroom returns sales work to Payments & receipts and asks for a plan when a paid workspace is selected; saved workspace choices and records are retained. Subscription payment is different from a customer paying your business. Reconnect to refresh renewal status on an offline device.
+**Remember:** Add to subscription carries the pending workspace count into the quote and retains your selection across checkout. After payment is confirmed, return to Available workspaces and select Save workspaces; payment does not enable the workspace by itself. The configured free-trial duration, plan prices and grace periods are shown by the app. A free trial ends at its expiry; it does not receive paid-plan grace. Paid-plan access continues through its configured grace period. After access is blocked, Stockroom returns sales work to Payments & receipts and asks for a plan when a paid workspace is selected; saved workspace choices and records are retained. Subscription payment is different from a customer paying your business. Reconnect to refresh renewal status on an offline device.
 
 ## Your first working setup
 
@@ -108,13 +109,13 @@ Owners can publish QR bank details and enable takeaway delivery with a fixed cha
 ## Business settings > Workspaces
 
 1. Open Business settings and select **Available workspaces** from the task selector.
-2. Turn on each needed destination: Product sales, Oil sales, Payments & receipts, Order counter, or Tables & tabs. Business type and workspace selection are separate settings.
-3. Select Save workspaces. Check Daily work for the resulting links. Workspace changes do not delete products, menus, payments or records already saved.
+2. Turn on the needed options: Product sales, Oil sales, Payments & receipts, Order counter, Tables & tabs, and Hotel operations and/or Nightlife operations. Hotel and Nightlife are separate switches, but share one Hospitality destination and one subscription entitlement. Business type and workspace selection are separate settings.
+3. Select Save workspaces. When subscription enforcement is on and the selection exceeds the current entitlement, the app explains the mismatch. Cancel closes the message; Return to Overview restores the currently available choices; Add to subscription opens Subscription with a quote for the pending workspace count. After payment, return here and save the selection. When developer enforcement is off, extra workspaces can be saved without the entitlement prompt. Check Overview for the resulting destination. Workspace changes do not delete products, menus, payments or records already saved.
 4. Use **Business type** to change type-based suggestions without changing workspace selection. Use **Workspace catalogues** to choose a workspace; the highlighted workspace name identifies which category and unit dropdowns you are editing.
 5. Use **Product form** for templates and custom product fields where that task is available. This changes product-entry fields, not the business type or enabled workspaces.
 6. Choose a city from the Reporting timezone dropdown, grouped by continent, such as Africa → Lagos. Check the UTC and local-time previews below the dropdown. Select Save reporting timezone, then Sync now. Existing saved timezones are retained until changed; businesses without a saved timezone default to UTC.
 
-**Remember:** Catalogue templates supply labels, categories and units; they do not add specialist operations such as hotel bookings or prescription dispensing. Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices.
+**Remember:** Catalogue templates supply product labels, categories and units; hotel and nightlife operations are enabled separately in Available workspaces. Loading a template changes the draft. Hidden optional fields retain saved data. The preview is not a saved product. Use Sync now to share saved configuration with other connected devices.
 
 ## Business settings > Sales
 
@@ -349,6 +350,19 @@ Shared reservations require updated apps and a sync backend supporting `restaura
 5. Review the remaining bill/return history after saving.
 
 **Remember:** Move/merge operations retain original orders and prices. Merge is restricted to compatible unpaid bills on the original till/currency. Refunds do not automatically restock prepared items.
+
+## Hospitality operations: hotels and nightlife
+
+1. In Business settings > Available workspaces, turn on Hotel operations, Nightlife operations, or both. They are separate options that use one Hospitality subscription entitlement and one Hospitality operations destination. Overview labels the destination for the option(s) enabled.
+2. For a hotel, add rooms with nightly rates and keep room status current. Book stays by room and dates; overlapping bookings are rejected and the monthly availability calendar shows room stays.
+3. Assign a stay manager and housekeeping staff from existing staff who have Hotel operations access in this branch. Set room readiness and a cleaning time. A room must be ready before check-in; checking out marks it dirty.
+4. Create the stay invoice from the booking and use Payments & receipts > Jobs & invoices to record deposits, balances and receipts. During an active stay, add priced folio charges or charge stocked products. Stock is deducted when the stocked-product invoice is created. Check-out is blocked while stay/folio invoices have a balance due.
+5. For nightlife, create an event with its time, optional capacity and admission price. Assign an event host and door lead from staff who have Nightlife operations access. Add guests; paid entries need an invoice paid in full before check-in. Free entries can be checked in without an invoice.
+6. Customer-created hotel and event bookings show a QR pass in the customer portal. Use Scan guest QR or Scan admission QR at the venue; staff-entered bookings can be checked in with the staff action. Passes are single-use. Customer booking requires an internet connection.
+7. If Tables & tabs is enabled, event table reservations and venue tabs link to the nightlife event. Configure tables, menus and bills in Tables & tabs; that workspace continues to handle food, drinks and settlement.
+8. Guests can make bookings through the customer portal as a guest or sign in to link them to a customer account. The portal shows booking and invoice balances but does not collect the hotel/admission invoice payment; staff record payment in Jobs & invoices. A linked customer wallet can be used by staff when enabled by payment policy.
+
+**Remember:** Hospitality reuses existing staff accounts, branch permissions, Jobs & invoices, stock, customer accounts and Tables & tabs. It is not a full hotel PMS or ticketing/accounting system. There is no separate hospitality staff directory, housekeeping task history/workload board, direct online invoice payment, or ticket marketplace.
 
 ## Cash register
 

@@ -10,7 +10,7 @@ import { ShopProductFields } from './ShopProductFields'
 import { BlankProductForm } from './BlankProductForm'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
-export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, refreshSubscriptionAccess, onSubscriptionRequired, onReturnOverview }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; refreshSubscriptionAccess: () => Promise<SubscriptionAccess>; onSubscriptionRequired: () => void; onReturnOverview: () => void }) {
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, refreshSubscriptionAccess, onSubscriptionRequired, onReturnOverview, onWorkspacesSaved }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; refreshSubscriptionAccess: () => Promise<SubscriptionAccess>; onSubscriptionRequired: (selection: { profile: ShopProfile; count: number; names: string[] }) => void; onReturnOverview: () => void; onWorkspacesSaved?: () => void }) {
   const [view,setView]=useState('type')
   const [draft, setDraft] = useState(value)
   const [step, setStep] = useState(0)
@@ -25,6 +25,15 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   useEffect(() => { if (!dirty) setDraft(value) }, [value, dirty])
   useEffect(() => { if (requestedView) setView(requestedView) }, [requestedView])
   function change(next: ShopProfile) { setDraft(next); setDirty(true); setMessage(''); setProblem(''); setSubscriptionPrompt(false) }
+  function workspaceUpgradeSelection(profile: ShopProfile = draft) {
+    const workspace = businessWorkspace(profile)
+    const names = [
+      ...(workspace.productSales ? ['Product sales'] : []), ...(workspace.oil ? ['Oil sales'] : []),
+      ...(workspace.fastFood ? ['Order counter'] : []), ...(workspace.restaurant ? ['Tables & tabs'] : []),
+      ...(workspace.hospitalityOperations ? ['Hospitality operations'] : []),
+    ]
+    return { profile, count: names.length, names }
+  }
   function changeCatalogueList(update: (settings: ReturnType<typeof workspaceCatalogueSettings>) => ReturnType<typeof workspaceCatalogueSettings>) {
     const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
     change({ ...draft, workspaceCatalogues: { ...draft.workspaceCatalogues, [catalogueWorkspace]: update(settings) } })
@@ -83,7 +92,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
   }
   async function saveWorkspaces() {
     const next = businessWorkspace(draft)
-    const count = [next.productSales, next.oil, next.fastFood, next.restaurant, next.hospitalityOperations].filter(Boolean).length
+    const { count, names: enabledNames } = workspaceUpgradeSelection()
     let currentAccess: SubscriptionAccess
     try { currentAccess = await refreshSubscriptionAccess() }
     catch (error) {
@@ -95,11 +104,6 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     const entitlement = currentAccess.entitledWorkspaces ?? currentAccess.workspacePricing?.count ?? 0
     if (!unrestricted && count > entitlement) {
       const additional = count - entitlement
-      const enabledNames = [
-        ...(next.productSales ? ['Product sales'] : []), ...(next.oil ? ['Oil sales'] : []),
-        ...(next.fastFood ? ['Order counter'] : []), ...(next.restaurant ? ['Tables & tabs'] : []),
-        ...(next.hospitalityOperations ? ['Hospitality operations'] : []),
-      ]
       setProblem(`Your plan includes ${entitlement} selling workspace${entitlement === 1 ? '' : 's'}, but this selection has ${count}: ${enabledNames.join(', ')}. Add ${additional} workspace${additional === 1 ? '' : 's'} to your subscription, or return to Overview with your currently available workspaces.`)
       setSubscriptionPrompt(true)
       setShowWorkspaceSubscriptionDialog(true)
@@ -108,6 +112,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     try {
       const valid = validateShopProfile(draft)
       await save(valid)
+      onWorkspacesSaved?.()
       setDraft(valid); setDirty(false); setMessage('Workspaces saved.'); setProblem('')
     } catch (error) { setProblem(error instanceof Error ? error.message : 'Workspaces could not be saved.') }
   }
@@ -195,7 +200,7 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     </div>}
     <div className="shop-steps">{step > 0 && <button type="button" className="filter-button" onClick={() => go(step - 1)}>Back</button>}{step < 2 && <button type="button" className="primary-button" onClick={() => go(step + 1)}>Continue</button>}</div>
     </>}
-    </section>{problem && !showWorkspaceSubscriptionDialog && <p role="alert">{problem} {subscriptionPrompt && <button type="button" className="text-button" onClick={onSubscriptionRequired}>View plans</button>}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted" role="status">Unsaved changes.</p>}
-    {showWorkspaceSubscriptionDialog && <div className="modal-backdrop workspace-subscription-backdrop"><section className="modal workspace-subscription-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-subscription-title"><div className="modal-head"><h2 id="workspace-subscription-title">Workspace subscription limit</h2><button type="button" className="icon-button" aria-label="Cancel" title="Cancel" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);setProblem('');setSubscriptionPrompt(false)}}><X size={19}/></button></div><p>{problem}</p><div className="workspace-subscription-actions"><button type="button" className="filter-button" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);setProblem('');setDirty(false);setDraft(value);onReturnOverview()}}>Return to Overview</button><button type="button" className="primary-button" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);onSubscriptionRequired()}}>Add to subscription</button></div></section></div>}
+    </section>{problem && !showWorkspaceSubscriptionDialog && <p role="alert">{problem} {subscriptionPrompt && <button type="button" className="text-button" onClick={()=>onSubscriptionRequired(workspaceUpgradeSelection())}>View plans</button>}</p>}{message && <p role="status">{message}</p>}{dirty && <p className="muted" role="status">Unsaved changes.</p>}
+    {showWorkspaceSubscriptionDialog && <div className="modal-backdrop workspace-subscription-backdrop"><section className="modal workspace-subscription-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-subscription-title"><div className="modal-head"><h2 id="workspace-subscription-title">Workspace subscription limit</h2><button type="button" className="icon-button" aria-label="Cancel" title="Cancel" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);setProblem('');setSubscriptionPrompt(false)}}><X size={19}/></button></div><p>{problem}</p><div className="workspace-subscription-actions"><button type="button" className="filter-button" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);setProblem('');setDirty(false);setDraft(value);onReturnOverview()}}>Return to Overview</button><button type="button" className="primary-button" onClick={()=>{setShowWorkspaceSubscriptionDialog(false);onSubscriptionRequired(workspaceUpgradeSelection())}}>Add to subscription</button></div></section></div>}
   </section>
 }

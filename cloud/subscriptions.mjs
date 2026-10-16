@@ -362,7 +362,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           if (!Number.isSafeInteger(productExportFeeAmount) || productExportFeeAmount < 0 || productExportFeeAmount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(productExportFeeCurrency)) throw new Error('Product export fee must be a non-negative minor-unit amount and supported currency.')
           const workspaceAddonPercent = Number(input.workspaceAddonPercent ?? 5)
           if (!Number.isFinite(workspaceAddonPercent) || workspaceAddonPercent < 0 || workspaceAddonPercent > 100 || Math.round(workspaceAddonPercent * 100) !== workspaceAddonPercent * 100) throw new Error('Extra workspace pricing must be from 0 to 100 percent, with up to two decimal places.')
-          const workspaceProductKeys = ['monthly','yearly','enterprise', ...['monthly','yearly','enterprise'].flatMap(id => [2,3,4].map(count => `${id}${count}`))]
+          const workspaceProductKeys = ['monthly','yearly','enterprise', ...['monthly','yearly','enterprise'].flatMap(id => [2,3,4,5].map(count => `${id}${count}`))]
           const googlePlayProductIds = Object.fromEntries(workspaceProductKeys.map(id => [id, String(input[`play${id[0].toUpperCase()}${id.slice(1)}ProductId`] || '').trim()]).filter(([, value]) => value))
           if (Object.values(googlePlayProductIds).some(value => !/^[a-zA-Z0-9._-]{3,100}$/.test(value))) throw new Error('Google Play product IDs must be 3 to 100 letters, numbers, dots, underscores, or hyphens.')
           const googlePlayExportProductId = String(input.playExportProductId || '').trim()
@@ -517,14 +517,15 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         const configuredPlan = await getPlan()
         const workspace = await workspacePricing(claims.businessId, configuredPlan)
-        if (!workspace.count) return reply(409, { error: 'Payments & receipts is free. Enable a selling workspace before starting a subscription.' })
-        const quotedAmount = priceForWorkspaces(plan, workspace.count, workspace.addonPercent)
+        const requestedWorkspaceCount = Number(input.workspaceCount ?? workspace.count)
+        if (!Number.isInteger(requestedWorkspaceCount) || requestedWorkspaceCount < Math.max(1, workspace.count) || requestedWorkspaceCount > 5) return reply(400, { error: 'Workspace count must include at least one selling workspace, include all currently enabled workspaces, and be no greater than five.' })
+        const quotedAmount = priceForWorkspaces(plan, requestedWorkspaceCount, workspace.addonPercent)
         const quotedPlan = { ...plan, amount: quotedAmount }
         const rates = subscription.referrerType === 'visitor' ? { firstReferralPercent: configuredPlan?.visitorFirstReferralPercent || 0, recurringReferralPercent: configuredPlan?.visitorRecurringReferralPercent || 0 } : referralPercentages(configuredPlan || plan)
         const recurringPlanCode = autoRenew ? await paystackPlanCode(quotedPlan) : null
-        await payments.insertOne({ ...validatePlan(quotedPlan), ...rates, workspaceCount: workspace.count, workspaceAddonPercent: workspace.addonPercent, planId: plan.id || 'monthly', referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', ...(autoRenew ? { autoRenew: true, autoRenewConsentAt: new Date(), autoRenewTermsVersion: '2026-09', paystackPlanCode: recurringPlanCode } : {}), _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        await payments.insertOne({ ...validatePlan(quotedPlan), ...rates, workspaceCount: requestedWorkspaceCount, workspaceAddonPercent: workspace.addonPercent, planId: plan.id || 'monthly', referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', ...(autoRenew ? { autoRenew: true, autoRenewConsentAt: new Date(), autoRenewTermsVersion: '2026-09', paystackPlanCode: recurringPlanCode } : {}), _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
         const result = await paystack('/transaction/initialize', { email: owner.email, amount: quotedAmount, currency: plan.currency, reference, callback_url: callback, ...(recurringPlanCode ? { plan: recurringPlanCode } : {}) })
-        return reply(200, { authorizationUrl: result.authorization_url, reference, amount: quotedAmount, workspaceCount: workspace.count })
+        return reply(200, { authorizationUrl: result.authorization_url, reference, amount: quotedAmount, workspaceCount: requestedWorkspaceCount })
       }
       if (url.pathname === '/v1/subscriptions/enterprise-request' && request.method === 'POST') {
         const input = JSON.parse(await body(request))
@@ -542,13 +543,14 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const configured = await getPlan()
         const basePlan = validatePlan({ amount: requestRow.offeredAmount, currency: requestRow.offeredCurrency, days: requestRow.offeredDays, reminderDays: configured?.reminderDays, freeTrialDays: configured?.freeTrialDays, graceMonths: configured?.graceMonths })
         const workspace = await workspacePricing(claims.businessId, configured)
-        if (!workspace.count) return reply(409, { error: 'Payments & receipts is free. Enable a selling workspace before starting a subscription.' })
-        const plan = { ...basePlan, amount: priceForWorkspaces(basePlan, workspace.count, workspace.addonPercent) }
+        const requestedWorkspaceCount = Number(input.workspaceCount ?? workspace.count)
+        if (!Number.isInteger(requestedWorkspaceCount) || requestedWorkspaceCount < Math.max(1, workspace.count) || requestedWorkspaceCount > 5) return reply(400, { error: 'Workspace count must include at least one selling workspace, include all currently enabled workspaces, and be no greater than five.' })
+        const plan = { ...basePlan, amount: priceForWorkspaces(basePlan, requestedWorkspaceCount, workspace.addonPercent) }
         const reference = `sub-${randomBytes(20).toString('hex')}`
         await ensureSubscription(claims.businessId)
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         const rates = subscription.referrerType === 'visitor' ? { firstReferralPercent: configured?.visitorFirstReferralPercent || 0, recurringReferralPercent: configured?.visitorRecurringReferralPercent || 0 } : referralPercentages(configured || {})
-        await payments.insertOne({ ...plan, ...rates, workspaceCount: workspace.count, workspaceAddonPercent: workspace.addonPercent, planId: 'enterprise', enterpriseRequestId: requestRow._id, referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        await payments.insertOne({ ...plan, ...rates, workspaceCount: requestedWorkspaceCount, workspaceAddonPercent: workspace.addonPercent, planId: 'enterprise', enterpriseRequestId: requestRow._id, referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
         const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: appUrl() })
         return reply(200, { authorizationUrl: result.authorization_url, reference })
       }

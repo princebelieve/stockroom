@@ -220,6 +220,7 @@ This refactor is complete when:
 - Each screen presents the information and actions needed for its own task without burying them in long instructions or undifferentiated lists.
 - Status, success, warning, empty and failure states are visually distinct and explain the next available action.
 - Desktop and phone layouts are each intentionally composed and usable; desktop uses available width with balanced panels and legible data, while phone keeps a focused touch-friendly flow. Text, controls, focus, contrast and motion meet the project's accessibility expectations.
+
 - Workspace rules, role permissions, saved data, offline use, calculations and recovery flows have been checked for unintended changes.
 - Supporting docs match the shipped behavior, and the final checkpoint identifies what was verified, the build/release state, and known limitations.
 

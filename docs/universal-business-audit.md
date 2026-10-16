@@ -2,11 +2,13 @@
 
 Updated: 2026-10-06. Current operational details are maintained in the linked workspace guides.
 
+**Historical notice, 2026-10-16:** This audit predates the Hospitality destination. Its statements below that room availability, hotel stays, hospitality billing, or nightlife booking are not implemented are obsolete. Do not use this document as the current feature list; follow [workspace scope](workspaces.md) and [hotel/nightlife operations](hospitality-workspace.md).
+
 ## Purpose
 
-This document records the app's current scope and the architectural limits that matter when extending it. It is a maintenance reference, not a required redesign plan or a claim that every business sector is supported.
+This document records the app's scope and architectural limits as assessed on 2026-10-06. It is a historical maintenance reference, not a current capability inventory or a claim that every business sector is supported.
 
-The original audit identified a real issue: changing product labels and templates does not change how a business operates. However, it proposed orders, kitchen workflows and hotel management before the intended next step had been narrowed to simple payment entry and receipts. That broader proposal is not the current implementation plan.
+The original audit identified a real issue: changing product labels and templates does not change how a business operates. It also records the then-current decision to focus on payment entry before broader workflows. Later code added Orders, kitchen workflows, and Hospitality; use current operational guides for those implementations.
 
 ## What the app supports now
 
