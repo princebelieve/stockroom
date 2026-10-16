@@ -7,16 +7,18 @@ import { validateReservationBook, validateReservationArchive, checkReservationOp
 
 function fixture(timeZone='UTC') {
   const sql=new DatabaseSync(':memory:')
-  sql.exec("CREATE TABLE app_settings(id INTEGER PRIMARY KEY,shop_profile TEXT,app_name TEXT,currency TEXT);CREATE TABLE customers(id TEXT,name TEXT,phone TEXT,balance REAL);")
+  sql.exec("CREATE TABLE app_settings(id INTEGER PRIMARY KEY,shop_profile TEXT,app_name TEXT,currency TEXT);CREATE TABLE customers(id TEXT,name TEXT,phone TEXT,balance REAL);CREATE TABLE users(id TEXT,organization_id TEXT,name TEXT);CREATE TABLE branches(id TEXT,assigned_user_ids TEXT);")
+  sql.prepare('INSERT INTO users VALUES(?,?,?)').run('owner','business','Owner');sql.prepare('INSERT INTO users VALUES(?,?,?)').run('cleaner','business','Cleaner');sql.prepare('INSERT INTO branches VALUES(?,?)').run('main','[]')
   sql.prepare('INSERT INTO app_settings VALUES(1,?,?,?)').run(JSON.stringify({restaurant:true,reportingTimeZone:timeZone,features:{hospitalityOperations:true}}),'Cafe','USD')
   const db={query:(s,p=[])=>({values:sql.prepare(s).all(...p)}),run:(s,p=[])=>sql.prepare(s).run(...p),beginTransaction:()=>sql.exec('BEGIN'),commitTransaction:()=>sql.exec('COMMIT'),rollbackTransaction:()=>sql.exec('ROLLBACK')}
   const published=[]
   const options={db,scope:'business',branchId:'main',tillId:'till',user:{id:'owner',name:'Owner',role:'owner'},sales:()=>[],publish:record=>published.push(record)}
   const call=(input,extra={})=>handlePos({...options,...extra,path:'/api/pos/restaurant/reservations',method:input?'POST':'GET',input:input||{}})
+  const hospitality=(input,method='POST')=>handlePos({...options,path:'/api/pos/hospitality',method,input:input||{}})
   const command=(path,input,extra={})=>handlePos({...options,...extra,path:'/api/pos/restaurant/'+path,method:'POST',input:{commandId:crypto.randomUUID(),expectedUpdatedAt:'',...input}})
   const layout={id:'restaurant-layout:main',tables:[{id:'one',name:'Table 1',seats:4},{id:'two',name:'Table 2',seats:4}]}
   const setup=()=>command('layout',layout)
-  return {sql,db,call,command,setup,layout,published}
+  return {sql,db,call,hospitality,command,setup,layout,published}
 }
 const create={action:'create',id:'reservation:guest001',commandId:'book001',expectedUpdatedAt:'',name:'Ada',phone:'555',guests:2,tableId:'one',startLocal:'2099-05-01T18:00',endLocal:'2099-05-01T19:30',timeZone:'UTC',occurrence:'earlier',note:'Birthday'}
 
@@ -127,5 +129,43 @@ test('hotel guests can link their restaurant reservation and the opened table bi
     const bill=await f.command('open',{id:'restaurant-tab:main:one',tableId:'one',sessionId:'hotel-guest-bill',guests:2,reservationId:entry.id})
     assert.equal(bill.hotelStayId,stay.id)
     assert.equal((await f.call()).hotelStays[0].id,stay.id)
+  }finally{f.sql.close()}
+})
+
+test('nightlife event reservations validate the event and keep it linked to the open venue tab',async()=>{
+  const f=fixture();try{
+    await f.setup()
+    await ensurePos(f.db)
+    const eventStart=new Date(Date.now()+10*60000),arrival=new Date(Date.now()+20*60000),departure=new Date(Date.now()+80*60000)
+    const startLocal=reservationLocalTime(arrival.toISOString(),'UTC'),endLocal=reservationLocalTime(departure.toISOString(),'UTC')
+    const event={id:'nightclub-event:event001',kind:'nightclub-event',branchId:'main',name:'Friday Live',status:'scheduled',startsAt:eventStart.toISOString(),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),capacity:100,admissionPrice:20}
+    await f.db.run('INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES(?,?,?,?,?,?)',['business',event.id,event.kind,'main',JSON.stringify(event),event.updatedAt])
+    const request={...create,id:'reservation:eventguest',commandId:'book-eventguest',startLocal,endLocal,nightlifeEventId:event.id}
+    const saved=await f.call(request)
+    assert.equal(saved.entry.nightlifeEventName,event.name)
+    assert.equal((await f.call()).nightlifeEvents[0].id,event.id)
+    await assert.rejects(f.call({...request,id:'reservation:wrongdate',commandId:'wrongdate',startLocal:reservationLocalTime(new Date(arrival.getTime()+86400000).toISOString(),'UTC'),endLocal:reservationLocalTime(new Date(departure.getTime()+86400000).toISOString(),'UTC'),expectedUpdatedAt:saved.book.updatedAt}),/event date/)
+    const arrived=await f.call({action:'arrive',id:saved.entry.id,commandId:'event-arrive',expectedUpdatedAt:saved.book.updatedAt})
+    const bill=await f.command('open',{id:'restaurant-tab:main:one',tableId:'one',sessionId:'event-guest-bill',guests:2,reservationId:saved.entry.id})
+    assert.equal(bill.nightlifeEventId,event.id)
+    assert.equal(bill.nightlifeEventName,event.name)
+    assert.equal(arrived.entry.status,'arrived')
+  }finally{f.sql.close()}
+})
+
+test('hotel check-in requires a ready room and occupied rooms cannot be put into cleaning',async()=>{
+  const f=fixture();try{
+    const room=await f.hospitality({action:'add-room',roomName:'Room 12',nightlyRate:120,expectedUpdatedAt:'',commandId:'add-room'})
+    assert.equal(room.housekeepingStatus,'ready')
+    const stay=await f.hospitality({action:'book-stay',roomId:room.id,guestName:'Ada',guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',note:'',expectedUpdatedAt:'',commandId:'book-stay'})
+    const dirty=await f.hospitality({action:'update-room',id:room.id,status:'active',housekeepingStatus:'cleaning',nightlyRate:120,expectedUpdatedAt:room.updatedAt,commandId:'start-clean'})
+    const scheduled=await f.hospitality({action:'update-room',id:room.id,status:'active',housekeepingStatus:'cleaning',housekeepingAssignedTo:'cleaner',housekeepingScheduledAt:'2099-05-01T08:00',nightlyRate:120,expectedUpdatedAt:dirty.updatedAt,commandId:'schedule-clean'})
+    assert.equal(scheduled.housekeepingAssignedTo,'cleaner');assert.equal(scheduled.housekeepingScheduledAt,'2099-05-01T08:00')
+    await assert.rejects(f.hospitality({action:'status',id:stay.id,status:'checked-in',expectedUpdatedAt:stay.updatedAt,commandId:'blocked-check-in'}),/mark the room ready/)
+    const ready=await f.hospitality({action:'update-room',id:room.id,status:'active',housekeepingStatus:'ready',housekeepingAssignedTo:'',housekeepingScheduledAt:'',nightlyRate:120,expectedUpdatedAt:scheduled.updatedAt,commandId:'finish-clean'})
+    const checkedIn=await f.hospitality({action:'status',id:stay.id,status:'checked-in',expectedUpdatedAt:stay.updatedAt,commandId:'check-in'})
+    assert.equal(checkedIn.status,'checked-in')
+    await assert.rejects(f.hospitality({action:'update-room',id:room.id,status:'active',housekeepingStatus:'dirty',nightlyRate:120,expectedUpdatedAt:ready.updatedAt,commandId:'dirty-occupied'}),/Check out the guest/)
+    await assert.rejects(f.hospitality({action:'update-room',id:room.id,status:'active',housekeepingStatus:'ready',housekeepingAssignedTo:'intruder',housekeepingScheduledAt:'2099-05-01T08:00',nightlyRate:120,expectedUpdatedAt:ready.updatedAt,commandId:'invalid-cleaner'}),/active staff member/)
   }finally{f.sql.close()}
 })

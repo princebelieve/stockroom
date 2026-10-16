@@ -15,7 +15,7 @@ function fixture() {
  const options={db,scope:'business',branchId:'main',user:{id:'owner',name:'Owner',role:'owner'},tillId:'till1',publish:async record=>{if(fail)throw new Error('outbox failed');published.push(record)},sales:()=>[]}
  const call=(path,input,extra={})=>handlePos({...options,...extra,path:'/api/pos/service-jobs'+path,method:input?'POST':'GET',input:input||{}})
  const create={id:'service-job:test',commandId:'create',expectedUpdatedAt:'',title:'200 flyers',customerName:'Ada',customerPhone:'555',lines:[{id:'flyers',description:'Flyers',quantity:200,price:0.5}]}
- return {sql,db,call,pos:(path,input)=>handlePos({...options,path,method:'POST',input,sales:()=>sql.prepare('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails FROM sales').all().map(row=>({...row,paymentDetails:JSON.parse(row.paymentDetails),items:sql.prepare('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=?').all(row.id)}))}),create,published,setFail:value=>fail=value}
+ return {sql,db,call,pos:(path,input)=>handlePos({...options,path,method:input?'POST':'GET',input:input||{},sales:()=>sql.prepare('SELECT id,total,payment_method AS paymentMethod,payment_details AS paymentDetails FROM sales').all().map(row=>({...row,paymentDetails:JSON.parse(row.paymentDetails),items:sql.prepare('SELECT product_id AS productId,product_name AS productName,quantity,unit_price AS price FROM sale_items WHERE sale_id=?').all(row.id)}))}),create,published,setFail:value=>fail=value}
 }
 
 test('split invoice payment validates totals, retries once and counts only net cash in the till',async()=>{
@@ -132,5 +132,22 @@ test('hotel folio stock charges snapshot the item, deduct once, and replay idemp
   assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE id LIKE '%hospitality-stock%'").get().n,1)
   const synced=fixture();try{await ensurePos(synced.db);synced.sql.exec(stockSchema);addStay(synced);addStock(synced);await applyPosRecord(synced.db,'business',job);await applyPosRecord(synced.db,'business',job);assert.equal(synced.sql.prepare("SELECT stock FROM branch_inventory WHERE product_id='water'").get().stock,3);assert.equal(synced.sql.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n,1)}finally{synced.sql.close()}
   const failed=fixture();try{await ensurePos(failed.db);failed.sql.exec(stockSchema);addStay(failed);addStock(failed);failed.setFail(true);await assert.rejects(failed.call('',input),/outbox/);assert.equal(failed.sql.prepare("SELECT stock FROM branch_inventory WHERE product_id='water'").get().stock,5);assert.equal(failed.sql.prepare('SELECT COUNT(*) AS n FROM pos_records').get().n,1)}finally{failed.sql.close()}
+ }finally{f.sql.close()}
+})
+
+test('hotel checkout collects the stay balance atomically and returns the room to housekeeping',async()=>{
+ const f=fixture();try{
+  const room=await f.pos('/api/pos/hospitality',{action:'add-room',roomName:'Room 8',nightlyRate:120,expectedUpdatedAt:'',commandId:'room-add'})
+  const stay=await f.pos('/api/pos/hospitality',{action:'book-stay',roomId:room.id,guestName:'Ada',guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',note:'',expectedUpdatedAt:'',commandId:'stay-book'})
+  const checkedIn=await f.pos('/api/pos/hospitality',{action:'status',id:stay.id,status:'checked-in',expectedUpdatedAt:stay.updatedAt,commandId:'stay-checkin'})
+  const invoice=await f.pos('/api/pos/hospitality/invoice',{id:'service-job:hotel-checkout',commandId:'hotel-invoice',expectedUpdatedAt:'',estimate:false,hospitality:{recordId:stay.id,recordKind:'hotel-stay'}})
+  assert.equal(invoice.job.pricing.total,240)
+  await assert.rejects(f.pos('/api/pos/hospitality',{action:'status',id:stay.id,status:'checked-out',expectedUpdatedAt:checkedIn.updatedAt,commandId:'early-checkout'}),/collect every stay charge/)
+  const paid=await f.pos('/api/pos/service-jobs/pay',{id:invoice.job.id,commandId:'hotel-payment',expectedUpdatedAt:invoice.job.updatedAt,amount:'240',method:'cash'})
+  const checkedOut=await f.pos('/api/pos/hospitality',{action:'status',id:stay.id,status:'checked-out',expectedUpdatedAt:checkedIn.updatedAt,commandId:'stay-checkout'})
+  assert.equal(checkedOut.status,'checked-out')
+  assert.equal(serviceJobBalance(paid.job).due,0)
+  const after=await f.pos('/api/pos/hospitality',null)
+  assert.equal(after.rooms[0].housekeepingStatus,'dirty')
  }finally{f.sql.close()}
 })

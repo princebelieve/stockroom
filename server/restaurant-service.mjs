@@ -33,10 +33,11 @@ export function validateRestaurantRecord(record, previous, snapshot = false) {
   if (!/^[A-Z]{3}$/.test(record.currency) || typeof record.businessName !== 'string') throw new Error('Invalid bill currency or business name.');
   if (!record.id.startsWith(`restaurant-tab:${record.branchId}:`) || !Number.isInteger(record.guests) || record.guests < 1 || record.guests > 100 || !Number.isFinite(Date.parse(record.openedAt))) throw new Error('Invalid bill details.')
   if(record.hotelStayId!==undefined&&!/^hotel-stay:[a-zA-Z0-9_-]{3,100}$/.test(record.hotelStayId))throw new Error('Invalid hotel stay link.')
+  if(record.nightlifeEventId!==undefined&&(!/^nightclub-event:[a-zA-Z0-9_-]{3,100}$/.test(record.nightlifeEventId)||typeof record.nightlifeEventName!=='string'||!record.nightlifeEventName.trim()))throw new Error('Invalid nightlife event link.')
   if (!previous) { if(!snapshot && record.history?.length) throw new Error('New bills cannot contain past sessions.'); if (!snapshot && record.status !== 'open') throw new Error('Open the bill first.'); return }
   if (record.branchId !== previous.branchId || record.tableId !== previous.tableId) throw new Error('Bill identity cannot change.')
   if (previous.status === 'closed' && record.status === 'open') { if (record.sessionId === previous.sessionId) throw new Error('Use a new bill session.'); const archive={id:previous.id,sessionId:previous.sessionId,name:previous.name,tableId:previous.tableId,guests:previous.guests,tillId:previous.tillId,status:'closed',openedAt:previous.openedAt,closedAt:previous.closedAt,currency:previous.currency,businessName:previous.businessName}; if(JSON.stringify(record.history)!==JSON.stringify([...(previous.history||[]),archive])) throw new Error('Preserve closed bill history.'); return }
-  if (previous.status !== 'open' || record.status !== 'closed' || ['sessionId','name','guests','tillId','openedAt','currency','businessName','reservationId','hotelStayId'].some(key=>record[key] !== previous[key])) throw new Error('Refresh the bill before closing it.')
+  if (previous.status !== 'open' || record.status !== 'closed' || ['sessionId','name','guests','tillId','openedAt','currency','businessName','reservationId','hotelStayId','nightlifeEventId','nightlifeEventName'].some(key=>record[key] !== previous[key])) throw new Error('Refresh the bill before closing it.')
   if(JSON.stringify(record.history)!==JSON.stringify(previous.history)) throw new Error('Preserve bill history.')
 }
 export function validateRestaurantClose(tab, orders, sales) {
@@ -47,7 +48,7 @@ export function validateRestaurantClose(tab, orders, sales) {
 export async function handleRestaurant({ db, scope, organizationId, branchId, user, method, path, input, tillId, sales, publish, saveRecord }) {
   const profile = (await db.query(`SELECT shop_profile,app_name,currency FROM app_settings WHERE ${organizationId ? 'organization_id=?' : 'id=1'}`, organizationId ? [organizationId] : [])).values[0]
   if (!normalizeShopProfile(profile?.shop_profile).restaurant) throw new Error('The owner must enable Restaurant & bar first.')
-  const rows = (await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind IN ('restaurant-layout','restaurant-tab','counter-order','restaurant-ledger','restaurant-floor','restaurant-reservations')", [scope, branchId])).values.map(row=>JSON.parse(row.payload))
+  const rows = (await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind IN ('restaurant-layout','restaurant-tab','counter-order','restaurant-ledger','restaurant-floor','restaurant-reservations','nightclub-event')", [scope, branchId])).values.map(row=>JSON.parse(row.payload))
   const layout = rows.find(row=>row.kind === 'restaurant-layout') || { id:`restaurant-layout:${branchId}`, updatedAt:'', tables:[] }
   const floor=rows.find(row=>row.kind==='restaurant-floor')
   const tabs=restaurantTabs(rows.filter(row=>row.kind==='restaurant-tab'),floor)
@@ -153,7 +154,7 @@ export async function handleRestaurant({ db, scope, organizationId, branchId, us
     if(table && tabs.some(tab=>tab.status==='open' && !tab.mergedInto && tab.displayTableId===table.id)) throw new Error('This table already has an open bill.')
     record = {...stamp, id:input.id, kind:'restaurant-tab', status:'open', tableId:table?.id || '', name:table?.name || text(input.name,'a tab name'), guests:Number(input.guests), sessionId:text(input.sessionId,'a new bill session'), tillId, currency:profile.currency, businessName:profile.app_name, openedAt:updatedAt, history:existing ? [...(existing.history||[]),{id:existing.id,sessionId:existing.sessionId,name:existing.name,tableId:existing.tableId,guests:existing.guests,tillId:existing.tillId,status:'closed',openedAt:existing.openedAt,closedAt:existing.closedAt,currency:existing.currency,businessName:existing.businessName}] : [], events:[...(existing?.events || []), {action:'open', sessionId:input.sessionId, at:updatedAt, staffId:user.id}]}
     if(table && record.guests > table.seats) throw new Error('Guest count exceeds the seats available at this table.')
-    if(reservation){record.reservationId=reservation.id;if(reservation.hotelStayId)record.hotelStayId=reservation.hotelStayId}
+    if(reservation){record.reservationId=reservation.id;if(reservation.hotelStayId)record.hotelStayId=reservation.hotelStayId;if(reservation.nightlifeEventId){const linkedEvent=rows.find(row=>row.kind==='nightclub-event'&&row.id===reservation.nightlifeEventId);if(!linkedEvent||linkedEvent.status!=='scheduled')throw new Error('This nightlife event is no longer accepting table bookings.');record.nightlifeEventId=linkedEvent.id;record.nightlifeEventName=linkedEvent.name}}
   } else if (path.endsWith('/close')) {
     if (!existing || existing.kind !== 'restaurant-tab' || existing.status !== 'open') throw new Error('Choose an open bill.')
     if(existing.tillId !== tillId) throw new Error('Close this bill on its original till.'); if(tabs.find(tab=>tab.id===existing.id)?.mergedInto)throw new Error('Close the combined destination bill instead.')
