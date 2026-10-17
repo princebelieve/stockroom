@@ -4,6 +4,9 @@ import { stockChange } from './stock-ledger.mjs'
 const cents = n => Math.round((Number(n)+Number.EPSILON)*100)
 const units = n => Math.round(Number(n)*1000)
 export const restaurantLedgerId = sessionId => `restaurant-ledger:${sessionId}`
+export function restaurantRoomChargeSales(tab) {
+  return (tab?.roomCharges || []).map(charge => ({ id: charge.invoiceId, paymentDetails: { restaurantBill: { selections: charge.selections } } }))
+}
 const originalPricing = order => order.pos?.pricing || priceOrder(order.lines.map(line=>({productId:line.productId||`service:counter:${line.id}`,quantity:line.quantity,price:line.price})))
 export function selectionsForOrder(sale, order) {
   if(sale.paymentDetails?.counterOrder?.id===order.id) return order.lines.map((line,index)=>({orderId:order.id,lineId:line.id,quantity:line.quantity,total:originalPricing(order).lines[index].total}))
@@ -16,9 +19,10 @@ export function restaurantOrderPayment(order,sales) {
   return {paidAmount:paid,paymentStarted:matching.length>0,receiptIds:matching.map(sale=>sale.id),receiptId:paid>=order.total-0.000001 ? matching.at(-1)?.id||'' : ''}
 }
 export function restaurantBillLines(tab,orders,sales) {
+  const billSales=[...sales,...restaurantRoomChargeSales(tab)]
   return orders.filter(order=>billContains(tab,order) && order.status!=='cancelled').flatMap(order=>{
     const pricing=originalPricing(order)
-    const paid=sales.flatMap(sale=>selectionsForOrder(sale,order))
+    const paid=billSales.flatMap(sale=>selectionsForOrder(sale,order))
     return order.lines.map((line,index)=>{
       const covered=paid.filter(part=>part.lineId===line.id)
       const paidUnits=covered.reduce((sum,part)=>sum+units(part.quantity),0)
@@ -27,7 +31,7 @@ export function restaurantBillLines(tab,orders,sales) {
     })
   })
 }
-export function restaurantPortion(tab,orders,sales,selections) {
+export function restaurantPortion(tab,orders,sales,selections,{allowMultipleCustomers=false}={}) {
   if(!Array.isArray(selections)||!selections.length||selections.length>1000) throw new Error('Select 1 to 1000 bill items to pay for.')
   const available=restaurantBillLines(tab,orders,sales)
   const seen=new Set(), parts=[], items=[], financial=[]
@@ -68,7 +72,7 @@ export function restaurantPortion(tab,orders,sales,selections) {
       earned+=share(allocate(cents(order.total*(originalPricing(order).taxSettings.loyaltyEnabled?originalPricing(order).taxSettings.loyaltyRate:0)/100)/100))
     }
   }
-  if(customers.size>1) throw new Error('Pay items belonging to different loyalty accounts separately.')
+  if(customers.size>1&&!allowMultipleCustomers) throw new Error('Pay items belonging to different loyalty accounts separately.')
   const sum=key=>parts.reduce((total,part)=>total+cents(part[key]),0)/100
   const taxSettings=posSettings({taxEnabled:parts.some(part=>part.tax>0),taxLabel:'Tax',taxIncluded:parts.every(part=>part.taxIncluded)})
   const pricing={subtotal:sum('subtotal'),discount:sum('discount'),tax:sum('tax'),total:sum('total'),lines:financial,taxSettings,addedTax:parts.filter(part=>!part.taxIncluded).reduce((n,part)=>n+cents(part.tax),0)/100,includedTax:parts.filter(part=>part.taxIncluded).reduce((n,part)=>n+cents(part.tax),0)/100}

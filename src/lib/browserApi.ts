@@ -10,7 +10,7 @@ import { registerCheckoutTill } from '../../server/till-binding.mjs'
 import { salesHistory } from '../../server/sales-history.mjs'
 import { ensureStaffRemovals, recordStaffRemoval } from '../../server/staff-removal.mjs'
 import { requiresServiceJobSync } from '../../server/service-jobs.mjs'
-import { requiresHospitalitySync } from '../../server/hospitality-operations.mjs'
+import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync } from '../../server/hospitality-operations.mjs'
 import { restaurantPaymentFingerprint } from '../../server/restaurant-payments.mjs'
 import { validateLoyaltyBalance, validateCheckoutSettings } from '../../server/pos-pricing.mjs'
 import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../server/stock-ledger.mjs'
@@ -245,10 +245,23 @@ async function syncNowImpl() {
       const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
       if(!support.ok || !(await support.json()).capabilities?.includes('hospitality-operations-v1'))throw new Error('Update the cloud server before synchronizing hotel and nightlife operations. Records remain on this device.')
     }
+    if(operations.some(requiresHotelShiftSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('hotel-shift-handoff-v1'))throw new Error('Update the cloud server before synchronizing front-desk shift handoffs. Records remain on this device.')
+    }
+    if(operations.some(requiresHotelDepositSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('hotel-reservation-deposits-v1'))throw new Error('Update the cloud server before synchronizing rooms or reservations with deposit policies. Records remain on this device.')
+    }
+    if(operations.some(requiresHotelGroupChangeSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('hotel-group-reschedule-v1'))throw new Error('Update the cloud server before synchronizing coordinated group date changes. Records remain on this device.')
+    }
     if (operations.some(requiresRestaurantSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
       if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Tables & tabs. Records remain on this device.')
     }
+    if(operations.some((operation:any)=>operation.payload?.kind==='restaurant-tab'&&operation.payload.roomCharges?.length||operation.payload?.kind==='service-job'&&operation.payload.hospitality?.restaurantBill)){const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}});if(!support.ok||!(await support.json()).capabilities?.includes('restaurant-hotel-folio-v1'))throw new Error('Update the cloud server before synchronizing restaurant bills charged to hotel folios. Records remain on this device.')}
     if (operations.some(requiresCounterSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })
       if (!support.ok || !(await support.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing counter orders. Your records remain on this device.')

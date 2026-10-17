@@ -38,3 +38,9 @@ services:
         sync: false
       - key: PAYSTACK_CREDENTIALS_ENCRYPTION_KEY
         sync: false
+      - key: BUSINESS_INTEGRATIONS_ENCRYPTION_KEY
+        sync: false
+      - key: CHANNEX_API_KEY
+        sync: false
+      - key: CHANNEX_ACCOUNT_EMAIL
+        sync: false

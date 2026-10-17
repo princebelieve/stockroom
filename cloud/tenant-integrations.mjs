@@ -1,23 +1,34 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 
-const keyFromEnv = env => {
-  const value = String(env.PAYSTACK_CREDENTIALS_ENCRYPTION_KEY || '').trim()
-  const key = Buffer.from(value, 'base64')
-  if (key.length !== 32) throw new Error('Paystack credential encryption is not configured. Ask Stockroom support to finish secure payment setup.')
+const keyFromEnv = (env, scope = 'business') => {
+  const key = encryptionKeyValues(env, scope).map(value => Buffer.from(value, 'base64')).find(value => value.length === 32)
+  if (!key) throw new Error('Business integration credential encryption is not configured. Ask Stockroom support to finish secure integration setup.')
   return key
 }
+function encryptionKeyValues(env, scope = 'business') {
+  const values = scope === 'paystack' ? [env.PAYSTACK_CREDENTIALS_ENCRYPTION_KEY, env.BUSINESS_INTEGRATIONS_ENCRYPTION_KEY] : [env.BUSINESS_INTEGRATIONS_ENCRYPTION_KEY, env.PAYSTACK_CREDENTIALS_ENCRYPTION_KEY]
+  return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))]
+}
 
-function encrypt(value, env) {
+function encrypt(value, env, scope = 'business') {
   const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', keyFromEnv(env), iv)
+  const cipher = createCipheriv('aes-256-gcm', keyFromEnv(env, scope), iv)
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
   return { version: 1, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') }
 }
 
-function decrypt(value, env) {
-  const decipher = createDecipheriv('aes-256-gcm', keyFromEnv(env), Buffer.from(value.iv, 'base64'))
-  decipher.setAuthTag(Buffer.from(value.tag, 'base64'))
-  return Buffer.concat([decipher.update(Buffer.from(value.ciphertext, 'base64')), decipher.final()]).toString('utf8')
+function decrypt(value, env, scope = 'business') {
+  let lastError
+  for (const encodedKey of encryptionKeyValues(env, scope)) {
+    try {
+      const key = Buffer.from(encodedKey, 'base64')
+      if (key.length !== 32) continue
+      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(value.iv, 'base64'))
+      decipher.setAuthTag(Buffer.from(value.tag, 'base64'))
+      return Buffer.concat([decipher.update(Buffer.from(value.ciphertext, 'base64')), decipher.final()]).toString('utf8')
+    } catch (error) { lastError = error }
+  }
+  throw lastError || new Error('Business integration credential encryption is not configured. Ask Stockroom support to finish secure integration setup.')
 }
 
 function validEmail(value) { return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(String(value || '')) && String(value).length <= 254 }
@@ -28,7 +39,7 @@ export function createTenantIntegrations({ database, env = process.env, fetcher 
 
   async function paystackConfig(businessId) {
     const saved = await collection.findOne({ businessId, provider: 'paystack' })
-    if (saved?.active && saved.secret) return { secretKey: decrypt(saved.secret, env), terminalId: saved.terminalId || '', customerCode: saved.customerCode || '' }
+    if (saved?.active && saved.secret) return { secretKey: decrypt(saved.secret, env, 'paystack'), terminalId: saved.terminalId || '', customerCode: saved.customerCode || '' }
     if (saved) return null
     // One-way compatibility during migration from the old Render JSON setting.
     const config = legacy[businessId]
@@ -56,7 +67,7 @@ export function createTenantIntegrations({ database, env = process.env, fetcher 
     const result = await response.json().catch(() => ({}))
     if (!response.ok || result.status !== true) throw new Error('Paystack could not validate these credentials. Check the key and try again.')
     const now = new Date()
-    await collection.updateOne({ businessId, provider: 'paystack' }, { $set: { businessId, provider: 'paystack', secret: encrypt(secretKey, env), testMode: secretKey.startsWith('sk_test_'), terminalId, customerCode, active: true, updatedAt: now }, $setOnInsert: { createdAt: now } }, { upsert: true })
+    await collection.updateOne({ businessId, provider: 'paystack' }, { $set: { businessId, provider: 'paystack', secret: encrypt(secretKey, env, 'paystack'), testMode: secretKey.startsWith('sk_test_'), terminalId, customerCode, active: true, updatedAt: now }, $setOnInsert: { createdAt: now } }, { upsert: true })
     return { connected: true, testMode: secretKey.startsWith('sk_test_'), terminalConnected: Boolean(terminalId), updatedAt: now }
   }
 
@@ -84,5 +95,256 @@ export function createTenantIntegrations({ database, env = process.env, fetcher 
     return settings
   }
 
-  return { paystackConfig, publicPaystack, connectPaystack, disconnectPaystack, encryptionReady, emailSettings, saveEmailSettings }
+  async function channexRequest(apiKey, path, method = 'GET', body) {
+    const response = await fetcher(`https://app.channex.io/api/v1/${path}`, {
+      method,
+      headers: { 'user-api-key': apiKey, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(15000),
+    })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || result.errors) throw new Error(response.status === 401 ? 'Channex rejected this API key. Check the key and its property access.' : String(result.errors?.title || result.meta?.message || 'Channex could not complete the request.'))
+    if (Array.isArray(result.meta?.warnings) && result.meta.warnings.length) throw new Error(`Channex rejected ${result.meta.warnings.length} availability or rate update(s). Correct the property or rate mappings and retry.`)
+    return result.data
+  }
+
+  function managedChannexKey() { const key = String(env.CHANNEX_API_KEY || '').trim(); return key.length >= 20 && key.length <= 512 && !/[\r\n]/.test(key) ? key : '' }
+  function channexKey(saved, property) {
+    if (property?.connectionMode === 'stockroom-managed') {
+      const key = managedChannexKey()
+      if (key.length < 20 || key.length > 512) throw new Error('Stockroom-managed Channex access is not configured on this server.')
+      return key
+    }
+    if (saved?.secret) return decrypt(saved.secret, env, 'business')
+    throw new Error('Connect a Channex property first.')
+  }
+
+  async function channexProperty(businessId, branchId, input = {}) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true })
+    const property = (saved?.properties || []).find(item => item.branchId === branchId)
+    if (!property) throw new Error('Connect a Channex property to this Stockroom branch first.')
+    const apiKey = channexKey(saved, property), propertyId = encodeURIComponent(property.propertyId)
+    const [externalRooms, externalRates] = await Promise.all([
+      channexRequest(apiKey, `room_types?filter[property_id]=${propertyId}&pagination[limit]=100`),
+      channexRequest(apiKey, `rate_plans?filter[property_id]=${propertyId}&pagination[limit]=100`),
+    ])
+    if (input.mappings) {
+      const roomIds = new Set((externalRooms || []).map(row => row.id)), ratePlansById = new Map((externalRates || []).map(row => [row.id, row.relationships?.room_type?.data?.id || '']))
+      const mappings = input.mappings.map(row => ({ roomType: String(row.roomType || '').trim().slice(0, 100), providerRoomTypeId: String(row.providerRoomTypeId || ''), providerRatePlanId: String(row.providerRatePlanId || '') }))
+      if (mappings.length > 100 || mappings.some(row => !row.roomType || !roomIds.has(row.providerRoomTypeId) || !ratePlansById.has(row.providerRatePlanId) || ratePlansById.get(row.providerRatePlanId) && ratePlansById.get(row.providerRatePlanId) !== row.providerRoomTypeId)) throw new Error('Choose valid Channex room types and a rate plan belonging to each selected type.')
+      const duplicate = mappings.some((row, index) => mappings.findIndex(other => other.roomType.toLocaleLowerCase() === row.roomType.toLocaleLowerCase()) !== index)
+      if (duplicate || new Set(mappings.map(row => row.providerRoomTypeId)).size !== mappings.length || new Set(mappings.map(row => row.providerRatePlanId)).size !== mappings.length) throw new Error('Map each Stockroom room type to a unique Channex room type and rate plan.')
+      await collection.updateOne({ businessId, provider: 'channex' }, { $set: { [`properties.$[property].mappings`]: mappings, updatedAt: new Date() } }, { arrayFilters: [{ 'property.branchId': branchId }] })
+      property.mappings = mappings
+    }
+    return {
+      property: { id: property.propertyId, title: property.title || '', branchId, mappings: property.mappings || [], connectedAt: property.connectedAt || null, onboardingStatus: property.onboardingStatus || 'ready' },
+      roomTypes: (externalRooms || []).map(row => ({ id: row.id, title: row.attributes?.title || row.attributes?.name || row.id, maxGuests: Number(row.attributes?.max_persons || row.attributes?.max_count_of_persons || (Number(row.attributes?.occ_adults || 0) + Number(row.attributes?.occ_children || 0))) })),
+      ratePlans: (externalRates || []).map(row => ({ id: row.id, title: row.attributes?.title || row.attributes?.name || row.id, roomTypeId: row.relationships?.room_type?.data?.id || '' })),
+    }
+  }
+
+  async function connectChannexProperty(businessId, input) {
+    const current = await collection.findOne({ businessId, provider: 'channex' })
+    const suppliedKey = String(input.apiKey || '').trim(), managed = !suppliedKey && Boolean(managedChannexKey()), branchId = String(input.branchId || '').trim(), propertyId = String(input.propertyId || '').trim()
+    const apiKey = managed ? managedChannexKey() : suppliedKey || (current?.secret ? decrypt(current.secret, env, 'business') : '')
+    if (apiKey.length < 20 || apiKey.length > 512 || /[\r\n]/.test(apiKey)) throw new Error('Enter a valid Channex API key.')
+    if (!branchId || !/^[0-9a-f-]{36}$/i.test(propertyId)) throw new Error('Choose a Stockroom branch and enter the Channex property ID.')
+    const propertyData = await channexRequest(apiKey, `properties/${encodeURIComponent(propertyId)}`)
+    const attributes = propertyData?.attributes || {}
+    if (propertyData?.id !== propertyId || attributes.is_active === false) throw new Error('That Channex property is unavailable or inactive for this API key.')
+    const [externalRooms, externalRates] = await Promise.all([
+      channexRequest(apiKey, `room_types?filter[property_id]=${encodeURIComponent(propertyId)}&pagination[limit]=100`),
+      channexRequest(apiKey, `rate_plans?filter[property_id]=${encodeURIComponent(propertyId)}&pagination[limit]=100`),
+    ])
+    const otherTenant = await collection.findOne({ provider: 'channex', active: true, businessId: { $ne: businessId }, 'properties.propertyId': propertyId })
+    if (otherTenant) throw new Error('This Channex property is already connected to another Stockroom business.')
+    const properties = (current?.properties || []).filter(item => item.branchId !== branchId)
+    if (properties.some(item => item.propertyId === propertyId)) throw new Error('This Channex property is already connected to another branch in this Stockroom business.')
+    const oldProperty = current?.properties?.find(item => item.branchId === branchId)
+    properties.push({ branchId, propertyId, title: String(attributes.title || '').slice(0, 255), connectionMode: managed ? 'stockroom-managed' : 'business-owned', connectedAt: new Date(), mappings: oldProperty?.propertyId === propertyId ? oldProperty.mappings || [] : [] })
+    const update = { $set: { businessId, provider: 'channex', active: true, properties, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }
+    if (!managed) update.$set.secret = encrypt(apiKey, env, 'business')
+    await collection.updateOne({ businessId, provider: 'channex' }, update, { upsert: true })
+    return {
+      property: { id: propertyId, title: String(attributes.title || '').slice(0, 255), branchId, mappings: properties.find(item => item.branchId === branchId)?.mappings || [], connectedAt: new Date() },
+      roomTypes: (externalRooms || []).map(row => ({ id: row.id, title: row.attributes?.title || row.attributes?.name || row.id, maxGuests: Number(row.attributes?.max_persons || row.attributes?.max_count_of_persons || (Number(row.attributes?.occ_adults || 0) + Number(row.attributes?.occ_children || 0))) })),
+      ratePlans: (externalRates || []).map(row => ({ id: row.id, title: row.attributes?.title || row.attributes?.name || row.id, roomTypeId: row.relationships?.room_type?.data?.id || '' })),
+    }
+  }
+
+  async function onboardChannexProperty(businessId, input) {
+    const apiKey = managedChannexKey()
+    if (!apiKey) throw new Error('Stockroom-managed Channex onboarding is not configured on this server.')
+    const branchId = String(input.branchId || '').trim()
+    const details = input.property || {}
+    const property = {
+      title: String(details.title || '').trim().slice(0, 255),
+      currency: String(details.currency || '').trim().toUpperCase(),
+      email: String(details.email || '').trim().toLowerCase(),
+      phone: String(details.phone || '').trim(),
+      country: String(details.country || '').trim().toUpperCase(),
+      state: String(details.state || '').trim(),
+      city: String(details.city || '').trim(),
+      address: String(details.address || '').trim(),
+      zip_code: String(details.postalCode || '').trim(),
+      timezone: String(details.timezone || '').trim(),
+      property_type: 'hotel',
+    }
+    let timezoneValid = false
+    try { new Intl.DateTimeFormat('en-US', { timeZone: property.timezone }); timezoneValid = true } catch {}
+    if (!branchId || !property.title || !/^[A-Z]{3}$/.test(property.currency) || !validEmail(property.email) || property.phone.length < 5 || property.phone.length > 32 || !/^[A-Z]{2}$/.test(property.country) || !property.state || !property.city || !property.address || !property.zip_code || !timezoneValid) throw new Error('Enter the hotel name, valid business contact details, full address, postal code, and IANA time zone before connecting its channels.')
+    const roomTypes = Array.isArray(input.roomTypes) ? input.roomTypes.map(row => ({
+      title: String(row.title || '').trim().slice(0, 255),
+      count: Number(row.count),
+      occupancy: Number(row.occupancy),
+    })) : []
+    if (!roomTypes.length || roomTypes.length > 100 || roomTypes.some(row => !row.title || !Number.isInteger(row.count) || row.count < 1 || !Number.isInteger(row.occupancy) || row.occupancy < 1 || row.occupancy > 20) || new Set(roomTypes.map(row => row.title.toLocaleLowerCase())).size !== roomTypes.length) throw new Error('Add at least one active room type with a unique name and valid room count and guest capacity before connecting channels.')
+
+    const current = await collection.findOne({ businessId, provider: 'channex' })
+    let savedProperty = (current?.properties || []).find(item => item.branchId === branchId)
+    if (savedProperty && savedProperty.onboardingStatus !== 'creating-inventory') throw new Error('This Stockroom branch already has a Channex property. Disconnect it first if you intend to replace it.')
+    const occupied = async propertyId => Boolean(await collection.findOne({ provider: 'channex', active: true, businessId: { $ne: businessId }, 'properties.propertyId': propertyId }))
+    const persist = async item => {
+      await collection.updateOne({ businessId, provider: 'channex' }, { $set: { active: true, updatedAt: new Date() }, $setOnInsert: { businessId, provider: 'channex', properties: [], createdAt: new Date() } }, { upsert: true })
+      const updated = await collection.updateOne({ businessId, provider: 'channex', 'properties.branchId': branchId }, { $set: { 'properties.$[target]': item, updatedAt: new Date() } }, { arrayFilters: [{ 'target.branchId': branchId }] })
+      if (!updated.matchedCount) {
+        const inserted = await collection.updateOne({ businessId, provider: 'channex', 'properties.branchId': { $ne: branchId } }, { $push: { properties: item }, $set: { active: true, updatedAt: new Date() } })
+        if (!inserted.modifiedCount) throw new Error('Another channel setup for this Stockroom branch just changed. Refresh the page and retry.')
+      }
+      return item
+    }
+    const readInventory = async propertyId => {
+      const [externalRooms, externalRates] = await Promise.all([
+        channexRequest(apiKey, `room_types?filter[property_id]=${encodeURIComponent(propertyId)}&pagination[limit]=100`),
+        channexRequest(apiKey, `rate_plans?filter[property_id]=${encodeURIComponent(propertyId)}&pagination[limit]=100`),
+      ])
+      return { externalRooms: externalRooms || [], externalRates: externalRates || [] }
+    }
+
+    // Recover a property if Channex created it but the previous response was lost.
+    const candidates = await channexRequest(apiKey, 'properties/options')
+    const titled = (candidates || []).filter(row => (row.attributes?.title || '') === property.title)
+    const candidateDetails = await Promise.all(titled.map(row => channexRequest(apiKey, `properties/${encodeURIComponent(row.id)}`)))
+    const matching = candidateDetails.filter(row => String(row.attributes?.email || '').toLowerCase() === property.email && String(row.attributes?.address || '').toLowerCase() === property.address.toLowerCase() && String(row.attributes?.city || '').toLowerCase() === property.city.toLowerCase())
+    if (matching.length > 1) throw new Error('More than one Channex property matches these hotel details. Ask Stockroom support to resolve the duplicate before continuing.')
+    let propertyRow = savedProperty ? await channexRequest(apiKey, `properties/${encodeURIComponent(savedProperty.propertyId)}`) : matching[0]
+    if (savedProperty && (!propertyRow?.id || propertyRow.id !== savedProperty.propertyId || propertyRow.attributes?.is_active === false)) throw new Error('The partially created Channex property is no longer accessible. Restore its Stockroom access or disconnect it before retrying.')
+    if (propertyRow && await occupied(propertyRow.id)) throw new Error('A Channex property with these details is already connected to another Stockroom business.')
+    if (!propertyRow) {
+      const created = await channexRequest(apiKey, 'properties', 'POST', { property })
+      propertyRow = created
+      if (!propertyRow?.id) throw new Error('Channex created no usable property record. Refresh the page and retry onboarding.')
+    }
+    savedProperty = await persist({ ...(savedProperty || {}), branchId, propertyId: propertyRow.id, title: String(propertyRow.attributes?.title || property.title).slice(0, 255), connectionMode: 'stockroom-managed', connectedAt: savedProperty?.connectedAt || new Date(), onboardingStatus: 'creating-inventory', mappings: savedProperty?.mappings || [] })
+    const { externalRooms, externalRates } = await readInventory(propertyRow.id)
+    const mappings = [...(savedProperty.mappings || [])]
+    for (const local of roomTypes) {
+      let room = externalRooms.find(row => String(row.attributes?.title || '').toLocaleLowerCase() === local.title.toLocaleLowerCase())
+      if (!room) {
+        room = await channexRequest(apiKey, 'room_types', 'POST', { room_type: { property_id: propertyRow.id, title: local.title, count_of_rooms: local.count, occ_adults: local.occupancy, occ_children: 0 } })
+        if (!room?.id) throw new Error(`Channex did not return a room type for “${local.title}”. Retry onboarding to continue.`)
+        externalRooms.push(room)
+      }
+      const rateTitle = `Stockroom Standard Rate - ${local.title}`.slice(0, 255)
+      let rate = externalRates.find(row => row.relationships?.room_type?.data?.id === room.id && String(row.attributes?.title || '').toLocaleLowerCase() === rateTitle.toLocaleLowerCase())
+      if (!rate) {
+        rate = await channexRequest(apiKey, 'rate_plans', 'POST', { rate_plan: { title: rateTitle, property_id: propertyRow.id, room_type_id: room.id, currency: property.currency, sell_mode: 'per_room', rate_mode: 'manual', options: [{ occupancy: local.occupancy, is_primary: true }] } })
+        if (!rate?.id) throw new Error(`Channex did not return a rate plan for “${local.title}”. Retry onboarding to continue.`)
+        externalRates.push(rate)
+      }
+      const mapping = { roomType: local.title, providerRoomTypeId: room.id, providerRatePlanId: rate.id }
+      const index = mappings.findIndex(row => row.roomType.toLocaleLowerCase() === local.title.toLocaleLowerCase())
+      if (index >= 0) mappings[index] = mapping
+      else mappings.push(mapping)
+      savedProperty = await persist({ ...savedProperty, mappings, onboardingStatus: 'creating-inventory' })
+    }
+    savedProperty = await persist({ ...savedProperty, mappings, onboardingStatus: 'ready' })
+    return {
+      property: { id: propertyRow.id, title: String(propertyRow.attributes?.title || property.title).slice(0, 255), branchId, mappings, connectedAt: savedProperty.connectedAt },
+      roomTypes: externalRooms.map(row => ({ id: row.id, title: row.attributes?.title || row.attributes?.name || row.id, maxGuests: Number(row.attributes?.max_persons || row.attributes?.max_count_of_persons || row.attributes?.occ_adults || 0) })),
+      ratePlans: externalRates.map(row => ({ id: row.id, title: row.attributes?.title || row.attributes?.name || row.id, roomTypeId: row.relationships?.room_type?.data?.id || '' })),
+      onboardingStatus: 'ready',
+    }
+  }
+
+  async function publicChannex(businessId) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true })
+    const managed = Boolean(managedChannexKey())
+    return { connected: Boolean(saved?.secret || saved?.properties?.length), encryptionConfigured: encryptionReady(), connectionMode: managed ? 'stockroom-managed' : 'business-owned', managedAccountEmail: String(env.CHANNEX_ACCOUNT_EMAIL || '').trim(), properties: (saved?.properties || []).map(item => ({ branchId: item.branchId, propertyId: item.propertyId, title: item.title || '', connectionMode: item.connectionMode || 'business-owned', connectedAt: item.connectedAt || null, mappedRoomTypes: (item.mappings || []).length, lastSyncAt: item.lastSyncAt || null, syncError: item.syncError || '', lastAriSyncAt: item.lastAriSyncAt || null, ariSyncError: item.ariSyncError || '' })) }
+  }
+
+  async function discoverChannexProperties(businessId, suppliedKey = '') {
+    if (!String(suppliedKey || '').trim() && managedChannexKey()) throw new Error('Stockroom-managed setup creates the channel property for each hotel branch. The shared integration account property list is not available to business workspaces.')
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true })
+    const apiKey = String(suppliedKey || '').trim() || (saved?.secret ? decrypt(saved.secret, env, 'business') : '')
+    if (apiKey.length < 20 || apiKey.length > 512 || /[\r\n]/.test(apiKey)) throw new Error('Enter a valid Channex API key before loading properties.')
+    const rows = await channexRequest(apiKey, 'properties?pagination[limit]=100')
+    return { availableProperties: (rows || []).filter(row => row.attributes?.is_active !== false).map(row => ({ id: row.id, title: row.attributes?.title || row.id })) }
+  }
+
+  async function channexRevisionFeed(businessId, branchId) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true }), property = saved?.properties?.find(item => item.branchId === branchId)
+    if (!property) throw new Error('The Channex property connection is unavailable.')
+    const apiKey = channexKey(saved, property), propertyId = encodeURIComponent(property.propertyId)
+    const revisions = await channexRequest(apiKey, `booking_revisions/feed?filter[property_id]=${propertyId}&order[inserted_at]=asc&pagination[limit]=100`)
+    return { propertyId: property.propertyId, revisions: Array.isArray(revisions) ? revisions : [] }
+  }
+
+  async function channexMapping(businessId, branchId) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true }), property = saved?.properties?.find(item => item.branchId === branchId)
+    if (!property) throw new Error('The Channex property connection is unavailable.')
+    return { propertyId: property.propertyId, mappings: Array.isArray(property.mappings) ? property.mappings : [], lastAriSyncAt: property.lastAriSyncAt || null, ariSyncError: property.ariSyncError || '' }
+  }
+
+  async function channexChannelSetupUrl(businessId, branchId, username) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true }), property = saved?.properties?.find(item => item.branchId === branchId)
+    if (!property) throw new Error('Connect and map this hotel property before setting up Airbnb or Booking.com.')
+    const name = String(username || '').trim().slice(0, 100)
+    if (!name) throw new Error('A signed-in Stockroom staff name is required to open channel setup.')
+    const payload = { one_time_token: { property_id: property.propertyId, username: name } }
+    const tokenResult = await channexRequest(channexKey(saved, property), 'auth/one_time_token', 'POST', payload)
+    const token = String(tokenResult?.token || '')
+    if (!/^[0-9a-f-]{36}$/i.test(token)) throw new Error('Channex did not return a valid one-time channel setup token.')
+    const query = new URLSearchParams({ oauth_session_key: token, app_mode: 'headless', redirect_to: '/channels', property_id: property.propertyId, channels: 'ABB,BDC' })
+    return { channelSetupUrl: `https://app.channex.io/auth/exchange?${query.toString()}`, expiresInSeconds: 900 }
+  }
+
+  async function updateChannexAvailability(businessId, branchId, values) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true }), property = saved?.properties?.find(item => item.branchId === branchId)
+    if (!property || !Array.isArray(values) || values.length > 50000 || values.some(row => row.property_id !== property.propertyId)) throw new Error('The channel availability update is invalid for this property.')
+    await channexRequest(channexKey(saved, property), 'availability', 'POST', { values })
+  }
+
+  async function updateChannexRates(businessId, branchId, values) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true }), property = saved?.properties?.find(item => item.branchId === branchId)
+    if (!property || !Array.isArray(values) || values.length > 50000 || values.some(row => row.property_id !== property.propertyId)) throw new Error('The channel rate update is invalid for this property.')
+    await channexRequest(channexKey(saved, property), 'restrictions', 'POST', { values })
+  }
+
+  async function updateChannexAriStatus(businessId, branchId, ariSyncError = '') {
+    const now = new Date()
+    await collection.updateOne({ businessId, provider: 'channex', active: true, 'properties.branchId': branchId }, { $set: { 'properties.$[property].lastAriSyncAt': now, 'properties.$[property].ariSyncError': String(ariSyncError || '').slice(0, 300), updatedAt: now } }, { arrayFilters: [{ 'property.branchId': branchId }] })
+  }
+
+  async function acknowledgeChannexRevision(businessId, branchId, revisionId) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true }), property = saved?.properties?.find(item => item.branchId === branchId)
+    if (!property || !/^[0-9a-f-]{36}$/i.test(revisionId)) throw new Error('The Channex revision cannot be acknowledged for this property.')
+    await channexRequest(channexKey(saved, property), `booking_revisions/${encodeURIComponent(revisionId)}/ack`, 'POST')
+  }
+
+  async function updateChannexSyncStatus(businessId, branchId, syncError = '') {
+    await collection.updateOne({ businessId, provider: 'channex', active: true, 'properties.branchId': branchId }, { $set: { 'properties.$[property].lastSyncAt': new Date(), 'properties.$[property].syncError': String(syncError || '').slice(0, 300), updatedAt: new Date() } }, { arrayFilters: [{ 'property.branchId': branchId }] })
+  }
+
+  async function disconnectChannexProperty(businessId, branchId) {
+    const saved = await collection.findOne({ businessId, provider: 'channex', active: true })
+    if (!saved) return { removed: false }
+    const properties = (saved.properties || []).filter(item => item.branchId !== branchId)
+    if (!properties.length) await collection.updateOne({ businessId, provider: 'channex' }, { $set: { active: false, properties: [], updatedAt: new Date() }, $unset: { secret: '' } })
+    else await collection.updateOne({ businessId, provider: 'channex' }, { $set: { properties, updatedAt: new Date() } })
+    return { removed: true }
+  }
+
+  return { paystackConfig, publicPaystack, connectPaystack, disconnectPaystack, encryptionReady, emailSettings, saveEmailSettings, channexProperty, connectChannexProperty, onboardChannexProperty, publicChannex, discoverChannexProperties, channexRevisionFeed, channexMapping, channexChannelSetupUrl, updateChannexAvailability, updateChannexRates, updateChannexAriStatus, acknowledgeChannexRevision, updateChannexSyncStatus, disconnectChannexProperty }
 }

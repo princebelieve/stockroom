@@ -1,11 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { serviceJobBalance, createHostedServiceJobPayment } from '../server/service-jobs.mjs'
+import { PAYSTACK_MINIMUM_SUBUNITS } from './customer-paystack-payments.mjs'
 
 const cents=value=>Math.round(Number(value)*100)
 const expiration=()=>new Date(Date.now()+365*24*60*60*1000)
 function readRaw(request,limit=32768){return new Promise((resolve,reject)=>{const chunks=[];let size=0;request.on('data',chunk=>{size+=chunk.length;if(size>limit){reject(Object.assign(new Error('Payment webhook request is too large.'),{statusCode:413}));request.destroy();return}chunks.push(chunk)});request.on('end',()=>resolve(Buffer.concat(chunks)));request.on('error',reject)})}
 
-export function createHospitalityPayments({database,entityHeads,operations,businessSettings,accounts,customerPortalAccounts,verifyToken,readJson,send,serialize,configFor,env=process.env,fetcher=fetch,ObjectId}){
+export function createHospitalityPayments({database,entityHeads,operations,businessSettings,accounts,customerPortalAccounts,verifyToken,readJson,send,serialize,configFor,fallbackWebhook,env=process.env,fetcher=fetch,ObjectId}){
   const sessions=database.collection('hospitality_payment_sessions')
   const initializing=new Set()
   const rateLimits=new Map()
@@ -78,7 +79,11 @@ export function createHospitalityPayments({database,entityHeads,operations,busin
         const {job,balance,booking}=await serialize(claims.businessId,()=>invoiceForCustomer(claims.businessId,claims.customerId,invoiceId))
         if(!saved||await database.collection('account_deletion_requests').findOne({type:'business',businessId:claims.businessId,status:{$in:['pending','processing']}}))return send(response,403,{error:'This business is not accepting online payments.'})
         if(balance.due<=0)return send(response,409,{error:'This invoice has no remaining balance.'})
-        const amount=cents(balance.due),state=randomBytes(32).toString('base64url'),reference=`SR-${randomBytes(15).toString('hex')}`,mode=booking.kind==='hotel-stay'?'hotel':'nightlife',cloudOrigin=(env.RENDER_EXTERNAL_URL||'https://stockroom-0vm5.onrender.com').replace(/\/$/,'')
+        const currency=String(job.currency||'').toUpperCase(),minimum=PAYSTACK_MINIMUM_SUBUNITS[currency],amount=cents(balance.due)
+        if(!minimum)return send(response,400,{error:`Paystack checkout is not available for ${currency||'this'} invoice currency.`})
+        if(currency==='XOF'&&!Number.isInteger(balance.due))return send(response,400,{error:'Paystack requires XOF invoice balances to be whole francs.'})
+        if(!Number.isSafeInteger(amount)||amount<minimum)return send(response,400,{error:`Paystack requires a minimum invoice payment of ${minimum/100} ${currency}.`})
+        const state=randomBytes(32).toString('base64url'),reference=`SR-${randomBytes(15).toString('hex')}`,mode=booking.kind==='hotel-stay'?'hotel':'nightlife',cloudOrigin=(env.RENDER_EXTERNAL_URL||'https://stockroom-0vm5.onrender.com').replace(/\/$/,'')
         session={...sessionFilter,state,reference,invoiceId,bookingId:booking.id,amount,currency:job.currency,mode,email,status:'initializing',expiresAt:expiration(),createdAt:new Date()}
         const reserved=await serialize(claims.businessId,async()=>{const sameRequest=await sessions.findOne(sessionFilter);if(sameRequest)return sameRequest;const active=await sessions.findOne({businessId:claims.businessId,invoiceId,status:{$in:['initializing','initialized','uncertain','needs-review']}});if(active)return active;await sessions.insertOne(session);return session})
         if(reserved.state!==state){if(reserved.requestId===requestId&&reserved.invoiceId===invoiceId&&reserved.email===email&&reserved.status==='initialized')return send(response,200,{authorizationUrl:reserved.authorizationUrl});return send(response,409,{error:'Another checkout for this invoice is already being processed. Refresh the invoice before starting a new one.'})}
@@ -89,7 +94,7 @@ export function createHospitalityPayments({database,entityHeads,operations,busin
           const callbackUrl=`${cloudOrigin}/v1/customer-portal/hospitality/paystack-return?state=${encodeURIComponent(state)}`
           const responseFromPaystack=await fetcher('https://api.paystack.co/transaction/initialize',{method:'POST',headers:{Authorization:`Bearer ${config.secretKey}`,'Content-Type':'application/json'},body:JSON.stringify({email,amount:String(amount),currency:job.currency,reference,callback_url:callbackUrl,metadata:JSON.stringify({paymentState:state,businessId:claims.businessId,invoiceId,customerId:claims.customerId,bookingId:booking.id})}),signal:AbortSignal.timeout(20000)})
           const result=await responseFromPaystack.json().catch(()=>({})),data=result.data
-          if(!responseFromPaystack.ok||result.status!==true||data?.reference!==reference||!/^https:\/\/checkout\.paystack\.com\//.test(data?.authorization_url||''))throw new Error(`Paystack could not start checkout (${responseFromPaystack.status}).`)
+          if(!responseFromPaystack.ok||result.status!==true||data?.reference!==reference||!/^https:\/\/checkout\.paystack\.com\//.test(data?.authorization_url||'')||typeof data?.access_code!=='string'||!data.access_code)throw new Error(`Paystack could not start checkout (${responseFromPaystack.status}).`)
           await sessions.updateOne({businessId:claims.businessId,state,status:'initializing'},{$set:{status:'initialized',authorizationUrl:data.authorization_url,accessCode:data.access_code||''}})
           return send(response,200,{authorizationUrl:data.authorization_url})
         }catch(error){await sessions.updateOne({businessId:claims.businessId,state,status:'initializing'},{$set:{status:'uncertain',initializationError:String(error.message||'').slice(0,250)}});return send(response,502,{error:'Paystack checkout could not be confirmed as started. Check the provider dashboard before retrying this invoice.'})}
@@ -109,7 +114,7 @@ export function createHospitalityPayments({database,entityHeads,operations,busin
       const raw=await readRaw(request),signature=String(request.headers['x-paystack-signature']||'')
       let body;try{body=JSON.parse(raw.toString('utf8'))}catch{return send(response,400,{error:'Invalid Paystack webhook payload.'})}
       const reference=String(body?.data?.reference||''),session=reference?await sessions.findOne({reference}):null
-      if(!session)return send(response,200,{received:true})
+      if(!session)return fallbackWebhook?fallbackWebhook(request,response,raw,body):send(response,200,{received:true})
       const config=await configFor(session.businessId);if(!config)return send(response,503,{error:'Paystack account configuration is unavailable.'})
       const expected=createHmac('sha512',config.secretKey).update(raw).digest('hex')
       if(Buffer.byteLength(signature)!==Buffer.byteLength(expected)||!timingSafeEqual(Buffer.from(signature),Buffer.from(expected)))return send(response,401,{error:'Invalid Paystack webhook signature.'})

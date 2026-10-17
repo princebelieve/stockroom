@@ -4,7 +4,7 @@ import { requiresReservationSync } from './restaurant-reservations.mjs'
 import { requiresStockWorkSync } from './stock-work.mjs'
 import { registerCheckoutTill } from './till-binding.mjs'
 import { requiresServiceJobSync } from './service-jobs.mjs'
-import { requiresHospitalitySync } from './hospitality-operations.mjs'
+import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync } from './hospitality-operations.mjs'
 import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markKnownLocalOperationsApplied, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -144,10 +144,23 @@ export async function syncNow(tillId) {
         const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
         if(!support.ok || !(await support.json()).capabilities?.includes('hospitality-operations-v1'))throw new Error('Update the cloud server before synchronizing hotel and nightlife operations. Records remain on this device.')
       }
+      if(pending.some(requiresHotelShiftSync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('hotel-shift-handoff-v1'))throw new Error('Update the cloud server before synchronizing front-desk shift handoffs. Records remain on this device.')
+      }
+      if(pending.some(requiresHotelDepositSync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('hotel-reservation-deposits-v1'))throw new Error('Update the cloud server before synchronizing rooms or reservations with deposit policies. Records remain on this device.')
+      }
+      if(pending.some(requiresHotelGroupChangeSync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('hotel-group-reschedule-v1'))throw new Error('Update the cloud server before synchronizing coordinated group date changes. Records remain on this device.')
+      }
       if (pending.some(requiresRestaurantSync)) {
         const support = await fetch(`${url}/v1/sync/capabilities`, { headers })
         if (!support.ok || !(await support.json()).capabilities?.includes('restaurant-v2')) throw new Error('Update the existing sync server before synchronizing Restaurant & bar. Records remain on this device.')
       }
+      if(pending.some(operation=>operation.payload?.kind==='restaurant-tab'&&operation.payload.roomCharges?.length||operation.payload?.kind==='service-job'&&operation.payload.hospitality?.restaurantBill)){const support=await fetch(`${url}/v1/sync/capabilities`,{headers});if(!support.ok||!(await support.json()).capabilities?.includes('restaurant-hotel-folio-v1'))throw new Error('Update the cloud server before synchronizing restaurant bills charged to hotel folios. Records remain on this device.')}
       if (pending.some(requiresCounterSync)) {
         const response = await fetch(`${url}/v1/sync/capabilities`, { headers })
         if (!response.ok || !(await response.json()).capabilities?.includes('counter-v3')) throw new Error('Update the cloud server before synchronizing Fast food orders. Your records remain on this device.')

@@ -12,7 +12,7 @@ const data=await mkdtemp(join(tmpdir(),'stockroom-hospitality-browser-'))
 const base='http://127.0.0.1:9687'
 const cloud=createServer(async(request,response)=>{
   response.setHeader('Content-Type','application/json')
-  if(request.url==='/v1/sync/capabilities'){response.end(JSON.stringify({capabilities:['counter-v3','restaurant-v2']}));return}
+  if(request.url==='/v1/sync/capabilities'){response.end(JSON.stringify({capabilities:['counter-v3','restaurant-v2','hospitality-operations-v1','hotel-shift-handoff-v1','hotel-reservation-deposits-v1','hotel-group-reschedule-v1','restaurant-hotel-folio-v1']}));return}
   if(request.url.startsWith('/v1/sync/push')){let raw='';for await(const chunk of request)raw+=chunk;response.end(JSON.stringify({acceptedOperationIds:JSON.parse(raw).operations.map(row=>row.operationId),conflicts:[]}));return}
   if(request.url.startsWith('/v1/sync/pull')){response.end(JSON.stringify({operations:[],cursor:''}));return}
   response.end(JSON.stringify({businessId:'hospitality-test',testMode:true}))
@@ -46,20 +46,20 @@ try{
   await hospitality.getByLabel('Room name or number').fill('Suite 1')
   await hospitality.getByLabel('Nightly rate').fill('120')
   await hospitality.getByRole('button',{name:'Add room',exact:true}).click()
-  const room=hospitality.locator('.customer-row').filter({hasText:'Suite 1'}).first()
+  const room=hospitality.locator('article.customer-row:has(select[name="housekeepingStatus"])').filter({hasText:'Suite 1'}).first()
   await room.locator('select[name="housekeepingStatus"]').selectOption('ready')
   await room.locator('select[name="housekeepingAssignedTo"]').selectOption({label:'Owner'})
   await room.locator('input[name="housekeepingScheduledAt"]').fill('2099-10-01T10:00')
   await room.getByRole('button',{name:'Save room and housekeeping'}).click()
   await room.getByText(/Assigned to Owner/).waitFor()
 
-  const roomSelect=hospitality.locator('select[name="roomId"]')
+  const roomSelect=hospitality.locator('select[name="roomId"]:not([multiple])')
   const roomId=await roomSelect.locator('option').nth(1).getAttribute('value')
   await roomSelect.selectOption(roomId)
   await hospitality.getByLabel('Guest name').fill('Ada Guest')
-  await hospitality.getByLabel('Phone').fill('08000000001')
-  await hospitality.getByLabel('Check in').fill('2099-10-01')
-  await hospitality.getByLabel('Check out').fill('2099-10-03')
+  await hospitality.getByLabel('Phone',{exact:true}).fill('08000000001')
+  await hospitality.locator('input[name="checkin"]').fill('2099-10-01')
+  await hospitality.locator('input[name="checkout"]').fill('2099-10-03')
   await hospitality.getByLabel('Stay manager').selectOption({label:'Owner'})
   await hospitality.getByRole('button',{name:'Save booking'}).click()
   const stay=hospitality.locator('.customer-row').filter({hasText:'Ada Guest'})
@@ -84,6 +84,7 @@ try{
   await hospitality.getByRole('button',{name:'Nightlife events',exact:true}).click()
   await hospitality.getByLabel('Event name').fill('Friday Live')
   await hospitality.getByLabel('Starts').fill('2099-10-02T20:00')
+  await hospitality.getByLabel('Ends').fill('2099-10-02T23:00')
   await hospitality.getByLabel('Guest capacity').fill('50')
   await hospitality.getByLabel('Admission price').fill('25')
   await hospitality.getByLabel('Event host').first().selectOption({label:'Owner'})
@@ -91,8 +92,8 @@ try{
   await hospitality.getByRole('button',{name:'Create event'}).click()
   const event=hospitality.locator('.panel').filter({hasText:'Friday Live'}).last()
   assert.match(await event.innerText(),/Owner/)
-  await event.getByLabel('Guest').fill('Ben Guest')
-  await event.getByLabel('Phone').fill('08000000002')
+  await event.getByLabel('Guest',{exact:true}).fill('Ben Guest')
+  await event.getByLabel('Phone',{exact:true}).fill('08000000002')
   await event.getByRole('button',{name:'Add guest'}).click()
   const guest=event.locator('.customer-row').filter({hasText:'Ben Guest'})
   const unpaidGuest=(await(await fetch(base+'/api/pos/hospitality',{headers})).json()).entries.find(entry=>entry.guestName==='Ben Guest')

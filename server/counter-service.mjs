@@ -32,8 +32,9 @@ export function validateCounterPayment(sale, order, tillId) {
   if (!order || order.kind !== 'counter-order' || order.branchId !== sale.branchId) throw new Error('Synchronize this order before taking payment.')
   if (order.status === 'cancelled') throw new Error('Cancelled orders cannot be paid.')
   if (sale.id !== counterSaleId(order.id) || sale.paymentDetails?.counterOrder?.id !== order.id) throw new Error('Use the order payment action to settle this order.')
-  if (!counterActionTill(order)) throw new Error('Accept this online order on a till before taking payment.')
-  if (tillId && tillId !== counterActionTill(order)) throw new Error('Take payment on the till that created this order.')
+  const verifiedOnlineCheckout = sale.paymentMethod === 'external-pos' && sale.terminalProvider === 'Paystack Online' && order.source === 'customer-portal'
+  if (!counterActionTill(order) && !verifiedOnlineCheckout) throw new Error('Accept this online order on a till before taking payment.')
+  if (tillId && tillId !== counterActionTill(order) && !verifiedOnlineCheckout) throw new Error('Take payment on the till that created this order.')
   if (!order.tableService && (sale.paymentDetails.counterOrder.diningOption || 'Takeaway') !== (order.diningOption || 'Takeaway')) throw new Error('Payment must match the order type.')
   if (sale.paymentDetails.counterOrder.tillId !== order.tillId) throw new Error('Payment till does not match the order.')
   if (JSON.stringify(sale.paymentDetails.counterOrder.tableService) !== JSON.stringify(order.tableService)) throw new Error('Payment must match the table bill and seat.');

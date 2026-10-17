@@ -1,6 +1,6 @@
 import { requiresChurchSync } from '../server/church-ledger.mjs'
 import { requiresReservationSync } from '../server/restaurant-reservations.mjs'
-import { requiresHospitalitySync } from '../server/hospitality-operations.mjs'
+import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync } from '../server/hospitality-operations.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -67,7 +67,7 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
     }
     const code = source.slice(source.indexOf('async function syncNowImpl('), source.indexOf('\n// Pull-to-refresh'))
     const sync = vm.runInNewContext(stripTypeScriptTypes(`(${code})`), {
-      requiresCounterSync, requiresRestaurantSync, requiresServiceJobSync, requiresStockWorkSync, requiresReservationSync, requiresHospitalitySync, requiresChurchSync, counterConflictRecord,
+      requiresCounterSync, requiresRestaurantSync, requiresServiceJobSync, requiresStockWorkSync, requiresReservationSync, requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync, requiresChurchSync, counterConflictRecord,
       registerCheckoutTill, localStorage: { getItem: () => '' },
       getMobileSyncConfiguration: async () => ({ syncApiUrl: 'https://test', businessId: 'shop', deviceId: 'device', deviceToken: 'token' }),
       openMobileDatabase: async () => db, now: () => '2026-01-01',
@@ -89,7 +89,7 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
     let uploaded=false,acknowledged=false
     const code=source.slice(source.indexOf('async function syncNowImpl('),source.indexOf('\n// Pull-to-refresh'))
     const sync=vm.runInNewContext(stripTypeScriptTypes(`(${code})`),{
-      requiresCounterSync,requiresRestaurantSync,requiresServiceJobSync,requiresStockWorkSync,requiresReservationSync,requiresHospitalitySync,requiresChurchSync,counterConflictRecord,
+      requiresCounterSync,requiresRestaurantSync,requiresServiceJobSync,requiresStockWorkSync,requiresReservationSync,requiresHospitalitySync,requiresHotelShiftSync,requiresHotelDepositSync,requiresHotelGroupChangeSync,requiresChurchSync,counterConflictRecord,
       registerCheckoutTill,localStorage:{getItem:()=>''},
       getMobileSyncConfiguration:async()=>({syncApiUrl:'https://test',businessId:'shop',deviceId:'device',deviceToken:'token'}),
       openMobileDatabase:async()=>({query:async sql=>({values:sql.includes('COUNT(*)')?[{count:1}]:[pending]}),run:async()=>{acknowledged=true}}),

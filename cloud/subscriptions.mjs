@@ -517,7 +517,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         const configuredPlan = await getPlan()
         const workspace = await workspacePricing(claims.businessId, configuredPlan)
-        const requestedWorkspaceCount = Number(input.workspaceCount ?? workspace.count)
+        const requestedWorkspaceCount = Number(input.workspaceCount ?? Math.max(1, workspace.count))
         if (!Number.isInteger(requestedWorkspaceCount) || requestedWorkspaceCount < Math.max(1, workspace.count) || requestedWorkspaceCount > 5) return reply(400, { error: 'Workspace count must include at least one selling workspace, include all currently enabled workspaces, and be no greater than five.' })
         const quotedAmount = priceForWorkspaces(plan, requestedWorkspaceCount, workspace.addonPercent)
         const quotedPlan = { ...plan, amount: quotedAmount }
@@ -536,6 +536,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         return reply(201, { ok: true })
       }
       if (url.pathname === '/v1/subscriptions/enterprise-checkout' && request.method === 'POST') {
+        const input = JSON.parse(await body(request))
         const requestRow = await currentEnterpriseRequest(claims.businessId)
         if (!requestRow || requestRow.status !== 'approved') return reply(409, { error: 'There is no approved enterprise proposal ready for payment.' })
         const current = await subscriptions.findOne({ _id: claims.businessId }, { projection: { paystackAutoRenewStatus: 1 } })
@@ -543,7 +544,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const configured = await getPlan()
         const basePlan = validatePlan({ amount: requestRow.offeredAmount, currency: requestRow.offeredCurrency, days: requestRow.offeredDays, reminderDays: configured?.reminderDays, freeTrialDays: configured?.freeTrialDays, graceMonths: configured?.graceMonths })
         const workspace = await workspacePricing(claims.businessId, configured)
-        const requestedWorkspaceCount = Number(input.workspaceCount ?? workspace.count)
+        const requestedWorkspaceCount = Number(input.workspaceCount ?? Math.max(1, workspace.count))
         if (!Number.isInteger(requestedWorkspaceCount) || requestedWorkspaceCount < Math.max(1, workspace.count) || requestedWorkspaceCount > 5) return reply(400, { error: 'Workspace count must include at least one selling workspace, include all currently enabled workspaces, and be no greater than five.' })
         const plan = { ...basePlan, amount: priceForWorkspaces(basePlan, requestedWorkspaceCount, workspace.addonPercent) }
         const reference = `sub-${randomBytes(20).toString('hex')}`

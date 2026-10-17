@@ -2,14 +2,18 @@ import { floorId,restaurantTabs,billContains,floorChange,validateRestaurantFloor
 import { recordPayment } from './payment.mjs'
 import { receiptSettings } from './receipts.mjs'
 import { validateLoyaltyBalance } from './pos-pricing.mjs'
-import { restaurantLedgerId, restaurantOrderPayment, restaurantPortion, restaurantReceiptHash, saveRestaurantSale } from './restaurant-payments.mjs'
+import { restaurantLedgerId, restaurantOrderPayment, restaurantPortion, restaurantReceiptHash, restaurantRoomChargeSales, saveRestaurantSale } from './restaurant-payments.mjs'
 import { normalizeShopProfile } from './shop-profile.mjs'
 import { reservationBookId, checkReservationOpening } from './restaurant-reservations.mjs'
+import { hasPermission } from './staff-permissions.mjs'
+import { hotelFolios } from './hotel-folios.mjs'
+import { handleServiceJobs } from './service-jobs.mjs'
 const text = (value, label, max = 100) => { if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`Enter ${label}.`); return value.trim() }
+const validRoomCharge = charge => Boolean(charge && /^service-job:[A-Za-z0-9:_-]{3,150}$/.test(charge.invoiceId) && (charge.folioId === 'guest' || /^hotel-folio:[A-Za-z0-9_-]{20,80}$/.test(charge.folioId)) && Number.isFinite(charge.total) && charge.total > 0 && Math.abs(charge.total*100-Math.round(charge.total*100)) < 0.000001 && Array.isArray(charge.selections) && charge.selections.length > 0 && charge.selections.length <= 1000 && charge.selections.every(part => part && /^[A-Za-z0-9:_-]{1,150}$/.test(part.orderId) && typeof part.lineId === 'string' && part.lineId.length > 0 && part.lineId.length <= 150 && Number.isFinite(part.quantity) && part.quantity > 0 && Number.isFinite(part.total) && part.total > 0) && Math.abs(charge.selections.reduce((sum,part)=>sum+Number(part.total),0)-charge.total) < 0.005 && Number.isFinite(Date.parse(charge.createdAt)) && typeof charge.staffId === 'string' && charge.staffId.length > 0 && charge.staffId.length <= 100)
 export const tableTabId = (branch, table) => `restaurant-tab:${branch}:${table}`
 // Preparation progress does not alter the amount a cashier reviewed.
 export function restaurantBillFingerprint(tab, orders) {
-  return JSON.stringify([tab.id,tab.sessionId,tab.currency,tab.tillId,tab.floorRevision||'',tab.billMembers||[],
+  return JSON.stringify([tab.id,tab.sessionId,tab.currency,tab.tillId,tab.floorRevision||'',tab.billMembers||[],tab.roomCharges||[],
     orders.filter(order=>billContains(tab,order) && order.status!=='cancelled' && !order.receiptId)
       .sort((a,b)=>a.id.localeCompare(b.id))
       .map(order=>[order.id,order.currency,order.tillId,order.total,order.lines,order.pos,order.tableService,order.paidAmount||0,order.receiptIds||[]])])
@@ -33,36 +37,80 @@ export function validateRestaurantRecord(record, previous, snapshot = false) {
   if (!/^[A-Z]{3}$/.test(record.currency) || typeof record.businessName !== 'string') throw new Error('Invalid bill currency or business name.');
   if (!record.id.startsWith(`restaurant-tab:${record.branchId}:`) || !Number.isInteger(record.guests) || record.guests < 1 || record.guests > 100 || !Number.isFinite(Date.parse(record.openedAt))) throw new Error('Invalid bill details.')
   if(record.hotelStayId!==undefined&&!/^hotel-stay:[a-zA-Z0-9_-]{3,100}$/.test(record.hotelStayId))throw new Error('Invalid hotel stay link.')
+  if(record.roomCharges!==undefined&&(!Array.isArray(record.roomCharges)||record.roomCharges.length>100||new Set(record.roomCharges.map(charge=>charge?.invoiceId)).size!==record.roomCharges.length||record.roomCharges.some(charge=>!validRoomCharge(charge))))throw new Error('Invalid hotel folio bill transfer.')
   if(record.nightlifeEventId!==undefined&&(!/^nightclub-event:[a-zA-Z0-9_-]{3,100}$/.test(record.nightlifeEventId)||typeof record.nightlifeEventName!=='string'||!record.nightlifeEventName.trim()))throw new Error('Invalid nightlife event link.')
   if(record.minimumSpend!==undefined&&(!Number.isFinite(record.minimumSpend)||record.minimumSpend<0||Math.abs(record.minimumSpend*100-Math.round(record.minimumSpend*100))>0.000001)||record.tablePackageId!==undefined&&(!/^[a-z0-9_-]{1,40}$/.test(record.tablePackageId)||typeof record.tablePackageName!=='string'||!record.tablePackageName.trim())||record.tablePackageItems!==undefined&&(!Array.isArray(record.tablePackageItems)||record.tablePackageItems.length>20||record.tablePackageItems.some(item=>!item.menuItemId||!item.productId||!item.name||!Number.isInteger(item.quantity)||item.quantity<1||item.quantity>999)))throw new Error('Invalid bottle-service package or minimum spend.')
   if (!previous) { if(!snapshot && record.history?.length) throw new Error('New bills cannot contain past sessions.'); if (!snapshot && record.status !== 'open') throw new Error('Open the bill first.'); return }
   if (record.branchId !== previous.branchId || record.tableId !== previous.tableId) throw new Error('Bill identity cannot change.')
-  if (previous.status === 'closed' && record.status === 'open') { if (record.sessionId === previous.sessionId) throw new Error('Use a new bill session.'); const archive={id:previous.id,sessionId:previous.sessionId,name:previous.name,tableId:previous.tableId,guests:previous.guests,tillId:previous.tillId,status:'closed',openedAt:previous.openedAt,closedAt:previous.closedAt,currency:previous.currency,businessName:previous.businessName}; if(JSON.stringify(record.history)!==JSON.stringify([...(previous.history||[]),archive])) throw new Error('Preserve closed bill history.'); return }
-  if (previous.status !== 'open' || record.status !== 'closed' || ['sessionId','name','guests','tillId','openedAt','currency','businessName','reservationId','hotelStayId','nightlifeEventId','nightlifeEventName','tablePackageId','tablePackageName','minimumSpend','tablePackageItems'].some(key=>record[key] !== previous[key])) throw new Error('Refresh the bill before closing it.')
+  if (previous.status === 'closed' && record.status === 'open') { if (record.sessionId === previous.sessionId) throw new Error('Use a new bill session.'); const archive={id:previous.id,sessionId:previous.sessionId,name:previous.name,tableId:previous.tableId,guests:previous.guests,tillId:previous.tillId,status:'closed',openedAt:previous.openedAt,closedAt:previous.closedAt,currency:previous.currency,businessName:previous.businessName,...(previous.roomCharges?.length?{roomCharges:previous.roomCharges}:{})}; if(JSON.stringify(record.history)!==JSON.stringify([...(previous.history||[]),archive])) throw new Error('Preserve closed bill history.'); return }
+  if (previous.status !== 'open' || !['open','closed'].includes(record.status) || ['sessionId','name','tillId','openedAt','currency','businessName','reservationId','hotelStayId','nightlifeEventId','nightlifeEventName','tablePackageId','tablePackageName','minimumSpend','tablePackageItems'].some(key=>record[key] !== previous[key])) throw new Error('Refresh the bill before continuing.')
+  const oldRoomCharges=previous.roomCharges||[],nextRoomCharges=record.roomCharges||[]
+  if(nextRoomCharges.length<oldRoomCharges.length||nextRoomCharges.length>oldRoomCharges.length+1||JSON.stringify(nextRoomCharges.slice(0,oldRoomCharges.length))!==JSON.stringify(oldRoomCharges))throw new Error('Preserve hotel folio bill transfers.')
+  if(record.status==='open'&&nextRoomCharges.length!==oldRoomCharges.length+1||record.status==='closed'&&nextRoomCharges.length!==oldRoomCharges.length)throw new Error('Refresh the bill before continuing.')
   if(JSON.stringify(record.history)!==JSON.stringify(previous.history)) throw new Error('Preserve bill history.')
 }
 export function validateRestaurantClose(tab, orders, sales) {
   const matching = orders.filter(order=>billContains(tab,order))
+  const settledSales=[...sales,...restaurantRoomChargeSales(tab)]
   const billTotal = matching.filter(order=>order.status!=='cancelled').reduce((sum,order)=>sum+Number(order.total||0),0)
   if(tab.minimumSpend>0&&billTotal+0.000001<tab.minimumSpend)throw new Error(`${tab.tablePackageName||'This table package'} requires a minimum spend of ${tab.currency} ${Number(tab.minimumSpend).toFixed(2)}. Add orders totalling at least ${tab.currency} ${Number(tab.minimumSpend).toFixed(2)} before closing the bill.`)
   if (matching.some(order=>!['collected','cancelled'].includes(order.status))) throw new Error('Serve or cancel every order before closing the bill.')
-  if (matching.some(order=>order.status !== 'cancelled' && !restaurantOrderPayment(order,sales).receiptId)) throw new Error('Settle all unpaid orders before closing the bill.')
+  if (matching.some(order=>order.status !== 'cancelled' && !restaurantOrderPayment(order,settledSales).receiptId)) throw new Error('Settle all unpaid orders before closing the bill.')
 }
 export async function handleRestaurant({ db, scope, organizationId, branchId, user, method, path, input, tillId, sales, publish, saveRecord }) {
   const profile = (await db.query(`SELECT shop_profile,app_name,currency FROM app_settings WHERE ${organizationId ? 'organization_id=?' : 'id=1'}`, organizationId ? [organizationId] : [])).values[0]
   if (!normalizeShopProfile(profile?.shop_profile).restaurant) throw new Error('The owner must enable Restaurant & bar first.')
-  const rows = (await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind IN ('restaurant-layout','restaurant-tab','counter-order','restaurant-ledger','restaurant-floor','restaurant-reservations','nightclub-event')", [scope, branchId])).values.map(row=>JSON.parse(row.payload))
+  const rows = (await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind IN ('restaurant-layout','restaurant-tab','counter-order','restaurant-ledger','restaurant-floor','restaurant-reservations','nightclub-event','hotel-stay')", [scope, branchId])).values.map(row=>JSON.parse(row.payload))
   const layout = rows.find(row=>row.kind === 'restaurant-layout') || { id:`restaurant-layout:${branchId}`, updatedAt:'', tables:[] }
   const floor=rows.find(row=>row.kind==='restaurant-floor')
   const tabs=restaurantTabs(rows.filter(row=>row.kind==='restaurant-tab'),floor)
   const loadedSales = await sales()
   const orders = rows.filter(row=>row.tableService)
-  const paymentState=orders.map(order=>({...order,...restaurantOrderPayment(order,loadedSales)}))
+  const paymentState=orders.map(order=>{const tab=tabs.find(item=>billContains(item,order));return {...order,...restaurantOrderPayment(order,[...loadedSales,...restaurantRoomChargeSales(tab)])}})
   const receipts=loadedSales.filter(sale=>sale.paymentDetails?.restaurantBill || sale.paymentDetails?.counterOrder?.tableService).map(sale=>{
     const order=orders.find(order=>order.id===sale.paymentDetails?.counterOrder?.id),bill=sale.paymentDetails?.restaurantBill
     return {...sale,branchId,currency:bill?.currency||order?.currency,businessName:bill?.businessName||order?.businessName,items:sale.items.map(item=>({...item,price:item.price??item.unitPrice})),syncStatus:'synced'}
   })
-  if (method === 'GET') return {reservations:rows.find(row=>row.kind==='restaurant-reservations')?.entries||[],reservationTimeZone:normalizeShopProfile(profile?.shop_profile).reportingTimeZone,layout,floor:floor||{id:floorId(branchId),updatedAt:'',bindings:[]},tabs,ledgers:rows.filter(row=>row.kind==='restaurant-ledger'),orders:paymentState,receipts,returns:(await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='return'",[scope,branchId])).values.map(row=>JSON.parse(row.payload))}
+  if (method === 'GET') {const hotelAccess=hasPermission(user,'hotelOperations')&&hasPermission(user,'serviceJobs'),linkedStays=new Set(tabs.map(tab=>tab.hotelStayId).filter(Boolean));return {reservations:rows.find(row=>row.kind==='restaurant-reservations')?.entries||[],reservationTimeZone:normalizeShopProfile(profile?.shop_profile).reportingTimeZone,layout,floor:floor||{id:floorId(branchId),updatedAt:'',bindings:[]},tabs,ledgers:rows.filter(row=>row.kind==='restaurant-ledger'),orders:paymentState,receipts,returns:(await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='return'",[scope,branchId])).values.map(row=>JSON.parse(row.payload)),hotelStays:hotelAccess?rows.filter(row=>row.kind==='hotel-stay'&&linkedStays.has(row.id)).map(stay=>({id:stay.id,roomName:stay.roomName,guestName:stay.guestName,status:stay.status,folios:hotelFolios(stay)})):[]}}
+  if (path.endsWith('/charge-to-room')) {
+    if(method!=='POST'||!tillId||!input.commandId||!hasPermission(user,'hotelOperations')||!hasPermission(user,'serviceJobs'))throw new Error('Hotel operations, Jobs & invoices, and the original restaurant till are required to charge a bill to a room.')
+    const tab=tabs.find(row=>row.id===input.tabId&&row.sessionId===input.sessionId&&row.status==='open'&&!row.mergedInto)
+    if(!tab||tab.tillId!==tillId||!tab.hotelStayId)throw new Error('Open the restaurant bill from a reservation linked to a hotel stay before charging the room.')
+    if(tab.updatedAt!==input.expectedUpdatedAt||input.billFingerprint!==restaurantBillFingerprint(tab,paymentState))throw new Error('This bill changed. Refresh it before charging the room.')
+    const stay=rows.find(row=>row.kind==='hotel-stay'&&row.id===tab.hotelStayId&&row.branchId===branchId)
+    if(!stay||stay.status!=='checked-in')throw new Error('The linked hotel guest must be checked in before restaurant charges can be added to the folio.')
+    const folioId=String(input.folioId||'guest'),folio=hotelFolios(stay).find(row=>row.id===folioId)
+    if(!folio)throw new Error('Choose a folio on the linked hotel stay.')
+    const portion=restaurantPortion(tab,orders,loadedSales,input.selections,{allowMultipleCustomers:true})
+    const alreadyCharged=(tab.roomCharges||[]).flatMap(charge=>charge.selections.map(part=>`${part.orderId}:${part.lineId}`)),selectedKeys=portion.parts.map(part=>`${part.orderId}:${part.lineId}`)
+    if(selectedKeys.some(key=>alreadyCharged.includes(key)))throw new Error('Some selected bill items were already transferred to a hotel folio.')
+    const billTaxModes=new Set(portion.parts.map(part=>part.taxIncluded))
+    if(billTaxModes.size>1)throw new Error('This bill mixes included-tax and added-tax items. Settle those items separately before transferring them to a hotel folio.')
+    const taxIncluded=billTaxModes.has(true),tax=Number(portion.pricing.tax||0),base=taxIncluded?portion.pricing.total:portion.pricing.total-tax
+    if(base<=0||tax>0&&base<=(taxIncluded?tax:0))throw new Error('This bill cannot be represented as one valid folio charge.')
+    const taxRate=tax<=0?0:taxIncluded?tax/(base-tax)*100:tax/base*100
+    const invoiceId=String(input.invoiceId||'')
+    if(!/^service-job:[A-Za-z0-9:_-]{3,150}$/.test(invoiceId))throw new Error('Start a new room-charge command and try again.')
+    const existingJobs=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='service-job'",[scope,branchId])).values.map(row=>JSON.parse(row.payload))
+    const overlap=existingJobs.find(job=>job.hospitality?.restaurantBill?.tabId===tab.id&&job.hospitality.restaurantBill.sessionId===tab.sessionId&&job.hospitality.restaurantBill.selections.some(part=>selectedKeys.includes(`${part.orderId}:${part.lineId}`))&&job.status!=='cancelled')
+    if(overlap&&overlap.id!==invoiceId)throw new Error('Some selected restaurant items are already on a hotel folio invoice.')
+    const invoiceInput={id:invoiceId,commandId:input.commandId,expectedUpdatedAt:'',estimate:false,title:`Restaurant / bar - ${tab.name}`.slice(0,200),lines:[{id:`restaurant:${tab.sessionId}:${input.commandId}`.slice(0,100),description:`Restaurant / bar bill ${tab.sessionId.slice(-8).toUpperCase()}`,quantity:1,price:Math.round(base*100)/100}],hospitality:{recordId:stay.id,recordKind:'hotel-stay',chargeType:'extra',folioId,restaurantBill:{tabId:tab.id,sessionId:tab.sessionId,folioId,selections:portion.parts}}}
+    const jobResult=await handleServiceJobs({db,scope,organizationId,branchId,user,path:'/api/pos/service-jobs',method:'POST',input:invoiceInput,tillId,sales,publish,saveRecord,restaurantBillContext:{taxEnabled:tax>0,taxIncluded,taxRate,taxLabel:portion.pricing.taxSettings.taxLabel||'Tax'}})
+    const job=jobResult.job
+    if(Math.abs(Number(job.pricing.total)-Number(portion.pricing.total))>0.005||Math.abs(Number(job.pricing.tax)-tax)>0.005)throw new Error('The folio tax settings could not match this restaurant bill. Review tax setup before transferring the items.')
+    const updatedAt=new Date(Math.max(Date.now(),Date.parse(tab.updatedAt||'')+1||0)).toISOString(),roomCharge={invoiceId:job.id,folioId,total:job.pricing.total,selections:portion.parts,createdAt:updatedAt,staffId:user.id},record={...tab,updatedAt,expectedUpdatedAt:tab.updatedAt,roomCharges:[...(tab.roomCharges||[]),roomCharge],staffId:user.id,staffName:user.name}
+    validateRestaurantRecord(record,tab)
+    await db.beginTransaction()
+    try {
+      const current=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,tab.id])).values[0],freshOrders=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='counter-order'",[scope,branchId])).values.map(row=>JSON.parse(row.payload)),freshSales=await sales()
+      const currentTab=current&&JSON.parse(current.payload)
+      if(!currentTab||currentTab.updatedAt!==tab.updatedAt||input.billFingerprint!==restaurantBillFingerprint(currentTab,freshOrders.map(order=>({...order,...restaurantOrderPayment(order,freshSales)}))))throw new Error('This bill changed while its folio invoice was being created. Refresh the bill; the invoice is saved for review.')
+      const freshPortion=restaurantPortion(currentTab,freshOrders,freshSales,input.selections,{allowMultipleCustomers:true})
+      if(JSON.stringify(freshPortion.parts)!==JSON.stringify(portion.parts))throw new Error('This bill changed while its folio invoice was being created. Refresh and review the invoice.')
+      await saveRecord(db,scope,record);await publish(record);await db.commitTransaction()
+    } catch(error) { await db.rollbackTransaction(); throw error }
+    return {tab:record,job}
+  }
   if (path.endsWith('/settle')) {
     if(method!=='POST' || !tillId) throw new Error('A registered payment till is required.')
     text(input.id,'a payment ID',150)
@@ -74,7 +122,7 @@ export async function handleRestaurant({ db, scope, organizationId, branchId, us
     if(!tab || tab.tillId!==tillId) throw new Error('Settle this open bill on its original till.')
     const ledger=rows.find(row=>row.id===restaurantLedgerId(tab.sessionId))
     if(input.expectedUpdatedAt!==(ledger?.updatedAt||'') || input.billFingerprint!==restaurantBillFingerprint(tab,paymentState)) throw new Error('This bill changed. Cancel payment entry, review the bill and start payment again.')
-    const portion=restaurantPortion(tab,orders,loadedSales,input.selections)
+    const portion=restaurantPortion(tab,orders,loadedSales,input.selections,{allowMultipleCustomers:true})
     const registers=(await db.query("SELECT payload FROM pos_records WHERE scope=? AND branch_id=? AND kind='register'",[scope,branchId])).values.map(row=>JSON.parse(row.payload))
     const register=registers.find(row=>!row.closedAt && row.staffId===user.id)
     if(register) portion.pos.registerId=register.id
@@ -155,7 +203,7 @@ export async function handleRestaurant({ db, scope, organizationId, branchId, us
     const savedBook=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,reservationBookId(branchId)])).values[0]
     const reservation=checkReservationOpening(savedBook?JSON.parse(savedBook.payload):null,input,table?.id||'',Number(input.guests),updatedAt)
     if(table && tabs.some(tab=>tab.status==='open' && !tab.mergedInto && tab.displayTableId===table.id)) throw new Error('This table already has an open bill.')
-    record = {...stamp, id:input.id, kind:'restaurant-tab', status:'open', tableId:table?.id || '', name:table?.name || text(input.name,'a tab name'), guests:Number(input.guests), sessionId:text(input.sessionId,'a new bill session'), tillId, currency:profile.currency, businessName:profile.app_name, openedAt:updatedAt, history:existing ? [...(existing.history||[]),{id:existing.id,sessionId:existing.sessionId,name:existing.name,tableId:existing.tableId,guests:existing.guests,tillId:existing.tillId,status:'closed',openedAt:existing.openedAt,closedAt:existing.closedAt,currency:existing.currency,businessName:existing.businessName}] : [], events:[...(existing?.events || []), {action:'open', sessionId:input.sessionId, at:updatedAt, staffId:user.id}]}
+    record = {...stamp, id:input.id, kind:'restaurant-tab', status:'open', tableId:table?.id || '', name:table?.name || text(input.name,'a tab name'), guests:Number(input.guests), sessionId:text(input.sessionId,'a new bill session'), tillId, currency:profile.currency, businessName:profile.app_name, openedAt:updatedAt, history:existing ? [...(existing.history||[]),{id:existing.id,sessionId:existing.sessionId,name:existing.name,tableId:existing.tableId,guests:existing.guests,tillId:existing.tillId,status:'closed',openedAt:existing.openedAt,closedAt:existing.closedAt,currency:existing.currency,businessName:existing.businessName,...(existing.roomCharges?.length?{roomCharges:existing.roomCharges}:{})}] : [], events:[...(existing?.events || []), {action:'open', sessionId:input.sessionId, at:updatedAt, staffId:user.id}]}
     if(table && record.guests > table.seats) throw new Error('Guest count exceeds the seats available at this table.')
     if(reservation){record.reservationId=reservation.id;if(reservation.hotelStayId)record.hotelStayId=reservation.hotelStayId;if(reservation.tablePackageId){record.tablePackageId=reservation.tablePackageId;record.tablePackageName=reservation.tablePackageName;record.minimumSpend=Number(reservation.minimumSpend||0);record.tablePackageItems=reservation.tablePackageItems||[]}if(reservation.nightlifeEventId){const linkedEvent=rows.find(row=>row.kind==='nightclub-event'&&row.id===reservation.nightlifeEventId);if(!linkedEvent||linkedEvent.status!=='scheduled')throw new Error('This nightlife event is no longer accepting table bookings.');record.nightlifeEventId=linkedEvent.id;record.nightlifeEventName=linkedEvent.name}}
   } else if (path.endsWith('/close')) {

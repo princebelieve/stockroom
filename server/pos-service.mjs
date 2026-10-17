@@ -14,7 +14,8 @@ import { handleCounter } from './counter-service.mjs'
 import { posSettings, refundFor, loyaltyBalances } from './pos-pricing.mjs'
 import { normalizeShopProfile } from './shop-profile.mjs'
 import { handleHospitality, validateHospitalityRecord } from './hospitality-operations.mjs'
-export const posSchema = 'CREATE TABLE IF NOT EXISTS pos_records (scope TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,id));'
+import { validateHotelDayClose, validateHotelJournal } from './hotel-accounting.mjs'
+export const posSchema = 'CREATE TABLE IF NOT EXISTS pos_records (scope TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, branch_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,id)); CREATE INDEX IF NOT EXISTS pos_records_branch_kind_updated ON pos_records(scope,branch_id,kind,updated_at DESC);'
 export async function ensurePos(db) { await db.run(posSchema) }
 export async function posRecords(db, scope, kind, branch = 'main') {
   await ensurePos(db)
@@ -31,7 +32,9 @@ export async function applyPosRecord(db, scope, record, organizationId) {
   if(record.kind==='service-job') await applyServiceJob(db,scope,record,organizationId)
   const found = (await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?', [scope, record.id])).values[0]
   if(record.kind?.startsWith('church-'))validateChurchRecord(record,undefined,true)
-  if(['hotel-room','hotel-stay','nightclub-event','nightclub-entry','nightclub-inquiry'].includes(record.kind))validateHospitalityRecord(record,found?JSON.parse(found.payload):undefined)
+  if(record.kind==='hotel-journal-entry')validateHotelJournal(record,found?JSON.parse(found.payload):undefined)
+  else if(record.kind==='hotel-day-close')validateHotelDayClose(record,found?JSON.parse(found.payload):undefined)
+  else if(['hotel-room','hotel-stay','hotel-room-block','hotel-shift','nightclub-event','nightclub-entry','nightclub-inquiry'].includes(record.kind))validateHospitalityRecord(record,found?JSON.parse(found.payload):undefined)
   if(record.kind==='restaurant-reservations')validateReservationBook(record,undefined,true)
   if(record.kind==='restaurant-reservation-archive')validateReservationArchive(record,undefined,found?JSON.parse(found.payload):undefined)
   if(isStockWork(record)){validateStockWork(record,found?JSON.parse(found.payload):undefined);await applyStockWork(db,record,organizationId)}
@@ -78,7 +81,7 @@ export async function handlePos({ db, scope, branchId, user, path, method, input
   if(path==='/api/pos/hospitality/invoice'){if(!hasPermission(user,'serviceJobs'))throw new Error('The owner must grant Jobs & invoices access before you can bill this stay or admission.');const linked=(await db.query('SELECT payload FROM pos_records WHERE scope=? AND id=?',[scope,String(input.hospitality?.recordId||'')])).values[0];if(linked){const kind=JSON.parse(linked.payload).kind;if(kind==='hotel-stay'&&!hasPermission(user,'hotelOperations'))throw new Error('The owner has not granted Hotel operations access.');if(kind==='nightclub-entry'&&!hasPermission(user,'nightlifeOperations'))throw new Error('The owner has not granted Nightlife operations access.')}return handleServiceJobs({db,scope,organizationId,branchId,user,path:'/api/pos/service-jobs',method,input,tillId,sales,publish,saveRecord:savePosRecord})}
   if(path==='/api/pos/hospitality')return handleHospitality({db,scope,organizationId,branchId,user,method,input,publish,saveRecord:savePosRecord})
   if(path==='/api/pos/stock-work')return handleStockWork({db,scope,organizationId,branchId,tillId,user,method,input,publish,saveRecord:savePosRecord})
-  if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close','/api/pos/restaurant/settle','/api/pos/restaurant/arrange'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
+  if (['/api/pos/restaurant', '/api/pos/restaurant/layout', '/api/pos/restaurant/open', '/api/pos/restaurant/close','/api/pos/restaurant/settle','/api/pos/restaurant/arrange','/api/pos/restaurant/charge-to-room'].includes(path)) return handleRestaurant({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   if(path.startsWith('/api/pos/service-jobs')) return handleServiceJobs({db,scope,organizationId,branchId,user,path,method,input,tillId,sales,publish,saveRecord:savePosRecord})
   if (path.startsWith('/api/pos/retail-orders') || path.startsWith('/api/pos/restaurant/counter') || path.startsWith('/api/pos/counter')) return handleCounter({ db, scope, organizationId, branchId, user, path, method, input, sales, publish, tillId, saveRecord: savePosRecord })
   const manager = ['owner', 'admin'].includes(user.role)
