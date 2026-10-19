@@ -1,6 +1,6 @@
 # Documentation alignment
 
-Original full review: 2026-10-06. Incremental screen/subscription review: 2026-10-12. Current implementation reconciliation: 2026-10-16. The dated inventories below are snapshots, not permanent authorities. Generated builds, dependencies and release artifacts are not documentation authorities; current source code is.
+Original full review: 2026-10-06. Incremental screen/subscription review: 2026-10-12. Current implementation reconciliation: 2026-10-19. The dated inventories below are snapshots, not permanent authorities. Generated builds, dependencies and release artifacts are not documentation authorities; current source code is.
 
 ## Current authority
 
@@ -19,6 +19,7 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 - Cloud legacy owner registration requires an enrolled device token; ordinary onboarding uses registration keys. All devices in one business share its business ID and have unique device IDs.
 - Release examples use versioned Android artifact names. Landing documentation includes supported Paystack referral transfers and no longer asserts a particular hosting allowance or installer size.
 - Unsupported claims about shops already using this version were removed. Historical setup recommendations are identified as implemented or still proposed.
+- The Hospitality guide was rechecked against the current UI, server handlers and browser flows. The user guide and workspace overview now distinguish supported folio settlement, online invoice checkout, housekeeping history, cashier-reviewed night audit, and Channex-mediated channel sync from still-missing complete accounting, automatic till close, provider certification and property-specific deployment acceptance.
 
 ## Coverage
 
@@ -59,7 +60,7 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 
 ## What this confirms
 
-The October 6 review confirms the implementation facts listed in its coverage table as of that date. This incremental pass updates the operational user guide, in-app guide source, workspace guide, subscription guide, sales/payment guides, setup review, README, and roadmap for the newer screen navigation and subscription behavior. It does not certify that current code is deployed, that provider credentials are configured, that released installers contain these changes, or that physical hardware works. Historical audits retain their original dates and findings; follow current operational guides when they differ.
+The October 6 review confirms the implementation facts listed in its coverage table as of that date. The October 19 reconciliation verifies hotel-facing claims against current source and browser workflows. It does not certify that current code is deployed, that provider credentials are configured, that released installers contain these changes, or that a property's operational and statutory requirements are satisfied. Historical audits retain their original dates and findings; follow current operational guides when they differ.
 
 ## Incremental review: 2026-10-12
 

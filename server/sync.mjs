@@ -4,7 +4,7 @@ import { requiresReservationSync } from './restaurant-reservations.mjs'
 import { requiresStockWorkSync } from './stock-work.mjs'
 import { registerCheckoutTill } from './till-binding.mjs'
 import { requiresServiceJobSync } from './service-jobs.mjs'
-import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync } from './hospitality-operations.mjs'
+import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync, requiresHotelGroupFolioSync, requiresHotelFolioCorrectionSync } from './hospitality-operations.mjs'
 import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markKnownLocalOperationsApplied, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -155,6 +155,14 @@ export async function syncNow(tillId) {
       if(pending.some(requiresHotelGroupChangeSync)) {
         const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
         if(!support.ok || !(await support.json()).capabilities?.includes('hotel-group-reschedule-v1'))throw new Error('Update the cloud server before synchronizing coordinated group date changes. Records remain on this device.')
+      }
+      if(pending.some(requiresHotelGroupFolioSync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('hotel-group-master-folio-v1'))throw new Error('Update the cloud server before synchronizing group master folios or their invoices. Records remain on this device.')
+      }
+      if(pending.some(requiresHotelFolioCorrectionSync)) {
+        const support=await fetch(`${url}/v1/sync/capabilities`,{headers})
+        if(!support.ok || !(await support.json()).capabilities?.includes('hotel-folio-correction-v1'))throw new Error('Update the cloud server before synchronizing corrected hotel invoices. Records remain on this device.')
       }
       if (pending.some(requiresRestaurantSync)) {
         const support = await fetch(`${url}/v1/sync/capabilities`, { headers })

@@ -65,6 +65,7 @@ export async function applyPosRecord(db, scope, record, organizationId) {
 const amount = value => { const n = Number(value); if (!Number.isFinite(n) || n < 0 || Math.abs(Math.round(n * 100) - n * 100) > 0.000001) throw new Error('Enter a non-negative amount with at most two decimals.'); return n }
 export async function handlePos({ db, scope, branchId, user, path, method, input, sales, publish, organizationId, tillId }) {
   if(!canRequest(user,path,method,input))throw new Error('The owner has not granted access to this operation.')
+  if(path==='/api/pos/service-jobs/correct-hotel-folio'&&!['owner','admin'].includes(user.role))throw new Error('Only an owner or admin can correct a hotel invoice.')
   if(user.role==='cashier'&&user.permissions&&routePermission(path,method,input)&&routePermission(path,method,input)!=='register')user={...user,role:'admin'}
   // handlePos owns its transactions; native SQLite run() must not nest them.
   const connection = db

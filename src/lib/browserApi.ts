@@ -10,7 +10,7 @@ import { registerCheckoutTill } from '../../server/till-binding.mjs'
 import { salesHistory } from '../../server/sales-history.mjs'
 import { ensureStaffRemovals, recordStaffRemoval } from '../../server/staff-removal.mjs'
 import { requiresServiceJobSync } from '../../server/service-jobs.mjs'
-import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync } from '../../server/hospitality-operations.mjs'
+import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync, requiresHotelGroupFolioSync, requiresHotelFolioCorrectionSync } from '../../server/hospitality-operations.mjs'
 import { restaurantPaymentFingerprint } from '../../server/restaurant-payments.mjs'
 import { validateLoyaltyBalance, validateCheckoutSettings } from '../../server/pos-pricing.mjs'
 import { stockChange, stockTransfer, batchReport, applySyncedSale } from '../../server/stock-ledger.mjs'
@@ -256,6 +256,14 @@ async function syncNowImpl() {
     if(operations.some(requiresHotelGroupChangeSync)) {
       const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
       if(!support.ok || !(await support.json()).capabilities?.includes('hotel-group-reschedule-v1'))throw new Error('Update the cloud server before synchronizing coordinated group date changes. Records remain on this device.')
+    }
+    if(operations.some(requiresHotelGroupFolioSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('hotel-group-master-folio-v1'))throw new Error('Update the cloud server before synchronizing group master folios or their invoices. Records remain on this device.')
+    }
+    if(operations.some(requiresHotelFolioCorrectionSync)) {
+      const support=await originalFetch(config.syncApiUrl+'/v1/sync/capabilities',{headers:{Authorization:'Bearer '+config.deviceToken}})
+      if(!support.ok || !(await support.json()).capabilities?.includes('hotel-folio-correction-v1'))throw new Error('Update the cloud server before synchronizing corrected hotel invoices. Records remain on this device.')
     }
     if (operations.some(requiresRestaurantSync)) {
       const support = await originalFetch(config.syncApiUrl + '/v1/sync/capabilities', { headers: { Authorization: 'Bearer ' + config.deviceToken } })

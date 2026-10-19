@@ -199,7 +199,7 @@ export function hotelInvoiceJournalEntries(jobs, hospitalityRecords = [], refund
       }
     }
     if(job.status==='cancelled') {
-      const cancelledDate=String(job.updatedAt||'').slice(0,10)
+      const cancelledDate=String(job.cancelledAt||job.updatedAt||'').slice(0,10)
       if(isoDate(cancelledDate)&&cancelledDate<=throughDate)result.push({id:`system:${job.id}:cancel`,kind:'hotel-system-entry',date:cancelledDate,memo:`Invoice cancelled · ${job.title}`.slice(0,240),sourceId:job.id,lines:[{accountCode:'2200',debit:Math.round((total-tax)*100)/100,credit:0},...(tax?[{accountCode:'2000',debit:tax,credit:0}]:[]),{accountCode:'1100',debit:0,credit:total}]})
       continue
     }

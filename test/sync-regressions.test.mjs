@@ -1,6 +1,6 @@
 import { requiresChurchSync } from '../server/church-ledger.mjs'
 import { requiresReservationSync } from '../server/restaurant-reservations.mjs'
-import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync } from '../server/hospitality-operations.mjs'
+import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync, requiresHotelGroupFolioSync, requiresHotelFolioCorrectionSync } from '../server/hospitality-operations.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -67,7 +67,7 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
     }
     const code = source.slice(source.indexOf('async function syncNowImpl('), source.indexOf('\n// Pull-to-refresh'))
     const sync = vm.runInNewContext(stripTypeScriptTypes(`(${code})`), {
-      requiresCounterSync, requiresRestaurantSync, requiresServiceJobSync, requiresStockWorkSync, requiresReservationSync, requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync, requiresChurchSync, counterConflictRecord,
+      requiresCounterSync, requiresRestaurantSync, requiresServiceJobSync, requiresStockWorkSync, requiresReservationSync, requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync, requiresHotelGroupFolioSync, requiresHotelFolioCorrectionSync, requiresChurchSync, counterConflictRecord,
       registerCheckoutTill, localStorage: { getItem: () => '' },
       getMobileSyncConfiguration: async () => ({ syncApiUrl: 'https://test', businessId: 'shop', deviceId: 'device', deviceToken: 'token' }),
       openMobileDatabase: async () => db, now: () => '2026-01-01',
@@ -84,20 +84,20 @@ for (const path of ['src/lib/browserApi.ts', 'src/lib/mobileApi.ts']) {
     if (!acknowledge) assert.match(result.lastError, /acknowledge/)
   })
 
-  for(const payload of [{kind:'food-production'},{kind:'church-fund'},{kind:'service-job',church:{type:'pledge'}}]) test(`${path}: an older server keeps ${payload.kind} work queued`,async()=>{
+  for(const payload of [{kind:'food-production'},{kind:'church-fund'},{kind:'service-job',church:{type:'pledge'}},{kind:'hotel-stay',folios:[{id:'guest'},{id:'hotel-folio:12345678901234567890123456789012',groupMaster:true}]},{kind:'service-job',hospitality:{recordKind:'hotel-stay',groupId:'hotel-group:11111111-1111-4111-8111-111111111111'}},{kind:'service-job',correctionOf:{originalJobId:'service-job:original'}}]) test(`${path}: an older server keeps ${payload.kind}${payload.hospitality?.groupId?' group folio invoice':payload.correctionOf?' corrected invoice':''} work queued`,async()=>{
     const pending={operationId:'batch',entityType:'pos_record',payload:JSON.stringify(payload)}
     let uploaded=false,acknowledged=false
     const code=source.slice(source.indexOf('async function syncNowImpl('),source.indexOf('\n// Pull-to-refresh'))
     const sync=vm.runInNewContext(stripTypeScriptTypes(`(${code})`),{
-      requiresCounterSync,requiresRestaurantSync,requiresServiceJobSync,requiresStockWorkSync,requiresReservationSync,requiresHospitalitySync,requiresHotelShiftSync,requiresHotelDepositSync,requiresHotelGroupChangeSync,requiresChurchSync,counterConflictRecord,
+      requiresCounterSync,requiresRestaurantSync,requiresServiceJobSync,requiresStockWorkSync,requiresReservationSync,requiresHospitalitySync,requiresHotelShiftSync,requiresHotelDepositSync,requiresHotelGroupChangeSync,requiresHotelGroupFolioSync,requiresHotelFolioCorrectionSync,requiresChurchSync,counterConflictRecord,
       registerCheckoutTill,localStorage:{getItem:()=>''},
       getMobileSyncConfiguration:async()=>({syncApiUrl:'https://test',businessId:'shop',deviceId:'device',deviceToken:'token'}),
       openMobileDatabase:async()=>({query:async sql=>({values:sql.includes('COUNT(*)')?[{count:1}]:[pending]}),run:async()=>{acknowledged=true}}),
       now:()=> '2026-01-01',pullLatestImpl:async()=>({pending:1,lastError:''}),
-      originalFetch:async url=>{if(url.endsWith('/v1/sync/push'))uploaded=true;return {ok:true,json:async()=>({capabilities:['service-jobs-v1','counter-v3']})}}
+      originalFetch:async url=>{if(url.endsWith('/v1/sync/push'))uploaded=true;return {ok:true,json:async()=>({capabilities:['service-jobs-v1','counter-v3','hospitality-operations-v1']})}}
     })
     const result=await sync()
     assert.equal(uploaded,false);assert.equal(acknowledged,false);assert.equal(result.pending,1)
-    assert.match(result.lastError,/Update the existing sync server/)
+    assert.match(result.lastError,/Update (?:the existing sync server|the cloud server)/)
   })
 }

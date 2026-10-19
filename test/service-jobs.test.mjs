@@ -137,6 +137,124 @@ test('hotel folio stock charges snapshot the item, deduct once, and replay idemp
  }finally{f.sql.close()}
 })
 
+test('unpaid hotel invoices can move folios with a reason and append-only transfer history',async()=>{
+ const f=fixture();try{
+  await ensurePos(f.db)
+  const stay={id:'hotel-stay:guest001',kind:'hotel-stay',branchId:'main',roomName:'Room 4',guestName:'Ada',guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',nightlyRate:100,status:'booked',folios:[{id:'guest',name:'Guest',payerName:'Ada',payerPhone:'555'},{id:'hotel-folio:company12345678901234567890',name:'Company',payerName:'Acme Ltd',payerPhone:'555-2000'}],createdAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-01T00:00:00.000Z'}
+  f.sql.prepare("INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES('business',?,'hotel-stay','main',?,?)").run(stay.id,JSON.stringify(stay),stay.updatedAt)
+  const created=await f.pos('/api/pos/hospitality/invoice',{id:'service-job:move-folio',commandId:'create',expectedUpdatedAt:'',estimate:false,hospitality:{recordId:stay.id,recordKind:'hotel-stay',folioId:'guest'}})
+  const move={id:created.job.id,commandId:'move-to-company',expectedUpdatedAt:created.job.updatedAt,folioId:'hotel-folio:company12345678901234567890',reason:'Company accepts the accommodation charges'}
+  const moved=await f.call('/transfer-folio',move)
+  assert.equal(moved.job.hospitality.folioId,move.folioId)
+  assert.equal(moved.job.customerName,'Acme Ltd')
+  assert.equal(moved.job.folioTransferHistory.length,1)
+  assert.equal(serviceJobBalance(moved.job).due,created.job.pricing.total)
+  await f.call('/transfer-folio',move)
+  assert.equal(f.published.filter(row=>row.id===created.job.id).length,2)
+  await assert.rejects(f.call('/transfer-folio',{...move,commandId:'missing-reason',expectedUpdatedAt:moved.job.updatedAt,folioId:'guest',reason:''}),/reason/)
+  await assert.rejects(f.call('/transfer-folio',{...move,commandId:'no-hotel-access',expectedUpdatedAt:moved.job.updatedAt},{user:{id:'cashier',name:'Cashier',role:'cashier',permissions:{serviceJobs:true}}}),/Hotel operations access/)
+  const paid=await f.call('/pay',{id:moved.job.id,commandId:'company-payment',expectedUpdatedAt:moved.job.updatedAt,amount:String(moved.job.pricing.total),method:'cash'})
+  await assert.rejects(f.call('/transfer-folio',{...move,commandId:'paid-invoice-move',expectedUpdatedAt:paid.job.updatedAt}),/payment or refund history/)
+ }finally{f.sql.close()}
+})
+
+test('fully refunded hotel folio invoices can be corrected by an auditable replacement without changing original receipts',async()=>{
+ const f=fixture();try{
+  await ensurePos(f.db)
+  const stay={id:'hotel-stay:correct001',kind:'hotel-stay',branchId:'main',roomName:'Room 21',guestName:'Ada',guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',nightlyRate:100,status:'checked-in',folios:[{id:'guest',name:'Guest',payerName:'Ada',payerPhone:'555'},{id:'hotel-folio:company12345678901234567890',name:'Company',payerName:'Acme Ltd',payerPhone:'555-2000'}],createdAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-01T00:00:00.000Z'}
+  f.sql.prepare("INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES('business',?,'hotel-stay','main',?,?)").run(stay.id,JSON.stringify(stay),stay.updatedAt)
+  const created=await f.pos('/api/pos/hospitality/invoice',{id:'service-job:correction-original',commandId:'create-correction-original',expectedUpdatedAt:'',estimate:false,title:'Hotel folio charge',lines:[{id:'conference-charge',description:'Conference meal',quantity:1,price:80}],hospitality:{recordId:stay.id,recordKind:'hotel-stay',chargeType:'extra',folioId:'guest'}})
+  const paid=await f.call('/pay',{id:created.job.id,commandId:'pay-original',expectedUpdatedAt:created.job.updatedAt,amount:'80',method:'cash'})
+  const refund=await f.pos('/api/pos/returns',{id:'refund-original-correction',saleId:paid.sale.id,reason:'Wrong payer selected',method:'cash',items:[{lineIndex:0,amount:80}]})
+  assert.equal(refund.total,80)
+  const cancelled=await f.call('/status',{id:paid.job.id,commandId:'cancel-refunded-original',expectedUpdatedAt:paid.job.updatedAt,status:'cancelled'})
+  const request={id:cancelled.job.id,replacementId:'service-job:correction-replacement',folioId:'hotel-folio:company12345678901234567890',reason:'Conference company is responsible for this guest folio charge',expectedUpdatedAt:cancelled.job.updatedAt,commandId:'correct-original-001'}
+  await assert.rejects(f.call('/correct-hotel-folio',{...request,reason:''}),/correction reason/)
+  await assert.rejects(f.call('/correct-hotel-folio',request,{user:{id:'cashier',name:'Cashier',role:'cashier',permissions:{serviceJobs:true,hotelOperations:true}}}),/owner or admin/)
+  const corrected=await f.call('/correct-hotel-folio',request)
+  assert.equal(corrected.job.id,request.replacementId)
+  assert.equal(corrected.job.customerName,'Acme Ltd')
+  assert.equal(corrected.job.hospitality.folioId,request.folioId)
+  assert.equal(corrected.job.hospitality.groupId,undefined)
+  assert.equal(corrected.job.correctionOf.originalJobId,cancelled.job.id)
+  assert.equal(corrected.job.pricing.total,paid.job.pricing.total)
+  assert.equal(corrected.job.lines[0].description,paid.job.lines[0].description)
+  assert.equal(corrected.job.balance,undefined)
+  assert.equal(corrected.original.folioCorrection.replacementJobId,request.replacementId)
+  assert.equal(corrected.original.cancelledAt,cancelled.job.cancelledAt)
+  assert.equal(corrected.original.payments[0].sale.id,paid.sale.id)
+  assert.equal(serviceJobBalance(corrected.job).due,80)
+  const retry=await f.call('/correct-hotel-folio',request)
+  assert.equal(retry.alreadyProcessed,true)
+  assert.equal(f.published.filter(row=>[request.id,request.replacementId].includes(row.id)).length,5)
+  await assert.rejects(f.call('/correct-hotel-folio',{...request,commandId:'another-correction',replacementId:'service-job:correction-second'}),/uncorrected, cancelled/)
+  const cloud=fixture();try{await ensurePos(cloud.db);cloud.sql.prepare("INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES('business',?,'hotel-stay','main',?,?)").run(stay.id,JSON.stringify(stay),stay.updatedAt);await assert.rejects(applyPosRecord(cloud.db,'business',corrected.job),/sync with its cancelled original/);await applyPosRecord(cloud.db,'business',corrected.original);await applyPosRecord(cloud.db,'business',corrected.job);assert.equal(cloud.sql.prepare("SELECT COUNT(*) AS n FROM pos_records WHERE kind='service-job'").get().n,2)}finally{cloud.sql.close()}
+ }finally{f.sql.close()}
+})
+
+test('folio-wide split settlement allocates tenders across invoices atomically and idempotently',async()=>{
+ const f=fixture();try{
+  await ensurePos(f.db)
+  const register=await f.pos('/api/pos/registers',{action:'open',amount:0})
+  const stay={id:'hotel-stay:settle001',kind:'hotel-stay',branchId:'main',roomName:'Room 9',guestName:'Ada',guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',nightlyRate:100,status:'checked-in',createdAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-01T00:00:00.000Z'}
+  f.sql.prepare("INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES('business',?,'hotel-stay','main',?,?)").run(stay.id,JSON.stringify(stay),stay.updatedAt)
+  const first=await f.pos('/api/pos/hospitality/invoice',{id:'service-job:settle1',commandId:'invoice-1',expectedUpdatedAt:'',estimate:false,title:'Hotel folio - Room 9',lines:[{id:'charge-1',description:'Laundry',quantity:1,price:35}],hospitality:{recordId:stay.id,recordKind:'hotel-stay',chargeType:'extra',folioId:'guest'}})
+  const second=await f.pos('/api/pos/hospitality/invoice',{id:'service-job:settle2',commandId:'invoice-2',expectedUpdatedAt:'',estimate:false,title:'Hotel folio - Room 9',lines:[{id:'charge-2',description:'Dinner',quantity:1,price:65}],hospitality:{recordId:stay.id,recordKind:'hotel-stay',chargeType:'extra',folioId:'guest'}})
+  const request={commandId:'settle-all-001',stayId:stay.id,folioId:'guest',method:'multiple',parts:[{method:'cash',amount:50},{method:'bank-transfer',amount:50,provider:'Bank',reference:'BANK-SETTLE-001'}]}
+  const settled=await f.pos('/api/pos/service-jobs/settle-folio',request)
+  assert.equal(settled.jobs.length,2)
+  assert.equal(settled.jobs.reduce((sum,job)=>sum+serviceJobBalance(job).due,0),0)
+  assert.ok(settled.jobs.every(job=>job.payments?.[0]?.sale?.paymentDetails?.serviceSettlement?.id===request.commandId),JSON.stringify(settled))
+  const recordedParts=settled.jobs.flatMap(job=>{const sale=job.payments[0].sale;return sale.paymentMethod==='multiple'?sale.paymentDetails.allocations:[{method:sale.paymentMethod,amount:sale.total}]})
+  assert.equal(recordedParts.filter(part=>part.method==='cash').reduce((sum,part)=>sum+part.amount,0),50)
+  assert.equal(recordedParts.filter(part=>part.method==='bank-transfer').reduce((sum,part)=>sum+part.amount,0),50)
+  const replay=await f.pos('/api/pos/service-jobs/settle-folio',request)
+  assert.equal(replay.alreadyProcessed,true)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM sales').get().n,2)
+  const closed=await f.pos('/api/pos/registers',{id:register.id,action:'close',amount:50})
+  assert.equal(closed.expectedCash,50);assert.equal(closed.difference,0)
+  assert.equal(serviceJobBalance(first.job).due,35);assert.equal(serviceJobBalance(second.job).due,65)
+ }finally{f.sql.close()}
+})
+
+test('group master folio settles invoices across all member stays, including checked-out guests',async()=>{
+ const f=fixture();try{
+  await ensurePos(f.db)
+  const register=await f.pos('/api/pos/registers',{action:'open',amount:0})
+  const groupId='hotel-group:11111111-1111-4111-8111-111111111111',folioId='hotel-folio:11111111-1111-4111-8111-111111111111'
+  const stays=[1,2].map((number)=>({id:`hotel-stay:masterfolio000000000000000${number}`,kind:'hotel-stay',branchId:'main',roomId:`hotel-room:${number}`,roomName:`Room ${number}`,guestName:`Guest ${number}`,guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',nightlyRate:100,status:'checked-in',groupId,groupName:'Acme conference',groupSequence:number,groupSize:2,folios:[{id:'guest',name:'Guest',payerName:`Guest ${number}`,payerPhone:'555'},{id:folioId,name:'Group master',payerName:'Acme conference',payerPhone:'555',groupMaster:true}],createdAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-01T00:00:00.000Z'}))
+  for(const stay of stays)f.sql.prepare("INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES('business',?,'hotel-stay','main',?,?)").run(stay.id,JSON.stringify(stay),stay.updatedAt)
+  for(const [index,amount] of [35,65].entries())await f.pos('/api/pos/hospitality/invoice',{id:`service-job:masterfolio${index}`,commandId:`master-invoice-${index}`,expectedUpdatedAt:'',estimate:false,title:'Hotel group folio',lines:[{id:`group-charge-${index}`,description:'Accommodation',quantity:1,price:amount}],hospitality:{recordId:stays[index].id,recordKind:'hotel-stay',chargeType:'extra',folioId}})
+  const groupInvoices=f.sql.prepare("SELECT payload FROM pos_records WHERE kind='service-job'").all().map(row=>JSON.parse(row.payload))
+  assert.ok(groupInvoices.every(job=>job.hospitality.groupId===groupId))
+  const checkedOut={...stays[1],status:'checked-out',updatedAt:'2026-01-02T00:00:00.000Z'}
+  f.sql.prepare("UPDATE pos_records SET payload=?,updated_at=? WHERE id=?").run(JSON.stringify(checkedOut),checkedOut.updatedAt,checkedOut.id)
+  const request={commandId:'group-master-settle-001',groupId,folioId,method:'external-pos',provider:'Visa terminal',reference:'AUTH-12345'}
+  const result=await f.pos('/api/pos/service-jobs/settle-folio',request)
+  assert.equal(result.jobs.length,2)
+  assert.ok(result.jobs.every(job=>serviceJobBalance(job).due===0))
+  assert.ok(result.jobs.every(job=>job.payments?.[0]?.sale?.paymentDetails?.serviceSettlement?.request===JSON.stringify({groupId,folioId,method:'external-pos',provider:'Visa terminal',reference:'AUTH-12345'})))
+  assert.ok(result.jobs.every(job=>job.payments?.[0]?.sale?.terminalProvider==='Visa terminal'&&job.payments?.[0]?.sale?.paymentReference==='AUTH-12345'))
+  assert.equal((await f.pos('/api/pos/service-jobs/settle-folio',request)).alreadyProcessed,true)
+  const closed=await f.pos('/api/pos/registers',{id:register.id,action:'close',amount:0,reason:'Checking group folio tender tally'})
+  assert.equal(closed.expectedCash,0);assert.equal(closed.difference,0)
+ }finally{f.sql.close()}
+})
+
+test('folio-wide settlement rolls back all invoice payments if saving a later receipt fails',async()=>{
+ const f=fixture();try{
+  await ensurePos(f.db)
+  const stay={id:'hotel-stay:settle002',kind:'hotel-stay',branchId:'main',roomName:'Room 10',guestName:'Ada',guestPhone:'555',checkIn:'2099-05-01',checkOut:'2099-05-03',nightlyRate:100,status:'checked-in',createdAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-01T00:00:00.000Z'}
+  f.sql.prepare("INSERT INTO pos_records(scope,id,kind,branch_id,payload,updated_at) VALUES('business',?,'hotel-stay','main',?,?)").run(stay.id,JSON.stringify(stay),stay.updatedAt)
+  for(const [id,amount] of [['service-job:settle3',20],['service-job:settle4',30]])await f.pos('/api/pos/hospitality/invoice',{id,commandId:id,expectedUpdatedAt:'',estimate:false,title:'Hotel folio - Room 10',lines:[{id:`charge-${id}`,description:'Charge',quantity:1,price:amount}],hospitality:{recordId:stay.id,recordKind:'hotel-stay',chargeType:'extra',folioId:'guest'}})
+  f.setFail(true)
+  await assert.rejects(f.pos('/api/pos/service-jobs/settle-folio',{commandId:'settle-fail-001',stayId:stay.id,folioId:'guest',method:'cash'}),/outbox failed/)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM sales').get().n,0)
+  const rows=f.sql.prepare("SELECT payload FROM pos_records WHERE kind='service-job'").all().map(row=>JSON.parse(row.payload))
+  assert.ok(rows.every(job=>job.payments.length===0))
+ }finally{f.sql.close()}
+})
+
 test('hotel checkout collects the stay balance atomically and returns the room to housekeeping',async()=>{
  const f=fixture();try{
   const room=await f.pos('/api/pos/hospitality',{action:'add-room',roomName:'Room 8',nightlyRate:120,expectedUpdatedAt:'',commandId:'room-add'})

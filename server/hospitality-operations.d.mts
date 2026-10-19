@@ -3,5 +3,7 @@ export function requiresHospitalitySync(operation: any): boolean
 export function requiresHotelShiftSync(operation: any): boolean
 export function requiresHotelDepositSync(operation: any): boolean
 export function requiresHotelGroupChangeSync(operation: any): boolean
+export function requiresHotelGroupFolioSync(operation: any): boolean
+export function requiresHotelFolioCorrectionSync(operation: any): boolean
 export function hotelDepositRequirement(room: any, checkIn: string, checkOut: string): number
 export function handleHospitality(input: any): Promise<any>

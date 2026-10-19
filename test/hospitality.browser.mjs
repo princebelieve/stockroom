@@ -12,7 +12,7 @@ const data=await mkdtemp(join(tmpdir(),'stockroom-hospitality-browser-'))
 const base='http://127.0.0.1:9687'
 const cloud=createServer(async(request,response)=>{
   response.setHeader('Content-Type','application/json')
-  if(request.url==='/v1/sync/capabilities'){response.end(JSON.stringify({capabilities:['counter-v3','restaurant-v2','hospitality-operations-v1','hotel-shift-handoff-v1','hotel-reservation-deposits-v1','hotel-group-reschedule-v1','restaurant-hotel-folio-v1']}));return}
+  if(request.url==='/v1/sync/capabilities'){response.end(JSON.stringify({capabilities:['counter-v3','restaurant-v2','hospitality-operations-v1','hotel-shift-handoff-v1','hotel-reservation-deposits-v1','hotel-group-reschedule-v1','hotel-group-master-folio-v1','restaurant-hotel-folio-v1']}));return}
   if(request.url.startsWith('/v1/sync/push')){let raw='';for await(const chunk of request)raw+=chunk;response.end(JSON.stringify({acceptedOperationIds:JSON.parse(raw).operations.map(row=>row.operationId),conflicts:[]}));return}
   if(request.url.startsWith('/v1/sync/pull')){response.end(JSON.stringify({operations:[],cursor:''}));return}
   response.end(JSON.stringify({businessId:'hospitality-test',testMode:true}))
@@ -44,7 +44,7 @@ try{
   await hospitality.getByRole('heading',{name:'Hospitality operations'}).waitFor()
 
   await hospitality.getByLabel('Room name or number').fill('Suite 1')
-  await hospitality.getByLabel('Nightly rate').fill('120')
+  await hospitality.locator('input[name="rate"]').first().fill('120')
   await hospitality.getByRole('button',{name:'Add room',exact:true}).click()
   const room=hospitality.locator('article.customer-row:has(select[name="housekeepingStatus"])').filter({hasText:'Suite 1'}).first()
   await room.locator('select[name="housekeepingStatus"]').selectOption('ready')
@@ -80,6 +80,35 @@ try{
   await stay.getByText(/checked-out/).waitFor()
   const hotelState=await(await fetch(base+'/api/pos/hospitality',{headers})).json()
   assert.equal(hotelState.rooms.find(item=>item.roomName==='Suite 1').housekeepingStatus,'dirty')
+
+  await hospitality.getByLabel('Room name or number').fill('Suite 2')
+  await hospitality.locator('input[name="rate"]').first().fill('120')
+  await hospitality.getByRole('button',{name:'Add room',exact:true}).click()
+  const groupState=await(await fetch(base+'/api/pos/hospitality',{headers})).json(),groupRoomIds=groupState.rooms.filter(item=>['Suite 1','Suite 2'].includes(item.roomName)).map(item=>item.id)
+  assert.equal(groupRoomIds.length,2)
+  const groupPanel=hospitality.locator('section[aria-label="Group reservation"]')
+  await groupPanel.getByLabel('Group or company name').fill('Acme Conference')
+  await groupPanel.getByLabel('Group contact').fill('Ada Contact')
+  await groupPanel.getByLabel('Contact phone').fill('08000000003')
+  await groupPanel.getByLabel('Contact email').fill('ada@example.com')
+  await groupPanel.locator('input[name="checkIn"]').fill('2099-11-01')
+  await groupPanel.locator('input[name="checkOut"]').fill('2099-11-03')
+  await groupPanel.locator('select[name^="group-room-"]').nth(0).selectOption(groupRoomIds[0])
+  await groupPanel.locator('select[name^="group-room-"]').nth(1).selectOption(groupRoomIds[1])
+  await groupPanel.locator('input[name^="group-guest-"]').nth(0).fill('Guest One')
+  await groupPanel.locator('input[name^="group-guest-"]').nth(1).fill('Guest Two')
+  await groupPanel.getByRole('button',{name:'Reserve group rooms'}).click()
+  const groupRows=hospitality.locator('.customer-row').filter({hasText:'Group: Acme Conference'})
+  await groupRows.first().waitFor()
+  for(let index=0;index<2;index++){const stayRow=groupRows.nth(index),folioSelect=stayRow.locator('select[name="folioId"]').first(),groupFolioOption=await folioSelect.locator('option').filter({hasText:'Group master'}).getAttribute('value');assert.ok(groupFolioOption);await folioSelect.selectOption(groupFolioOption);await stayRow.getByRole('button',{name:'Create stay invoice'}).click();await openHospitality()}
+  const groupMasterPanel=hospitality.locator('section[aria-label="Group master folio"]')
+  await groupMasterPanel.locator('summary').filter({hasText:'Settle group master folio by POS terminal'}).click()
+  await groupMasterPanel.getByLabel('Terminal provider').nth(0).fill('Visa terminal')
+  await groupMasterPanel.getByLabel('Verified terminal approval reference').nth(0).fill('AUTH-GROUP-01')
+  await groupMasterPanel.getByRole('button',{name:'Settle group master folio by POS terminal'}).click()
+  await hospitality.getByText(/Group master folio settled across 2 invoice/).waitFor()
+  const settledGroup=(await(await fetch(base+'/api/pos/hospitality',{headers})).json()).invoices.filter(job=>job.hospitality.groupId)
+  assert.equal(settledGroup.length,2);assert.ok(settledGroup.every(job=>job.balance.due===0&&job.payments.some(payment=>payment.sale.paymentDetails.serviceSettlement.id)))
 
   await hospitality.getByRole('button',{name:'Nightlife events',exact:true}).click()
   await hospitality.getByLabel('Event name').fill('Friday Live')

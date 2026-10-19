@@ -13,7 +13,7 @@ try{
     const url=new URL(route.request().url()),path=url.pathname,input=route.request().method()==='POST'?route.request().postDataJSON():null
     requests.push({path,input})
     let data
-    if(path.endsWith('/catalog'))data=mode==='hotel'?{businessName:'Harbour House',currency:'NGN',mode,rooms:[{id:'hotel-room:suite',branchId:'main',name:'Suite 1',nightlyRate:120,available:true}]}:{businessName:'Harbour House',currency:'NGN',mode,tableReservationsEnabled:true,events:[{id:'nightclub-event:friday',branchId:'main',name:'Friday Live',startsAt:'2099-10-02T20:00:00.000Z',admissionPrice:25,capacity:20,spotsRemaining:19,tables:[{id:'table:vip',name:'VIP 1',seats:6}]}]}
+    if(path.endsWith('/catalog'))data=mode==='hotel'?{businessName:'Harbour House',currency:'NGN',mode,rooms:[{id:'hotel-room:suite',branchId:'main',name:'Suite 1',nightlyRate:120,available:true}]}:{businessName:'Harbour House',currency:'NGN',mode,tableReservationsEnabled:true,events:[{id:'nightclub-event:friday',branchId:'main',name:'Friday Live',startsAt:'2099-10-02T20:00:00.000Z',admissionPrice:25,capacity:20,spotsRemaining:19,ticketTypes:[{id:'general',name:'General',price:25,spotsRemaining:19}],tables:[{id:'table:vip',name:'VIP 1',seats:6}]}]}
     else if(path.endsWith('/guest'))data={accessToken:'guest-token'}
     else if(path.endsWith('/hospitality/bookings')&&route.request().method()==='GET')data={bookings}
     else if(path.endsWith('/hospitality/cancel')){const booking=bookings.find(row=>row.id===input.bookingId);booking.status='cancelled';data={booking}}
@@ -28,13 +28,13 @@ try{
   const mount=()=>page.evaluate(async()=>{const {React,createRoot}=await import('/test/shop-setup-harness.ts');const {CustomerPortal}=await import('/src/CustomerPortal.tsx');createRoot(document.getElementById('root')).render(React.createElement(CustomerPortal,{businessId:'shop'}))})
   await page.goto(`${base}/hospitality-harness?customer=shop&catalog=hotel`,{waitUntil:'domcontentloaded'});await mount()
   await page.getByLabel('Guest name').fill('Ada Guest');await page.getByLabel('Phone number').fill('08000000001');await page.getByRole('button',{name:'Continue as guest'}).click()
-  await page.getByLabel('Contact phone').fill('08000000001');await page.getByLabel('Room').selectOption('hotel-room:suite');await page.getByLabel('Check in').fill('2099-10-01');await page.getByLabel('Check out').fill('2099-10-03');await page.getByRole('button',{name:'Reserve stay'}).click()
-  await page.getByRole('heading',{name:/Suite 1/}).waitFor()
+  await page.getByLabel('Contact phone').fill('08000000001');await page.getByLabel('Email for confirmation and reminder').fill('ada@example.com');await page.getByLabel('Room type').selectOption('hotel-room:suite');await page.getByLabel('Check in').fill('2099-10-01');await page.getByLabel('Check out').fill('2099-10-03');await page.getByRole('button',{name:'Reserve stay'}).click()
+  try{await page.getByRole('heading',{name:/Suite 1/}).waitFor()}catch(error){console.error('Customer hotel booking debug:',JSON.stringify({requests,body:(await page.locator('body').innerText()).slice(-1800)}));throw error}
   page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Cancel booking'}).click();await page.getByText('Status: cancelled').waitFor()
   const hotelRequest=requests.find(row=>row.path.endsWith('/hospitality/bookings')&&row.input?.type==='hotel');assert.equal(hotelRequest.input.roomId,'hotel-room:suite');assert.equal(hotelRequest.input.checkOut,'2099-10-03')
   mode='nightlife';await page.evaluate(()=>{sessionStorage.clear();history.replaceState({},'',location.pathname+'?customer=shop&catalog=nightlife')});await page.reload({waitUntil:'domcontentloaded'});await mount()
   await page.getByLabel('Guest name').fill('Ada Guest');await page.getByLabel('Phone number').fill('08000000001');await page.getByRole('button',{name:'Continue as guest'}).click()
-  await page.getByLabel('Contact phone').first().fill('08000000001');await page.getByRole('radio',{name:/Friday Live/}).check();await page.getByRole('button',{name:'Reserve admission'}).click()
+  await page.getByLabel('Contact phone').first().fill('08000000001');await page.getByLabel('Email for confirmation and reminder').first().fill('ada@example.com');await page.getByRole('radio',{name:/Friday Live/}).check({noWaitAfter:true});await page.getByRole('button',{name:'Reserve admission'}).click()
   await page.getByRole('img',{name:'Hospitality check-in pass'}).waitFor()
   const ticketRequest=requests.find(row=>row.path.endsWith('/hospitality/bookings')&&row.input?.type==='nightlife');assert.equal(ticketRequest.input.eventId,'nightclub-event:friday')
   await page.getByRole('combobox',{name:'Event'}).selectOption('nightclub-event:friday');await page.getByLabel('Table').selectOption('table:vip');await page.getByRole('spinbutton',{name:'Guests'}).fill('4');await page.getByRole('button',{name:'Reserve table'}).click()

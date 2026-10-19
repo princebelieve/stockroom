@@ -1208,7 +1208,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sync/capabilities') {
       if (claims.kind !== 'device' || !claims.businessId || !claims.deviceId) return send(response, 403, { error: 'An enrolled device is required.' })
-      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2','restaurant-hotel-folio-v1', 'service-jobs-v1','service-jobs-wallet-v1','staff-permissions-v1', 'customer-orders-v1', 'retail-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1', 'church-collections-v1','hospitality-operations-v1','hotel-shift-handoff-v1','hotel-reservation-deposits-v1','hotel-group-reschedule-v1'] })
+      return send(response, 200, { capabilities: ['counter-v3', 'restaurant-v2','restaurant-hotel-folio-v1', 'service-jobs-v1','service-jobs-wallet-v1','staff-permissions-v1', 'customer-orders-v1', 'retail-orders-v1', 'stock-work-v1', 'restaurant-reservations-v1', 'church-collections-v1','hospitality-operations-v1','hotel-shift-handoff-v1','hotel-reservation-deposits-v1','hotel-group-reschedule-v1','hotel-group-master-folio-v1','hotel-folio-correction-v1'] })
     }
     if (request.method === 'POST' && request.url === '/v1/sync/push') {
       const input = await readJson(request)
