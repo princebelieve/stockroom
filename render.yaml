@@ -42,5 +42,9 @@ services:
         sync: false
       - key: CHANNEX_API_KEY
         sync: false
+      - key: CHANNEX_API_BASE_URL
+        sync: false
+      - key: CHANNEX_WEBHOOK_SECRET
+        sync: false
       - key: CHANNEX_ACCOUNT_EMAIL
         sync: false

@@ -13,7 +13,71 @@ export function createChannexBookingSync({ database, entityHeads, operations, te
   const settings = database.collection('business_settings')
   const integrations = database.collection('business_integrations')
   const calendarSources = database.collection('hotel_calendar_sources')
+  const ariQueue = database.collection('channex_ari_queue')
+  const ariExpiries = database.collection('channex_ari_expiries')
   let running = false
+
+  const ariHorizon = (profile, now = new Date()) => {
+    const start = businessDate(now, normalizeShopProfile(profile).reportingTimeZone || 'UTC')
+    return Array.from({ length: 500 }, (_, offset) => new Date(Date.parse(`${start}T00:00:00Z`) + offset * 86400000).toISOString().slice(0, 10))
+  }
+  const isFullSyncWindow = (profile, now = new Date()) => {
+    try { return new Intl.DateTimeFormat('en-GB', { timeZone: normalizeShopProfile(profile).reportingTimeZone || 'UTC', hour: '2-digit', hourCycle: 'h23' }).format(now) === '03' }
+    catch { return now.getUTCHours() === 3 }
+  }
+  const stayDates = (checkIn, checkOut, horizon) => horizon.filter(date => date >= checkIn && date < checkOut)
+  async function enqueueAriDates(businessId, branchId, roomType, dates) {
+    const connected = await integrations.findOne({ businessId, provider: 'channex', active: true, 'properties.branchId': branchId }, { projection: { _id: 1 } })
+    if (!connected) return
+    const name = String(roomType || '').trim() || 'Standard', roomTypeKey = createHash('sha256').update(name.toLocaleLowerCase()).digest('hex')
+    const validDates = [...new Set(dates)].filter(validDate)
+    if (validDates.length) await ariQueue.updateOne({ businessId, branchId, roomTypeKey }, { $set: { businessId, branchId, roomTypeKey, roomType: name, updatedAt: new Date() }, $addToSet: { dates: { $each: validDates } }, $inc: { generation: 1 } }, { upsert: true })
+  }
+  async function enqueueAriChange(businessId, branchId, previous, next) {
+    const kind = next?.kind || previous?.kind
+    if (!['hotel-room', 'hotel-stay', 'hotel-room-block'].includes(kind) || next?.source === 'channex' || previous?.source === 'channex') return
+    if (kind === 'hotel-room-block') {
+      const expiryFilter = { businessId, branchId, blockId: next?.id || previous?.id }
+      if (next?.status === 'held' && Date.parse(next.expiresAt) > Date.now()) await ariExpiries.updateOne(expiryFilter, { $set: { ...expiryFilter, expiresAt: new Date(next.expiresAt) } }, { upsert: true })
+      else await ariExpiries.deleteOne(expiryFilter)
+    }
+    const settingsRow = await settings.findOne({ businessId }, { projection: { 'settings.shopProfile': 1 } })
+    const horizon = ariHorizon(settingsRow?.settings?.shopProfile), byType = new Map()
+    const add = (roomType, dates) => {
+      const name = String(roomType || '').trim() || 'Standard'
+      const valid = [...new Set(dates)].filter(date => horizon.includes(date))
+      if (valid.length) byType.set(name, [...new Set([...(byType.get(name) || []), ...valid])])
+    }
+    const roomTypeFor = async (roomId, payload) => {
+      if (!roomId) return ''
+      if (payload?.kind === 'hotel-room' && payload.id === roomId) return payload.roomType || 'Standard'
+      const room = await entityHeads.findOne({ businessId, entityType: 'pos_record', entityId: roomId })
+      return room?.payload?.kind === 'hotel-room' ? room.payload.roomType || 'Standard' : ''
+    }
+    if (kind === 'hotel-room') {
+      const fields = ['roomType', 'status', 'nightlyRate', 'ratePeriods', 'minStayArrival', 'minStayThrough', 'maxStay', 'closedToArrival', 'closedToDeparture', 'stopSell', 'outOfOrderPeriods']
+      if (!previous || fields.some(field => JSON.stringify(previous[field]) !== JSON.stringify(next?.[field]))) {
+        add(previous?.roomType, horizon)
+        add(next?.roomType, horizon)
+      }
+    } else if (kind === 'hotel-stay') {
+      const relevant = row => row && ['booked', 'checked-in'].includes(row.status)
+      if (JSON.stringify([previous?.status, previous?.checkIn, previous?.checkOut, previous?.roomId]) !== JSON.stringify([next?.status, next?.checkIn, next?.checkOut, next?.roomId])) {
+        for (const row of [previous, next]) if (relevant(row)) add(await roomTypeFor(row.roomId, next), stayDates(row.checkIn, row.checkOut, horizon))
+      }
+    } else {
+      const active = row => row && hotelRoomBlockActive(row)
+      if (JSON.stringify([previous?.status, previous?.checkIn, previous?.checkOut, previous?.rooms]) !== JSON.stringify([next?.status, next?.checkIn, next?.checkOut, next?.rooms])) {
+        for (const row of [previous, next]) if (active(row)) {
+          const dates = stayDates(row.checkIn, row.checkOut, horizon)
+          for (const room of row.rooms || []) add(await roomTypeFor(room.roomId, next), dates)
+        }
+      }
+    }
+    for (const [roomType, dates] of byType) {
+      await enqueueAriDates(businessId, branchId, roomType, dates)
+    }
+  }
 
   async function storeStay(businessId, stay, previous) {
     validateHospitalityRecord(stay, previous?.payload || previous, { trustedChannelUpdate: true })
@@ -57,7 +121,7 @@ export function createChannexBookingSync({ database, entityHeads, operations, te
     if (!validDate(checkIn) || !validDate(checkOut) || checkOut <= checkIn) throw new Error('The channel reservation has invalid arrival or departure dates.')
     const stayNights = (Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86400000
     if (stayNights > 366) throw new Error('The channel reservation exceeds Stockroom’s 366-night stay limit.')
-    const mappingByProvider = new Map(mappings.map(mapping => [mapping.providerRoomTypeId, mapping]))
+    const mappingByProvider = new Map(mappings.map(mapping => [`${mapping.providerRoomTypeId}|${mapping.providerRatePlanId}`, mapping]))
     const business = await settings.findOne({ businessId }, { projection: { 'settings.currency': 1, currency: 1 } })
     const currency = String(business?.settings?.currency || business?.currency || 'USD').toUpperCase()
     const otaCurrency = String(value.currency || currency).toUpperCase()
@@ -71,8 +135,8 @@ export function createChannexBookingSync({ database, entityHeads, operations, te
     const guestPhone = clean(customer.phone, 80), suppliedEmail = clean(customer.mail, 254).toLowerCase(), guestEmail = /^\S+@\S+\.\S+$/.test(suppliedEmail) ? suppliedEmail : ''
     const occupiedInBatch = new Set(), proposed = []
     for (let index = 0; index < bookingRooms.length; index++) {
-      const channelRoom = bookingRooms[index], mapping = mappingByProvider.get(String(channelRoom.room_type_id || ''))
-      if (!mapping || channelRoom.rate_plan_id && channelRoom.rate_plan_id !== mapping.providerRatePlanId) throw new Error('Map every channel room type and rate plan to a Stockroom room type before importing reservations.')
+      const channelRoom = bookingRooms[index], providerRoomTypeId = String(channelRoom.room_type_id || ''), providerRatePlanId = String(channelRoom.rate_plan_id || channelRoom.parent_rate_plan_id || ''), mapping = providerRatePlanId ? mappingByProvider.get(`${providerRoomTypeId}|${providerRatePlanId}`) : mappings.find(row => row.providerRoomTypeId === providerRoomTypeId)
+      if (!mapping) throw new Error('Map every channel room type and rate plan to a Stockroom room type before importing reservations.')
       const roomKey = clean(channelRoom.ota_unique_id || channelRoom.booking_room_id || `${channelRoom.room_type_id}:${index}`, 160)
       const priorRow = byRoomKey.get(roomKey), prior = priorRow?.payload
       if (prior && prior.status !== 'booked') throw new Error('A channel update affects a stay that is already checked in, checked out, cancelled or marked no-show. Resolve it with the front desk before acknowledging the channel change.')
@@ -153,7 +217,17 @@ export function createChannexBookingSync({ database, entityHeads, operations, te
       const branch = await entityHeads.findOne({ businessId, entityType: 'branch', entityId: branchId })
       if (!branch || branch.payload?.isActive === false) throw new Error('The Stockroom branch connected to this channel property is unavailable or inactive.')
     }
-    const mapping = await tenantIntegrations.channexMapping(businessId, branchId)
+    let mapping = await tenantIntegrations.channexMapping(businessId, branchId)
+    const roomHeads = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'hotel-room', 'payload.branchId': branchId, 'payload.status': 'active' }).toArray(), roomTypeRows = new Map()
+    for (const row of roomHeads) {
+      const room = row.payload, title = String(room.roomType || 'Standard').trim() || 'Standard', key = normalized(title), item = roomTypeRows.get(key) || { title, count: 0, occupancy: 1 }
+      item.count++; item.occupancy = Math.max(item.occupancy, Number(room.maxGuests || 2)); roomTypeRows.set(key, item)
+    }
+    const currentMappings = new Set(mapping.mappings.map(row => normalized(row.roomType))), missingTypes = [...roomTypeRows.keys()].some(key => !currentMappings.has(key))
+    if (missingTypes) {
+      await tenantIntegrations.reconcileChannexRoomTypes(businessId, branchId, [...roomTypeRows.values()])
+      mapping = await tenantIntegrations.channexMapping(businessId, branchId)
+    }
     if (mapping.propertyId !== propertyId || !mapping.mappings.length) throw new Error('Map the connected property room types and rates before importing reservations.')
     const feed = await tenantIntegrations.channexRevisionFeed(businessId, branchId)
     for (const revision of feed.revisions) {
@@ -162,19 +236,61 @@ export function createChannexBookingSync({ database, entityHeads, operations, te
       await tenantIntegrations.acknowledgeChannexRevision(businessId, branchId, revisionId)
     }
     await tenantIntegrations.updateChannexSyncStatus(businessId, branchId, '')
-    if (!mapping.lastAriSyncAt || Date.now() - Date.parse(mapping.lastAriSyncAt) >= 60_000) {
-      try { await syncPropertyAri(businessId, branchId, propertyId, mapping.mappings, business?.settings?.shopProfile) }
-      catch (error) { await tenantIntegrations.updateChannexAriStatus(businessId, branchId, clean(error?.message || 'Could not sync channel availability and rates.', 300)) }
+    const queued = await ariQueue.find({ businessId, branchId }).toArray()
+    const fullSync = !mapping.lastFullAriSyncAt || mapping.fullSyncPending || Date.now() - Date.parse(mapping.lastFullAriSyncAt) >= 24 * 60 * 60 * 1000 && isFullSyncWindow(business?.settings?.shopProfile)
+    const retryAt = mapping.ariRetryAt ? Date.parse(mapping.ariRetryAt) : 0
+    if (retryAt > Date.now() || (!fullSync && !queued.length)) return
+    const dateKeysByType = Object.fromEntries(queued.map(row => [row.roomType, row.dates || []]))
+    try {
+      const result = await syncPropertyAri(businessId, branchId, propertyId, mapping.mappings, business?.settings?.shopProfile, fullSync ? null : dateKeysByType)
+      if (fullSync && !result.fullSyncComplete) {
+        const count = Number(mapping.ariRetryCount || 0) + 1, waitMs = Math.min(60 * 60 * 1000, 30_000 * (2 ** Math.min(count - 1, 7)))
+        await tenantIntegrations.updateChannexAriStatus(businessId, branchId, result.warning || 'The 500-day full sync did not include a valid rate and restriction value for every mapped date.', { failed: true, fullSync, retryAt: new Date(Date.now() + waitMs), retryCount: count, taskIds: result.taskIds })
+      } else await tenantIntegrations.updateChannexAriStatus(businessId, branchId, result.warning, { fullSync, taskIds: result.taskIds })
+      for (const row of queued) await ariQueue.deleteOne({ _id: row._id, generation: row.generation })
+    } catch (error) {
+      const count = Number(mapping.ariRetryCount || 0) + 1, waitMs = error?.statusCode === 429 ? 60_000 : Math.min(60 * 60 * 1000, 30_000 * (2 ** Math.min(count - 1, 7)))
+      const message = clean(error?.message || 'Could not sync channel availability and rates.', 300)
+      await tenantIntegrations.updateChannexAriStatus(businessId, branchId, message, { failed: true, fullSync, retryAt: new Date(Date.now() + waitMs), retryCount: count })
     }
   }
 
-  async function syncPropertyAri(businessId, branchId, propertyId, mappings, profile) {
-    const timezone = normalizeShopProfile(profile).reportingTimeZone || 'UTC', start = businessDate(new Date(), timezone), rooms = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'hotel-room', 'payload.branchId': branchId }).toArray(), stays = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'hotel-stay', 'payload.branchId': branchId, 'payload.status': { $in: ['booked', 'checked-in'] } }).toArray(), holds = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'hotel-room-block', 'payload.branchId': branchId, 'payload.status': 'held' }).toArray()
-    const dateList = Array.from({ length: 365 }, (_, offset) => new Date(Date.parse(`${start}T00:00:00Z`) + offset * 86400000).toISOString().slice(0, 10)), availability = [], rates = [], rateErrors = [], restrictionErrors = []
+  async function receiveBookingWebhook(propertyId, revisionId) {
+    const connection = await integrations.findOne({ provider: 'channex', active: true, 'properties.propertyId': propertyId })
+    const property = connection?.properties?.find(row => row.propertyId === propertyId)
+    if (!connection || !property) throw new Error('The Channex webhook references an unconnected property.')
+    await serialize(connection.businessId, async () => {
+      const revision = await tenantIntegrations.channexRevision(connection.businessId, property.branchId, revisionId)
+      const value = revision?.attributes || revision
+      if (String(revision?.id || value?.id || '') !== revisionId || String(value?.property_id || propertyId) !== propertyId) throw new Error('The Channex webhook revision does not match its property.')
+      await processRevision(connection.businessId, property.branchId, propertyId, revision, property.mappings || [])
+      await tenantIntegrations.acknowledgeChannexRevision(connection.businessId, property.branchId, revisionId)
+      await tenantIntegrations.updateChannexSyncStatus(connection.businessId, property.branchId, '')
+    })
+    return { received: true }
+  }
+
+  async function syncPropertyAri(businessId, branchId, propertyId, mappings, profile, dateKeysByType = null) {
+    const rooms = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'hotel-room', 'payload.branchId': branchId }).toArray(), stays = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'hotel-stay', 'payload.branchId': branchId, 'payload.status': { $in: ['booked', 'checked-in'] } }).toArray(), holds = await entityHeads.find({ businessId, entityType: 'pos_record', 'payload.kind': 'hotel-room-block', 'payload.branchId': branchId, 'payload.status': 'held' }).toArray()
+    const mappedTypes = new Set(mappings.map(row => normalized(row.roomType))), activeTypes = [...new Set(rooms.map(row => row.payload).filter(room => room.status === 'active').map(room => String(room.roomType || 'Standard').trim() || 'Standard'))]
+    const unmappedActive = activeTypes.filter(roomType => !mappedTypes.has(normalized(roomType)))
+    const unmappedChanged = dateKeysByType ? Object.keys(dateKeysByType).filter(roomType => rooms.some(row => row.payload.status === 'active' && normalized(row.payload.roomType || 'Standard') === normalized(roomType)) && !mappedTypes.has(normalized(roomType))) : []
+    if (unmappedActive.length && dateKeysByType === null) throw new Error(`Map every active Stockroom room type in Channex before full sync: ${unmappedActive.slice(0, 5).join(', ')}.`)
+    if (unmappedChanged.length) throw new Error(`Map changed Stockroom room types in Channex before availability can sync: ${unmappedChanged.slice(0, 5).join(', ')}.`)
+    const horizon = ariHorizon(profile), availability = [], rates = [], rateErrors = [], restrictionErrors = [], validRateRows = new Set()
     const staysByRoom = new Map(), holdsByRoom = new Map()
     for (const stay of stays) if (stay.payload.roomId) staysByRoom.set(stay.payload.roomId, [...(staysByRoom.get(stay.payload.roomId) || []), stay.payload])
     for (const block of holds) if (hotelRoomBlockActive(block.payload)) for (const room of block.payload.rooms || []) holdsByRoom.set(room.roomId, [...(holdsByRoom.get(room.roomId) || []), block.payload])
+    const mappingGroups = new Map()
     for (const mapping of mappings) {
+      const key = normalized(mapping.roomType), group = mappingGroups.get(key) || { roomType: mapping.roomType, providerRoomTypeId: mapping.providerRoomTypeId, plans: [] }
+      if (group.providerRoomTypeId !== mapping.providerRoomTypeId) throw new Error(`Map ${mapping.roomType} to a single Channex room type.`)
+      if (mapping.providerRatePlanId && !group.plans.some(plan => plan.id === mapping.providerRatePlanId)) group.plans.push({ id: mapping.providerRatePlanId, adjustment: Number(mapping.providerRatePlanAdjustment || 0) })
+      mappingGroups.set(key, group)
+    }
+    for (const mapping of mappingGroups.values()) {
+      const dateList = dateKeysByType ? [...new Set(dateKeysByType[mapping.roomType] || [])].filter(date => horizon.includes(date)).sort() : horizon
+      if (!dateList.length) continue
       const typeRooms = rooms.map(row => row.payload).filter(room => normalized(room.roomType || 'Standard') === normalized(mapping.roomType)), activeRooms = typeRooms.filter(room => room.status === 'active')
       const sources = activeRooms.length ? await calendarSources.find({ businessId, roomId: { $in: activeRooms.map(room => room.id) } }).toArray() : [], blocksByRoom = new Map()
       for (const source of sources) blocksByRoom.set(source.roomId, [...(blocksByRoom.get(source.roomId) || []), ...(Array.isArray(source.blocks) ? source.blocks : [])])
@@ -197,24 +313,38 @@ export function createChannexBookingSync({ database, entityHeads, operations, te
           } else if (prices.some(price => !Number.isFinite(price) || price <= 0) || prices.some(price => cents(price) !== cents(prices[0]))) {
             safeAvailability = 0
             if (rateErrors.length < 10) rateErrors.push(`${mapping.roomType} has inconsistent nightly rates on ${date}`)
-          } else rates.push({ property_id: propertyId, rate_plan_id: mapping.providerRatePlanId, date, rate: cents(prices[0]).toFixed(2), ...restrictions[0] })
+          } else for (const plan of mapping.plans) { const adjusted = cents(prices[0] * (1 + Number(plan.adjustment || 0) / 100)); rates.push({ property_id: propertyId, rate_plan_id: plan.id, date, rate: adjusted.toFixed(2), ...restrictions[0] }); validRateRows.add(`${plan.id}|${date}`) }
           if (!restrictionConflict && restrictions[0].stop_sell) safeAvailability = 0
         }
         availability.push({ property_id: propertyId, room_type_id: mapping.providerRoomTypeId, date, availability: safeAvailability })
       }
     }
-    if (!availability.length) throw new Error('Map at least one Stockroom room type before synchronizing channel availability.')
-    await tenantIntegrations.updateChannexAvailability(businessId, branchId, availability)
-    if (rates.length) await tenantIntegrations.updateChannexRates(businessId, branchId, rates)
+    if (!availability.length) throw new Error('Map at least one Stockroom room type with changed dates before synchronizing channel availability.')
+    const taskIds = []
+    const taskId = value => {
+      const rows = Array.isArray(value) ? value : [value]
+      for (const row of rows) { const id = String(row?.id || row?.task_id || row?.attributes?.task_id || ''); if (id && !taskIds.includes(id)) taskIds.push(id) }
+      if (!rows.some(row => row?.id || row?.task_id || row?.attributes?.task_id)) throw new Error('Channex accepted an ARI request without returning the task ID required to confirm the update.')
+    }
+    taskId(await tenantIntegrations.updateChannexAvailability(businessId, branchId, availability))
+    if (rates.length) taskId(await tenantIntegrations.updateChannexRates(businessId, branchId, rates))
     const warnings = [rateErrors.length ? `Channel availability was closed for room types with inconsistent rates: ${rateErrors.join('; ')}.` : '', restrictionErrors.length ? `Channel availability was closed for room types with inconsistent stay restrictions: ${restrictionErrors.join('; ')}.` : ''].filter(Boolean)
     const warning = warnings.join(' ')
-    await tenantIntegrations.updateChannexAriStatus(businessId, branchId, warning)
+    const activeTypeKeys = new Set(rooms.map(row => row.payload).filter(room => room.status === 'active').map(room => normalized(room.roomType || 'Standard')))
+    const expectedRateRows = dateKeysByType === null ? [...mappingGroups.values()].filter(group => activeTypeKeys.has(normalized(group.roomType))).reduce((total, group) => total + group.plans.length * horizon.length, 0) : 0
+    return { warning, taskIds, fullSyncComplete: Boolean(dateKeysByType === null && validRateRows.size === expectedRateRows && warnings.length === 0) }
   }
 
   async function run() {
     if (running) return
     running = true
     try {
+      const expired = await ariExpiries.find({ expiresAt: { $lte: new Date() } }).limit(100).toArray()
+      for (const entry of expired) {
+        const head = await entityHeads.findOne({ businessId: entry.businessId, entityType: 'pos_record', entityId: entry.blockId, 'payload.kind': 'hotel-room-block' })
+        if (head?.payload?.status === 'held' && Date.parse(head.payload.expiresAt) <= Date.now()) await enqueueAriChange(entry.businessId, entry.branchId, { ...head.payload, expiresAt: new Date(Date.now() + 1000).toISOString() }, { ...head.payload, status: 'released' })
+        await ariExpiries.deleteOne({ _id: entry._id })
+      }
       const connected = await integrations.find({ provider: 'channex', active: true }).toArray()
       for (const connection of connected) for (const property of connection.properties || []) {
         try { await syncProperty(connection.businessId, property.branchId, property.propertyId) }
@@ -226,5 +356,5 @@ export function createChannexBookingSync({ database, entityHeads, operations, te
     } finally { running = false }
   }
 
-  return { run }
+  return { run, enqueueAriChange, enqueueAriDates, receiveBookingWebhook }
 }

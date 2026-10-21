@@ -125,6 +125,8 @@ await customerPortalAccounts.createIndex({ businessId: 1, username: 1 }, { uniqu
 await entityHeads.createIndex({ 'payload.calendarFeedToken': 1 }, { sparse: true })
 await hotelCalendarSources.createIndex({ businessId: 1, roomId: 1, sourceId: 1 }, { unique: true })
 await database.collection('business_integrations').createIndex({ 'properties.propertyId': 1 }, { unique: true, partialFilterExpression: { provider: 'channex' } })
+await database.collection('channex_ari_queue').createIndex({ businessId: 1, branchId: 1, roomTypeKey: 1 }, { unique: true, name: 'unique_channex_ari_dirty_room_type' })
+await database.collection('channex_ari_expiries').createIndex({ businessId: 1, branchId: 1, blockId: 1 }, { unique: true, name: 'unique_channex_ari_hold_expiry' })
 await hospitalityEmailLog.createIndex({ businessId: 1, bookingId: 1, messageType: 1 }, { unique: true })
 await hospitalityEmailLog.createIndex({ businessId: 1, createdAt: -1 })
 
@@ -132,11 +134,23 @@ async function refreshHotelCalendarSource(source) {
   try {
     const blocks = await fetchHotelCalendar(source.url)
     await hotelCalendarSources.updateOne({ _id: source._id }, { $set: { blocks, lastSyncedAt: new Date(), nextSyncAt: new Date(Date.now() + 15 * 60_000), syncError: '' } })
+    if (JSON.stringify(blocks) !== JSON.stringify(source.blocks || [])) await queueCalendarSourceAri(source, [...(source.blocks || []), ...blocks])
     return { ...source, blocks, lastSyncedAt: new Date(), syncError: '' }
   } catch (error) {
     await hotelCalendarSources.updateOne({ _id: source._id }, { $set: { nextSyncAt: new Date(Date.now() + 5 * 60_000), syncError: String(error?.message || 'Calendar sync failed.').slice(0, 240) } })
     throw error
   }
+}
+async function queueCalendarSourceAri(source, blocks) {
+  const room = await entityHeads.findOne({ businessId: source.businessId, entityType: 'pos_record', entityId: source.roomId, 'payload.kind': 'hotel-room' })
+  if (!room) return
+  const timezone = normalizeShopProfile((await businessSettings.findOne({ businessId: source.businessId }))?.settings?.shopProfile).reportingTimeZone || 'UTC'
+  const start = businessDate(new Date(), timezone), end = new Date(Date.parse(`${start}T00:00:00Z`) + 500 * 86400000).toISOString().slice(0, 10), dates = new Set()
+  for (const block of blocks) for (let stamp = Date.parse(`${block.checkIn}T00:00:00Z`); stamp < Date.parse(`${block.checkOut}T00:00:00Z`); stamp += 86400000) {
+    const date = new Date(stamp).toISOString().slice(0, 10)
+    if (date >= start && date < end) dates.add(date)
+  }
+  await channexBookingSync.enqueueAriDates(source.businessId, source.branchId || room.payload.branchId, room.payload.roomType || 'Standard', [...dates])
 }
 async function hotelCalendarBlocks(businessId, roomId, knownHeads) {
   const sources = await hotelCalendarSources.find({ businessId, roomId }).toArray()
@@ -208,6 +222,19 @@ function readJson(request, maxBytes = Infinity) {
     let size = 0
     request.on('data', (chunk) => { size += chunk.length; if (size > maxBytes) { reject(new Error('Request too large.')); return }; body += chunk })
     request.on('end', () => { try { resolve(JSON.parse(body || '{}')) } catch { reject(new Error('Invalid JSON.')) } })
+  })
+}
+function readRawBody(request, maxBytes = 65536) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let size = 0, settled = false
+    request.on('data', chunk => {
+      if (settled) return
+      size += chunk.length
+      if (size > maxBytes) { settled = true; reject(Object.assign(new Error('Request too large.'), { statusCode: 413 })); return }
+      chunks.push(chunk)
+    })
+    request.on('end', () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks)) } })
+    request.on('error', error => { if (!settled) { settled = true; reject(error) } })
   })
 }
 function username(value) { return String(value || '').trim().toLowerCase() }
@@ -406,6 +433,23 @@ const server = createServer(async (request, response) => {
   if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders); return response.end() }
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { ok: true })
   const requestUrl = new URL(request.url || '/', 'http://localhost')
+  if (request.method === 'POST' && requestUrl.pathname === '/v1/webhooks/channex') {
+    const configuredSecret = String(process.env.CHANNEX_WEBHOOK_SECRET || '')
+    if (configuredSecret.length < 32) return send(response, 503, { error: 'Channex webhook authentication is not configured.' })
+    let raw
+    try { raw = await readRawBody(request) } catch (error) { return send(response, error.statusCode || 400, { error: error.message || 'Invalid webhook body.' }) }
+    const supplied = String(request.headers['x-stockroom-channex-secret'] || ''), expected = Buffer.from(configuredSecret), received = Buffer.from(supplied)
+    if (received.length !== expected.length || !timingSafeEqual(received, expected)) return send(response, 401, { error: 'Invalid Channex webhook credential.' })
+    let event
+    try { event = JSON.parse(raw.toString('utf8')) } catch { return send(response, 400, { error: 'Invalid Channex webhook payload.' }) }
+    if (event?.event !== 'booking') return send(response, 200, { ignored: true })
+    const topLevelPropertyId = String(event.property_id || ''), payloadPropertyId = String(event.payload?.property_id || '')
+    if (topLevelPropertyId && payloadPropertyId && topLevelPropertyId !== payloadPropertyId) return send(response, 400, { error: 'Channex booking notification contains conflicting property IDs.' })
+    const propertyId = topLevelPropertyId || payloadPropertyId, revisionId = String(event.payload?.revision_id || event.payload?.booking_revision_id || '')
+    if (!/^[0-9a-f-]{36}$/i.test(propertyId) || !/^[0-9a-f-]{36}$/i.test(revisionId)) return send(response, 400, { error: 'Channex booking notification is missing a valid property or revision ID.' })
+    try { await channexBookingSync.receiveBookingWebhook(propertyId, revisionId); return send(response, 200, { received: true }) }
+    catch (error) { return send(response, 503, { error: String(error?.message || 'Could not process the Channex booking revision.').slice(0, 300) }) }
+  }
   const hotelCalendarMatch = requestUrl.pathname.match(/^\/v1\/public\/hotel-calendar\/([A-Za-z0-9_-]{40,80})\.ics$/)
   if (request.method === 'GET' && hotelCalendarMatch) {
     const roomHead = await entityHeads.findOne({ entityType: 'pos_record', 'payload.kind': 'hotel-room', 'payload.calendarFeedToken': hotelCalendarMatch[1] })
@@ -601,8 +645,9 @@ const server = createServer(async (request, response) => {
           }
           validateHospitalityRecord(record)
           const operationId=`customer-hospitality:${recordId}`,head={businessId:claims.businessId,entityType:'pos_record',entityId:recordId,operationId,deviceId:'customer-portal',payload:record,updatedAt:now}
-          const inserted=await entityHeads.updateOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId},{$setOnInsert:head},{upsert:true});if(!inserted.upsertedCount){const existing=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(existing?.payload.customerPortalId!==claims.customerId)throw Object.assign(new Error('This booking request ID is already used.'),{statusCode:409});return existing.payload}
+          const inserted=await entityHeads.updateOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId},{$setOnInsert:head},{upsert:true});if(!inserted.upsertedCount){const existing=await entityHeads.findOne({businessId:claims.businessId,entityType:'pos_record',entityId:recordId});if(existing?.payload.customerPortalId!==claims.customerId)throw Object.assign(new Error('This booking request ID is already used.'),{statusCode:409});if(existing.payload.kind==='hotel-stay')await channexBookingSync.enqueueAriChange(claims.businessId,existing.payload.branchId,null,existing.payload);return existing.payload}
           await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:{...head,action:'upsert',createdAt:now,receivedAt:new Date()}},{upsert:true})
+          if(record.kind==='hotel-stay')await channexBookingSync.enqueueAriChange(claims.businessId,record.branchId,null,record)
           let ticketInvoiceId=''
           if(record.kind==='nightclub-entry'&&record.status==='expected'&&record.admissionPrice>0){
             const receiptHead=all.find(row=>row.entityId==='receipt-settings'&&row.payload.kind==='receipt-settings'),profileSettings=receiptSettings(receiptHead?.payload?.value||{}),invoiceId=`service-job:ticket-${recordId.slice('nightclub-entry:'.length)}`,lines=[{id:record.id,description:`Admission: ${record.eventName}`.slice(0,150),quantity:1,price:record.admissionPrice}],pricing=priceOrder(lines.map(line=>({productId:`service:${line.id}`,quantity:line.quantity,price:line.price})),{tax:profileSettings}),invoiceNow=new Date().toISOString(),job={id:invoiceId,kind:'service-job',branchId:record.branchId,tillId:'customer-portal',status:'new',createdAt:invoiceNow,updatedAt:invoiceNow,expectedUpdatedAt:'',lastCommandId:`ticket-invoice:${record.id}`,lastRequest:JSON.stringify({recordId:record.id}),staffId:`customer:${claims.customerId}`,staffName:'Customer portal',businessName:profileSettings.businessName||saved.settings.appName||'Business',currency:saved.settings.currency||'USD',customerName:name,customerPhone:phone,title:`Nightclub admission - ${record.eventName}`.slice(0,200),note:`Admission ticket for ${record.eventName}.`,dueDate:'',lines,profile:profileSettings,pricing,payments:[],hospitality:{recordId:record.id,recordKind:'nightclub-entry'},customerPortalId:claims.customerId,...(!claims.guest?{customerId:claims.customerId}:{})}
@@ -666,6 +711,7 @@ const server = createServer(async (request, response) => {
         const jobs=await entityHeads.find({businessId:claims.businessId,entityType:'pos_record','payload.kind':'service-job','payload.hospitality.recordId':bookingId,'payload.status':{$ne:'cancelled'}}).toArray();if(jobs.length)throw new Error('Contact the business to cancel this booking because an invoice has already been issued. Any payment must be reviewed before cancellation.')
         const payload={...head.payload,status:'cancelled',updatedAt:now,expectedUpdatedAt:head.updatedAt,staffId:`customer:${claims.customerId}`};validateHospitalityRecord(payload,head.payload)
         const operationId=`customer-hospitality-cancel:${bookingId}:${now}`,changed=await entityHeads.updateOne({...filter,operationId:head.operationId},{$set:{payload,updatedAt:now,operationId,deviceId:'customer-portal'}});if(!changed.modifiedCount)throw new Error('This booking changed. Refresh and retry.')
+        await channexBookingSync.enqueueAriChange(claims.businessId,payload.branchId,head.payload,payload)
         const operation={businessId:claims.businessId,operationId,deviceId:'customer-portal',entityType:'pos_record',entityId:bookingId,action:'upsert',payload,createdAt:now,receivedAt:new Date()};await operations.updateOne({businessId:claims.businessId,operationId},{$setOnInsert:operation},{upsert:true});return payload})
         return send(response,200,{booking})
       }catch(error){return send(response,error.statusCode||400,{error:error.message||'Could not cancel this booking.'})}
@@ -999,6 +1045,7 @@ const server = createServer(async (request, response) => {
       const source = await hotelCalendarSources.findOne({ businessId: claims.businessId, roomId, sourceId })
       if (!source) return send(response, 404, { error: 'That booking-channel calendar is not connected.' })
       if (action === 'remove') {
+        await queueCalendarSourceAri(source, source.blocks || [])
         await hotelCalendarSources.deleteOne({ _id: source._id })
         return send(response, 200, { removed: true })
       }
@@ -1068,7 +1115,7 @@ const server = createServer(async (request, response) => {
       }
       if (action === 'create-channel-setup-session') {
         try { return send(response, 200, await tenantIntegrations.channexChannelSetupUrl(claims.businessId, branchId, account.name || account.displayName || account.email || account.username)) }
-        catch (error) { return send(response, 400, { error: error.message || 'Could not open Airbnb and Booking.com setup.' }) }
+        catch (error) { return send(response, 400, { error: error.message || 'Could not open booking channel setup.' }) }
       }
       if (action === 'save-mappings') {
         try { return send(response, 200, await tenantIntegrations.channexProperty(claims.businessId, branchId, { mappings: Array.isArray(input.mappings) ? input.mappings : [] })) }
@@ -1603,7 +1650,7 @@ const server = createServer(async (request, response) => {
             conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'This record was changed on another till. Refresh and review the other version.',localPayload:document.payload,remotePayload:current?.payload||{}});continue
           }
           if (!isNewerMutableOperation(document, current)) {
-            if (identicalSettings(document,current)) { acceptedOperationIds.push(document.operationId); continue }
+            if (identicalSettings(document,current)) { if(document.entityType==='pos_record'&&['hotel-room','hotel-stay','hotel-room-block'].includes(document.payload.kind))await channexBookingSync.enqueueAriChange(businessId,document.payload.branchId,current?.payload||null,document.payload); acceptedOperationIds.push(document.operationId); continue }
             conflicts.push({ operationId: document.operationId, entityType: document.entityType, entityId: document.entityId, reason: 'A newer version of this record was saved on another device.', localPayload: document.payload, remotePayload: current.payload })
             continue
           }
@@ -1611,6 +1658,7 @@ const server = createServer(async (request, response) => {
             const guarded=document.entityType==='pos_record' && document.payload.expectedUpdatedAt!==undefined
             const result=await entityHeads.updateOne(guarded && current?{...filter,operationId:current.operationId}:filter,{ $set: { updatedAt: operationUpdatedAt(document), payload: document.payload, operationId: document.operationId, deviceId, receivedAt: new Date() } },{upsert:guarded?!current:true})
             if(guarded && current && !result.matchedCount){conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent till edit won. Refresh this record.'});continue}
+            if(document.entityType==='pos_record'&&['hotel-room','hotel-stay','hotel-room-block'].includes(document.payload.kind))await channexBookingSync.enqueueAriChange(businessId,document.payload.branchId,current?.payload||null,document.payload)
           }catch(error){if(error.code!==11000)throw error;conflicts.push({operationId:document.operationId,entityType:document.entityType,entityId:document.entityId,reason:'A concurrent till created this record. Refresh before editing.'});continue}
 
         }

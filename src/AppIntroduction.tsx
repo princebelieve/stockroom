@@ -2,12 +2,14 @@ import { useState } from 'react'
 
 const slides = [
   { title: 'Keep trading offline after setup', illustration: 4 },
-  { title: 'Choose a workspace for the way you sell', illustration: 5 },
-  { title: 'Sell goods, take payments and print receipts', illustration: 0 },
-  { title: 'Track stock, supplies and purchase costs', illustration: 1 },
-  { title: 'Keep orders moving from counter to kitchen', illustration: 2 },
-  { title: 'Keep customer and supplier balances clear', illustration: 3 },
-  { title: 'See sales, costs and staff activity', illustration: 6 },
+  { title: 'Choose Product sales, Oil sales or service payments', illustration: 5 },
+  { title: 'Free receipts, service jobs and Church collections', illustration: 0 },
+  { title: 'Track stock, suppliers and purchase costs', illustration: 1 },
+  { title: 'Keep counter orders moving through preparation', illustration: 2 },
+  { title: 'Manage restaurant tables, rounds and tabs', illustration: 3 },
+  { title: 'Manage hotel rooms, stays and guest folios', illustration: 7 },
+  { title: 'Plan nightlife events, tickets and guest entry', illustration: 8 },
+  { title: 'See sales, costs, customers and staff activity', illustration: 6 },
 ]
 function IntroIllustration({step:slideIndex}:{step:number}) {
   const step=slides[slideIndex].illustration
@@ -19,6 +21,8 @@ function IntroIllustration({step:slideIndex}:{step:number}) {
     {step===1&&<><path d="M103 103l137-64 137 64v152H103z" fill="white" stroke="currentColor" strokeWidth="5"/><path d="M87 103h306v39H87z" fill="currentColor"/><path d="M120 104v38m48-38v38m48-38v38m48-38v38m48-38v38m48-38v38" stroke="white" strokeWidth="15" opacity=".4"/><path d="M124 201h231m-231 46h231" stroke="currentColor" strokeWidth="5"/><rect x="134" y="161" width="46" height="38" rx="4" fill="currentColor" opacity=".3"/><rect x="195" y="154" width="46" height="45" rx="4" fill="currentColor"/><rect x="257" y="164" width="79" height="35" rx="4" fill="currentColor" opacity=".2"/><rect x="139" y="218" width="79" height="27" rx="4" fill="currentColor" opacity=".2"/><rect x="241" y="213" width="46" height="32" rx="4" fill="currentColor" opacity=".5"/></>}
     {step===2&&<><rect x="84" y="47" width="312" height="133" rx="16" fill="white" stroke="currentColor" strokeWidth="5"/>{[111,210,309].map((x,index)=><g key={x}><rect x={x} y="72" width="61" height="81" rx="7" fill="currentColor" opacity={.15+index*.2}/><path d={`M${x+14} 100h33m-33 15h24`} stroke="white" strokeWidth="5"/></g>)}<rect x="113" y="230" width="254" height="14" rx="7" fill="currentColor"/><path d="M137 225a48 48 0 0196 0m25 0a40 40 0 0180 0" fill="currentColor" opacity=".3"/><circle cx="347" cy="190" r="30" fill="currentColor"/><path d="M332 190l10 10 20-23" fill="none" stroke="white" strokeWidth="6" strokeLinecap="round"/></>}
     {step===3&&<><path d="M139 139l102 76 101-76" fill="none" stroke="currentColor" strokeWidth="5" opacity=".35"/>{[139,342].map((x,index)=><g key={x}><circle cx={x} cy="110" r="56" fill="currentColor" opacity={index?.15:.25}/><circle cx={x} cy="97" r="18" fill="currentColor"/><path d={`M${x-32} 141q0-37 32-37t32 37`} fill="currentColor"/></g>)}<rect x="201" y="170" width="80" height="93" rx="13" fill="white" stroke="currentColor" strokeWidth="5"/><circle cx="241" cy="197" r="12" fill="currentColor"/><path d="M220 232q0-25 21-25t21 25" fill="currentColor"/><path d="M223 249h36" stroke="currentColor" strokeWidth="4"/></>}
+    {step===7&&<><path d="M102 121l138-73 138 73v128H102z" fill="white" stroke="currentColor" strokeWidth="5"/><path d="M84 121h312v28H84z" fill="currentColor"/><rect x="214" y="177" width="53" height="72" rx="5" fill="currentColor" opacity=".3"/><path d="M130 174h42v38h-42zm68 0h40v38h-40zm73 0h42v38h-42zm64 0h32v38h-32zM130 219h42v30h-42zm201 0h32v30h-32z" fill="currentColor" opacity=".25"/><circle cx="349" cy="83" r="31" fill="currentColor"/><path d="M334 83l10 10 21-23" fill="none" stroke="white" strokeWidth="6" strokeLinecap="round"/></>}
+    {step===8&&<><rect x="109" y="49" width="262" height="115" rx="12" fill="currentColor"/><path d="M143 132l35-45 31 30 38-50 62 65" fill="none" stroke="white" strokeWidth="8" opacity=".8"/><path d="M88 176h304v20H88z" fill="currentColor"/>{[137,194,251,308,365].map(x=><g key={x}><circle cx={x} cy="235" r="15" fill="currentColor"/><path d={`M${x-14} 263q0-28 14-28t14 28`} fill="currentColor"/></g>)}<path d="M127 198v30m55-30v30m55-30v30m55-30v30m55-30v30" stroke="currentColor" strokeWidth="5"/></>}
   </svg>
 }
 export function AppIntroduction({ onContinue }: { onContinue: () => void }) {

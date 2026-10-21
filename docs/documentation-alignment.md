@@ -1,6 +1,6 @@
 # Documentation alignment
 
-Original full review: 2026-10-06. Incremental screen/subscription review: 2026-10-12. Current implementation reconciliation: 2026-10-19. The dated inventories below are snapshots, not permanent authorities. Generated builds, dependencies and release artifacts are not documentation authorities; current source code is.
+Original full review: 2026-10-06. Incremental screen/subscription review: 2026-10-12. Current implementation reconciliation: 2026-10-21. The dated inventories below are snapshots, not permanent authorities. Generated builds, dependencies and release artifacts are not documentation authorities; current source code is.
 
 ## Current authority
 
@@ -20,6 +20,7 @@ The Markdown user-guide chapters match `src/user-guide.json`, which supplies Hel
 - Release examples use versioned Android artifact names. Landing documentation includes supported Paystack referral transfers and no longer asserts a particular hosting allowance or installer size.
 - Unsupported claims about shops already using this version were removed. Historical setup recommendations are identified as implemented or still proposed.
 - The Hospitality guide was rechecked against the current UI, server handlers and browser flows. The user guide and workspace overview now distinguish supported folio settlement, online invoice checkout, housekeeping history, cashier-reviewed night audit, and Channex-mediated channel sync from still-missing complete accounting, automatic till close, provider certification and property-specific deployment acceptance.
+- Channex connector behavior was checked against the current PMS certification checklist and API guides. ARI changes now use a durable date-level queue and rate-spaced retries; full sync covers 500 days, runs immediately on first connection and then during the local 03:00 window, and does not count as complete without rate/restriction values and returned task IDs. Booking notifications have a secret-validated webhook endpoint with revision-feed polling retained as recovery. Channex's one-rate-plan-per-room-type support is disclosed, the embedded setup no longer limits channels to Airbnb and Booking.com, and provider certification is Stockroom's process rather than a hotel-owner certificate.
 
 ## Coverage
 
