@@ -1,3 +1,5 @@
+# Reference only. The deployed 'stockroom' Render Web Service is configured in the
+# Render Dashboard and is not managed by a Render Blueprint.
 services:
   - type: web
     name: stockroom-sync-api

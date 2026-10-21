@@ -33,6 +33,7 @@
 .searchable-select-trigger { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; color:#213247; background:#fff; font:inherit; text-align:left; }
 .searchable-select-trigger:disabled { opacity:.62; cursor:not-allowed; }
 .searchable-select-menu { position:absolute; z-index:80; top:calc(100% + 6px); left:0; width:min(100%,440px); min-width:min(280px,calc(100vw - 40px)); padding:8px; border:1px solid var(--line); border-radius:14px; background:#fff; box-shadow:0 14px 36px #14263b26; }
+.searchable-select-menu.searchable-select-menu-viewport { position:fixed; z-index:200; box-sizing:border-box; min-width:0; }
 .searchable-select-search { display:flex; align-items:center; gap:8px; padding:0 10px; border:1px solid var(--line); border-radius:10px; color:var(--muted); }
 .searchable-select-search input { width:100%; min-width:0; min-height:42px; border:0; outline:0; color:#213247; background:transparent; font:inherit; }
 .searchable-select-options { max-height:min(300px,55vh); overflow:auto; margin-top:6px; }

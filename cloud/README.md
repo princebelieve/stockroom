@@ -1,11 +1,11 @@
 # Cloud sync service deployment
 
-Deploy this repository to Render as a **Web Service** using `render.yaml`.
+The live cloud sync API is the manually configured Render **Web Service** named `stockroom` (the service shown in the Render dashboard). This project does not use a Render Blueprint to manage that service. Deploy code through the existing service's configured Git repository and deployment settings; do not create or deploy a new service from the repository's root `render.yaml`. That YAML is a reference only and is not the source of the live service configuration.
 
 Set these Render environment variables:
 
 - `MONGODB_URI`: MongoDB Atlas connection string. Only Render receives this value.
-- `JWT_SECRET`: a long random secret. Render can generate it from `render.yaml`.
+- `JWT_SECRET`: a long random secret configured in the existing Render service's Environment settings.
 - `ADMIN_API_KEY`: a long random secret used only by you to enroll a device.
 - `MONGODB_DATABASE`: optional; defaults to `stockroom_sync`.
 - `GMAIL_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`: optional Gmail API OAuth 2.0 credentials for Stockroom account, support, receipt and hospitality guest email.
