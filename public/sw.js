@@ -38,7 +38,7 @@ self.addEventListener('fetch', event => {
   if (event.request.mode === 'navigate') {
     // These are real static documents. Do not turn their navigations into the
     // app shell: doing so makes sitemap.xml render Stockroom instead of XML.
-    if (['/sitemap.xml', '/robots.txt', '/privacy', '/privacy.html', '/terms', '/terms.html'].includes(url.pathname)) return
+    if (['/sitemap.xml', '/robots.txt', '/privacy', '/privacy.html', '/terms', '/terms.html', '/account-deletion', '/account-deletion.html'].includes(url.pathname)) return
     // Prefer the deployed HTML whenever online. An old controlling worker
     // must not keep returning its cached app document after a deployment.
     // Retain the cached document only as an offline fallback.
