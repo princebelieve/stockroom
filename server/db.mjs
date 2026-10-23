@@ -391,6 +391,37 @@ export async function getSettings() {
   }
 }
 
+export function localBusinessResetBlockers() {
+  const pending = Number(database.prepare('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL').get()?.count || 0)
+  const conflicts = Number(database.prepare('SELECT COUNT(*) AS count FROM sync_conflicts WHERE resolved_at IS NULL').get()?.count || 0)
+  return pending + conflicts
+}
+
+/** Clear this computer's local business after an owner has authorized the reset. */
+export async function resetLocalBusinessData() {
+  const pending = localBusinessResetBlockers()
+  if (pending > 0) return { reset: false, pending }
+
+  const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'").all().map(row => String(row.name))
+  database.exec('PRAGMA foreign_keys = OFF')
+  try {
+    database.exec('BEGIN')
+    for (const table of tables) database.exec(`DELETE FROM "${table.replaceAll('"', '""')}"`)
+    database.prepare('INSERT INTO organizations (id, name, created_at) VALUES (?, ?, ?)').run(organizationId, 'My Business', now())
+    database.prepare("INSERT INTO branches (id, organization_id, name, address, is_default, created_at, updated_at) VALUES ('main', ?, 'Main branch', '', 1, ?, ?)").run(organizationId, now(), now())
+    database.prepare('INSERT INTO app_settings (organization_id, app_name, updated_at) VALUES (?, ?, ?)').run(organizationId, 'My Business', now())
+    database.exec('COMMIT')
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
+  } finally {
+    database.exec('PRAGMA foreign_keys = ON')
+  }
+  await writeFile(settingsFile, JSON.stringify({ appName: 'My Business' }, null, 2))
+  await writeShopConfig({})
+  return { reset: true, pending: 0 }
+}
+
 export async function createOwnerSetup(input) {
   const appName = String(input.appName || '').trim() || 'My Business'
   const ownerName = String(input.ownerName || 'Shop Owner').trim() || 'Shop Owner'

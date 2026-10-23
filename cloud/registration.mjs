@@ -97,7 +97,8 @@ export async function createRegistration({ database, client, accounts, hashPassw
         await accounts.insertOne(account, { session })
         const settings = { appName: grant.businessName, currency, updatedAt: new Date().toISOString() }
         settings.catalogueContributionMode = catalogueContributionMode
-        await database.collection('business_settings').updateOne({ businessId: grant.businessId }, { $set: { businessId: grant.businessId, settings, catalogueContributionMode } }, { upsert: true, session })
+        settings.allowStaffDeviceEnrollment = input.allowStaffDeviceEnrollment === true
+        await database.collection('business_settings').updateOne({ businessId: grant.businessId }, { $set: { businessId: grant.businessId, settings, catalogueContributionMode, allowStaffDeviceEnrollment: settings.allowStaffDeviceEnrollment } }, { upsert: true, session })
         // Every client hydrates its new local workspace through the sync log.
         await database.collection('sync_operations').insertOne({ businessId: grant.businessId, deviceId: 'registration', operationId: randomUUID(), entityType: 'settings', entityId: 'business', action: 'upsert', payload: settings, createdAt: settings.updatedAt, receivedAt: new Date() }, { session })
         const plan = await database.collection('subscription_settings').findOne({ _id: 'plan' }, { session })

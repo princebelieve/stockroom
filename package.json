@@ -16,8 +16,8 @@
     "desktop:package": "npm run build && electron-builder --win nsis",
     "android:sync": "npm run build && npx cap sync android",
     "android:debug": "npm run android:sync && cd android && gradlew.bat assembleDirectDebug && (if not exist ..\\release\\android mkdir ..\\release\\android) && copy /Y app\\build\\outputs\\apk\\direct\\debug\\app-direct-debug.apk ..\\release\\android\\Stockroom-debug.apk",
-    "android:release": "npm run android:sync && cd android && gradlew.bat assembleDirectRelease && cd .. && npm run build:playstore && npx cap sync android && cd android && gradlew.bat bundlePlayStoreRelease && cd .. && node scripts/publish-android-release.mjs",
-    "android:bundle": "npm run build:playstore && npx cap sync android && cd android && gradlew.bat bundlePlayStoreRelease && cd .. && node scripts/publish-android-release.mjs --aab-only",
+    "android:release": "npm run android:sync && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-datastore-native-symbols.ps1 && cd android && gradlew.bat assembleDirectRelease && cd .. && npm run build:playstore && npx cap sync android && cd android && gradlew.bat bundlePlayStoreRelease && cd .. && node scripts/publish-android-release.mjs",
+    "android:bundle": "npm run build:playstore && npx cap sync android && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-datastore-native-symbols.ps1 && cd android && gradlew.bat bundlePlayStoreRelease --refresh-dependencies && cd .. && node scripts/publish-android-release.mjs --aab-only",
     "sync-api": "node cloud/index.mjs",
     "vapid:keys": "node scripts/generate-vapid-keys.mjs",
     "test": "node --test test/**/*.test.mjs"

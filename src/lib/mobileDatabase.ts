@@ -9,6 +9,7 @@ import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@cap
 const databaseName = 'stockroom-mobile'
 const schemaVersion = 1
 let connection: SQLiteDBConnection | null = null
+let openingConnection: Promise<SQLiteDBConnection> | null = null
 
 export type MobileSyncConfiguration = {
   syncApiUrl: string
@@ -21,9 +22,19 @@ export function isNativeMobile() {
   return Capacitor.isNativePlatform()
 }
 
-export async function openMobileDatabase() {
+export async function openMobileDatabase(): Promise<SQLiteDBConnection> {
   if (!isNativeMobile()) throw new Error('Native SQLite is available only inside the Android application.')
+  if (openingConnection) return openingConnection
   if (connection) return connection
+  const opening = initializeMobileDatabase()
+  openingConnection = opening
+  try { return await opening }
+  catch (error) { connection = null; throw error }
+  finally { if (openingConnection === opening) openingConnection = null }
+}
+
+async function initializeMobileDatabase(): Promise<SQLiteDBConnection> {
+  if (!isNativeMobile()) throw new Error('Native SQLite is available only inside the Android application.')
   const sqlite = new SQLiteConnection(CapacitorSQLite)
   const existing = await sqlite.isConnection(databaseName, false)
   connection = existing.result
@@ -205,4 +216,19 @@ export async function getMobileSyncConfiguration(): Promise<MobileSyncConfigurat
   const result = await db.query('SELECT key, value FROM mobile_settings WHERE key IN (?, ?, ?, ?)', ['syncApiUrl', 'businessId', 'deviceId', 'deviceToken'])
   const values = Object.fromEntries((result.values || []).map((row) => [String(row.key), String(row.value)]))
   return values.syncApiUrl && values.businessId && values.deviceId && values.deviceToken ? values as MobileSyncConfiguration : null
+}
+
+/** Remove this installation's complete local workspace after protecting queued work. */
+export async function resetMobileDatabaseForNewBusiness(): Promise<{ pending: number }> {
+  const db = await openMobileDatabase()
+  const pendingResult = await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')
+  const conflictResult = await db.query('SELECT COUNT(*) AS count FROM sync_conflicts WHERE resolved_at IS NULL')
+  const pending = Number(pendingResult.values?.[0]?.count || 0) + Number(conflictResult.values?.[0]?.count || 0)
+  if (pending > 0) return { pending }
+
+  await db.close()
+  await db.delete()
+  connection = null
+  openingConnection = null
+  return { pending: 0 }
 }

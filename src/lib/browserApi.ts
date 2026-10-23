@@ -426,6 +426,10 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const cloud = cloudUrl
     const login = await originalFetch(`${cloud}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.ownerEmail, password: input.ownerPassword }) })
     const account = await login.json(); if (!login.ok || account.account?.role !== 'owner') return error(account.error || 'Only a business owner can enroll this browser.')
+    if (['allow', 'deny'].includes(String(input.staffDevicePolicy))) {
+      const policy = await originalFetch(`${cloud}/v1/business/device-enrollment-policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ allowStaffDeviceEnrollment: input.staffDevicePolicy === 'allow' }) })
+      const saved = await policy.json().catch(() => ({})); if (!policy.ok) return error(saved.error || 'Could not save the staff device permission.')
+    }
     const enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: await browserDeviceId(), label: input.label }) })
     const device = await enrolled.json(); if (!enrolled.ok) return error(device.error || 'Could not enroll this browser.')
     await saveMobileSyncConfiguration({ syncApiUrl: cloud, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken })

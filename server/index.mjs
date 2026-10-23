@@ -1,6 +1,6 @@
 import { canRequest, hasPermission, ownStaffActivity } from './staff-permissions.mjs'
 import { isBranchOperation, hasActiveBranchAccess } from './branch-access.mjs'
-import { updateCustomerBirthday, setStaffPermissions } from './db.mjs'
+import { updateCustomerBirthday, setStaffPermissions, localBusinessResetBlockers, resetLocalBusinessData } from './db.mjs'
 import { cloudSetStaffPermissions } from './cloud-auth.mjs'
 import { backupSnapshot, encryptBackup, decryptBackup, restoreSnapshot } from './business-backup.mjs'
 import { salesHistory } from './sales-history.mjs'
@@ -16,9 +16,9 @@ import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProduct, updateProduct, adjustStock, createSale, getSettings, listProducts, exportProductCatalogCsv, updateSettings, storageName } from './repository.mjs'
 import { recordStaffRemovalLocal, authenticateUser, adjustCustomerWallet, approveStocktake, cacheCloudUsers, changePassword, createBackup, createBranch, updateBranch, transferBranchStock, createCustomer, createExpense, createOwnerSetup, createSession, createStocktake, createUser, deleteSession, exportSalesCsv, getOwnerMetrics, getReports, getStocktake, listBranches, listCustomers, listExpenses, listMovements, listSales, listSaleItemVoids, listSyncConflicts, listUsers, provisionCloudUser, recordSaleItemVoid, resetCashierPassword, resolveSyncConflict, sessionUser as savedSessionUser, setCashierOperationalAccess, updateStocktakeCount, updateUserRole } from './repository.mjs'
-import { registerLocalCheckout, getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow } from './sync.mjs'
+import { registerLocalCheckout, getCloudConfiguration, getCloudRegistrationToken, getSubscriptionAccess, pullLatest, saveCloudConfiguration, startSyncWorker, syncConfigurationStatus, syncNow, clearCloudConfiguration } from './sync.mjs'
 import { createDisplayPairing, getCustomerDisplay, setCustomerDisplay, startCustomerDisplayGateway } from './customer-display.mjs'
-import { cloudRemoveStaff, cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
+import { cloudRemoveStaff, cloudAccountForBusiness, cloudCreateStaff, cloudEnrollDevice, cloudEnrollDeviceAsInstaller, cloudListStaff, cloudLogin, cloudLoginAt, cloudLoginStaffAt, cloudOwnerForBusiness, cloudPasswordResetConfirm, cloudPasswordResetRequest, cloudRefreshSession, cloudRegister, cloudResetCashierPassword, cloudSetCashierOperationalAccess, cloudSetStaffDeviceEnrollment, cloudUpdateStaffRole, getDefaultCloudApiUrl } from './cloud-auth.mjs'
 import { lookupOpenFoodFacts, searchProductNames } from './open-food-facts.mjs'
 import { businessWorkspace } from './shop-profile.mjs'
 
@@ -55,7 +55,7 @@ const server = createServer(async (request, response) => {
     const referralWalletRoute = ['/v1/referral-wallet/me', '/v1/referral-wallet/payouts', '/v1/referral-wallet/banks', '/v1/referral-wallet/resolve', '/v1/referral-wallet/profile'].includes(path.split('?')[0])
     if (!publicProductLookupRoute && (!user || (!sessionRefreshRoute && !notificationRoute && !customerPortalRoute && !customerOrderRoute && !cataloguePreferenceRead && user.role !== 'owner'))) return sendJson(response, 401, { error: sessionRefreshRoute || notificationRoute ? 'Sign in to manage account notifications.' : 'Local owner authentication required.' })
     if (customerPortalRoute && !['owner', 'admin'].includes(user.role)) return sendJson(response, 403, { error: 'Owner or admin access required.' })
-    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me', '/v1/till-recovery/tills', '/v1/till-recovery/recover', '/v1/preparation-print/configure', '/v1/business/catalogue-contribution'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute && !customerPortalRoute && !customerOrderRoute && !publicProductLookupRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
+    if (!/^\/v1\/subscriptions(?:\/[a-z-]+)*$/.test(path) && !['/v1/auth/refresh', '/v1/auth/me', '/v1/registration-keys', '/v1/account-deletion/me', '/v1/till-recovery/tills', '/v1/till-recovery/recover', '/v1/preparation-print/configure', '/v1/business/catalogue-contribution', '/v1/business/device-enrollment-policy'].includes(path) && !notificationRoute && !productFormRoute && !referralWalletRoute && !customerPortalRoute && !customerOrderRoute && !publicProductLookupRoute) return sendJson(response, 404, { error: 'Cloud route not available.' })
     try {
       const config = await getCloudConfiguration()
       if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
@@ -184,6 +184,24 @@ const server = createServer(async (request, response) => {
     const token = request.headers.authorization?.replace('Bearer ', '')
     deleteSession(token)
     return sendJson(response, 204, {})
+  }
+
+  if (request.method === 'POST' && request.url === '/api/device/reset') {
+    if (process.env.STOCKROOM_LOCAL_ONLY !== 'true') return sendJson(response, 404, { error: 'This action is available only in the desktop installation.' })
+    return readJson(request, response, async input => {
+      const owner = await authenticateUser(String(input.email || '').trim(), String(input.password || ''))
+      if (owner?.role !== 'owner') return sendJson(response, 403, { error: 'Enter the current owner email and password to remove this business from the computer.' })
+      try {
+        const blockers = localBusinessResetBlockers()
+        if (blockers > 0) return sendJson(response, 409, { error: `This computer has ${blockers} unsynced change(s) or unresolved sync conflict(s). Sync or resolve them before removing this business.`, pending: blockers })
+        await clearCloudConfiguration()
+        const result = await resetLocalBusinessData()
+        if (!result.reset) return sendJson(response, 409, { error: `This computer has ${result.pending} unsynced change(s) or unresolved sync conflict(s). Sync or resolve them before removing this business.`, pending: result.pending })
+        return sendJson(response, 200, { reset: true })
+      } catch (error) {
+        return sendJson(response, 500, { error: error instanceof Error ? error.message : 'Could not clear this computer’s business data.' })
+      }
+    })
   }
 
   if (request.method === 'PUT' && request.url === '/api/auth/password') {
@@ -465,17 +483,27 @@ const server = createServer(async (request, response) => {
     if ((await getSettings()).ownerConfigured) return sendJson(response, 403, { error: 'This installation has already been handed over to its owner.' })
     return readJson(request, response, async (input) => {
       try {
-        const existingBusiness = input.mode === 'existing'
-        const remote = existingBusiness ? await cloudLoginAt('', String(input.ownerEmail || ''), String(input.ownerPassword || '')) : null
+        const existingBusiness = ['existing', 'staff'].includes(String(input.mode))
+        let remote = null
+        if (input.mode === 'existing') remote = await cloudLoginAt('', String(input.ownerEmail || ''), String(input.ownerPassword || ''))
+        if (input.mode === 'staff') {
+          const rawLink = String(input.businessLink || '').trim()
+          let businessId = rawLink
+          try { businessId = new URL(rawLink.includes('://') ? rawLink : `https://${rawLink}`).searchParams.get('business') || rawLink } catch {}
+          if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId)) throw new Error('Paste the business sign-in link shared by the owner, or enter its business ID.')
+          remote = await cloudLoginStaffAt(getDefaultCloudApiUrl(), businessId, String(input.username || ''), String(input.password || ''))
+          if (!['admin', 'cashier'].includes(remote.account?.role)) throw new Error('Use a staff account to join here. Owners should choose Existing business owner.')
+        }
         const businessId = existingBusiness ? String(remote?.account?.businessId || '') : String(input.businessId || '').trim()
-        if (remote && remote.account?.role !== 'owner') throw new Error('Only a business owner can add another device.')
+        if (input.mode === 'existing' && remote?.account?.role !== 'owner') throw new Error('Only a business owner can add another device.')
         const syncApiUrl = existingBusiness ? remote.syncApiUrl : getDefaultCloudApiUrl()
+        if (input.mode === 'existing' && ['allow', 'deny'].includes(String(input.staffDevicePolicy))) await cloudSetStaffDeviceEnrollment(syncApiUrl, remote.accessToken, input.staffDevicePolicy === 'allow')
         const deviceId = generatedDeviceId()
         const enrolled = existingBusiness
           ? await cloudEnrollDevice(syncApiUrl, remote.accessToken, { deviceId, label: input.label })
           : await cloudEnrollDeviceAsInstaller(syncApiUrl, String(input.adminApiKey || ''), { businessId, deviceId, label: input.label, expiresInDays: 365 })
         const configuration = await saveCloudConfiguration({ syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken, existingBusiness })
-        return sendJson(response, 201, { ...configuration, configured: true, existingBusiness })
+        return sendJson(response, 201, { ...configuration, configured: true, existingBusiness, staff: input.mode === 'staff' })
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
     })
   }

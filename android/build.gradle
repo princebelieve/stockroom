@@ -19,6 +19,7 @@ apply from: "variables.gradle"
 
 allprojects {
     repositories {
+        maven { url uri("${rootProject.projectDir}/local-maven") }
         google()
         mavenCentral()
     }

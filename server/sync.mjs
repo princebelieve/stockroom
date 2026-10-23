@@ -6,13 +6,14 @@ import { registerCheckoutTill } from './till-binding.mjs'
 import { requiresServiceJobSync } from './service-jobs.mjs'
 import { requiresHospitalitySync, requiresHotelShiftSync, requiresHotelDepositSync, requiresHotelGroupChangeSync, requiresHotelGroupFolioSync, requiresHotelFolioCorrectionSync } from './hospitality-operations.mjs'
 import { applyRemoteOperations, getPendingSyncOperations, getSyncCursor, getSyncStatus, markKnownLocalOperationsApplied, markSyncFailure, markSyncOperationsSynced, queueInitialSettingsSnapshot, recordSyncConflicts, setSyncCursor } from './repository.mjs'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadSubscriptionAccess } from './subscription-client.mjs'
 import { requiresCounterSync, requiresRestaurantSync } from './counter-service.mjs'
 
 let running = false
+let paused = false
 
 async function configuration() {
   const fallbackPath = join(fileURLToPath(new URL('.', import.meta.url)), 'data', 'sync-config.json')
@@ -26,6 +27,16 @@ async function configuration() {
 
 function configurationPath() {
   return process.env.SYNC_CONFIG_PATH || join(fileURLToPath(new URL('.', import.meta.url)), 'data', 'sync-config.json')
+}
+
+export async function clearCloudConfiguration() {
+  paused = true
+  while (running) await new Promise(resolve => setTimeout(resolve, 25))
+  const path = configurationPath()
+  for (const file of [path, `${path}.subscription.json`]) {
+    try { await unlink(file) } catch (error) { if (error?.code !== 'ENOENT') throw error }
+  }
+  for (const key of ['SYNC_API_URL', 'SYNC_DEVICE_TOKEN', 'BUSINESS_ID', 'DEVICE_ID']) delete process.env[key]
 }
 
 export async function saveCloudConfiguration(input) {
@@ -43,6 +54,7 @@ export async function saveCloudConfiguration(input) {
   const temporaryPath = `${filePath}.new`
   await writeFile(temporaryPath, `${JSON.stringify({ syncApiUrl, businessId, deviceId, deviceToken, existingBusiness }, null, 2)}\n`, { mode: 0o600 })
   await rename(temporaryPath, filePath)
+  paused = false
   return { syncApiUrl, businessId, deviceId, existingBusiness }
 }
 
@@ -110,11 +122,13 @@ export async function pullLatest() {
 }
 
 export async function syncNow(tillId) {
+  if (paused) return syncConfigurationStatus()
   if (running) return getSyncStatus()
-  const { url, token, businessId, deviceId, existingBusiness } = await configuration()
-  if (!url || !token || !businessId || !deviceId) return syncConfigurationStatus()
   running = true
   try {
+    if (paused) return await syncConfigurationStatus()
+    const { url, token, businessId, deviceId, existingBusiness } = await configuration()
+    if (!url || !token || !businessId || !deviceId) return await syncConfigurationStatus()
     await registerCheckoutTill({ url, token }, tillId)
     const headers = { 'Content-Type': 'application/json', 'X-Stockroom-Staff-Permissions':'staff-permissions-v1', Authorization: `Bearer ${token}` }
     if (!existingBusiness && !(await cloudHasBusinessState({ url, token, businessId }))) await queueInitialSettingsSnapshot()

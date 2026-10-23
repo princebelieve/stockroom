@@ -30,6 +30,20 @@ export async function cloudLoginAt(syncApiUrl, email, password) {
   if (!response.ok) throw new Error(body.error || 'Could not confirm the cloud owner account.')
   return { ...body, syncApiUrl: url }
 }
+export async function cloudLoginStaffAt(syncApiUrl, businessId, username, password) {
+  const url = cloudUrl(syncApiUrl)
+  const response = await fetch(`${url}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ businessId, username, password }) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Could not sign in to the staff account.')
+  return { ...body, syncApiUrl: url }
+}
+export async function cloudSetStaffDeviceEnrollment(syncApiUrl, accessToken, allowStaffDeviceEnrollment) {
+  const url = cloudUrl(syncApiUrl)
+  const response = await fetch(`${url}/v1/business/device-enrollment-policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ allowStaffDeviceEnrollment }) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Could not save staff device enrollment permission.')
+  return body
+}
 export async function cloudRegisterAt(syncApiUrl, input) {
   const url = cloudUrl(syncApiUrl)
   const response = await fetch(`${url}/v1/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })

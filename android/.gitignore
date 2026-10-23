@@ -3,6 +3,7 @@
 # Built application files
 *.apk
 *.aar
+!local-maven/net/zetetic/sqlcipher-android/4.17.0/sqlcipher-android-4.17.0.aar
 *.ap_
 *.aab
 

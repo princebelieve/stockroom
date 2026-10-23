@@ -1,3 +1,4 @@
+import { PasswordInput } from './PasswordInput'
 import { useEffect, useState } from 'react'
 import { posRequest } from './PosTools'
 import { AsyncButton, AsyncForm, SubmitButton } from './AsyncControls'
@@ -260,7 +261,7 @@ async function saveChannel(action:string,fields:Record<string,unknown>={}):Promi
             {!channelState.localRoomInventory?.length&&<small>Add at least one active room before setting up channel inventory.</small>}
           </AsyncForm>
         </>:channelState.connectionMode!=='stockroom-managed'&&!channelState.property?<AsyncForm className="form-grid" onSubmit={async event=>{event.preventDefault();const form=new FormData(event.currentTarget);if(await saveChannel('connect',{apiKey:String(form.get('apiKey')||''),propertyId:String(form.get('propertyId')||'')}))setChannelKey('')}}>
-          <label>Channex API key{channelState.connected?' (leave blank to use the saved key)':''}<input name="apiKey" type="password" autoComplete="new-password" value={channelKey} onChange={event=>setChannelKey(event.target.value)} minLength={channelState.connected?0:20} required={!channelState.connected}/></label>
+          <label>Channex API key{channelState.connected?' (leave blank to use the saved key)':''}<PasswordInput toggleLabel="API key" name="apiKey" autoComplete="new-password" value={channelKey} onChange={event=>setChannelKey(event.target.value)} minLength={channelState.connected?0:20} required={!channelState.connected}/></label>
           <AsyncButton className="filter-button" disabled={channelBusy||!channelState.encryptionConfigured} onClick={()=>{void saveChannel('discover-properties',{apiKey:channelKey})}}>Load properties from Channex</AsyncButton>
           <label>Channex property<select name="propertyId" required value={channelPropertyId} onChange={event=>setChannelPropertyId(event.target.value)}><option value="">Choose a discovered property</option>{(channelState.availableProperties||[]).map(property=><option key={property.id} value={property.id}>{property.title} | {property.id}</option>)}</select></label>
           <SubmitButton className="filter-button" disabled={channelBusy||!channelState.encryptionConfigured}>{channelBusy?'Connecting...':'Validate and connect property'}</SubmitButton>

@@ -26,7 +26,7 @@ import { catalogueWorkspaces, normalizeShopProfile, validateShopProfile, workspa
 import { paymentPolicy, recordPayment } from '../../server/payment.mjs'
 import { normalizeCashSale } from '../../server/cash.mjs'
 import { loadSubscriptionAccess } from '../../server/subscription-client.mjs'
-import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, saveMobileSyncConfiguration, type MobileSyncConfiguration } from './mobileDatabase'
+import { getMobileSyncConfiguration, isNativeMobile, openMobileDatabase, resetMobileDatabaseForNewBusiness, saveMobileSyncConfiguration, type MobileSyncConfiguration } from './mobileDatabase'
 import { mobileStocktake } from './mobileStocktake'
 import { cloudRequest as requestCloud } from './cloudRequest'
 import { collectStaffActivity } from './staffActivityData'
@@ -384,6 +384,12 @@ async function cachedStaff(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
 
 async function handle(path: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase()
+  if (path === '/api/device/reset' && method === 'POST') {
+    const result = await resetMobileDatabaseForNewBusiness()
+    if (result.pending > 0) return json({ error: `This device has ${result.pending} unsynced change(s) or unresolved sync conflict(s). Sync or resolve them before removing this business from the device.`, pending: result.pending }, 409)
+    localStorage.clear()
+    return json({ reset: true })
+  }
   if (path === '/api/auth/register-business' && method === 'POST') {
     if (await getMobileSyncConfiguration() || await sessionUser()) return error('This device already belongs to a business. Sign in to continue.', 409)
     return originalFetch(`${cloudUrl}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: init?.body, signal: AbortSignal.timeout(20000) })
@@ -418,14 +424,35 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === '/api/installer/activate' && method === 'POST') {
     const input = await body(init)
-    if (input.mode !== 'existing') return error('Mobile devices must join an existing business using an owner account.')
+    if (!['existing', 'staff'].includes(String(input.mode))) return error('Choose an existing business owner or staff sign-in.')
     const cloud = 'https://stockroom-0vm5.onrender.com'
-    const login = await originalFetch(`${cloud}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.ownerEmail, password: input.ownerPassword }) })
-    const account = await login.json(); if (!login.ok || account.account?.role !== 'owner') return error(account.error || 'Only a business owner can enroll this phone.')
+    let businessId = ''
+    let credentials: Record<string, unknown>
+    if (input.mode === 'staff') {
+      const raw = String(input.businessLink || '').trim()
+      try {
+        const link = new URL(raw.includes('://') ? raw : `https://${raw}`)
+        businessId = link.searchParams.get('business') || ''
+      } catch { businessId = raw }
+      if (!businessId) businessId = raw
+      if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId)) return error('Paste the business sign-in link shared by the owner, or enter its business ID.')
+      credentials = { username: String(input.username || '').trim(), password: input.password, businessId }
+    } else {
+      credentials = { email: input.ownerEmail, password: input.ownerPassword }
+    }
+    const login = await originalFetch(`${cloud}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) })
+    const account = await login.json()
+    if (!login.ok) return error(account.error || 'Sign-in failed. Check the credentials and business link.')
+    if (input.mode === 'existing' && account.account?.role !== 'owner') return error('Use the business owner email here. Staff should choose “Join as staff”.')
+    if (input.mode === 'staff' && !['admin', 'cashier'].includes(account.account?.role)) return error('This sign-in is not a staff account. Use the owner sign-in option instead.')
+    if (input.mode === 'existing' && ['allow', 'deny'].includes(String(input.staffDevicePolicy))) {
+      const policy = await originalFetch(`${cloud}/v1/business/device-enrollment-policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ allowStaffDeviceEnrollment: input.staffDevicePolicy === 'allow' }) })
+      const saved = await policy.json().catch(() => ({})); if (!policy.ok) return error(saved.error || 'Could not save the staff device permission.')
+    }
     const enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: await mobileDeviceId(), label: input.label }) })
     const device = await enrolled.json(); if (!enrolled.ok) return error(device.error || 'Could not enroll this phone.')
     await saveMobileSyncConfiguration({ syncApiUrl: cloud, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken })
-    return json({ configured: true, existingBusiness: true }, 201)
+    return json({ configured: true, existingBusiness: true, staff: input.mode === 'staff' }, 201)
   }
   if (path === '/api/auth/cloud-session' && method === 'POST') {
     const input = await body(init); const config = await getMobileSyncConfiguration(); if (!config) return error('Enroll this phone before signing in.', 400)

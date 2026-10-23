@@ -1147,8 +1147,24 @@ const server = createServer(async (request, response) => {
       const hasHistory = Boolean(latest || await operations.findOne({ businessId }, { projection: { _id: 1 } }))
       return send(response, 200, { settings: latest?.payload || null, hasHistory })
     }
+    if (request.url === '/v1/business/device-enrollment-policy' && ['GET', 'PUT'].includes(request.method || '')) {
+      if (!isAccess(claims) || claims.role !== 'owner') return send(response, 403, { error: 'Owner access required to manage staff device enrollment.' })
+      if (request.method === 'GET') {
+        const saved = await businessSettings.findOne({ businessId: claims.businessId }, { projection: { allowStaffDeviceEnrollment: 1, 'settings.allowStaffDeviceEnrollment': 1 } })
+        return send(response, 200, { allowStaffDeviceEnrollment: saved?.allowStaffDeviceEnrollment === true || saved?.settings?.allowStaffDeviceEnrollment === true })
+      }
+      const input = await readJson(request)
+      if (typeof input.allowStaffDeviceEnrollment !== 'boolean') return send(response, 400, { error: 'Choose whether staff may enroll new devices.' })
+      const updatedAt = new Date()
+      await businessSettings.updateOne({ businessId: claims.businessId }, { $set: { businessId: claims.businessId, allowStaffDeviceEnrollment: input.allowStaffDeviceEnrollment, 'settings.allowStaffDeviceEnrollment': input.allowStaffDeviceEnrollment, updatedAt } }, { upsert: true })
+      return send(response, 200, { allowStaffDeviceEnrollment: input.allowStaffDeviceEnrollment })
+    }
     if (request.method === 'POST' && request.url === '/v1/devices/enroll') {
       if (!isAccess(claims)) return send(response, 403, { error: 'Sign-in required.' })
+      if (claims.role !== 'owner') {
+        const policy = await businessSettings.findOne({ businessId: claims.businessId }, { projection: { allowStaffDeviceEnrollment: 1, 'settings.allowStaffDeviceEnrollment': 1 } })
+        if (policy?.allowStaffDeviceEnrollment !== true && policy?.settings?.allowStaffDeviceEnrollment !== true) return send(response, 403, { error: 'The owner has not allowed staff to enroll new devices. Ask them to enable staff device enrollment in Business settings.' })
+      }
       const input = await readJson(request)
       const deviceId = String(input.deviceId || '').trim()
       if (!/^[a-z0-9][a-z0-9-]{2,100}$/i.test(deviceId)) return send(response, 400, { error: 'A valid device ID is required.' })

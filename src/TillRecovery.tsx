@@ -1,3 +1,4 @@
+import { PasswordInput } from './PasswordInput'
 import { useEffect, useState } from 'react'
 import { AsyncButton, AsyncForm, SubmitButton } from './AsyncControls'
 import { cloudRequest } from './lib/cloudRequest'
@@ -49,6 +50,6 @@ export function TillRecovery({ apiUrl, token, headers, businessId, onToken }: { 
         localStorage.removeItem(pendingKey)
         window.location.reload()
       } catch (error) { setMessage(`${error instanceof Error ? error.message : 'Recovery failed.'} If the reply was interrupted, resume this same request.`) } finally { setPassword(''); setBusy(false) }
-    }}><fieldset disabled={busy}><label>Owner password<input type="password" required autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></label><label><input type="checkbox" checked={stopped} onChange={event => setStopped(event.target.checked)} />The original device is stopped and will no longer transact</label><label><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} />I reconciled unsynchronized payments, preparation and stock</label><label>Type RECOVER<input required value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label><button type="button" className="filter-button" onClick={() => { setPassword(''); setOpen(false) }}>Cancel</button><SubmitButton className="closure-confirm" disabled={!password || !stopped || !reviewed || confirmation !== 'RECOVER'}>Confirm till recovery</SubmitButton></fieldset></AsyncForm></section></div>}
+    }}><fieldset disabled={busy}><label>Owner password<PasswordInput required autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></label><label><input type="checkbox" checked={stopped} onChange={event => setStopped(event.target.checked)} />The original device is stopped and will no longer transact</label><label><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} />I reconciled unsynchronized payments, preparation and stock</label><label>Type RECOVER<input required value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label><button type="button" className="filter-button" onClick={() => { setPassword(''); setOpen(false) }}>Cancel</button><SubmitButton className="closure-confirm" disabled={!password || !stopped || !reviewed || confirmation !== 'RECOVER'}>Confirm till recovery</SubmitButton></fieldset></AsyncForm></section></div>}
   </section>
 }

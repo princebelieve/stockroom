@@ -19,6 +19,7 @@ const artifacts = [
   { source: 'android/app/build/outputs/native-debug-symbols/playStoreRelease/native-debug-symbols.zip', extension: 'symbols.zip', optional: true },
 ]
 
+const plannedArtifacts = []
 for (const artifact of artifacts) {
   const source = resolve(projectRoot, artifact.source)
   const destination = resolve(outputDirectory, `Stockroom-Android-${versionName}-${versionCode}.${artifact.extension}`)
@@ -29,14 +30,23 @@ for (const artifact of artifacts) {
     }
     throw new Error(`Required release artifact was not generated: ${source}`)
   }
+  let alreadyCurrent = false
   if (existsSync(destination)) {
     const sourceHash = createHash('sha256').update(readFileSync(source)).digest('hex')
     const destinationHash = createHash('sha256').update(readFileSync(destination)).digest('hex')
     if (sourceHash === destinationHash) {
-      console.log(`Already current: ${destination}`)
-      continue
+      alreadyCurrent = true
+    } else {
+      throw new Error(`Refusing to replace a different release artifact: ${destination}`)
     }
-    throw new Error(`Refusing to replace a different release artifact: ${destination}`)
+  }
+  plannedArtifacts.push({ source, destination, alreadyCurrent })
+}
+
+for (const { source, destination, alreadyCurrent } of plannedArtifacts) {
+  if (alreadyCurrent) {
+    console.log(`Already current: ${destination}`)
+    continue
   }
   try {
     copyFileSync(source, destination, constants.COPYFILE_EXCL)
