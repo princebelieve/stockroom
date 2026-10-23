@@ -64,6 +64,7 @@
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -74,6 +75,9 @@
       ]
     },
     "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "include": "build/installer.nsh",

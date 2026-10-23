@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Stockroom Business app icon concept</title>
+  <desc id="desc">An isometric stack of stock boxes with a rising lime accent on a deep green background.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#102c33"/>
+      <stop offset="1" stop-color="#17463b"/>
+    </linearGradient>
+    <linearGradient id="boxTop" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#fbf8ee"/>
+      <stop offset="1" stop-color="#dcece2"/>
+    </linearGradient>
+    <linearGradient id="boxSide" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a9d8b7"/>
+      <stop offset="1" stop-color="#72bda1"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#071c20" flood-opacity=".32"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="255" cy="242" r="190" fill="#4e9478" opacity=".12"/>
+  <path d="M88 385h336" fill="none" stroke="#82b69d" stroke-opacity=".35" stroke-width="8" stroke-linecap="round"/>
+
+  <g filter="url(#shadow)" stroke="#103632" stroke-width="8" stroke-linejoin="round">
+    <!-- upper left carton -->
+    <path d="m147 186 61-35 62 35-62 36z" fill="url(#boxTop)"/>
+    <path d="M147 186v70l61 36v-70z" fill="#9ccfb0"/>
+    <path d="M208 222v70l62-36v-70z" fill="#62ab8c"/>
+    <path d="m181 166 61 36" fill="none" stroke="#d8a943" stroke-width="9"/>
+
+    <!-- upper right carton -->
+    <path d="m241 186 62-35 62 35-62 36z" fill="url(#boxTop)"/>
+    <path d="M241 186v70l62 36v-70z" fill="#b5dfbd"/>
+    <path d="M303 222v70l62-36v-70z" fill="#76bf9b"/>
+    <path d="m275 166 62 36" fill="none" stroke="#d8a943" stroke-width="9"/>
+
+    <!-- lower center carton -->
+    <path d="m194 293 61-36 62 36-62 36z" fill="url(#boxTop)"/>
+    <path d="M194 293v70l61 36v-70z" fill="#9ccfb0"/>
+    <path d="M255 329v70l62-36v-70z" fill="#62ab8c"/>
+    <path d="m229 273 61 36" fill="none" stroke="#d8a943" stroke-width="9"/>
+  </g>
+
+  <path d="M349 125v-32m0 0-19 19m19-19 19 19" fill="none" stroke="#d9ef65" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="349" cy="125" r="8" fill="#d9ef65"/>
+</svg>
