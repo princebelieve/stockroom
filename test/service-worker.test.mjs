@@ -29,6 +29,18 @@ test('service worker excludes APIs, external requests and writes from caching', 
   }
 })
 
+test('account deletion page navigations bypass the app shell', () => {
+  const listeners = {}
+  vm.runInNewContext(readFileSync('public/sw.js', 'utf8'), {
+    URL, self: { location: { origin: 'https://shop.example' }, addEventListener: (event, handler) => listeners[event] = handler },
+  })
+  for (const path of ['/account-deletion', '/account-deletion.html']) {
+    let intercepted = false
+    listeners.fetch({ request: { url: `https://shop.example${path}`, method: 'GET', mode: 'navigate' }, respondWith: () => { intercepted = true } })
+    assert.equal(intercepted, false, path)
+  }
+})
+
 test('service worker serves its matching cached shell before attempting navigation', async () => {
   const listeners = {}
   const shell = new Response('<!doctype html><title>cached shell</title>')

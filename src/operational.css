@@ -36,6 +36,7 @@
   .app-shell .mobile-app-brand strong { display:block; flex:0 1 auto; width:auto; min-width:0; max-width:100%; overflow:hidden; color:white; font:700 15px/1.1 'Space Grotesk',sans-serif; letter-spacing:0; white-space:normal; overflow-wrap:anywhere; word-break:normal; }
   .app-shell .mobile-app-brand span { overflow:hidden; margin-top:2px; color:#ffffffb8; font-size:10px; line-height:1.1; text-overflow:ellipsis; white-space:nowrap; }
   .app-shell .mobile-app-header .notification-center { position:absolute; top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 6px); right:58px; z-index:146; }
+  .app-shell .mobile-app-header .mobile-header-share { position:absolute; top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 6px); right:106px; z-index:146; display:flex; width:40px; min-width:40px; height:40px; align-items:center; justify-content:center; padding:0; border:1px solid #ffffff55; border-radius:10px; color:white; background:#ffffff18; }
   .app-shell .mobile-app-header .notification-center button { color:white; border-color:#ffffff55; background:transparent; }
   .app-shell .mobile-app-actions { display:flex; height:40px; margin-top:2px; align-items:center; justify-content:flex-end; gap:8px; }
   .app-shell .mobile-header-sync { display:inline-flex; width:40px; min-width:40px; height:40px; align-items:center; justify-content:center; padding:0; border:1px solid #ffffff75; border-radius:10px; background:#ffffff18; color:white; }
@@ -671,13 +672,14 @@
   .app-shell .mobile-app-topline,.app-shell .mobile-app-brand { height:58px; }
   .app-shell .mobile-app-brand { overflow:visible; }
   .app-shell .mobile-app-brand-copy { overflow:visible; transform:translateY(20px); }
-  .app-shell .mobile-app-brand { max-width:calc(100% - 100px); gap:9px; }
+  .app-shell .mobile-app-brand { max-width:calc(100% - 156px); gap:9px; }
   .app-shell .mobile-app-brand .brand-mark { flex-basis:38px; width:38px; height:38px; border-radius:11px; }
   .app-shell .mobile-app-brand .brand-mark { align-self:flex-start; margin-top:22px; }
   .app-shell .mobile-app-brand .brand-mark svg { width:24px; height:24px; }
   .app-shell .mobile-app-brand strong { display:-webkit-box; max-width:195px; overflow:hidden; font-size:22px; line-height:1.02; white-space:normal; overflow-wrap:normal; word-break:normal; text-overflow:clip; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
   .app-shell .mobile-app-brand span { display:block; font-size:10px; line-height:1.1; }
   .app-shell .mobile-app-header .notification-center { top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 5px); right:57px; }
+  .app-shell .mobile-app-header .mobile-header-share { top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 5px); right:105px; }
   .app-shell .mobile-app-actions { height:30px; margin-top:2px; gap:8px; }
   .app-shell .mobile-header-sync { width:auto; min-width:78px; height:30px; gap:6px; padding:0 10px; border-radius:9px; font-size:12px; }
   .app-shell .mobile-header-sync span { display:inline; }
@@ -986,6 +988,48 @@
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-facts > div { border-color:#426654; background:#102b31; }
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-facts dt { color:#afc2dc; }
 :root[data-app-theme="dark"] .app-shell .barcode-lookup-facts dd { color:#edf6ff; }
+
+/* Public sign-in and recovery screens use a stable light surface. The global
+   dark theme is for the business workspace; leaking its pale text tokens onto
+   these white pages made headings and form labels nearly invisible. */
+.login-screen {
+  --paper:#ffffff;
+  --ink:#17324d;
+  --muted:#536374;
+  --line:#d7e0e9;
+  --brand-primary:#176b73;
+  --brand-hover:#145a61;
+  --brand-on-primary:#ffffff;
+  color:#17324d;
+  background:#f3f6f9;
+}
+.login-screen .login-card { color:#17324d; background:#ffffff; }
+.login-screen .login-card :is(h1,h2,h3,strong,label) { color:#17324d; }
+.login-screen .login-card :is(p,small) { color:#536374; }
+.login-screen .login-card input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.login-screen .login-card textarea,
+.login-screen .login-card select { color:#17324d; border-color:#c8d4df; background:#ffffff; }
+.login-screen .login-card input::placeholder,
+.login-screen .login-card textarea::placeholder { color:#667789; opacity:1; }
+.login-screen .login-card .text-button { color:#176b73; }
+
+/* Keep the mobile plan controls on the same dark navy surface as the page. */
+:root[data-app-theme="dark"] .app-shell .subscription-mobile-cta {
+  color:#e8f2ff;
+  border-top-color:#29436c;
+  background:rgba(8,20,43,.96);
+  box-shadow:0 -8px 24px rgba(2,8,23,.4);
+}
+:root[data-app-theme="dark"] .app-shell .subscription-mobile-plan-picker {
+  border-color:#38577f;
+  background:#102344;
+}
+:root[data-app-theme="dark"] .app-shell .subscription-mobile-plan-picker button { color:#b6c8df; }
+:root[data-app-theme="dark"] .app-shell .subscription-mobile-plan-picker button.selected {
+  color:#08213a;
+  background:#bcefff;
+  box-shadow:0 2px 8px rgba(2,8,23,.35);
+}
 :root[data-app-theme="dark"] .app-shell .barcode-source-check { border-color:#426654; background:#102b31; }
 :root[data-app-theme="dark"] .app-shell .barcode-source-check label { color:#c2d1e6; }
 :root[data-app-theme="dark"] .app-shell .barcode-source-check select { color:#edf6ff; border-color:#45658e; background:#102442; }
@@ -1009,9 +1053,11 @@
 :root .app-shell .mobile-app-brand span { color:var(--mobile-app-header-text); }
 :root .app-shell .mobile-app-brand span { opacity:.78; }
 :root .app-shell .mobile-header-sync,
+:root .app-shell .mobile-header-share,
 :root .app-shell .mobile-header-help>summary,
 :root .app-shell .mobile-app-header .notification-center button { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:transparent; }
 :root .app-shell .mobile-header-sync,
+:root .app-shell .mobile-header-share,
 :root .app-shell .mobile-header-help>summary { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 92%,var(--mobile-app-header-text)); }
 :root .app-shell .mobile-app-actions .app-theme-toggle { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 34%,transparent); background:transparent; }
 :root .app-shell .mobile-app-actions .app-theme-toggle-track { border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 88%,var(--mobile-app-header-text)); }
@@ -1022,5 +1068,5 @@
 :root .app-shell .mobile-header-help>summary { box-shadow:inset 0 1px #ffffff7a,0 2px 6px #07152522; }
 :root .app-shell .mobile-header-sync-feedback { color:#14263c; background:#f5f8fc; }
 :root[data-app-theme="dark"] .app-shell .mobile-app-header { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
-:root[data-app-theme="dark"] .app-shell .mobile-app-header :is(.mobile-app-brand,.mobile-app-brand strong,.mobile-app-brand span,.mobile-header-sync,.mobile-header-help>summary,.notification-center button) { color:var(--mobile-app-header-text); }
+:root[data-app-theme="dark"] .app-shell .mobile-app-header :is(.mobile-app-brand,.mobile-app-brand strong,.mobile-app-brand span,.mobile-header-sync,.mobile-header-share,.mobile-header-help>summary,.notification-center button) { color:var(--mobile-app-header-text); }
 :root[data-app-theme="dark"] .app-shell .mobile-header-sync-feedback { color:#14263c; background:#f5f8fc; }

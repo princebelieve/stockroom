@@ -62,7 +62,8 @@ const server = createServer(async (request, response) => {
       let body = ''
       let bodySize = 0
       for await (const chunk of request) { bodySize += chunk.length; if (productFormRoute && bodySize > 4_100_000) return sendJson(response, 413, { error: 'Form image is too large.' }); body += chunk }
-      const upstream = await fetch(`${config.url}${path}`, { method: request.method, headers: { 'Content-Type': 'application/json', Authorization: String(request.headers.authorization || '') }, ...(body ? { body } : {}), signal: AbortSignal.timeout(productFormRoute ? 55000 : 8000) })
+      const upstreamTimeout = productFormRoute ? 55000 : (path === '/v1/account-deletion/me' || sessionRefreshRoute ? 90000 : 8000)
+      const upstream = await fetch(`${config.url}${path}`, { method: request.method, headers: { 'Content-Type': 'application/json', Authorization: String(request.headers.authorization || '') }, ...(body ? { body } : {}), signal: AbortSignal.timeout(upstreamTimeout) })
       return sendJson(response, upstream.status, await upstream.json())
     } catch { return sendJson(response, 503, { error: 'Could not reach the cloud service. Check your connection and try again.' }) }
   }

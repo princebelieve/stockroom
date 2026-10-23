@@ -13,12 +13,12 @@ export function AccountDeletionPanel({ apiUrl, token, onToken, role }: { apiUrl:
   const [loading, setLoading] = useState(true)
   const [retry, setRetry] = useState(0)
 
-  useEffect(() => { let live = true; if (role !== 'owner') return; setLoading(true); setError(''); void cloudRequest(apiUrl, '/v1/account-deletion/me', {}, onToken, token).then(value => { if (live) setState(value as DeletionStatus) }).catch(caught => { if (live) setError(caught instanceof Error ? caught.message : 'Could not check account deletion status.') }).finally(() => { if (live) setLoading(false) }); return () => { live = false } }, [apiUrl, token, retry, role])
+  useEffect(() => { let live = true; if (role !== 'owner') return; setLoading(true); setError(''); void cloudRequest(apiUrl, '/v1/account-deletion/me', { signal: AbortSignal.timeout(90_000) }, onToken, token).then(value => { if (live) setState(value as DeletionStatus) }).catch(caught => { if (live) setError(caught instanceof Error ? caught.message : 'Could not check account deletion status.') }).finally(() => { if (live) setLoading(false) }); return () => { live = false } }, [apiUrl, token, retry, role])
 
   const act = async (action: 'request' | 'cancel') => {
     setBusy(true); setError('')
     try {
-      const result = await cloudRequest(apiUrl, '/v1/account-deletion/me', { method: 'POST', body: JSON.stringify({ action, confirmation }) }, onToken, token) as DeletionStatus
+      const result = await cloudRequest(apiUrl, '/v1/account-deletion/me', { method: 'POST', body: JSON.stringify({ action, confirmation }), signal: AbortSignal.timeout(90_000) }, onToken, token) as DeletionStatus
       setState(result.status === 'active' ? { ...result, graceDays: state?.graceDays } : result); setConfirmation(''); setConfirming(false)
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not update account deletion request.') }
     finally { setBusy(false) }

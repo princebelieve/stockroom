@@ -19,7 +19,7 @@ async function cloudRequestInternal(apiUrl: string, path: string, init: RequestI
       if (!renewal) {
         const localSession = localStorage.getItem('stockroom-token')
         renewal = (async () => {
-          const result = await fetch(`${apiUrl}/v1/auth/refresh`, { method: 'POST', signal: AbortSignal.timeout(10_000), headers: { 'Content-Type': 'application/json', ...(apiUrl === '/api/cloud' ? { 'X-Local-Session': localStorage.getItem('stockroom-token') || '' } : {}) }, body: JSON.stringify({ refreshToken }) })
+          const result = await fetch(`${apiUrl}/v1/auth/refresh`, { method: 'POST', signal: init.signal || AbortSignal.timeout(90_000), headers: { 'Content-Type': 'application/json', ...(apiUrl === '/api/cloud' ? { 'X-Local-Session': localStorage.getItem('stockroom-token') || '' } : {}) }, body: JSON.stringify({ refreshToken }) })
           const data = await result.json().catch(() => ({}))
           if (!result.ok) {
             if (result.status === 401 || result.status === 403) throw new CloudAuthenticationError(data.error || 'Sign in with your cloud owner account.')

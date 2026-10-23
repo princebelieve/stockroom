@@ -413,6 +413,22 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   // session goes to sign-in, where the user explicitly requests cloud access.
   const user = savedUser
   const db = await openMobileDatabase()
+  if (path === '/api/device/reset' && method === 'POST') {
+    const config = await getMobileSyncConfiguration()
+    if (!config) return error('This browser is not connected to a saved business.')
+    const input = await body(init)
+    const login = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: String(input.email || '').trim(), password: String(input.password || '') }), signal: AbortSignal.timeout(90_000) })
+    const account = await login.json().catch(() => ({}))
+    if (!login.ok) return error(account.error || 'Owner sign-in failed. The business was not removed.', login.status)
+    if (account.account?.role !== 'owner' || account.account?.businessId !== config.businessId) return error('Sign in as this business owner to remove its saved data from this browser.', 403)
+    const pending = Number((await db.query('SELECT COUNT(*) AS count FROM sync_outbox WHERE synced_at IS NULL')).values?.[0]?.count || 0)
+    const conflicts = Number((await db.query('SELECT COUNT(*) AS count FROM sync_conflicts WHERE resolved_at IS NULL')).values?.[0]?.count || 0)
+    if (pending + conflicts > 0) return error(`This browser has ${pending + conflicts} unsynced change(s) or unresolved sync conflict(s). Sync or resolve them before removing this business.`, 409)
+    await db.run('PRAGMA defer_foreign_keys = ON')
+    const tables = (await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'")).values || []
+    for (const row of tables) await db.run(`DELETE FROM "${String(row.name).replaceAll('"', '""')}"`)
+    return json({ reset: true })
+  }
   if (path === '/api/health') return json({ ok: true, storage: 'Browser SQLite / IndexedDB' })
   if (path === '/api/settings' && method === 'GET') {
     const config = await getMobileSyncConfiguration()
@@ -442,17 +458,17 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     const rawBusinessId = String(input.businessId || new URLSearchParams(window.location.search).get('business') || '').trim()
     let requestedBusinessId = rawBusinessId
     try { requestedBusinessId = new URL(rawBusinessId.includes('://') ? rawBusinessId : `https://${rawBusinessId}`).searchParams.get('business') || rawBusinessId } catch { /* Accept a plain business ID. */ }
-    if (config && requestedBusinessId && requestedBusinessId !== config.businessId) return error('This browser is already connected to a different business. Sign out and use a separate browser profile to join another business.', 403)
+    if (config && requestedBusinessId && requestedBusinessId !== config.businessId) return error('This browser is already connected to a different business. Remove its saved business from this browser before joining another business.', 403)
     const businessId = config?.businessId || requestedBusinessId
     const identifier = String(input.identifier || input.email || '').trim()
-    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId }) })
+    const response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId }), signal: AbortSignal.timeout(90_000) })
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
     const account = result.account
     if (businessId && account.businessId !== businessId) return error('These credentials belong to a different business than this sign-in link.', 403)
     if (config && account.businessId !== config.businessId) return error('This account belongs to a different business.', 403)
     if (!config) {
       const deviceId = await browserDeviceId()
-      const enrolled = await originalFetch(`${syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ deviceId, label: `PWA ${deviceId.slice(-8)}` }) })
+      const enrolled = await originalFetch(`${syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ deviceId, label: `PWA ${deviceId.slice(-8)}` }), signal: AbortSignal.timeout(90_000) })
       const device = await enrolled.json()
       if (!enrolled.ok) return error(device.error || 'Could not enroll this browser.', enrolled.status)
       config = { syncApiUrl, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken }
@@ -462,7 +478,7 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
     // Explicit owner sign-in renews this device after token expiry/password reset.
     // Keep the same device ID, cursor and outbox so queued work is preserved.
     if (account.role === 'owner') {
-      const renewed = await originalFetch(`${config.syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ deviceId: config.deviceId, label: await setting('deviceLabel') || config.deviceId }) })
+      const renewed = await originalFetch(`${config.syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ deviceId: config.deviceId, label: await setting('deviceLabel') || config.deviceId }), signal: AbortSignal.timeout(90_000) })
       const device = await renewed.json()
       if (!renewed.ok) return error(device.error || 'Could not renew this device.', renewed.status)
       config.deviceToken = device.deviceToken

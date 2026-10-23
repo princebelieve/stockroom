@@ -21,18 +21,18 @@ async function request(path, payload, timeoutMs = 12_000) {
 export async function cloudLogin(identifier, password) {
   const { businessId } = await getCloudConfiguration()
   const value = String(identifier || '').trim()
-  return request('/v1/auth/login', value.includes('@') ? { email: value, password } : { username: value, password, businessId })
+  return request('/v1/auth/login', value.includes('@') ? { email: value, password } : { username: value, password, businessId }, 90_000)
 }
 export async function cloudLoginAt(syncApiUrl, email, password) {
   const url = cloudUrl(syncApiUrl)
-  const response = await fetch(`${url}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
+  const response = await fetch(`${url}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }), signal: AbortSignal.timeout(90_000) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Could not confirm the cloud owner account.')
   return { ...body, syncApiUrl: url }
 }
 export async function cloudLoginStaffAt(syncApiUrl, businessId, username, password) {
   const url = cloudUrl(syncApiUrl)
-  const response = await fetch(`${url}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ businessId, username, password }) })
+  const response = await fetch(`${url}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ businessId, username, password }), signal: AbortSignal.timeout(90_000) })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || 'Could not sign in to the staff account.')
   return { ...body, syncApiUrl: url }

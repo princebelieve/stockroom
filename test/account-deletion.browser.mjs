@@ -61,7 +61,7 @@ try {
    const {UserGuide}=await import('/src/UserGuide.tsx')
    createRoot(document.getElementById('root')).render(React.createElement(React.Fragment,null,React.createElement(AccountDeletionPanel,{apiUrl:'/test-cloud',token:'test',role,onToken:()=>{}}),React.createElement(UserGuide,{role})))
   },role)
-  await staff.getByLabel('Guide topic').waitFor()
+  await staff.getByRole('navigation', { name: 'Guide topics', exact: true }).waitFor()
   assert.equal(await staff.getByRole('button',{name:'Delete business account'}).count(),0)
   assert.equal(await staff.getByRole('option',{name:'Close your account, exports and referrals'}).count(),0)
   assert.equal(calls,0);await staff.close()
