@@ -439,7 +439,9 @@ export async function handleBrowserApi(path: string, init?: RequestInit): Promis
   if (path === '/api/auth/cloud-session' && method === 'POST') {
     const input = await body(init); let config = await getMobileSyncConfiguration()
     const syncApiUrl = config?.syncApiUrl || cloudUrl
-    const requestedBusinessId = String(new URLSearchParams(window.location.search).get('business') || '').trim()
+    const rawBusinessId = String(input.businessId || new URLSearchParams(window.location.search).get('business') || '').trim()
+    let requestedBusinessId = rawBusinessId
+    try { requestedBusinessId = new URL(rawBusinessId.includes('://') ? rawBusinessId : `https://${rawBusinessId}`).searchParams.get('business') || rawBusinessId } catch { /* Accept a plain business ID. */ }
     if (config && requestedBusinessId && requestedBusinessId !== config.businessId) return error('This browser is already connected to a different business. Sign out and use a separate browser profile to join another business.', 403)
     const businessId = config?.businessId || requestedBusinessId
     const identifier = String(input.identifier || input.email || '').trim()

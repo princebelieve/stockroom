@@ -127,8 +127,8 @@ const server = createServer(async (request, response) => {
     const config = await getCloudConfiguration()
     if (config.businessId || (await getSettings()).ownerConfigured) return sendJson(response, 409, { error: 'This installation already belongs to a business. Sign in to continue.' })
     try {
-      if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
-      const result = await fetch(`${config.url}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(20000) })
+      const cloudUrl = config.url || getDefaultCloudApiUrl()
+      const result = await fetch(`${cloudUrl}/v1/business-registration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(65000) })
       return sendJson(response, result.status, await result.json())
     } catch { return sendJson(response, 503, { error: 'Registration could not be confirmed. Try signing in first; if no account exists, retry your key.' }) }
   })
@@ -137,8 +137,8 @@ const server = createServer(async (request, response) => {
     const config = await getCloudConfiguration()
     if (config.businessId || (await getSettings()).ownerConfigured) return sendJson(response, 409, { error: 'This installation already belongs to a business. Sign in to continue.' })
     try {
-      if (!config.url) return sendJson(response, 503, { error: 'Cloud service is not configured.' })
-      const result = await fetch(`${config.url}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(60000) })
+      const cloudUrl = config.url || getDefaultCloudApiUrl()
+      const result = await fetch(`${cloudUrl}/v1/public/registration-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(65000) })
       return sendJson(response, result.status, await result.json())
     } catch { return sendJson(response, 503, { error: 'Could not request a registration key. Check your internet connection and try again.' }) }
   })
@@ -189,9 +189,17 @@ const server = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/device/reset') {
     if (process.env.STOCKROOM_LOCAL_ONLY !== 'true') return sendJson(response, 404, { error: 'This action is available only in the desktop installation.' })
     return readJson(request, response, async input => {
-      const owner = await authenticateUser(String(input.email || '').trim(), String(input.password || ''))
-      if (owner?.role !== 'owner') return sendJson(response, 403, { error: 'Enter the current owner email and password to remove this business from the computer.' })
       try {
+        const email = String(input.email || '').trim()
+        const password = String(input.password || '')
+        const configured = await getCloudConfiguration()
+        if (configured.businessId) {
+          const remote = await cloudLoginAt(configured.syncApiUrl, email, password)
+          if (remote.account?.role !== 'owner' || remote.account?.businessId !== configured.businessId) return sendJson(response, 403, { error: 'Enter the current owner email and password for this business to remove it from the computer.' })
+        } else {
+          const owner = await authenticateUser(email, password)
+          if (owner?.role !== 'owner') return sendJson(response, 403, { error: 'Enter the current owner email and password to remove this business from the computer.' })
+        }
         const blockers = localBusinessResetBlockers()
         if (blockers > 0) return sendJson(response, 409, { error: `This computer has ${blockers} unsynced change(s) or unresolved sync conflict(s). Sync or resolve them before removing this business.`, pending: blockers })
         await clearCloudConfiguration()
@@ -274,9 +282,24 @@ const server = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/auth/cloud-session') return readJson(request, response, async (input) => {
     try {
       const password = String(input.password || '')
-      const remote = await cloudLogin(String(input.identifier || input.email || ''), password)
       const configured = await getCloudConfiguration()
-      if (configured.businessId && remote.account?.businessId !== configured.businessId) throw new Error('This account belongs to a different business than this enrolled device.')
+      const identifier = String(input.identifier || input.email || '').trim()
+      let remote
+      if (configured.businessId) {
+        remote = await cloudLogin(identifier, password)
+        if (remote.account?.businessId !== configured.businessId) throw new Error('This account belongs to a different business than this computer. Remove its saved business before switching.')
+      } else {
+        const rawBusinessId = String(input.businessId || '').trim()
+        let businessId = rawBusinessId
+        try { businessId = new URL(rawBusinessId.includes('://') ? rawBusinessId : `https://${rawBusinessId}`).searchParams.get('business') || rawBusinessId } catch {}
+        if (identifier.includes('@')) remote = await cloudLoginAt(configured.url || getDefaultCloudApiUrl(), identifier, password)
+        else {
+          if (!/^[a-z0-9][a-z0-9-]{2,80}$/i.test(businessId)) throw new Error('Open or paste the business sign-in link shared by the owner, then sign in with your staff username.')
+          remote = await cloudLoginStaffAt(configured.url || getDefaultCloudApiUrl(), businessId, identifier, password)
+        }
+        const enrolled = await cloudEnrollDevice(remote.syncApiUrl || configured.url || getDefaultCloudApiUrl(), remote.accessToken, { deviceId: generatedDeviceId(), label: 'Windows computer' })
+        await saveCloudConfiguration({ syncApiUrl: remote.syncApiUrl || configured.url || getDefaultCloudApiUrl(), businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken, existingBusiness: true })
+      }
       const user = provisionCloudUser({ ...remote.account, password })
       const token = createSession(user.id)
       return sendJson(response, 200, { token, user, cloudAccessToken: remote.accessToken, refreshToken: remote.refreshToken })

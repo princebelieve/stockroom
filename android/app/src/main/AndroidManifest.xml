@@ -26,6 +26,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Business, staff, customer, ordering, booking, and referral
+                 URLs use query parameters on the site root. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="stockroom.globalcreest.com" android:path="/" />
+            </intent-filter>
+            <!-- Dedicated referral route; ordinary landing-page URLs remain web pages. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="stockroom.globalcreest.com" android:pathPrefix="/r/" />
+            </intent-filter>
+
         </activity>
 
         <service

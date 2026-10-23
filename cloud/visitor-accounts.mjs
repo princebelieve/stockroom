@@ -33,7 +33,7 @@ export function createVisitorAccounts({ database, hashPassword, matchesPassword,
       const referral = await referrals.findOne({ _id: `visitor:${visitor._id}` })
       const commissions = await database.collection('referral_commissions').find({ referrerId: visitor._id, referrerType: 'visitor' }).sort({ createdAt: -1 }).limit(100).toArray()
       const publicUrl = process.env.SUBSCRIPTION_PUBLIC_URL || 'https://stockroom.globalcreest.com/'
-      const link = new URL(publicUrl); link.pathname = '/welcome'; link.search = ''; link.searchParams.set('ref', referral.code); link.hash = 'register'
+      const link = new URL(publicUrl); link.pathname = `/r/${referral.code}`; link.search = ''; link.hash = ''
       return send(response, 200, { visitor: { id: visitor._id, name: visitor.name, email: visitor.email }, link: link.href, commissions: commissions.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amount, currency, percent, kind, createdAt })) })
     }
     return send(response, 404, { error: 'Not found.' })

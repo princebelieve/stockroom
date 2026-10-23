@@ -27,9 +27,10 @@ function configuredProducts(saved = null) {
   return result
 }
 
-export function createGooglePlayBilling({ database, accounts, verifyToken, fetcher = fetch }) {
+export function createGooglePlayBilling({ database, accounts, verifyToken, notifications, fetcher = fetch }) {
   const subscriptions = database.collection('subscriptions')
   const purchases = database.collection('google_play_purchases')
+  const commissions = database.collection('referral_commissions')
   const businessExits = database.collection('business_exit_payments')
   let cachedAccessToken = ''
   let tokenExpiresAt = 0
@@ -81,6 +82,15 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
     return data
   }
 
+  async function getOrder({ serviceAccount, packageName, orderId }) {
+    const accessToken = await googleAccessToken(serviceAccount)
+    const url = `${API_ROOT}/applications/${encodeURIComponent(packageName)}/orders/${encodeURIComponent(orderId)}`
+    const response = await fetcher(url, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15000) })
+    const data = await response.json()
+    if (!response.ok) throw new Error('Google Play could not verify the subscription order amount.')
+    return data
+  }
+
   async function acknowledgeSubscription({ serviceAccount, packageName, productId, purchaseToken }) {
     const accessToken = await googleAccessToken(serviceAccount)
     const url = `${API_ROOT}/applications/${encodeURIComponent(packageName)}/purchases/subscriptions/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}:acknowledge`
@@ -129,6 +139,60 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
     return { ...active, state: data.subscriptionState }
   }
 
+  function minorAmount(money) {
+    const units = Number(money?.units)
+    const nanos = Number(money?.nanos || 0)
+    if (!Number.isFinite(units) || !Number.isFinite(nanos) || units < 0 || nanos < 0 || nanos >= 1_000_000_000) return null
+    // Stockroom's referral wallet stores currency amounts in the same 1/100
+    // units used by its Paystack settlement records.
+    const amount = Math.round((units + nanos / 1_000_000_000) * 100)
+    return Number.isSafeInteger(amount) ? amount : null
+  }
+
+  async function creditVerifiedPlayOrder({ businessId, orderId, order, referrerId, referrerType, firstRate, recurringRate }) {
+    if (!orderId || order?.orderId !== orderId || order?.state !== 'ORDER_STATE_COMPLETED') return false
+    const amount = minorAmount(order.total)
+    const currency = String(order.total?.currencyCode || '').trim().toUpperCase()
+    if (amount === null || amount <= 0 || !currency) return false
+
+    const reference = `google-play:${orderId}`
+    const subscription = await subscriptions.findOne({ _id: businessId })
+    if (!subscription) return false
+    firstRate = Number(firstRate || 0)
+    recurringRate = Number(recurringRate || 0)
+    const first = { $eq: [{ $size: { $ifNull: ['$references', []] } }, 0] }
+    const underLimit = { $lt: [{ $size: { $ifNull: ['$references', []] } }, 4] }
+    const rate = { $cond: [underLimit, { $cond: [first, firstRate, recurringRate] }, 0] }
+    const basisPoints = { $cond: [underLimit, { $cond: [first, Math.round(firstRate * 100), Math.round(recurringRate * 100)] }, 0] }
+    const commission = {
+      reference,
+      referrerId: { $cond: [underLimit, referrerId || null, null] },
+      referrerType: { $cond: [underLimit, referrerType || 'business', null] },
+      currency,
+      percent: rate,
+      kind: { $cond: [underLimit, { $cond: [first, 'first', 'recurring'] }, 'exhausted'] },
+      amount: { $floor: { $divide: [{ $multiply: [amount, basisPoints] }, 10000] } },
+      createdAt: '$$NOW',
+    }
+    await subscriptions.updateOne({ _id: businessId, references: { $ne: reference } }, [{ $set: {
+      references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] },
+      commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] },
+    } }])
+    const updated = await subscriptions.findOne({ _id: businessId })
+    const entry = updated?.commissionEvents?.find(item => item.reference === reference)
+    if (!entry?.referrerId) return true
+    const result = await commissions.updateOne({ _id: reference }, { $setOnInsert: entry }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
+    if (result?.upsertedCount && entry.amount > 0 && notifications?.notifyReferrer) {
+      void notifications.notifyReferrer(entry.referrerType || 'business', entry.referrerId, {
+        title: 'Referral reward earned',
+        body: `${entry.currency} ${Number(entry.amount / 100).toFixed(2)} was added for a verified ${entry.kind === 'first' ? 'first subscription' : 'renewal'}.`,
+        type: 'referral',
+        url: entry.referrerType === 'visitor' ? '/visitor' : '/?screen=subscription',
+      }).catch(error => console.error('Referral notification failed:', error.message))
+    }
+    return true
+  }
+
   async function upsertVerified({ businessId, purchaseToken, data, config: current }) {
     const binding = data.externalAccountIdentifiers?.obfuscatedExternalAccountId
     if (binding !== accountBinding(businessId, current.packageName)) {
@@ -163,6 +227,17 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
     const now = new Date()
     const configured = await database.collection('subscription_settings').findOne({ _id: 'plan' })
     const plan = configured?.plans?.find(row => row.id === planId) || configured
+    const playOrderId = data.latestOrderId || item.latestSuccessfulOrderId || null
+    const existingSubscription = await subscriptions.findOne({ _id: businessId })
+    const playReferralSnapshot = existingSubscription?.playReferralLockedAt
+      ? {}
+      : {
+          playReferralLockedAt: now,
+          playReferralId: existingSubscription?.referrerId || null,
+          playReferralType: existingSubscription?.referrerType || 'business',
+          playFirstReferralPercent: existingSubscription?.referrerType === 'visitor' ? Number(configured?.visitorFirstReferralPercent || 0) : Number(configured?.firstReferralPercent || 0),
+          playRecurringReferralPercent: existingSubscription?.referrerType === 'visitor' ? Number(configured?.visitorRecurringReferralPercent || 0) : Number(configured?.recurringReferralPercent || 0),
+        }
     await subscriptions.updateOne({ _id: businessId }, { $set: {
       playExpiresAt: expiry,
       playPlanId: planId,
@@ -170,15 +245,37 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, fetch
       playProductId: item.productId,
       playPurchaseTokenHash: tokenId,
       playSubscriptionState: state,
+      referralClosed: true,
+      ...playReferralSnapshot,
       ...(Number.isInteger(plan?.graceDays) ? { playGraceDays: plan.graceDays } : {}),
       ...(Number.isInteger(plan?.graceMonths) ? { playGraceMonths: plan.graceMonths } : {}),
       playLastVerifiedAt: now,
     } }, { upsert: true })
     await purchases.updateOne({ _id: tokenId }, { $set: {
       businessId, productId: item.productId, planId, packageName: current.packageName,
-      latestOrderId: data.latestOrderId || null, linkedPurchaseTokenHash: linkedToken ? tokenKey(linkedToken) : null,
+      latestOrderId: playOrderId, linkedPurchaseTokenHash: linkedToken ? tokenKey(linkedToken) : null,
       expiry, subscriptionState: state, workspaceCount, updatedAt: now,
     }, $setOnInsert: { createdAt: now } }, { upsert: true })
+    if (playOrderId) {
+      try {
+        const order = await getOrder({ serviceAccount: current.serviceAccount, packageName: current.packageName, orderId: playOrderId })
+        // Use the attribution and rates frozen on the first verified Play purchase.
+        const lockedSubscription = await subscriptions.findOne({ _id: businessId })
+        if (lockedSubscription) await creditVerifiedPlayOrder({
+          businessId,
+          orderId: playOrderId,
+          order,
+          referrerId: lockedSubscription.playReferralId,
+          referrerType: lockedSubscription.playReferralType,
+          firstRate: lockedSubscription.playFirstReferralPercent,
+          recurringRate: lockedSubscription.playRecurringReferralPercent,
+        })
+      } catch (error) {
+        // Keep the verified entitlement usable. Subsequent owner verification or
+        // a later owner verification or RTDN event can retry order accounting.
+        console.error('Google Play referral order verification failed:', error.message)
+      }
+    }
     return { status: state, expiresAt: expiry, planId }
   }
 

@@ -36,6 +36,12 @@ type Operation = { operationId: string; entityType: string; entityId: string; ac
 
 const networkFetch = window.fetch.bind(window)
 const originalFetch: typeof fetch = (input, init = {}) => networkFetch(input, { ...init, signal: init.signal || AbortSignal.timeout(20000) })
+const enrollmentSignal = () => AbortSignal.timeout(90_000)
+const isTimeoutError = (caught: unknown) => {
+  if (caught instanceof DOMException && caught.name === 'TimeoutError') return true
+  const message = caught instanceof Error ? `${caught.name} ${caught.message}` : String(caught)
+  return /timed?\s*out|timeout|signal.*abort/i.test(message)
+}
 const cloudUrl = __STOCKROOM_SYNC_API_URL__.replace(/\/$/, '')
 const now = () => new Date().toISOString()
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -385,6 +391,13 @@ async function cachedStaff(db: Awaited<ReturnType<typeof openMobileDatabase>>) {
 async function handle(path: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase()
   if (path === '/api/device/reset' && method === 'POST') {
+    const config = await getMobileSyncConfiguration()
+    if (!config) return error('This device is not connected to a saved business.')
+    const input = await body(init)
+    const login = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: String(input.email || '').trim(), password: String(input.password || '') }) })
+    const account = await login.json().catch(() => ({}))
+    if (!login.ok) return error(account.error || 'Owner sign-in failed. The business was not removed.', login.status)
+    if (account.account?.role !== 'owner' || account.account?.businessId !== config.businessId) return error('Sign in as this business owner to remove this device.', 403)
     const result = await resetMobileDatabaseForNewBusiness()
     if (result.pending > 0) return json({ error: `This device has ${result.pending} unsynced change(s) or unresolved sync conflict(s). Sync or resolve them before removing this business from the device.`, pending: result.pending }, 409)
     localStorage.clear()
@@ -440,26 +453,67 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     } else {
       credentials = { email: input.ownerEmail, password: input.ownerPassword }
     }
-    const login = await originalFetch(`${cloud}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) })
-    const account = await login.json()
+    let login: Response
+    try {
+      login = await originalFetch(`${cloud}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials), signal: enrollmentSignal() })
+    } catch (caught) {
+      if (isTimeoutError(caught)) return error('Stockroom’s cloud service did not respond in time. Wait a moment for it to wake, then retry. No device was enrolled.', 504)
+      throw caught
+    }
+    const account = await login.json().catch(() => ({}))
     if (!login.ok) return error(account.error || 'Sign-in failed. Check the credentials and business link.')
     if (input.mode === 'existing' && account.account?.role !== 'owner') return error('Use the business owner email here. Staff should choose “Join as staff”.')
     if (input.mode === 'staff' && !['admin', 'cashier'].includes(account.account?.role)) return error('This sign-in is not a staff account. Use the owner sign-in option instead.')
     if (input.mode === 'existing' && ['allow', 'deny'].includes(String(input.staffDevicePolicy))) {
-      const policy = await originalFetch(`${cloud}/v1/business/device-enrollment-policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ allowStaffDeviceEnrollment: input.staffDevicePolicy === 'allow' }) })
+      const policy = await originalFetch(`${cloud}/v1/business/device-enrollment-policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ allowStaffDeviceEnrollment: input.staffDevicePolicy === 'allow' }), signal: enrollmentSignal() })
       const saved = await policy.json().catch(() => ({})); if (!policy.ok) return error(saved.error || 'Could not save the staff device permission.')
     }
-    const enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: await mobileDeviceId(), label: input.label }) })
+    let enrolled: Response
+    try {
+      enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: await mobileDeviceId(), label: input.label }), signal: enrollmentSignal() })
+    } catch (caught) {
+      if (isTimeoutError(caught)) return error('The cloud sign-in succeeded, but device enrollment did not respond in time. Retry using the same business; enrollment is safe to repeat.', 504)
+      throw caught
+    }
     const device = await enrolled.json(); if (!enrolled.ok) return error(device.error || 'Could not enroll this phone.')
     await saveMobileSyncConfiguration({ syncApiUrl: cloud, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken })
     return json({ configured: true, existingBusiness: true, staff: input.mode === 'staff' }, 201)
   }
   if (path === '/api/auth/cloud-session' && method === 'POST') {
-    const input = await body(init); const config = await getMobileSyncConfiguration(); if (!config) return error('Enroll this phone before signing in.', 400)
+    const input = await body(init); let config = await getMobileSyncConfiguration()
     const identifier = String(input.identifier || input.email || '').trim()
-    const response = await originalFetch(`${config.syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId: config.businessId }) })
+    const syncApiUrl = config?.syncApiUrl || 'https://stockroom-0vm5.onrender.com'
+    const rawBusinessId = String(input.businessId || new URLSearchParams(window.location.search).get('business') || '').trim()
+    let requestedBusinessId = rawBusinessId
+    try { requestedBusinessId = new URL(rawBusinessId.includes('://') ? rawBusinessId : `https://${rawBusinessId}`).searchParams.get('business') || rawBusinessId } catch { /* Accept a plain business ID. */ }
+    if (config && requestedBusinessId && requestedBusinessId !== config.businessId) return error('This phone is already connected to a different business. Remove its saved business before joining another.', 403)
+    const businessId = config?.businessId || requestedBusinessId
+    if (!identifier.includes('@') && !businessId) return error('Open the business sign-in link shared by the owner, then sign in with your staff username and password.', 400)
+    let response: Response
+    try {
+      response = await originalFetch(`${syncApiUrl}/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identifier.includes('@') ? { email: identifier, password: input.password } : { username: identifier, password: input.password, businessId }), signal: enrollmentSignal() })
+    } catch (caught) {
+      if (isTimeoutError(caught)) return error('Stockroom sign-in timed out. Check your connection and try again.', 504)
+      throw caught
+    }
     const result = await response.json(); if (!response.ok) return error(result.error || 'Email or password is incorrect.', response.status)
-    const account = result.account; if (account.businessId !== config.businessId) return error('This account belongs to a different business.', 403); const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, username: account.username || '', role: account.role, permissions:parsePermissions(account.permissions), operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
+    const account = result.account
+    if (config && account.businessId !== config.businessId) return error('This account belongs to a different business. Remove this phone’s saved business before switching.', 403)
+    if (!config) {
+      let enrolled: Response
+      const deviceId = await mobileDeviceId()
+      try {
+        enrolled = await originalFetch(`${syncApiUrl}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${result.accessToken}` }, body: JSON.stringify({ deviceId, label: `Android ${deviceId.slice(-8)}` }), signal: enrollmentSignal() })
+      } catch (caught) {
+        if (isTimeoutError(caught)) return error('Sign-in succeeded, but Stockroom did not finish preparing this phone. Retry sign-in; no manual device setup is needed.', 504)
+        throw caught
+      }
+      const device = await enrolled.json().catch(() => ({}))
+      if (!enrolled.ok) return error(device.error || 'Stockroom could not prepare this phone for business data.', enrolled.status)
+      config = { syncApiUrl, businessId: device.businessId, deviceId: device.deviceId, deviceToken: device.deviceToken }
+      await saveMobileSyncConfiguration(config)
+    }
+    const localId = account.id || id(); const localUser: MobileUser = { id: localId, name: account.name, email: account.email || `${localId}@staff.local.invalid`, username: account.username || '', role: account.role, permissions:parsePermissions(account.permissions), operationalAccess: Boolean(account.operationalAccess), organizationId: config.businessId }
     await db.run('INSERT INTO users (id, name, email, username, role, operational_access, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, email=excluded.email, username=excluded.username, role=excluded.role, operational_access=excluded.operational_access, permissions=excluded.permissions', [localUser.id, localUser.name, localUser.email, localUser.username || '', localUser.role, localUser.operationalAccess ? 1 : 0, JSON.stringify(localUser.permissions||null), now()])
     const stored = (await db.query('SELECT id, name, email, username, role, permissions, operational_access AS operationalAccess FROM users WHERE id = ?', [localUser.id])).values?.[0]
     await setSetting('sessionUserId', String(stored.id))

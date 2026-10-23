@@ -1,0 +1,8 @@
+.native-promoter-backdrop{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:20px;background:#10231fc9;overflow:auto}
+.native-promoter-card{position:relative;width:min(100%,460px);max-height:calc(100dvh - 40px);overflow:auto;padding:28px;border:1px solid #d7e5df;border-radius:22px;background:var(--surface,#fff);color:var(--text,#1c332d);box-shadow:0 20px 70px #10231f45}
+.native-promoter-card h2{margin:14px 0 8px}.native-promoter-card>p{color:var(--muted,#687a73);line-height:1.5}
+.native-promoter-close{position:absolute;top:16px;right:16px;display:grid;place-items:center;width:38px;height:38px;border:0;border-radius:50%;background:transparent;color:inherit}
+.native-promoter-form{display:grid;gap:14px;margin:20px 0}.native-promoter-form label,.native-promoter-link-label{display:grid;gap:7px;font-weight:600}
+.native-promoter-form input,.native-promoter-link-label input{width:100%;min-height:48px;padding:10px 13px;border:1px solid #d8e0dc;border-radius:12px;background:var(--surface,#fff);color:inherit;font:inherit}
+.native-promoter-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.native-promoter-actions button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:10px 16px}
+.native-promoter-message{color:#287a5b}.native-promoter-error{color:#a23d32}.native-promoter-card>.text-button{margin-top:10px}

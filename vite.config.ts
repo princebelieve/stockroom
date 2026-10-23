@@ -18,6 +18,9 @@ export default defineConfig(({ mode }) => {
   // The API base URL is public client configuration. Inject only this one
   // setting; never expose device tokens or other SYNC_* environment values.
   const syncApiUrl = env.SYNC_API_URL || env.VITE_SYNC_API_URL || 'https://stockroom-0vm5.onrender.com'
+  const appLinkFingerprints = (env.ANDROID_APP_LINK_SHA256_CERT_FINGERPRINT || '')
+    .split(',').map(value => value.trim().toUpperCase())
+    .filter(value => /^([A-F0-9]{2}:){31}[A-F0-9]{2}$/.test(value))
   return {
   define: {
     __STOCKROOM_SYNC_API_URL__: JSON.stringify(syncApiUrl),
@@ -36,6 +39,26 @@ export default defineConfig(({ mode }) => {
       })
     },
     generateBundle() { for (const [name, path] of Object.entries(ocrFiles)) this.emitFile({ type: 'asset', fileName: `ocr/${name}`, source: readFileSync(path) }) },
+  }, {
+    name: 'android-app-links-verification',
+    generateBundle() {
+      // Configure the Play App Signing SHA-256 fingerprint in the website
+      // build environment. Debug fingerprints can be added comma-separated
+      // when a hosted debug build needs verified links too.
+      if (!appLinkFingerprints.length) return
+      this.emitFile({
+        type: 'asset',
+        fileName: '.well-known/assetlinks.json',
+        source: JSON.stringify([{
+          relation: ['delegate_permission/common.handle_all_urls'],
+          target: {
+            namespace: 'android_app',
+            package_name: 'com.stockroom.business',
+            sha256_cert_fingerprints: [...new Set(appLinkFingerprints)],
+          },
+        }]),
+      })
+    },
   }, {
     name: 'offline-shell',
     writeBundle(options, bundle) {

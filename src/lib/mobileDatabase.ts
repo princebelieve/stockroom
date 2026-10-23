@@ -8,6 +8,7 @@ import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@cap
  */
 const databaseName = 'stockroom-mobile'
 const schemaVersion = 1
+const sqlite = new SQLiteConnection(CapacitorSQLite)
 let connection: SQLiteDBConnection | null = null
 let openingConnection: Promise<SQLiteDBConnection> | null = null
 
@@ -35,11 +36,20 @@ export async function openMobileDatabase(): Promise<SQLiteDBConnection> {
 
 async function initializeMobileDatabase(): Promise<SQLiteDBConnection> {
   if (!isNativeMobile()) throw new Error('Native SQLite is available only inside the Android application.')
-  const sqlite = new SQLiteConnection(CapacitorSQLite)
   const existing = await sqlite.isConnection(databaseName, false)
-  connection = existing.result
-    ? await sqlite.retrieveConnection(databaseName, false)
-    : await sqlite.createConnection(databaseName, false, 'no-encryption', schemaVersion, false)
+  if (existing.result) {
+    connection = await sqlite.retrieveConnection(databaseName, false)
+  } else {
+    try {
+      connection = await sqlite.createConnection(databaseName, false, 'no-encryption', schemaVersion, false)
+    } catch (error) {
+      // A recreated Android WebView has a fresh JS connection map while the
+      // Capacitor SQLite plugin may still own the database connection.
+      if (!String(error).includes(`Connection ${databaseName} already exists`)) throw error
+      await CapacitorSQLite.closeConnection({ database: databaseName, readonly: false })
+      connection = await sqlite.createConnection(databaseName, false, 'no-encryption', schemaVersion, false)
+    }
+  }
   await connection.open()
   await connection.execute(`
     PRAGMA foreign_keys = ON;
@@ -226,7 +236,7 @@ export async function resetMobileDatabaseForNewBusiness(): Promise<{ pending: nu
   const pending = Number(pendingResult.values?.[0]?.count || 0) + Number(conflictResult.values?.[0]?.count || 0)
   if (pending > 0) return { pending }
 
-  await db.close()
+  await sqlite.closeConnection(databaseName, false)
   await db.delete()
   connection = null
   openingConnection = null

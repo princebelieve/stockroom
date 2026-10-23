@@ -11,6 +11,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(StockroomPrintingPlugin.class);
         registerPlugin(StockroomNotificationsPlugin.class);
         registerPlugin(StockroomBillingPlugin.class);
+        registerPlugin(StockroomAppLinksPlugin.class);
+        registerPlugin(StockroomSharePlugin.class);
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         WebView webView = getBridge().getWebView();
@@ -20,5 +22,10 @@ public class MainActivity extends BridgeActivity {
             settings.setBuiltInZoomControls(false);
             settings.setDisplayZoomControls(false);
         }
+    }
+
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        setIntent(intent);
+        super.onNewIntent(intent);
     }
 }

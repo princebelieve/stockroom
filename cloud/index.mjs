@@ -89,46 +89,55 @@ const referralVisitors = database.collection('referral_visitors')
 const customerPortalAccounts = database.collection('customer_portal_accounts')
 const customerPortalLoginLimits = new Map()
 const businessExitPayments = database.collection('business_exit_payments')
-await operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true })
-await operations.createIndex({ businessId: 1, entityId: 1 }, { unique: true, partialFilterExpression: { entityType: 'retail_record' } })
-await operations.createIndex({businessId:1,'payload.branchId':1,'payload.supplierId':1},{unique:true,partialFilterExpression:{entityType:'retail_record','payload.kind':'supplier-opening'}})
-await operations.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { name: 'counter_order_receipt', unique: true, partialFilterExpression: { entityType: 'sale', 'payload.paymentDetails.counterOrder.id': { $exists: true } } })
-await operations.createIndex({ businessId: 1, _id: 1 })
-await entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true })
-await entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.channelPropertyId': 1, 'payload.channelBookingId': 1, 'payload.channelBookingRoomId': 1 }, { unique: true, name: 'unique_channel_stay_room', partialFilterExpression: { entityType: 'pos_record', 'payload.kind': 'hotel-stay', 'payload.source': 'channex' } })
-await entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.kind': 1, 'payload.source': 1, 'payload.channelPropertyId': 1, 'payload.channelBookingId': 1 }, { name: 'hotel_channel_booking_lookup', partialFilterExpression: { entityType: 'pos_record', 'payload.kind': 'hotel-stay', 'payload.source': 'channex' } })
-await entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.barcode': 1 }, { name: 'business_product_barcode', partialFilterExpression: { entityType: 'product', 'payload.barcode': { $type: 'string' } } })
-await businessSettings.createIndex({ businessId: 1 }, { unique: true })
-await sharedProductCatalogue.createIndex({ barcode: 1, lastContributedAt: -1 })
-await sharedProductCatalogueQueue.createIndex({ businessId: 1, state: 1, createdAt: 1 })
-await inventoryAlertState.createIndex({ businessId: 1, branchId: 1, productId: 1 }, { unique: true })
-// Staff email is optional contact data. Convert the original mandatory unique
-// index once so several staff accounts can omit it.
-await accounts.dropIndex('email_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
-await accounts.createIndex({ email: 1 }, { unique: true, partialFilterExpression: { email: { $type: 'string' } } })
-// A business has one owner and can have many staff. Older deployments created
-// this index as unique, which silently limited every business to one account
-// and surfaced as a misleading email/username collision on staff creation.
-await accounts.dropIndex('businessId_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error })
-await accounts.createIndex({ businessId: 1 })
-await accounts.createIndex({ businessId: 1, role: 1 }, { unique: true, partialFilterExpression: { role: 'owner' }, name: 'one_owner_per_business' })
-await accounts.createIndex({ businessId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } })
-await devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true })
-await database.collection('checkout_tills').createIndex({ businessId: 1, tillId: 1 }, { unique: true })
-await database.collection('till_recoveries').createIndex({ businessId: 1, requestId: 1 }, { unique: true })
-await passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
-await refreshTokens.createIndex({ tokenHash: 1 }, { unique: true })
-await refreshTokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
-await referralVisitors.createIndex({ email: 1 }, { unique: true })
-await customerPortalAccounts.createIndex({ businessId: 1, customerId: 1 }, { unique: true })
-await customerPortalAccounts.createIndex({ businessId: 1, username: 1 }, { unique: true })
-await entityHeads.createIndex({ 'payload.calendarFeedToken': 1 }, { sparse: true })
-await hotelCalendarSources.createIndex({ businessId: 1, roomId: 1, sourceId: 1 }, { unique: true })
-await database.collection('business_integrations').createIndex({ 'properties.propertyId': 1 }, { unique: true, partialFilterExpression: { provider: 'channex' } })
-await database.collection('channex_ari_queue').createIndex({ businessId: 1, branchId: 1, roomTypeKey: 1 }, { unique: true, name: 'unique_channex_ari_dirty_room_type' })
-await database.collection('channex_ari_expiries').createIndex({ businessId: 1, branchId: 1, blockId: 1 }, { unique: true, name: 'unique_channex_ari_hold_expiry' })
-await hospitalityEmailLog.createIndex({ businessId: 1, bookingId: 1, messageType: 1 }, { unique: true })
-await hospitalityEmailLog.createIndex({ businessId: 1, createdAt: -1 })
+// The service is not ready to answer requests until startup finishes. Create
+// independent indexes concurrently so a Render cold start does not spend one
+// database round trip per index before /health or sign-in can respond.
+const indexSetupStartedAt = Date.now()
+await Promise.all([
+  operations.createIndex({ businessId: 1, operationId: 1 }, { unique: true }),
+  operations.createIndex({ businessId: 1, entityId: 1 }, { unique: true, partialFilterExpression: { entityType: 'retail_record' } }),
+  operations.createIndex({businessId:1,'payload.branchId':1,'payload.supplierId':1},{unique:true,partialFilterExpression:{entityType:'retail_record','payload.kind':'supplier-opening'}}),
+  operations.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { name: 'counter_order_receipt', unique: true, partialFilterExpression: { entityType: 'sale', 'payload.paymentDetails.counterOrder.id': { $exists: true } } }),
+  operations.createIndex({ businessId: 1, _id: 1 }),
+  entityHeads.createIndex({ businessId: 1, entityType: 1, entityId: 1 }, { unique: true }),
+  entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.channelPropertyId': 1, 'payload.channelBookingId': 1, 'payload.channelBookingRoomId': 1 }, { unique: true, name: 'unique_channel_stay_room', partialFilterExpression: { entityType: 'pos_record', 'payload.kind': 'hotel-stay', 'payload.source': 'channex' } }),
+  entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.kind': 1, 'payload.source': 1, 'payload.channelPropertyId': 1, 'payload.channelBookingId': 1 }, { name: 'hotel_channel_booking_lookup', partialFilterExpression: { entityType: 'pos_record', 'payload.kind': 'hotel-stay', 'payload.source': 'channex' } }),
+  entityHeads.createIndex({ businessId: 1, entityType: 1, 'payload.barcode': 1 }, { name: 'business_product_barcode', partialFilterExpression: { entityType: 'product', 'payload.barcode': { $type: 'string' } } }),
+  businessSettings.createIndex({ businessId: 1 }, { unique: true }),
+  sharedProductCatalogue.createIndex({ barcode: 1, lastContributedAt: -1 }),
+  sharedProductCatalogueQueue.createIndex({ businessId: 1, state: 1, createdAt: 1 }),
+  inventoryAlertState.createIndex({ businessId: 1, branchId: 1, productId: 1 }, { unique: true }),
+  (async () => {
+    // Replace old unique indexes while preserving the multi-staff account model.
+    await Promise.all([
+      accounts.dropIndex('email_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error }),
+      accounts.dropIndex('businessId_1').catch((error) => { if (error?.codeName !== 'IndexNotFound') throw error }),
+    ])
+    await Promise.all([
+      accounts.createIndex({ email: 1 }, { unique: true, partialFilterExpression: { email: { $type: 'string' } } }),
+      accounts.createIndex({ businessId: 1 }),
+      accounts.createIndex({ businessId: 1, role: 1 }, { unique: true, partialFilterExpression: { role: 'owner' }, name: 'one_owner_per_business' }),
+      accounts.createIndex({ businessId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } }),
+    ])
+  })(),
+  devices.createIndex({ businessId: 1, deviceId: 1 }, { unique: true }),
+  database.collection('checkout_tills').createIndex({ businessId: 1, tillId: 1 }, { unique: true }),
+  database.collection('till_recoveries').createIndex({ businessId: 1, requestId: 1 }, { unique: true }),
+  passwordResets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+  refreshTokens.createIndex({ tokenHash: 1 }, { unique: true }),
+  refreshTokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+  referralVisitors.createIndex({ email: 1 }, { unique: true }),
+  customerPortalAccounts.createIndex({ businessId: 1, customerId: 1 }, { unique: true }),
+  customerPortalAccounts.createIndex({ businessId: 1, username: 1 }, { unique: true }),
+  entityHeads.createIndex({ 'payload.calendarFeedToken': 1 }, { sparse: true }),
+  hotelCalendarSources.createIndex({ businessId: 1, roomId: 1, sourceId: 1 }, { unique: true }),
+  database.collection('business_integrations').createIndex({ 'properties.propertyId': 1 }, { unique: true, partialFilterExpression: { provider: 'channex' } }),
+  database.collection('channex_ari_queue').createIndex({ businessId: 1, branchId: 1, roomTypeKey: 1 }, { unique: true, name: 'unique_channex_ari_dirty_room_type' }),
+  database.collection('channex_ari_expiries').createIndex({ businessId: 1, branchId: 1, blockId: 1 }, { unique: true, name: 'unique_channex_ari_hold_expiry' }),
+  hospitalityEmailLog.createIndex({ businessId: 1, bookingId: 1, messageType: 1 }, { unique: true }),
+  hospitalityEmailLog.createIndex({ businessId: 1, createdAt: -1 }),
+])
+console.info(`Cloud database indexes ready in ${Date.now() - indexSetupStartedAt}ms`)
 
 async function refreshHotelCalendarSource(source) {
   try {
@@ -380,7 +389,7 @@ async function processInventoryNotification(operation) {
   }
 }
 const referralWallet = await createReferralWallet({ database, accounts, verifyToken, notifications })
-const googlePlayBilling = createGooglePlayBilling({ database, accounts, verifyToken })
+const googlePlayBilling = createGooglePlayBilling({ database, accounts, verifyToken, notifications })
 const subscriptionHandler = await createSubscriptions({ database, accounts, verifyToken, send, handlePayoutWebhook: referralWallet.handleWebhook, notifications })
 const productFormReader = await createProductFormReader({ database, accounts, verifyToken, readJson, send })
 const posPaystack = await createPosPaystack({ database, configFor: tenantIntegrations.paystackConfig })

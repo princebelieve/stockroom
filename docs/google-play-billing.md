@@ -23,6 +23,8 @@ Configure a Pub/Sub topic for Play RTDN, then configure its push subscription to
 - `GET /v1/play/subscriptions/config` (signed-in business owner) returns configured product IDs and the account-binding value the Android billing client must pass as its obfuscated account ID.
 - `POST /v1/play/subscriptions/verify` accepts `{ "purchaseToken": "..." }` for a signed-in owner. The server verifies it through the Google Play Developer API, confirms the app, product, active state, and account binding, acknowledges an unacknowledged purchase, and saves the verified entitlement.
 - `POST /v1/play/rtdn` receives authenticated Pub/Sub notifications. It fetches the current subscription state from Google and updates the stored Play entitlement, including expiry and cancellation/expiry status.
+- For each completed Play order, Stockroom fetches the verified order amount and adds a referral commission using the existing business-owner or visitor-promoter rates. Each Google order ID is credited once, across purchase verification, restores, and RTDN retries. Attribution and reward rates are locked on the first verified Play purchase; the same four-payment limit is shared with Paystack payments for that business.
+- If Google cannot return the order details during a verification call, the verified subscription entitlement still applies and a later owner verification or RTDN event can retry the order reward. The server never estimates the reward from the configured plan price.
 
 The purchase token is hashed for the database mapping; the raw token is sent to Google for verification but is not saved. An account-bound purchase cannot be claimed by another Stockroom business.
 

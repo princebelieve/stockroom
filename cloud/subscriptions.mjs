@@ -123,7 +123,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     await referrals.updateOne({ _id: businessId }, { $setOnInsert: { code: randomBytes(16).toString('hex') } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
     const referral = await referrals.findOne({ _id: businessId })
     const rows = await commissions.find({ referrerId: businessId, $or: [{ referrerType: 'business' }, { referrerType: { $exists: false } }] }).sort({ createdAt: -1 }).limit(100).toArray()
-    const link = new URL(appUrl('register')); link.searchParams.set('ref', referral.code)
+    const link = new URL(process.env.SUBSCRIPTION_PUBLIC_URL); link.pathname = `/r/${referral.code}`; link.search = ''; link.hash = ''
     return { link: link.href, commissions: rows.map(({ _id, amount, currency, percent, kind, createdAt }) => ({ reference: _id, amount, currency, percent, kind, createdAt })) }
   }
   async function listBusinesses(limit = 10, skip = 0) {
