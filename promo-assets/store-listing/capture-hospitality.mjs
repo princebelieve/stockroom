@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
@@ -9,7 +9,7 @@ import { createServer as createViteServer } from 'vite'
 import { normalizeShopProfile } from '../../server/shop-profile.mjs'
 
 const data = await mkdtemp(join(tmpdir(), 'stockroom-play-listing-'))
-const output = resolve('promo-assets/store-listing')
+const output = resolve('promo-assets/store-listing/capture-source')
 const port = 9687
 const base = `http://127.0.0.1:${port}`
 const cloud = createServer(async (request, response) => {
@@ -44,7 +44,8 @@ try {
   const account = await (await fetch(`${base}/api/setup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appName: 'Harbour House', ownerName: 'Owner', email: 'listing-demo@example.invalid', password: 'temporary-listing-demo-password' }) })).json()
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${account.token}` }
   const settings = await (await fetch(`${base}/api/settings`, { headers })).json()
-  await fetch(`${base}/api/settings`, { method: 'PUT', headers, body: JSON.stringify({ ...settings, currency: 'NGN' }) })
+  const iconData = (await readFile(resolve('promo-assets/google-play/app-icon-512.png'))).toString('base64')
+  await fetch(`${base}/api/settings`, { method: 'PUT', headers, body: JSON.stringify({ ...settings, currency: 'NGN', logoData: `data:image/png;base64,${iconData}` }) })
   const profile = normalizeShopProfile({ ...settings.shopProfile, industry: 'services', workflows: 'both', restaurant: true, features: { ...settings.shopProfile?.features, hotelOperations: true, nightlifeOperations: true, hospitalityOperations: true } })
   await fetch(`${base}/api/settings/shop-profile`, { method: 'PUT', headers, body: JSON.stringify(profile) })
 
@@ -60,9 +61,31 @@ try {
   await page.addInitScript(accountData => {
     localStorage.setItem('stockroom-token', accountData.token)
     localStorage.setItem('stockroom-user', JSON.stringify(accountData.user))
+    localStorage.setItem('stockroom-theme', 'dark')
   }, account)
   await page.goto(base)
+  await page.addStyleTag({ content: '.reading-controls{display:none!important}' })
   await page.locator('[aria-label="Subscription: test"]').waitFor({ state: 'attached' })
+  await page.locator('.daily-screen').waitFor()
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: join(output, 'overview-dark.png') })
+  const lightAppearance = page.getByRole('switch', { name: 'Switch to light appearance' })
+  if (await lightAppearance.isVisible()) await lightAppearance.click()
+
+  const captureLargeScreenSet = async name => {
+    const originalViewport = page.viewportSize()
+    for (const device of [
+      { id: 'tablet-7-inch', width: 960, height: 540 },
+      { id: 'tablet-10-inch', width: 1280, height: 720 },
+      { id: 'desktop', width: 1920, height: 1080 },
+    ]) {
+      await page.setViewportSize({ width: device.width, height: device.height })
+      await page.waitForTimeout(150)
+      await page.screenshot({ path: join(output, `${device.id}-${name}.png`) })
+    }
+    await page.setViewportSize(originalViewport)
+  }
+  await captureLargeScreenSet('overview')
 
   const openHospitality = async () => {
     const button = page.getByRole('button', { name: 'Hotel & nightlife', exact: true })
@@ -95,7 +118,8 @@ try {
   await stay.waitFor()
   await stay.locator('strong').first().scrollIntoViewIfNeeded()
   await page.waitForTimeout(150)
-  await page.screenshot({ path: join(output, '03-hotel-operations.png') })
+  await page.screenshot({ path: join(output, 'hotel-operations.png') })
+  await captureLargeScreenSet('hotel-operations')
 
   await hospitality.getByRole('button', { name: 'Nightlife events', exact: true }).click()
   await hospitality.getByLabel('Event name').fill('Friday Live')
@@ -113,10 +137,12 @@ try {
   await event.locator('.customer-row').filter({ hasText: 'Ben Guest' }).waitFor()
   await event.locator('strong').first().scrollIntoViewIfNeeded()
   await page.waitForTimeout(150)
-  await page.screenshot({ path: join(output, '04-nightlife-events.png') })
+  await page.screenshot({ path: join(output, 'nightlife-events.png') })
+  await captureLargeScreenSet('nightlife-events')
 
   await page.route(`${uiBase}/harness`, route => route.fulfill({ contentType: 'text/html', body: '<link rel="stylesheet" href="/src/styles.css"><div id="root"></div>' }))
-  await page.goto(`${uiBase}/harness`)
+  await page.goto(`${uiBase}/harness`, { waitUntil: 'domcontentloaded' })
+  await page.addStyleTag({ content: '.reading-controls{display:none!important}' })
   await page.evaluate(async ({ headers }) => {
     const { React, createRoot } = await import('/test/shop-setup-harness.ts')
     const { ChurchCollections } = await import('/src/ChurchCollections.tsx')
@@ -140,7 +166,8 @@ try {
   await page.getByText('Commitment saved. No payment was recorded.', { exact: true }).waitFor()
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.waitForTimeout(150)
-  await page.screenshot({ path: join(output, '05-church-collections.png') })
+  await page.screenshot({ path: join(output, 'church-collections.png') })
+  await captureLargeScreenSet('church-collections')
 } finally {
   if (browser) await browser.close()
   if (viteServer) await viteServer.close()

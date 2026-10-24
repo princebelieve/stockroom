@@ -1,5 +1,5 @@
 param(
-    [string]$Source = "promo-assets/store-listing/app-icon-monogram-concept.png"
+    [string]$Source = "promo-assets/google-play/app-icon-512.png"
 )
 
 $ErrorActionPreference = 'Stop'
