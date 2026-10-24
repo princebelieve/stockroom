@@ -28,6 +28,7 @@ foreach ($target in $targets) {
     $compilerArgs = @(
         '-shared', '-fPIC', '-O2', '-g', '-fno-limit-debug-info', '-std=c++17',
         '-Wall', '-Werror', '-static-libstdc++', '-Wl,--build-id=sha1',
+        '-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384',
         '-Wl,-soname,libdatastore_shared_counter.so'
     ) + $target.Extra + @(
         (Join-Path $sourceDir 'shared_counter.cc'),

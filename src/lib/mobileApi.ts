@@ -470,7 +470,8 @@ async function handle(path: string, init?: RequestInit): Promise<Response> {
     }
     let enrolled: Response
     try {
-      enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId: await mobileDeviceId(), label: input.label }), signal: enrollmentSignal() })
+      const deviceId = await mobileDeviceId()
+      enrolled = await originalFetch(`${cloud}/v1/devices/enroll`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.accessToken}` }, body: JSON.stringify({ deviceId, label: `Android ${deviceId.slice(-8)}` }), signal: enrollmentSignal() })
     } catch (caught) {
       if (isTimeoutError(caught)) return error('The cloud sign-in succeeded, but device enrollment did not respond in time. Retry using the same business; enrollment is safe to repeat.', 504)
       throw caught

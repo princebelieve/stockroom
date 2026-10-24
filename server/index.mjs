@@ -523,9 +523,10 @@ const server = createServer(async (request, response) => {
         const syncApiUrl = existingBusiness ? remote.syncApiUrl : getDefaultCloudApiUrl()
         if (input.mode === 'existing' && ['allow', 'deny'].includes(String(input.staffDevicePolicy))) await cloudSetStaffDeviceEnrollment(syncApiUrl, remote.accessToken, input.staffDevicePolicy === 'allow')
         const deviceId = generatedDeviceId()
+        const deviceLabel = `Desktop ${deviceId.slice(-8)}`
         const enrolled = existingBusiness
-          ? await cloudEnrollDevice(syncApiUrl, remote.accessToken, { deviceId, label: input.label })
-          : await cloudEnrollDeviceAsInstaller(syncApiUrl, String(input.adminApiKey || ''), { businessId, deviceId, label: input.label, expiresInDays: 365 })
+          ? await cloudEnrollDevice(syncApiUrl, remote.accessToken, { deviceId, label: deviceLabel })
+          : await cloudEnrollDeviceAsInstaller(syncApiUrl, String(input.adminApiKey || ''), { businessId, deviceId, label: deviceLabel, expiresInDays: 365 })
         const configuration = await saveCloudConfiguration({ syncApiUrl, businessId: enrolled.businessId, deviceId: enrolled.deviceId, deviceToken: enrolled.deviceToken, existingBusiness })
         return sendJson(response, 201, { ...configuration, configured: true, existingBusiness, staff: input.mode === 'staff' })
       } catch (error) { return sendJson(response, 400, { error: error.message }) }
