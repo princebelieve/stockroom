@@ -10,7 +10,7 @@ import { ShopProductFields } from './ShopProductFields'
 import { BlankProductForm } from './BlankProductForm'
 import type { SubscriptionAccess } from '../server/subscription-policy.mjs'
 
-export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, refreshSubscriptionAccess, onSubscriptionRequired, onReturnOverview, onWorkspacesSaved }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; refreshSubscriptionAccess: () => Promise<SubscriptionAccess>; onSubscriptionRequired: (selection: { profile: ShopProfile; count: number; names: string[] }) => void; onReturnOverview: () => void; onWorkspacesSaved?: () => void }) {
+export function ShopSetup({ value, save, businessName = 'My business', currency = 'USD', requestedView, hideTaskNavigation = false, refreshSubscriptionAccess, onSubscriptionRequired, onReturnOverview, onWorkspacesSaved }: { value: ShopProfile; save: (profile: ShopProfile) => Promise<void>; businessName?: string; currency?: string; requestedView?: string; hideTaskNavigation?: boolean; refreshSubscriptionAccess: () => Promise<SubscriptionAccess>; onSubscriptionRequired: (selection: { profile: ShopProfile; count: number; names: string[]; workspaceKeys: string[] }) => void; onReturnOverview: () => void; onWorkspacesSaved?: () => void }) {
   const [view,setView]=useState('type')
   const [draft, setDraft] = useState(value)
   const [step, setStep] = useState(0)
@@ -30,9 +30,14 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     const names = [
       ...(workspace.productSales ? ['Product sales'] : []), ...(workspace.oil ? ['Oil sales'] : []),
       ...(workspace.fastFood ? ['Order counter'] : []), ...(workspace.restaurant ? ['Tables & tabs'] : []),
-      ...(workspace.hospitalityOperations ? ['Hospitality operations'] : []),
+      ...(workspace.nightlifeOperations ? ['Nightlife operations'] : []), ...(workspace.hotelOperations ? ['Hotel operations'] : []),
     ]
-    return { profile, count: names.length, names }
+    const workspaceKeys = [
+      ...(workspace.productSales ? ['productSales'] : []), ...(workspace.oil ? ['oil'] : []),
+      ...(workspace.fastFood ? ['fastFood'] : []), ...(workspace.restaurant ? ['restaurant'] : []),
+      ...(workspace.nightlifeOperations ? ['nightlifeOperations'] : []), ...(workspace.hotelOperations ? ['hotelOperations'] : []),
+    ]
+    return { profile, count: names.length, names, workspaceKeys }
   }
   function changeCatalogueList(update: (settings: ReturnType<typeof workspaceCatalogueSettings>) => ReturnType<typeof workspaceCatalogueSettings>) {
     const settings = workspaceCatalogueSettings(draft, catalogueWorkspace)
@@ -102,9 +107,10 @@ export function ShopSetup({ value, save, businessName = 'My business', currency 
     }
     const unrestricted = currentAccess.testMode === true || currentAccess.status === 'test'
     const entitlement = currentAccess.entitledWorkspaces ?? currentAccess.workspacePricing?.count ?? 0
-    if (!unrestricted && count > entitlement) {
-      const additional = count - entitlement
-      setProblem(`Your plan includes ${entitlement} selling workspace${entitlement === 1 ? '' : 's'}, but this selection has ${count}: ${enabledNames.join(', ')}. Add ${additional} workspace${additional === 1 ? '' : 's'} to your subscription, or return to Overview with your currently available workspaces.`)
+    const missingKeys = currentAccess.entitledWorkspaceKeys ? workspaceUpgradeSelection().workspaceKeys.filter(key => !currentAccess.entitledWorkspaceKeys?.includes(key)) : []
+    if (!unrestricted && (count > entitlement || missingKeys.length > 0)) {
+      const additional = Math.max(0, count - entitlement)
+      setProblem(`Your plan includes ${entitlement} selling workspace${entitlement === 1 ? '' : 's'}, but this selection has ${count}: ${enabledNames.join(', ')}. ${missingKeys.length ? `It adds: ${missingKeys.join(', ')}. ` : ''}${additional ? `Add ${additional} workspace${additional === 1 ? '' : 's'} to your subscription. ` : `Update the subscription to cover these workspace types. `}Or return to Overview with your currently available workspaces.`)
       setSubscriptionPrompt(true)
       setShowWorkspaceSubscriptionDialog(true)
       return

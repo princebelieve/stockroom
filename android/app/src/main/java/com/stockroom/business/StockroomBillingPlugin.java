@@ -70,7 +70,8 @@ public class StockroomBillingPlugin extends Plugin implements PurchasesUpdatedLi
                     JSObject row = new JSObject(); row.put("productId", detail.getProductId()); row.put("title", detail.getTitle()); row.put("description", detail.getDescription());
                     JSArray offers = new JSArray();
                     if (detail.getSubscriptionOfferDetails() != null) for (ProductDetails.SubscriptionOfferDetails offer : detail.getSubscriptionOfferDetails()) {
-                        JSObject item = new JSObject(); item.put("offerToken", offer.getOfferToken());
+                        JSObject item = new JSObject(); item.put("offerToken", offer.getOfferToken()); item.put("basePlanId", offer.getBasePlanId());
+                        JSArray tags = new JSArray(); for (String tag : offer.getOfferTags()) tags.put(tag); item.put("offerTags", tags);
                         if (!offer.getPricingPhases().getPricingPhaseList().isEmpty()) {
                             ProductDetails.PricingPhase phase = offer.getPricingPhases().getPricingPhaseList().get(offer.getPricingPhases().getPricingPhaseList().size() - 1);
                             item.put("formattedPrice", phase.getFormattedPrice()); item.put("currencyCode", phase.getPriceCurrencyCode());
@@ -86,12 +87,14 @@ public class StockroomBillingPlugin extends Plugin implements PurchasesUpdatedLi
 
     @PluginMethod
     public void purchase(PluginCall call) {
-        String productId = call.getString("productId", ""), offerToken = call.getString("offerToken", ""), accountId = call.getString("obfuscatedAccountId", "");
+        String productId = call.getString("productId", ""), offerToken = call.getString("offerToken", ""), accountId = call.getString("obfuscatedAccountId", ""), profileId = call.getString("obfuscatedProfileId", "");
         ProductDetails detail = products.get(productId);
         if (detail == null || offerToken.isEmpty() || accountId.isEmpty()) { call.reject("Load the Play subscription price before starting a purchase."); return; }
         Activity activity = getActivity();
         BillingFlowParams.ProductDetailsParams item = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(detail).setOfferToken(offerToken).build();
-        BillingFlowParams params = BillingFlowParams.newBuilder().setProductDetailsParamsList(java.util.Collections.singletonList(item)).setObfuscatedAccountId(accountId).build();
+        BillingFlowParams.Builder flow = BillingFlowParams.newBuilder().setProductDetailsParamsList(java.util.Collections.singletonList(item)).setObfuscatedAccountId(accountId);
+        if (!profileId.isEmpty()) flow.setObfuscatedProfileId(profileId);
+        BillingFlowParams params = flow.build();
         BillingResult result = billingClient.launchBillingFlow(activity, params);
         if (result.getResponseCode() == BillingClient.BillingResponseCode.OK) { JSObject out = new JSObject(); out.put("launched", true); call.resolve(out); }
         else if (result.getResponseCode() == BillingClient.BillingResponseCode.USER_CANCELED) { call.reject("Purchase cancelled.", "PURCHASE_CANCELLED"); }

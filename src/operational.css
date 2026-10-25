@@ -1070,3 +1070,7 @@
 :root[data-app-theme="dark"] .app-shell .mobile-app-header { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
 :root[data-app-theme="dark"] .app-shell .mobile-app-header :is(.mobile-app-brand,.mobile-app-brand strong,.mobile-app-brand span,.mobile-header-sync,.mobile-header-share,.mobile-header-help>summary,.notification-center button) { color:var(--mobile-app-header-text); }
 :root[data-app-theme="dark"] .app-shell .mobile-header-sync-feedback { color:#14263c; background:#f5f8fc; }
+
+.daily-screen .overview-workspace-controls { display:flex; align-items:end; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+.daily-screen .overview-workspace-controls .screen-picker { margin:0; }
+.daily-screen .overview-add-workspace { min-height:38px; padding:8px 12px; font-size:13px; opacity:.76; }

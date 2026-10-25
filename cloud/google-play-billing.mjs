@@ -1,4 +1,5 @@
-import { createHash, createSign } from 'node:crypto'
+import { createHash, createSign, randomBytes } from 'node:crypto'
+import { allWorkspaceBasePlanIds, normalizeWorkspaceKeys, quoteWorkspacePlan, workspaceBasePlanId } from '../server/workspace-subscription-pricing.mjs'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const API_ROOT = 'https://androidpublisher.googleapis.com/androidpublisher/v3'
@@ -21,7 +22,7 @@ function configuredProducts(saved = null) {
   }
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('GOOGLE_PLAY_PRODUCT_IDS must map plan IDs to Play subscription product IDs.')
   if (!Object.keys(values).length) return null
-  const allowed = new Set(['monthly', 'yearly', 'enterprise', ...['monthly','yearly','enterprise'].flatMap(id => [2,3,4].map(count => `${id}${count}`))])
+  const allowed = new Set(['monthly', 'yearly', 'enterprise', ...['monthly','yearly','enterprise'].flatMap(id => [2,3,4,5,6].map(count => `${id}${count}`)), ...['monthly','yearly','enterprise'].flatMap(id => [`${id}Sponsor`, ...[2,3,4,5,6].map(count => `${id}${count}Sponsor`)])])
   const result = Object.fromEntries(Object.entries(values).map(([planId, productId]) => [planId, String(productId).trim()]))
   if (!Object.keys(result).length || Object.entries(result).some(([planId, productId]) => !allowed.has(planId) || !/^[a-zA-Z0-9._-]{3,100}$/.test(productId))) throw new Error('Configure valid monthly, yearly, or enterprise Google Play product IDs.')
   return result
@@ -30,11 +31,13 @@ function configuredProducts(saved = null) {
 export function createGooglePlayBilling({ database, accounts, verifyToken, notifications, fetcher = fetch }) {
   const subscriptions = database.collection('subscriptions')
   const purchases = database.collection('google_play_purchases')
+  const pendingWorkspacePurchases = database.collection('google_play_pending_workspace_purchases')
   const commissions = database.collection('referral_commissions')
   const businessExits = database.collection('business_exit_payments')
   let cachedAccessToken = ''
   let tokenExpiresAt = 0
   let tokenPromise
+  void pendingWorkspacePurchases.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
   async function config() {
     const serviceAccount = parseServiceAccount()
@@ -130,8 +133,10 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, notif
     const lineItems = Array.isArray(data.lineItems) ? data.lineItems : []
     const active = lineItems.map(item => {
       const planKey = planForProduct(String(item.productId || ''), products)
-      const match = planKey?.match(/^(monthly|yearly|enterprise)([2-4])?$/)
-      return { item, planKey, planId: match?.[1] || null, workspaceCount: Number(match?.[2] || 1), expiry: new Date(item.expiryTime || 0) }
+      const match = planKey?.match(/^(monthly|yearly|enterprise)([2-6])?(Sponsor)?$/)
+      const basePlanId = String(item.offerDetails?.basePlanId || '')
+      const basePlanMatch = basePlanId.match(/^(sponsor-)?extra-(\d+)$/)
+      return { item, planKey, planId: match?.[1] || null, workspaceCount: Number(match?.[2] || 1), basePlanId, extraPercent: basePlanMatch ? Number(basePlanMatch[2]) / 100 : null, sponsorPrice: Boolean(match?.[3] || basePlanMatch?.[1]), expiry: new Date(item.expiryTime || 0) }
     })
       .filter(item => item.planId && Number.isFinite(item.expiry.getTime()))
       .sort((a, b) => b.expiry - a.expiry)[0]
@@ -206,6 +211,25 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, notif
       error.statusCode = 409
       throw error
     }
+    const configured = await database.collection('subscription_settings').findOne({ _id: 'plan' })
+    const profileId = String(data.externalAccountIdentifiers?.obfuscatedExternalProfileId || '')
+    const pending = profileId ? await pendingWorkspacePurchases.findOne({ _id: profileId, businessId, expiresAt: { $gt: new Date() } }) : null
+    if (pending) {
+      const expectedBasePlanId = workspaceBasePlanId(pending.extraPercent)
+      if (pending.productId !== currentEntitlement.item.productId || pending.basePlanId !== expectedBasePlanId || currentEntitlement.basePlanId !== expectedBasePlanId || pending.planId !== currentEntitlement.planId) {
+        const error = new Error('Google Play purchase does not match the workspace price selected for this business. Please contact support before retrying.')
+        error.statusCode = 409
+        throw error
+      }
+    }
+    if (currentEntitlement.sponsorPrice) {
+      const owner = await accounts.findOne({ businessId, role: 'owner' }, { projection: { email: 1 } })
+      if (!(configured?.sponsorEmails || []).includes(String(owner?.email || '').trim().toLowerCase())) {
+        const error = new Error('This discounted Google Play subscription is only available to approved sponsors.')
+        error.statusCode = 403
+        throw error
+      }
+    }
     const tokenId = tokenKey(purchaseToken)
     const existing = await purchases.findOne({ _id: tokenId })
     if (existing && existing.businessId !== businessId) {
@@ -222,13 +246,14 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, notif
         throw error
       }
     }
-    const { item, planId, workspaceCount, expiry, state } = currentEntitlement
+    const { item, planId, expiry, state } = currentEntitlement
+    const existingSubscription = await subscriptions.findOne({ _id: businessId })
+    const workspaceCount = pending?.workspaceCount || existing?.workspaceCount || existingSubscription?.playWorkspaceCount || currentEntitlement.workspaceCount
+    const workspaceKeys = pending?.workspaceKeys || existing?.workspaceKeys || existingSubscription?.playWorkspaceKeys
     if (data.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') await acknowledgeSubscription({ serviceAccount: current.serviceAccount, packageName: current.packageName, productId: item.productId, purchaseToken })
     const now = new Date()
-    const configured = await database.collection('subscription_settings').findOne({ _id: 'plan' })
     const plan = configured?.plans?.find(row => row.id === planId) || configured
     const playOrderId = data.latestOrderId || item.latestSuccessfulOrderId || null
-    const existingSubscription = await subscriptions.findOne({ _id: businessId })
     const playReferralSnapshot = existingSubscription?.playReferralLockedAt
       ? {}
       : {
@@ -241,7 +266,9 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, notif
     await subscriptions.updateOne({ _id: businessId }, { $set: {
       playExpiresAt: expiry,
       playPlanId: planId,
-      workspaceCount,
+      playWorkspaceCount: workspaceCount,
+      ...(workspaceKeys ? { playWorkspaceKeys: workspaceKeys } : {}),
+      ...(pending ? { playExtraPercent: pending.extraPercent, playSponsorPrice: pending.sponsorPrice, playBasePlanId: pending.basePlanId } : {}),
       playProductId: item.productId,
       playPurchaseTokenHash: tokenId,
       playSubscriptionState: state,
@@ -254,7 +281,7 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, notif
     await purchases.updateOne({ _id: tokenId }, { $set: {
       businessId, productId: item.productId, planId, packageName: current.packageName,
       latestOrderId: playOrderId, linkedPurchaseTokenHash: linkedToken ? tokenKey(linkedToken) : null,
-      expiry, subscriptionState: state, workspaceCount, updatedAt: now,
+      expiry, subscriptionState: state, workspaceCount, ...(workspaceKeys ? { workspaceKeys } : {}), ...(pending ? { basePlanId: pending.basePlanId, extraPercent: pending.extraPercent, sponsorPrice: pending.sponsorPrice } : {}), updatedAt: now,
     }, $setOnInsert: { createdAt: now } }, { upsert: true })
     if (playOrderId) {
       try {
@@ -377,13 +404,47 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, notif
 
   async function handle(request, response) {
     const url = new URL(request.url, 'http://localhost')
+    if (url.pathname === '/v1/play/subscriptions/prepare' && request.method === 'POST') {
+      let current
+      try { current = await config() } catch { return send(response, 503, { error: 'Google Play subscription configuration is invalid.' }) }
+      if (!current.enabled) return send(response, 503, { error: 'Google Play subscriptions are not configured yet.' })
+      const claims = verifyToken(request)
+      if (claims?.kind !== 'access' || claims.role !== 'owner' || !claims.businessId) return send(response, 401, { error: 'Sign in as the business owner to prepare a Play subscription.' })
+      const owner = await accounts.findOne({ businessId: claims.businessId, role: 'owner' }, { projection: { email: 1 } })
+      if (!owner) return send(response, 401, { error: 'Business owner account not found.' })
+      try {
+        const input = await readJson(request)
+        const planId = String(input.planId || '')
+        if (!['monthly', 'yearly', 'enterprise'].includes(planId)) return send(response, 400, { error: 'Choose a valid subscription plan.' })
+        const workspaceKeys = normalizeWorkspaceKeys(input.workspaceKeys)
+        if (!workspaceKeys.length) return send(response, 400, { error: 'Choose at least one selling workspace.' })
+        const settings = await database.collection('subscription_settings').findOne({ _id: 'plan' })
+        const plan = settings?.plans?.find(row => row.id === planId) || (settings?.id === planId ? settings : null)
+        if (!plan || !Number.isSafeInteger(Number(plan.amount)) || Number(plan.amount) < 1) return send(response, 503, { error: `The ${planId} plan price is not configured.` })
+        const sponsorEmails = settings?.sponsorEmails || []
+        const sponsorPrice = sponsorEmails.includes(String(owner.email || '').trim().toLowerCase())
+        const quote = quoteWorkspacePlan(plan, workspaceKeys, settings || {})
+        const productKey = `${planId}${sponsorPrice ? 'Sponsor' : ''}`
+        const productId = current.products[productKey]
+        if (!productId) return send(response, 503, { error: `Google Play ${productKey} subscription product is not configured.` })
+        const basePlanId = workspaceBasePlanId(quote.extraPercent)
+        const profileId = randomBytes(32).toString('base64url')
+        const now = new Date()
+        await pendingWorkspacePurchases.insertOne({ _id: profileId, businessId: claims.businessId, productId, planId, workspaceKeys, workspaceCount: quote.workspaceCount, extraPercent: quote.extraPercent, sponsorPrice, basePlanId, amount: Math.round(quote.amount * (100 - (sponsorPrice ? 50 : 0)) / 100), createdAt: now, expiresAt: new Date(now.getTime() + 7 * 86400000) })
+        return send(response, 200, { productId, basePlanId, obfuscatedProfileId: profileId, workspaceKeys, workspaceCount: quote.workspaceCount, extraPercent: quote.extraPercent, sponsorDiscountPercent: sponsorPrice ? 50 : 0, amount: Math.round(quote.amount * (100 - (sponsorPrice ? 50 : 0)) / 100), currency: plan.currency })
+      } catch (error) { return send(response, 400, { error: error.message || 'Could not prepare this Play subscription.' }) }
+    }
     if (url.pathname === '/v1/play/subscriptions/config' && request.method === 'GET') {
       let current
       try { current = await config() } catch { return send(response, 503, { enabled: false, error: 'Google Play subscription configuration is invalid.' }) }
       if (!current.enabled) return send(response, 503, { enabled: false, error: 'Google Play subscriptions are not configured yet.' })
       const claims = verifyToken(request)
       if (claims?.kind !== 'access' || claims.role !== 'owner' || !claims.businessId) return send(response, 401, { error: 'Sign in as the business owner to load Play subscription options.' })
-      return send(response, 200, { enabled: true, packageName: current.packageName, products: current.products, exportProductId: current.exportProductId, obfuscatedAccountId: accountBinding(claims.businessId, current.packageName) })
+      const owner = await accounts.findOne({ businessId: claims.businessId, role: 'owner' }, { projection: { email: 1 } })
+      const sponsor = (await database.collection('subscription_settings').findOne({ _id: 'plan' }, { projection: { sponsorEmails: 1 } }))?.sponsorEmails || []
+      const isSponsor = sponsor.includes(String(owner?.email || '').trim().toLowerCase())
+      const purchaseProducts = Object.fromEntries(['monthly','yearly','enterprise','monthlySponsor','yearlySponsor','enterpriseSponsor'].filter(planId => current.products[planId]).map(planId => [planId, current.products[planId]]))
+      return send(response, 200, { enabled: true, packageName: current.packageName, products: purchaseProducts, exportProductId: current.exportProductId, obfuscatedAccountId: accountBinding(claims.businessId, current.packageName), sponsorDiscountPercent: isSponsor ? 50 : 0 })
     }
     if (url.pathname === '/v1/play/subscriptions/verify' && request.method === 'POST') {
       let current

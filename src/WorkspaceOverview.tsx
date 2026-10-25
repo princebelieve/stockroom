@@ -1,20 +1,21 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowRight, ClipboardList, CookingPot, Inbox, PackagePlus, ReceiptText, ShoppingBasket, Store } from 'lucide-react'
+import { ArrowRight, ClipboardList, CookingPot, Inbox, PackagePlus, Plus, ReceiptText, ShoppingBasket, Store } from 'lucide-react'
 import { posRequest } from './PosTools'
 import { restaurantBillLines } from '../server/restaurant-payments.mjs'
 import { ScreenPicker } from './EmptyScreen'
 import type { Sale } from './types'
 
 type Workspace = { stock:boolean; productSales?:boolean; oil?:boolean; payments:boolean; fastFood:boolean; restaurant:boolean; hospitalityOperations?:boolean; hotelOperations?:boolean; nightlifeOperations?:boolean }
-type SellingScreen = 'Oil' | 'POS' | 'Payments' | 'Counter' | 'Restaurant' | 'Hospitality'
-export function WorkspaceOverview({workspace,headers,receipts,money,open,configure,openRecords,openCustomers,openExpenses,scanProducts,readProductList,hasProducts=true,timeZone='UTC',subscriptionExpired=false,onSubscriptionRequired,businessPerformance}:{configure?:(tab:'food'|'restaurant'|'products'|'starters'|'import'|'handwritten')=>void;openRecords?:()=>void;openCustomers?:()=>void;openExpenses?:()=>void;scanProducts?:()=>void;readProductList?:()=>void;hasProducts?:boolean;timeZone?:string;workspace:Workspace;headers:Record<string,string>;receipts:Sale[];money:(n:number)=>string;open:(screen:SellingScreen)=>void;subscriptionExpired?:boolean;onSubscriptionRequired?:()=>void;businessPerformance?:ReactNode}) {
+type SellingScreen = 'Oil' | 'POS' | 'Payments' | 'Counter' | 'Restaurant' | 'Hospitality' | 'Hotel' | 'Nightlife'
+export function WorkspaceOverview({workspace,headers,receipts,money,open,configure,openRecords,openCustomers,openExpenses,scanProducts,readProductList,hasProducts=true,timeZone='UTC',subscriptionExpired=false,onSubscriptionRequired,onAddWorkspace,businessPerformance}:{configure?:(tab:'food'|'restaurant'|'products'|'starters'|'import'|'handwritten')=>void;openRecords?:()=>void;openCustomers?:()=>void;openExpenses?:()=>void;scanProducts?:()=>void;readProductList?:()=>void;hasProducts?:boolean;timeZone?:string;workspace:Workspace;headers:Record<string,string>;receipts:Sale[];money:(n:number)=>string;open:(screen:SellingScreen)=>void;subscriptionExpired?:boolean;onSubscriptionRequired?:()=>void;onAddWorkspace?:()=>void;businessPerformance?:ReactNode}) {
   const choices:{id:SellingScreen;label:string;action:string}[] = [
     ...(workspace.productSales?[{id:'POS' as const,label:'Product sales',action:'New sale'}]:[]),
     ...(workspace.oil?[{id:'Oil' as const,label:'Oil sales',action:'New oil sale'}]:[]),
     ...(workspace.payments?[{id:'Payments' as const,label:'Payments & receipts',action:'Record payment'}]:[]),
     ...(workspace.fastFood?[{id:'Counter' as const,label:'Order counter',action:'New order'}]:[]),
     ...(workspace.restaurant?[{id:'Restaurant' as const,label:'Tables & tabs',action:'Open tables & tabs'}]:[]),
-    ...(workspace.hospitalityOperations?[{id:'Hospitality' as const,label:workspace.hotelOperations&&workspace.nightlifeOperations?'Hotel & nightlife':workspace.hotelOperations?'Hotel operations':'Nightlife operations',action:workspace.hotelOperations&&workspace.nightlifeOperations?'Open hotel & nightlife':workspace.hotelOperations?'Open hotel operations':'Open nightlife operations'}]:[]),
+    ...(workspace.hotelOperations?[{id:'Hotel' as const,label:'Hotel operations',action:'Open hotel operations'}]:[]),
+    ...(workspace.nightlifeOperations?[{id:'Nightlife' as const,label:'Nightlife operations',action:'Open nightlife operations'}]:[]),
   ]
   const [selected,setSelected] = useState('')
   const [subscriptionPrompt,setSubscriptionPrompt] = useState('')
@@ -26,7 +27,7 @@ export function WorkspaceOverview({workspace,headers,receipts,money,open,configu
     setSubscriptionPrompt('');setSelected(id)
   }
   const kind=(sale:Sale)=>sale.paymentDetails?.restaurantBill||sale.paymentDetails?.counterOrder?.tableService?'Restaurant':sale.paymentDetails?.counterOrder?'Counter':sale.paymentDetails?.servicePayment?'Payments':sale.paymentDetails?.pos?.workspace==='oil'?'Oil':'POS'
-  const workspaceReceipts=choice?.id==='Hospitality'?[]:receipts.filter(receipt=>kind(receipt)===choice?.id)
+  const workspaceReceipts=['Hospitality','Hotel','Nightlife'].includes(choice?.id||'')?[]:receipts.filter(receipt=>kind(receipt)===choice?.id)
   const day=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'})
   const today=day.format(new Date())
   const todayReceipts=workspaceReceipts.filter(receipt=>day.format(new Date(receipt.createdAt))===today)
@@ -59,10 +60,10 @@ export function WorkspaceOverview({workspace,headers,receipts,money,open,configu
   },[choice?.id,headers.Authorization,headers['x-stockroom-branch']])
   const needsProducts = choice && ['POS','Oil'].includes(choice.id) && !hasProducts
   const WorkspaceIcon=choice?.id==='Counter'?CookingPot:choice?.id==='Restaurant'?Store:choice?.id==='Payments'?ReceiptText:choice?.id==='Oil'?ShoppingBasket:choice?.id==='Hospitality'?Store:ClipboardList
-  const start = <button type="button" className="primary-button overview-start-button" onClick={()=>needsProducts&&configure?configure('products'):choice&&open(choice.id)}>{needsProducts&&configure?'Add your first product':choice?.action || 'Choose a workspace'}<ArrowRight size={17} aria-hidden="true"/></button>
+  const start = <button type="button" className="primary-button overview-start-button" onClick={()=>needsProducts&&configure?configure('products'):choice&&open(choice.id==='Hotel'||choice?.id==='Nightlife'?'Hospitality':choice.id)}>{needsProducts&&configure?'Add your first product':choice?.action || 'Choose a workspace'}<ArrowRight size={17} aria-hidden="true"/></button>
   const history = openRecords&&<button type="button" className="filter-button" onClick={openRecords}>View sales history<ArrowRight size={16} aria-hidden="true"/></button>
   return <section className="daily-screen" aria-label="Daily work">
-    {choices.length>1 && <ScreenPicker value={choice?.id||''} options={choices} change={selectWorkspace} label="Selling workspace" />}
+    <div className="overview-workspace-controls">{choices.length>1 && <ScreenPicker value={choice?.id||''} options={choices} change={selectWorkspace} label="Selling workspace" />}{onAddWorkspace&&<button type="button" className="filter-button overview-add-workspace" onClick={onAddWorkspace}><Plus size={15} aria-hidden="true"/> Add workspace</button>}</div>
     {subscriptionPrompt&&<p className="auth-error" role="alert">{subscriptionPrompt} {onSubscriptionRequired&&<button type="button" className="text-button" onClick={onSubscriptionRequired}>View plans</button>}</p>}
     <div className="overview-work-area">
       <section className="overview-main-card" aria-label={choice?.label||'Daily work'}>

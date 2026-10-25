@@ -3,6 +3,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { mailConfigured, sendReferralBonusNotice, sendSubscriptionConfirmation, sendSubscriptionGraceNotice, sendSubscriptionPaymentFailed, sendSubscriptionReminder } from './mailer.mjs'
 import { graceDaysEndsAt, graceEndsAt, subscriptionAccess, referralPercentages } from '../server/subscription-policy.mjs'
 import { businessWorkspace, normalizeShopProfile } from '../server/shop-profile.mjs'
+import { allWorkspaceBasePlanIds, quoteWorkspacePlan, workspaceExtraPercent } from '../server/workspace-subscription-pricing.mjs'
 
 export function validatePlan(input) {
   const plan = {
@@ -40,6 +41,7 @@ async function body(request) {
 export async function createSubscriptions({ database, accounts, verifyToken, send, fetcher = fetch, handlePayoutWebhook = async () => false, notifications = null }) {
   const settings = database.collection('subscription_settings')
   const subscriptions = database.collection('subscriptions')
+  const testerRewardClaims = database.collection('subscription_tester_reward_claims')
   const payments = database.collection('subscription_payments')
   const paystackRenewals = database.collection('paystack_auto_renewals')
   const notices = database.collection('subscription_notices')
@@ -48,23 +50,22 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
   const businessExits = database.collection('business_exit_payments')
   await businessExits.createIndex({ reference: 1 }, { unique: true, sparse: true })
   await subscriptions.createIndex({ expiresAt: 1 })
+  await testerRewardClaims.createIndex({ email: 1 }, { unique: true })
   await paystackRenewals.createIndex({ businessId: 1, status: 1 })
   const getPlan = () => settings.findOne({ _id: 'plan' })
   async function workspacePricing(businessId, plan = null) {
     const saved = await businessSettings.findOne({ businessId }, { projection: { 'settings.shopProfile': 1 } })
     const workspace = businessWorkspace(normalizeShopProfile(saved?.settings?.shopProfile))
-    const names = [
-      ...(workspace.productSales ? ['Product sales'] : []),
-      ...(workspace.oil ? ['Oil sales'] : []),
-      ...(workspace.fastFood ? ['Order counter'] : []),
-      ...(workspace.restaurant ? ['Tables & tabs'] : []),
-      ...(workspace.hospitalityOperations ? ['Hospitality operations'] : []),
+    const workspaces = [
+      ...(workspace.productSales ? [{ key: 'productSales', name: 'Product sales', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
+      ...(workspace.oil ? [{ key: 'oil', name: 'Oil sales', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
+      ...(workspace.fastFood ? [{ key: 'fastFood', name: 'Order counter', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
+      ...(workspace.restaurant ? [{ key: 'restaurant', name: 'Tables & tabs', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
+      ...(workspace.nightlifeOperations ? [{ key: 'nightlifeOperations', name: 'Nightlife operations', addonPercent: Number(plan?.nightlifeWorkspaceAddonPercent ?? plan?.workspaceAddonPercent ?? 5) }] : []),
+      ...(workspace.hotelOperations ? [{ key: 'hotelOperations', name: 'Hotel operations', addonPercent: Number(plan?.hotelWorkspaceAddonPercent ?? 10) }] : []),
     ]
-    return { count: names.length, names, addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }
-  }
-  function priceForWorkspaces(plan, count, addonPercent) {
-    if (count < 1) return 0
-    return Math.round(plan.amount * (100 + Math.max(0, count - 1) * addonPercent) / 100)
+    const workspaceKeys = workspaces.map(item => item.key)
+    return { count: workspaces.length, names: workspaces.map(item => item.name), workspaceKeys, addonPercent: Number(plan?.workspaceAddonPercent ?? 5), hotelAddonPercent: Number(plan?.hotelWorkspaceAddonPercent ?? 10), nightlifeAddonPercent: Number(plan?.nightlifeWorkspaceAddonPercent ?? 5), extraPercent: workspaceExtraPercent(workspaceKeys, plan || {}) }
   }
   const getPlans = async () => {
     const saved = await getPlan()
@@ -84,7 +85,23 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
   await settings.updateOne({ _id: 'control' }, { $setOnInsert: { testMode: true } }, { upsert: true })
   const getControl = () => settings.findOne({ _id: 'control' })
   async function access(businessId) {
-    const [control, subscription, plan, owner] = await Promise.all([getControl(), subscriptions.findOne({ _id: businessId }), getPlan(), accounts.findOne({ businessId, role: 'owner' })])
+    const [control, initialSubscription, plan, owner] = await Promise.all([getControl(), subscriptions.findOne({ _id: businessId }), getPlan(), accounts.findOne({ businessId, role: 'owner' })])
+    let subscription = initialSubscription
+    const ownerEmail = String(owner?.email || '').trim().toLowerCase()
+    if (ownerEmail && (plan?.testerRewardEmails || []).includes(ownerEmail)) {
+      let claim = await testerRewardClaims.findOne({ email: ownerEmail })
+      if (!claim) {
+        try { await testerRewardClaims.insertOne({ _id: businessId, businessId, email: ownerEmail, claimedAt: new Date() }) }
+        catch (error) { if (error.code !== 11000) throw error }
+        claim = await testerRewardClaims.findOne({ email: ownerEmail })
+      }
+      if (claim?.businessId === businessId && !subscription?.testerRewardClaimedAt) {
+        await ensureSubscription(businessId)
+        const claimedAt = claim.claimedAt || new Date()
+        await subscriptions.updateOne({ _id: businessId, testerRewardClaimedAt: { $exists: false } }, { $set: { testerRewardClaimedAt: claimedAt, testerRewardExpiresAt: new Date(new Date(claimedAt).getTime() + 30 * 86400000), testerRewardWorkspaceCount: 6, testerRewardWorkspaceKeys: ['productSales','oil','fastFood','restaurant','nightlifeOperations','hotelOperations'] } })
+        subscription = await subscriptions.findOne({ _id: businessId })
+      }
+    }
     const trialDays = Number(plan?.freeTrialDays ?? 0)
     const createdAtTime = owner?.createdAt ? new Date(owner.createdAt).getTime() : 0
     const legacyTrialEndsAt = subscription?.trialConfigured !== true && !subscription?.expiresAt && trialDays > 0 && Number.isFinite(createdAtTime) && createdAtTime > 0
@@ -94,17 +111,21 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const isTrial = !subscription?.expiresAt && Boolean(trialEndsAt)
     const playActive = ['SUBSCRIPTION_STATE_ACTIVE', 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD', 'SUBSCRIPTION_STATE_CANCELED'].includes(subscription?.playSubscriptionState) && subscription?.playExpiresAt && new Date(subscription.playExpiresAt) > new Date()
     const playIsLater = Boolean(playActive && (!subscription?.expiresAt || new Date(subscription.playExpiresAt) > new Date(subscription.expiresAt)))
-    const effectiveExpiresAt = playIsLater ? subscription.playExpiresAt : subscription?.expiresAt || trialEndsAt
+    const standardExpiresAt = playIsLater ? subscription.playExpiresAt : subscription?.expiresAt || trialEndsAt
+    const rewardActive = subscription?.testerRewardExpiresAt && new Date(subscription.testerRewardExpiresAt) > new Date()
+    const effectiveExpiresAt = rewardActive && (!standardExpiresAt || new Date(subscription.testerRewardExpiresAt) > new Date(standardExpiresAt)) ? subscription.testerRewardExpiresAt : standardExpiresAt
     const planId = playIsLater ? subscription.playPlanId : subscription?.planId || (isTrial ? 'trial' : null)
     const graceDays = isTrial ? 0 : playIsLater ? (planId === 'monthly' ? Number(subscription.playGraceDays ?? plan?.monthlyGraceDays ?? 30) : undefined) : planId === 'monthly' && subscription?.graceMonths === undefined ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? Number(plan?.monthlyGraceMonths ?? plan?.graceMonths ?? 1) * 30) : undefined
     const graceMonths = isTrial ? undefined : playIsLater ? (planId === 'monthly' ? undefined : Number(subscription.playGraceMonths ?? plan?.graceMonths ?? 1)) : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
     const current = subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, suspended: Boolean(subscription?.suspendedAt || subscription?.closedAt), suspensionReason: subscription?.closedAt ? 'This business has completed its Stockroom exit.' : subscription?.suspensionReason || '', portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
     const workspacePlan = await getPlan()
     const pricing = await workspacePricing(businessId, workspacePlan)
-    const entitledWorkspaces = Number(subscription?.workspaceCount || pricing.count)
+    const entitledWorkspaces = rewardActive ? 6 : Number((playIsLater ? subscription?.playWorkspaceCount : subscription?.workspaceCount) || pricing.count)
+    const entitledWorkspaceKeys = rewardActive ? subscription?.testerRewardWorkspaceKeys : playIsLater ? subscription?.playWorkspaceKeys : subscription?.workspaceKeys
     if (!pricing.count && !subscription?.suspendedAt && !subscription?.closedAt) return { ...current, blocked: false, status: 'free', reason: 'Payments & receipts is free. Add a selling workspace when you are ready.', workspacePricing: pricing, entitledWorkspaces: 0 }
-    if (pricing.count > entitledWorkspaces && !current.blocked && current.status !== 'test') return { ...current, blocked: true, status: 'workspace-update', reason: `Your subscription covers ${entitledWorkspaces} selling workspace${entitledWorkspaces === 1 ? '' : 's'}. Update the plan for ${pricing.count} enabled workspaces.`, workspacePricing: pricing, entitledWorkspaces }
-    return { ...current, workspacePricing: pricing, entitledWorkspaces }
+    const missingWorkspaceKeys = Array.isArray(entitledWorkspaceKeys) ? pricing.workspaceKeys.filter(key => !entitledWorkspaceKeys.includes(key)) : []
+    if ((pricing.count > entitledWorkspaces || missingWorkspaceKeys.length > 0) && !current.blocked && current.status !== 'test') return { ...current, blocked: true, status: 'workspace-update', reason: missingWorkspaceKeys.length ? `Your subscription does not include: ${missingWorkspaceKeys.map(key => ({ hotelOperations: 'Hotel operations', nightlifeOperations: 'Nightlife operations', productSales: 'Product sales', oil: 'Oil sales', fastFood: 'Order counter', restaurant: 'Tables & tabs' }[key])).join(', ')}. Update the plan to add these workspaces.` : `Your subscription covers ${entitledWorkspaces} selling workspace${entitledWorkspaces === 1 ? '' : 's'}. Update the plan for ${pricing.count} enabled workspaces.`, workspacePricing: pricing, entitledWorkspaces, ...(entitledWorkspaceKeys ? { entitledWorkspaceKeys } : {}) }
+    return { ...current, workspacePricing: pricing, entitledWorkspaces, ...(entitledWorkspaceKeys ? { entitledWorkspaceKeys } : {}) }
   }
   async function ensureSubscription(businessId) {
     await subscriptions.updateOne({ _id: businessId }, { $setOnInsert: { expiresAt: null, references: [], commissionEvents: [] } }, { upsert: true }).catch(error => { if (error.code !== 11000) throw error })
@@ -180,6 +201,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       currency: payment.currency,
       days: payment.days,
       workspaceCount: payment.workspaceCount || 1,
+      ...(Array.isArray(payment.workspaceKeys) ? { workspaceKeys: payment.workspaceKeys } : {}),
       ...(Number.isInteger(payment.graceDays) ? { graceDays: payment.graceDays } : {}),
       ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}),
       firstReferralPercent: payment.firstReferralPercent || 0,
@@ -252,7 +274,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const percent = { $cond: [underRewardLimit, { $cond: [first, payment.firstReferralPercent || 0, payment.recurringReferralPercent || 0] }, 0] }
     const basisPoints = { $cond: [underRewardLimit, { $cond: [first, Math.round((payment.firstReferralPercent || 0) * 100), Math.round((payment.recurringReferralPercent || 0) * 100)] }, 0] }
     const commission = { reference, referrerId: { $cond: [underRewardLimit, payment.referrerId || null, null] }, referrerType: { $cond: [underRewardLimit, payment.referrerType || 'business', null] }, currency: payment.currency, percent, kind: { $cond: [underRewardLimit, { $cond: [first, 'first', 'recurring'] }, 'exhausted'] }, amount: { $floor: { $divide: [{ $multiply: [payment.amount, basisPoints] }, 10000] } }, createdAt: '$$NOW' }
-    const paymentAccess = { ...(payment.planId ? { planId: payment.planId } : {}), ...(Number.isInteger(payment.workspaceCount) ? { workspaceCount: payment.workspaceCount } : {}), ...(Number.isInteger(payment.graceDays) ? { graceDays: payment.graceDays } : {}), ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}), trialEndsAt: null }
+  const paymentAccess = { ...(payment.planId ? { planId: payment.planId } : {}), ...(Number.isInteger(payment.workspaceCount) ? { workspaceCount: payment.workspaceCount } : {}), ...(Array.isArray(payment.workspaceKeys) ? { workspaceKeys: payment.workspaceKeys } : {}), ...(Number.isInteger(payment.graceDays) ? { graceDays: payment.graceDays } : {}), ...(Number.isInteger(payment.graceMonths) ? { graceMonths: payment.graceMonths } : {}), trialEndsAt: null }
     await subscriptions.updateOne({ _id: payment.businessId, references: { $ne: reference } }, [{ $set: { expiresAt: { $add: [{ $max: [{ $ifNull: ['$expiresAt', '$trialEndsAt'] }, { $ifNull: ['$playExpiresAt', '$$NOW'] }, '$$NOW'] }, payment.days * 86400000] }, references: { $concatArrays: [{ $ifNull: ['$references', []] }, [reference]] }, commissionEvents: { $concatArrays: [{ $ifNull: ['$commissionEvents', []] }, [commission]] }, ...paymentAccess } }])
     // The same atomic update selects the first paid renewal, even with concurrent checkouts.
     const settled = await subscriptions.findOne({ _id: payment.businessId })
@@ -362,15 +384,23 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           if (!Number.isSafeInteger(productExportFeeAmount) || productExportFeeAmount < 0 || productExportFeeAmount > 1000000000 || !['NGN', 'GHS', 'ZAR', 'KES', 'USD', 'XOF'].includes(productExportFeeCurrency)) throw new Error('Product export fee must be a non-negative minor-unit amount and supported currency.')
           const workspaceAddonPercent = Number(input.workspaceAddonPercent ?? 5)
           if (!Number.isFinite(workspaceAddonPercent) || workspaceAddonPercent < 0 || workspaceAddonPercent > 100 || Math.round(workspaceAddonPercent * 100) !== workspaceAddonPercent * 100) throw new Error('Extra workspace pricing must be from 0 to 100 percent, with up to two decimal places.')
-          const workspaceProductKeys = ['monthly','yearly','enterprise', ...['monthly','yearly','enterprise'].flatMap(id => [2,3,4,5].map(count => `${id}${count}`))]
-          const googlePlayProductIds = Object.fromEntries(workspaceProductKeys.map(id => [id, String(input[`play${id[0].toUpperCase()}${id.slice(1)}ProductId`] || '').trim()]).filter(([, value]) => value))
+          const hotelWorkspaceAddonPercent = Number(input.hotelWorkspaceAddonPercent ?? 10)
+          const nightlifeWorkspaceAddonPercent = Number(input.nightlifeWorkspaceAddonPercent ?? workspaceAddonPercent)
+          for (const value of [hotelWorkspaceAddonPercent, nightlifeWorkspaceAddonPercent]) if (!Number.isFinite(value) || value < 0 || value > 100 || Math.round(value * 100) !== value * 100) throw new Error('Hotel and Nightlife extra workspace pricing must be from 0 to 100 percent, with up to two decimal places.')
+          const testerRewardEmails = [...new Set(String(input.testerRewardEmails || '').split(/[\s,;]+/).map(value => value.trim().toLowerCase()).filter(Boolean))]
+          const sponsorEmails = [...new Set(String(input.sponsorEmails || '').split(/[\s,;]+/).map(value => value.trim().toLowerCase()).filter(Boolean))]
+          if ([...testerRewardEmails, ...sponsorEmails].some(value => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))) throw new Error('Enter valid email addresses in the tester and sponsor lists.')
+          const workspaceProductKeys = ['monthly','yearly','enterprise', ...['monthly','yearly','enterprise'].flatMap(id => [2,3,4,5,6].map(count => `${id}${count}`)), ...['monthly','yearly','enterprise'].flatMap(id => [`${id}Sponsor`, ...[2,3,4,5,6].map(count => `${id}${count}Sponsor`)])]
+          const existingPlaySettings = await settings.findOne({ _id: 'plan' }, { projection: { googlePlayProductIds: 1 } })
+          const submittedPlayProductIds = Object.fromEntries(workspaceProductKeys.map(id => [id, String(input[`play${id[0].toUpperCase()}${id.slice(1)}ProductId`] || '').trim()]).filter(([, value]) => value))
+          const googlePlayProductIds = { ...(existingPlaySettings?.googlePlayProductIds || {}), ...submittedPlayProductIds }
           if (Object.values(googlePlayProductIds).some(value => !/^[a-zA-Z0-9._-]{3,100}$/.test(value))) throw new Error('Google Play product IDs must be 3 to 100 letters, numbers, dots, underscores, or hyphens.')
           const googlePlayExportProductId = String(input.playExportProductId || '').trim()
           if (googlePlayExportProductId && !/^[a-zA-Z0-9._-]{3,100}$/.test(googlePlayExportProductId)) throw new Error('Google Play export product ID must be 3 to 100 letters, numbers, dots, underscores, or hyphens.')
           const referral = { ...referralPercentages(input), visitorFirstReferralPercent: Number(input.visitorFirstReferralPercent ?? 0), visitorRecurringReferralPercent: Number(input.visitorRecurringReferralPercent ?? 0) }
           for (const value of [referral.visitorFirstReferralPercent, referral.visitorRecurringReferralPercent]) if (!Number.isFinite(value) || value < 0 || value > 100 || Math.round(value * 100) !== value * 100) throw new Error('Visitor referral rates must be from 0 to 100 with up to two decimal places.')
           const plan = input.monthlyAmount === undefined
-              ? { ...validatePlan(input), workspaceAddonPercent, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, googlePlayExportProductId, ...referral }
+              ? { ...validatePlan(input), workspaceAddonPercent, hotelWorkspaceAddonPercent, nightlifeWorkspaceAddonPercent, testerRewardEmails, sponsorEmails, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, googlePlayExportProductId, ...referral }
             : (() => {
               const monthlyGraceDays = Number(input.monthlyGraceDays ?? Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1) * 30)
               const otherGraceMonths = Number(input.graceMonths ?? 1)
@@ -380,12 +410,14 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
                 { ...validatePlan({ ...base, amount: input.yearlyAmount, days: 365, graceMonths: otherGraceMonths }), id: 'yearly', name: 'Yearly' },
                 { ...validatePlan({ ...base, amount: input.enterpriseAmount, days: Number(input.enterpriseDays || 365), graceMonths: otherGraceMonths }), id: 'enterprise', name: 'Enterprise' },
               ]
-              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, workspaceAddonPercent, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, googlePlayExportProductId, ...referral, plans }
+              return { ...plans[0], graceMonths: otherGraceMonths, monthlyGraceDays, workspaceAddonPercent, hotelWorkspaceAddonPercent, nightlifeWorkspaceAddonPercent, testerRewardEmails, sponsorEmails, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, googlePlayExportProductId, ...referral, plans }
             })()
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         const plan = await getPlan()
-        return reply(200, { plan, workspaceAddonPercent: plan?.workspaceAddonPercent ?? 5, registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, accountDeletionGraceDays: plan?.accountDeletionGraceDays ?? 14, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', googlePlayProductIds: plan?.googlePlayProductIds || {}, googlePlayExportProductId: plan?.googlePlayExportProductId || '', testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
+        const pricing = { workspaceAddonPercent: plan?.workspaceAddonPercent ?? 5, hotelWorkspaceAddonPercent: plan?.hotelWorkspaceAddonPercent ?? 10, nightlifeWorkspaceAddonPercent: plan?.nightlifeWorkspaceAddonPercent ?? plan?.workspaceAddonPercent ?? 5 }
+        const googlePlayBasePlanIds = allWorkspaceBasePlanIds(pricing)
+        return reply(200, { plan, ...pricing, googlePlayBasePlanIds, testerRewardEmails: plan?.testerRewardEmails || [], sponsorEmails: plan?.sponsorEmails || [], registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, accountDeletionGraceDays: plan?.accountDeletionGraceDays ?? 14, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', googlePlayProductIds: plan?.googlePlayProductIds || {}, googlePlayExportProductId: plan?.googlePlayExportProductId || '', testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
       }
       if (url.pathname.startsWith('/v1/subscriptions/businesses') && request.method === 'GET') {
         if (!isDeveloper(claims)) return reply(403, { error: 'Developer account required.' })
@@ -429,7 +461,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       if (claims?.kind !== 'access' || claims.role !== 'owner') return reply(403, { error: 'Sign in with your cloud owner account.' })
       const owner = await accounts.findOne({ businessId: claims.businessId, email: claims.email, role: 'owner' })
       if (!owner) return reply(403, { error: 'Owner account not found.' })
-      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') { const configured = await getPlan(); return reply(200, { plan: configured, plans: await getPlans(), workspacePricing: await workspacePricing(claims.businessId, configured), access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1, planId: 1, workspaceCount: 1, paystackAutoRenewStatus: 1, paystackNextPaymentDate: 1, playSubscriptionState: 1, playExpiresAt: 1, playPlanId: 1 } }), enterpriseRequest: await currentEnterpriseRequest(claims.businessId), isDeveloper: isDeveloper(claims) }) }
+      if (url.pathname === '/v1/subscriptions' && request.method === 'GET') { const configured = await getPlan(); const owner = await accounts.findOne({ businessId: claims.businessId, role: 'owner' }, { projection: { email: 1 } }); return reply(200, { plan: configured, plans: await getPlans(), workspacePricing: await workspacePricing(claims.businessId, configured), sponsorDiscountPercent: (configured?.sponsorEmails || []).includes(String(owner?.email || '').trim().toLowerCase()) ? 50 : 0, access: await access(claims.businessId), subscription: await subscriptions.findOne({ _id: claims.businessId }, { projection: { expiresAt: 1, referrerId: 1, planId: 1, workspaceCount: 1, workspaceKeys: 1, paystackAutoRenewStatus: 1, paystackNextPaymentDate: 1, playSubscriptionState: 1, playExpiresAt: 1, playPlanId: 1 } }), enterpriseRequest: await currentEnterpriseRequest(claims.businessId), isDeveloper: isDeveloper(claims) }) }
       if (url.pathname === '/v1/subscriptions/auto-renewal/manage' && request.method === 'POST') {
         const current = await subscriptions.findOne({ _id: claims.businessId }, { projection: { paystackSubscriptionCode: 1, paystackAutoRenewStatus: 1 } })
         if (!current?.paystackSubscriptionCode || !['active', 'attention', 'non_renewing'].includes(current.paystackAutoRenewStatus)) return reply(409, { error: 'There is no active Paystack automatic renewal to manage.' })
@@ -517,13 +549,17 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         const configuredPlan = await getPlan()
         const workspace = await workspacePricing(claims.businessId, configuredPlan)
-        const requestedWorkspaceCount = Number(input.workspaceCount ?? Math.max(1, workspace.count))
-        if (!Number.isInteger(requestedWorkspaceCount) || requestedWorkspaceCount < Math.max(1, workspace.count) || requestedWorkspaceCount > 5) return reply(400, { error: 'Workspace count must include at least one selling workspace, include all currently enabled workspaces, and be no greater than five.' })
-        const quotedAmount = priceForWorkspaces(plan, requestedWorkspaceCount, workspace.addonPercent)
+        const requestedWorkspaceKeys = Array.isArray(input.workspaceKeys) ? [...new Set(input.workspaceKeys.map(String))] : workspace.workspaceKeys
+        const validWorkspaceKeys = new Set(['productSales','oil','fastFood','restaurant','hotelOperations','nightlifeOperations'])
+        if (requestedWorkspaceKeys.some(key => !validWorkspaceKeys.has(key)) || requestedWorkspaceKeys.length < 1 || requestedWorkspaceKeys.length > 6) return reply(400, { error: 'Choose from one to six valid selling workspaces. Save that same selection after payment.' })
+        const requestedWorkspaceCount = requestedWorkspaceKeys.length
+        const quote = quoteWorkspacePlan(plan, requestedWorkspaceKeys, configuredPlan)
+        const sponsorDiscountPercent = (configuredPlan?.sponsorEmails || []).includes(String(owner.email || '').trim().toLowerCase()) ? 50 : 0
+        const quotedAmount = Math.round(quote.amount * (100 - sponsorDiscountPercent) / 100)
         const quotedPlan = { ...plan, amount: quotedAmount }
         const rates = subscription.referrerType === 'visitor' ? { firstReferralPercent: configuredPlan?.visitorFirstReferralPercent || 0, recurringReferralPercent: configuredPlan?.visitorRecurringReferralPercent || 0 } : referralPercentages(configuredPlan || plan)
         const recurringPlanCode = autoRenew ? await paystackPlanCode(quotedPlan) : null
-        await payments.insertOne({ ...validatePlan(quotedPlan), ...rates, workspaceCount: requestedWorkspaceCount, workspaceAddonPercent: workspace.addonPercent, planId: plan.id || 'monthly', referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', ...(autoRenew ? { autoRenew: true, autoRenewConsentAt: new Date(), autoRenewTermsVersion: '2026-09', paystackPlanCode: recurringPlanCode } : {}), _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        await payments.insertOne({ ...validatePlan(quotedPlan), ...rates, workspaceCount: requestedWorkspaceCount, workspaceKeys: requestedWorkspaceKeys, workspaceExtraPercent: quote.extraPercent, sponsorDiscountPercent, workspaceAddonPercent: workspace.addonPercent, planId: plan.id || 'monthly', referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', ...(autoRenew ? { autoRenew: true, autoRenewConsentAt: new Date(), autoRenewTermsVersion: '2026-09', paystackPlanCode: recurringPlanCode } : {}), _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
         const result = await paystack('/transaction/initialize', { email: owner.email, amount: quotedAmount, currency: plan.currency, reference, callback_url: callback, ...(recurringPlanCode ? { plan: recurringPlanCode } : {}) })
         return reply(200, { authorizationUrl: result.authorization_url, reference, amount: quotedAmount, workspaceCount: requestedWorkspaceCount })
       }
@@ -544,14 +580,18 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
         const configured = await getPlan()
         const basePlan = validatePlan({ amount: requestRow.offeredAmount, currency: requestRow.offeredCurrency, days: requestRow.offeredDays, reminderDays: configured?.reminderDays, freeTrialDays: configured?.freeTrialDays, graceMonths: configured?.graceMonths })
         const workspace = await workspacePricing(claims.businessId, configured)
-        const requestedWorkspaceCount = Number(input.workspaceCount ?? Math.max(1, workspace.count))
-        if (!Number.isInteger(requestedWorkspaceCount) || requestedWorkspaceCount < Math.max(1, workspace.count) || requestedWorkspaceCount > 5) return reply(400, { error: 'Workspace count must include at least one selling workspace, include all currently enabled workspaces, and be no greater than five.' })
-        const plan = { ...basePlan, amount: priceForWorkspaces(basePlan, requestedWorkspaceCount, workspace.addonPercent) }
+        const requestedWorkspaceKeys = Array.isArray(input.workspaceKeys) ? [...new Set(input.workspaceKeys.map(String))] : workspace.workspaceKeys
+        const validWorkspaceKeys = new Set(['productSales','oil','fastFood','restaurant','hotelOperations','nightlifeOperations'])
+        if (requestedWorkspaceKeys.some(key => !validWorkspaceKeys.has(key)) || requestedWorkspaceKeys.length < 1 || requestedWorkspaceKeys.length > 6) return reply(400, { error: 'Choose from one to six valid selling workspaces. Save that same selection after payment.' })
+        const requestedWorkspaceCount = requestedWorkspaceKeys.length
+        const quote = quoteWorkspacePlan(basePlan, requestedWorkspaceKeys, configured)
+        const sponsorDiscountPercent = (configured?.sponsorEmails || []).includes(String(owner.email || '').trim().toLowerCase()) ? 50 : 0
+        const plan = { ...basePlan, amount: Math.round(quote.amount * (100 - sponsorDiscountPercent) / 100) }
         const reference = `sub-${randomBytes(20).toString('hex')}`
         await ensureSubscription(claims.businessId)
         const subscription = await subscriptions.findOneAndUpdate({ _id: claims.businessId }, { $set: { referralClosed: true } }, { returnDocument: 'after' })
         const rates = subscription.referrerType === 'visitor' ? { firstReferralPercent: configured?.visitorFirstReferralPercent || 0, recurringReferralPercent: configured?.visitorRecurringReferralPercent || 0 } : referralPercentages(configured || {})
-        await payments.insertOne({ ...plan, ...rates, workspaceCount: requestedWorkspaceCount, workspaceAddonPercent: workspace.addonPercent, planId: 'enterprise', enterpriseRequestId: requestRow._id, referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
+        await payments.insertOne({ ...plan, ...rates, workspaceCount: requestedWorkspaceCount, workspaceKeys: requestedWorkspaceKeys, workspaceExtraPercent: quote.extraPercent, sponsorDiscountPercent, workspaceAddonPercent: workspace.addonPercent, planId: 'enterprise', enterpriseRequestId: requestRow._id, referrerId: subscription.referrerId || null, referrerType: subscription.referrerType || 'business', _id: reference, businessId: claims.businessId, email: owner.email, createdAt: new Date() })
         const result = await paystack('/transaction/initialize', { email: owner.email, amount: plan.amount, currency: plan.currency, reference, callback_url: appUrl() })
         return reply(200, { authorizationUrl: result.authorization_url, reference })
       }
