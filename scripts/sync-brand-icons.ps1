@@ -35,6 +35,33 @@ try {
     Save-IconPng 'public/icon-192.png' 192
     Save-IconPng 'public/apple-touch-icon.png' 180
 
+    # Update every Android splash variant. Qualified drawable-port/land assets
+    # take precedence over drawable/splash.png on real devices.
+    $splashTargets = @('android/app/src/main/res/drawable/splash.png') + @(
+        Get-ChildItem 'android/app/src/main/res' -Directory -Filter 'drawable-*' |
+            ForEach-Object { Join-Path $_.FullName 'splash.png' } |
+            Where-Object { Test-Path $_ }
+    )
+    foreach ($splashPath in $splashTargets) {
+        $previous = [System.Drawing.Image]::FromFile((Resolve-Path $splashPath).Path)
+        try { $width = $previous.Width; $height = $previous.Height }
+        finally { $previous.Dispose() }
+        $splash = New-Object System.Drawing.Bitmap($width, $height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        try {
+            $graphics = [System.Drawing.Graphics]::FromImage($splash)
+            try {
+                $graphics.Clear([System.Drawing.Color]::White)
+                $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+                $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $iconSize = [Math]::Floor([Math]::Min($width, $height) / 3)
+                $graphics.DrawImage($sourceImage, [int](($width - $iconSize) / 2), [int](($height - $iconSize) / 2), $iconSize, $iconSize)
+            } finally { $graphics.Dispose() }
+            $splash.Save($splashPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        } finally { $splash.Dispose() }
+    }
+
     $densities = @(
         @{ Name = 'mdpi'; Size = 48 },
         @{ Name = 'hdpi'; Size = 72 },
