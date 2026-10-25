@@ -11,7 +11,7 @@ export function graceEndsAt(expiresAt, months = 1) {
   return date.toISOString()
 }
 
-export function graceDaysEndsAt(expiresAt, days = 30) {
+export function graceDaysEndsAt(expiresAt, days = 7) {
   const date = new Date(expiresAt)
   const graceDays = Number(days)
   if (!Number.isFinite(+date) || !Number.isInteger(graceDays) || graceDays < 0 || graceDays > 365) return null
@@ -33,8 +33,8 @@ export function subscriptionAccess(snapshot, now = Date.now()) {
     const active = now < +new Date(snapshot.expiresAt)
     return { ...snapshot, blocked: !active, graceEndsAt: snapshot.expiresAt, status: active ? 'trial' : 'trial-expired', reason: active ? `Free trial ends ${utcDateLabel(snapshot.expiresAt)} (UTC).` : 'Your free trial has ended. Please subscribe to continue using the POS.' }
   }
-  const monthly = snapshot.planId === 'monthly' && snapshot.graceDays !== undefined && snapshot.graceDays !== null && Number.isInteger(Number(snapshot.graceDays))
-  const days = monthly ? Number(snapshot.graceDays) : null
+  const monthly = snapshot.planId === 'monthly'
+  const days = monthly ? Number(snapshot.graceDays ?? 7) : null
   const months = Number.isInteger(Number(snapshot.graceMonths)) ? Number(snapshot.graceMonths) : 1
   const end = monthly ? graceDaysEndsAt(snapshot.expiresAt, days) : graceEndsAt(snapshot.expiresAt, months)
   if (!end) return { ...snapshot, blocked: true, status: 'unknown', reason: 'Connect to refresh subscription access.' }

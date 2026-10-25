@@ -115,7 +115,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
     const rewardActive = subscription?.testerRewardExpiresAt && new Date(subscription.testerRewardExpiresAt) > new Date()
     const effectiveExpiresAt = rewardActive && (!standardExpiresAt || new Date(subscription.testerRewardExpiresAt) > new Date(standardExpiresAt)) ? subscription.testerRewardExpiresAt : standardExpiresAt
     const planId = playIsLater ? subscription.playPlanId : subscription?.planId || (isTrial ? 'trial' : null)
-    const graceDays = isTrial ? 0 : playIsLater ? (planId === 'monthly' ? Number(subscription.playGraceDays ?? plan?.monthlyGraceDays ?? 30) : undefined) : planId === 'monthly' && subscription?.graceMonths === undefined ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? Number(plan?.monthlyGraceMonths ?? plan?.graceMonths ?? 1) * 30) : undefined
+    const graceDays = isTrial ? 0 : planId === 'monthly' ? Number((playIsLater ? subscription?.playGraceDays : subscription?.graceDays) ?? plan?.monthlyGraceDays ?? 7) : undefined
     const graceMonths = isTrial ? undefined : playIsLater ? (planId === 'monthly' ? undefined : Number(subscription.playGraceMonths ?? plan?.graceMonths ?? 1)) : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
     const current = subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, suspended: Boolean(subscription?.suspendedAt || subscription?.closedAt), suspensionReason: subscription?.closedAt ? 'This business has completed its Stockroom exit.' : subscription?.suspensionReason || '', portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
     const workspacePlan = await getPlan()
@@ -325,9 +325,9 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       } catch (error) { await notices.updateOne({ _id: id }, { $set: { lockedUntil: new Date(0) } }); console.error('Subscription reminder failed:', error.message) }
     }
     for await (const subscription of subscriptions.find({ expiresAt: { $lte: now } })) {
-      const end = subscription.planId === 'monthly' && Number.isInteger(subscription.graceDays)
-        ? graceDaysEndsAt(subscription.expiresAt, subscription.graceDays)
-        : graceEndsAt(subscription.expiresAt, Number(subscription.graceMonths ?? (subscription.planId === 'monthly' ? plan.monthlyGraceMonths ?? plan.graceMonths : plan.graceMonths) ?? 1))
+      const end = subscription.planId === 'monthly'
+        ? graceDaysEndsAt(subscription.expiresAt, Number(subscription.graceDays ?? plan.monthlyGraceDays ?? 7))
+        : graceEndsAt(subscription.expiresAt, Number(subscription.graceMonths ?? plan.graceMonths ?? 1))
       if (!end || new Date(end) <= now) continue
       const owner = await accounts.findOne({ businessId: subscription._id, role: 'owner' })
       if (!owner) continue
@@ -402,7 +402,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           const plan = input.monthlyAmount === undefined
               ? { ...validatePlan(input), workspaceAddonPercent, hotelWorkspaceAddonPercent, nightlifeWorkspaceAddonPercent, testerRewardEmails, sponsorEmails, registrationKeyDurationDays, accountDeletionGraceDays, productExportFeeAmount, productExportFeeCurrency, googlePlayProductIds, googlePlayExportProductId, ...referral }
             : (() => {
-              const monthlyGraceDays = Number(input.monthlyGraceDays ?? Number(input.monthlyGraceMonths ?? input.graceMonths ?? 1) * 30)
+              const monthlyGraceDays = Number(input.monthlyGraceDays ?? 7)
               const otherGraceMonths = Number(input.graceMonths ?? 1)
               const base = { currency: input.currency, reminderDays: input.reminderDays, freeTrialDays: input.freeTrialDays }
               const plans = [
