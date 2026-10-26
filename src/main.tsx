@@ -2152,6 +2152,7 @@ function App() {
   }
 
   const [scanning, setScanning] = useState(false)
+  const [scanInputMode, setScanInputMode] = useState<'camera' | 'keyboard'>('camera')
   const [torchSupported, setTorchSupported] = useState(false)
   const [torchOn, setTorchOn] = useState(false)
   const [torchMessage, setTorchMessage] = useState('')
@@ -2228,6 +2229,21 @@ function App() {
   async function scanBarcode(target: 'product' | 'payment' | 'setup' | 'intake' | 'ticket' = 'product', intake?: (value: string) => void) {
     const accept = target === 'setup' ? (_code: string) => {} : target === 'intake' || target === 'ticket' ? (value: string) => intake?.(value) : target === 'payment' ? acceptPaymentReference : acceptBarcode
     if (scanning) return
+    const configuredScanner = scannerSettings()
+    if (configuredScanner.mode === 'keyboard') {
+      stopScan()
+      const session = cameraSession.current
+      setScanInputMode('keyboard')
+      setScanning(true)
+      return await new Promise<string | undefined>(resolve => {
+        cameraScanResolver.current = value => {
+          if (value && target === 'intake' && !validGtin(value)) { window.alert('This scanner input is not a valid product GTIN. Try again or enter the barcode.'); setScanning(false); resolve(undefined); return }
+          if (value) accept(value)
+          resolve(value)
+        }
+        window.setTimeout(() => { if (session === cameraSession.current && cameraScanResolver.current) stopScan() }, 30_000)
+      })
+    }
     const requireRearCamera = requiresRearCamera(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
     if (!navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
@@ -2238,6 +2254,7 @@ function App() {
     const zxingModulesPromise = Promise.all([import('@zxing/browser'), import('@zxing/library')])
     stopScan()
     const session = cameraSession.current
+    setScanInputMode('camera')
     setScanning(true)
     const timeout = window.setTimeout(() => { if (session === cameraSession.current) { stopScan(); window.alert('Scan timed out. Try again or enter the barcode.') } }, 30_000)
     try {
@@ -2675,7 +2692,7 @@ function App() {
     }}><div className="modal-head"><h2>Edit product</h2><button type="button" className="icon-button" onClick={() => setDetailsProduct(null)} aria-label="Close product editor"><X size={19} /></button></div><p>Use the stock controls on the product row to record stock changes.</p><ShopProductFields profile={shopProfile} catalogueWorkspace={businessWorkspace(shopProfile).productSales ? 'product-sales' : 'oil-sales'} readOnlyStock initialDraft={{...detailsProduct,customValues:readCustomValues(detailsProduct.customValues)}} values={detailsProduct.customValues} />
       <div className="task-actions"><button type="button" className="filter-button" onClick={() => setDetailsProduct(null)}>Cancel</button><SubmitButton className="primary-button">Save product changes</SubmitButton></div></AsyncForm></div>}
     {inlinePrompt && <InlinePrompt request={inlinePrompt} onClose={closeInlinePrompt} />}
-    {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2><p>Point the camera at a printed UPC/EAN barcode. Hold steady and fill the frame with the bars. Scanning requires camera permission; package text is not read.</p><div className="scanner-preview-controls"><button type="button" className="filter-button" disabled={!torchSupported} aria-pressed={torchOn} onClick={() => void toggleScannerTorch()}>{torchSupported ? (torchOn ? 'Turn flashlight off' : 'Turn flashlight on') : 'Flashlight unavailable'}</button>{torchMessage && <span role="status">{torchMessage}</span>}</div><video ref={cameraVideo} muted autoPlay playsInline className="barcode-camera-preview" /><button type="button" className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
+    {scanning && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Scan barcode"><h2>Scan barcode</h2>{scanInputMode === 'keyboard' ? <><p>Scan with your USB or Bluetooth scanner. It must be set to keyboard / HID mode and use the configured {scannerSettings().suffix} terminator.</p><label>Barcode<input autoFocus aria-label="Barcode scanner input" onKeyDown={event => { if (event.key === scannerSettings().suffix) { event.preventDefault(); const value = event.currentTarget.value.trim(); if (value) { const resolve = cameraScanResolver.current; cameraScanResolver.current = null; resolve?.(value); setScanning(false) } } }} /></label></> : <><p>Point the camera at a printed UPC/EAN barcode. Hold steady and fill the frame with the bars. Scanning requires camera permission; package text is not read.</p><div className="scanner-preview-controls"><button type="button" className="filter-button" disabled={!torchSupported} aria-pressed={torchOn} onClick={() => void toggleScannerTorch()}>{torchSupported ? (torchOn ? 'Turn flashlight off' : 'Turn flashlight on') : 'Flashlight unavailable'}</button>{torchMessage && <span role="status">{torchMessage}</span>}</div><video ref={cameraVideo} muted autoPlay playsInline className="barcode-camera-preview" /></>}<button type="button" className="primary-button" onClick={stopScan}>Cancel scan</button></section></div>}
     {orderToPrint && <OrderDocument order={orderToPrint} />}
     {lastReceipt && active === 'Payments' && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
     <datalist id="approved-payment-providers">{extraPaymentPolicy.providers.map(provider => <option key={provider} value={provider} />)}</datalist>

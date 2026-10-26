@@ -61,11 +61,11 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       ...(workspace.oil ? [{ key: 'oil', name: 'Oil sales', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
       ...(workspace.fastFood ? [{ key: 'fastFood', name: 'Order counter', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
       ...(workspace.restaurant ? [{ key: 'restaurant', name: 'Tables & tabs', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
-      ...(workspace.nightlifeOperations ? [{ key: 'nightlifeOperations', name: 'Nightlife operations', addonPercent: Number(plan?.nightlifeWorkspaceAddonPercent ?? plan?.workspaceAddonPercent ?? 5) }] : []),
+      ...(workspace.nightlifeOperations ? [{ key: 'nightlifeOperations', name: 'Nightlife operations', addonPercent: Number(plan?.workspaceAddonPercent ?? 5) }] : []),
       ...(workspace.hotelOperations ? [{ key: 'hotelOperations', name: 'Hotel operations', addonPercent: Number(plan?.hotelWorkspaceAddonPercent ?? 10) }] : []),
     ]
     const workspaceKeys = workspaces.map(item => item.key)
-    return { count: workspaces.length, names: workspaces.map(item => item.name), workspaceKeys, addonPercent: Number(plan?.workspaceAddonPercent ?? 5), hotelAddonPercent: Number(plan?.hotelWorkspaceAddonPercent ?? 10), nightlifeAddonPercent: Number(plan?.nightlifeWorkspaceAddonPercent ?? 5), extraPercent: workspaceExtraPercent(workspaceKeys, plan || {}) }
+    return { count: workspaces.length, names: workspaces.map(item => item.name), workspaceKeys, addonPercent: Number(plan?.workspaceAddonPercent ?? 5), hotelAddonPercent: Number(plan?.hotelWorkspaceAddonPercent ?? 10), nightlifeAddonPercent: Number(plan?.workspaceAddonPercent ?? 5), extraPercent: workspaceExtraPercent(workspaceKeys, plan || {}) }
   }
   const getPlans = async () => {
     const saved = await getPlan()
@@ -108,15 +108,18 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
       ? new Date(createdAtTime + trialDays * 86400000).toISOString()
       : null
     const trialEndsAt = subscription?.trialEndsAt || legacyTrialEndsAt
-    const isTrial = !subscription?.expiresAt && Boolean(trialEndsAt)
     const playActive = ['SUBSCRIPTION_STATE_ACTIVE', 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD', 'SUBSCRIPTION_STATE_CANCELED'].includes(subscription?.playSubscriptionState) && subscription?.playExpiresAt && new Date(subscription.playExpiresAt) > new Date()
     const playIsLater = Boolean(playActive && (!subscription?.expiresAt || new Date(subscription.playExpiresAt) > new Date(subscription.expiresAt)))
+    const isTrial = !subscription?.expiresAt && !playIsLater && Boolean(trialEndsAt)
     const standardExpiresAt = playIsLater ? subscription.playExpiresAt : subscription?.expiresAt || trialEndsAt
     const rewardActive = subscription?.testerRewardExpiresAt && new Date(subscription.testerRewardExpiresAt) > new Date()
     const effectiveExpiresAt = rewardActive && (!standardExpiresAt || new Date(subscription.testerRewardExpiresAt) > new Date(standardExpiresAt)) ? subscription.testerRewardExpiresAt : standardExpiresAt
-    const planId = playIsLater ? subscription.playPlanId : subscription?.planId || (isTrial ? 'trial' : null)
-    const graceDays = isTrial ? 0 : planId === 'monthly' ? Number((playIsLater ? subscription?.playGraceDays : subscription?.graceDays) ?? plan?.monthlyGraceDays ?? 7) : undefined
-    const graceMonths = isTrial ? undefined : playIsLater ? (planId === 'monthly' ? undefined : Number(subscription.playGraceMonths ?? plan?.graceMonths ?? 1)) : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
+    const savedPlanId = subscription?.planId === 'trial' && !isTrial ? null : subscription?.planId
+    const planId = playIsLater ? subscription.playPlanId : savedPlanId || (isTrial ? 'trial' : null)
+    // Play extends its verified expiryTime for the configured grace period.
+    // Adding Stockroom grace after that timestamp would double the user's grace.
+    const graceDays = isTrial || playIsLater ? 0 : planId === 'monthly' ? Number(subscription?.graceDays ?? plan?.monthlyGraceDays ?? 7) : undefined
+    const graceMonths = isTrial || playIsLater ? 0 : planId === 'monthly' ? subscription?.graceMonths : Number(subscription?.graceMonths ?? plan?.graceMonths ?? 1)
     const current = subscriptionAccess({ businessId, testMode: control?.testMode !== false, expiresAt: effectiveExpiresAt, trialEndsAt, isTrial, planId, graceMonths, graceDays, suspended: Boolean(subscription?.suspendedAt || subscription?.closedAt), suspensionReason: subscription?.closedAt ? 'This business has completed its Stockroom exit.' : subscription?.suspensionReason || '', portalUrl: process.env.SUBSCRIPTION_PUBLIC_URL ? appUrl() : '' })
     const workspacePlan = await getPlan()
     const pricing = await workspacePricing(businessId, workspacePlan)
@@ -385,7 +388,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           const workspaceAddonPercent = Number(input.workspaceAddonPercent ?? 5)
           if (!Number.isFinite(workspaceAddonPercent) || workspaceAddonPercent < 0 || workspaceAddonPercent > 100 || Math.round(workspaceAddonPercent * 100) !== workspaceAddonPercent * 100) throw new Error('Extra workspace pricing must be from 0 to 100 percent, with up to two decimal places.')
           const hotelWorkspaceAddonPercent = Number(input.hotelWorkspaceAddonPercent ?? 10)
-          const nightlifeWorkspaceAddonPercent = Number(input.nightlifeWorkspaceAddonPercent ?? workspaceAddonPercent)
+          const nightlifeWorkspaceAddonPercent = workspaceAddonPercent
           for (const value of [hotelWorkspaceAddonPercent, nightlifeWorkspaceAddonPercent]) if (!Number.isFinite(value) || value < 0 || value > 100 || Math.round(value * 100) !== value * 100) throw new Error('Hotel and Nightlife extra workspace pricing must be from 0 to 100 percent, with up to two decimal places.')
           const testerRewardEmails = [...new Set(String(input.testerRewardEmails || '').split(/[\s,;]+/).map(value => value.trim().toLowerCase()).filter(Boolean))]
           const sponsorEmails = [...new Set(String(input.sponsorEmails || '').split(/[\s,;]+/).map(value => value.trim().toLowerCase()).filter(Boolean))]
@@ -415,7 +418,7 @@ export async function createSubscriptions({ database, accounts, verifyToken, sen
           await settings.updateOne({ _id: 'plan' }, { $set: plan }, { upsert: true })
         } else if (request.method !== 'GET') return reply(405, { error: 'Method not allowed.' })
         const plan = await getPlan()
-        const pricing = { workspaceAddonPercent: plan?.workspaceAddonPercent ?? 5, hotelWorkspaceAddonPercent: plan?.hotelWorkspaceAddonPercent ?? 10, nightlifeWorkspaceAddonPercent: plan?.nightlifeWorkspaceAddonPercent ?? plan?.workspaceAddonPercent ?? 5 }
+        const pricing = { workspaceAddonPercent: plan?.workspaceAddonPercent ?? 5, hotelWorkspaceAddonPercent: plan?.hotelWorkspaceAddonPercent ?? 10, nightlifeWorkspaceAddonPercent: plan?.workspaceAddonPercent ?? 5 }
         const googlePlayBasePlanIds = allWorkspaceBasePlanIds(pricing)
         return reply(200, { plan, ...pricing, googlePlayBasePlanIds, testerRewardEmails: plan?.testerRewardEmails || [], sponsorEmails: plan?.sponsorEmails || [], registrationKeyDurationDays: plan?.registrationKeyDurationDays ?? 7, accountDeletionGraceDays: plan?.accountDeletionGraceDays ?? 14, productExportFeeAmount: plan?.productExportFeeAmount ?? 0, productExportFeeCurrency: plan?.productExportFeeCurrency || plan?.currency || 'NGN', googlePlayProductIds: plan?.googlePlayProductIds || {}, googlePlayExportProductId: plan?.googlePlayExportProductId || '', testMode: (await getControl())?.testMode !== false, paystackConfigured: Boolean(process.env.PAYSTACK_SECRET_KEY), emailConfigured: mailConfigured(), publicUrlConfigured: Boolean(process.env.SUBSCRIPTION_PUBLIC_URL) })
       }

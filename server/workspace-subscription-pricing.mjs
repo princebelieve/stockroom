@@ -14,7 +14,7 @@ export function workspaceExtraPercent(keys, config = {}) {
     oil: Number(config.workspaceAddonPercent ?? 5),
     fastFood: Number(config.workspaceAddonPercent ?? 5),
     restaurant: Number(config.workspaceAddonPercent ?? 5),
-    nightlifeOperations: Number(config.nightlifeWorkspaceAddonPercent ?? 5),
+    nightlifeOperations: Number(config.workspaceAddonPercent ?? 5),
     hotelOperations: Number(config.hotelWorkspaceAddonPercent ?? 10),
   }
   return ordered.slice(1).reduce((sum, key) => sum + rates[key], 0)
