@@ -28,7 +28,7 @@ export function ServicePayments({ requestId, requestedTab, access, industry='gen
   useEffect(()=>{if(walletAllowed&&!hidden)void posRequest('/api/pos',headers).then(data=>setWalletCustomers(data.customers||customers)).catch(error=>setSetupError(error.message))},[walletAllowed,hidden,headers.Authorization,headers['X-Stockroom-Branch']])
   const allowed=(key:string)=>(key!=='church'||industry==='services')&&(!access||access[key]===true)
   const [tab,setTab]=useState(configuration?'Receipt settings':allowed('payments')?'New payment':allowed('serviceJobs')?'Jobs & invoices':'Church collections')
-  useEffect(()=>{if(hidden)return;if(configuration){if(requestedTab==='Receipt settings'||requestedTab==='Service catalogue')setTab(requestedTab);return}if((requestedTab==='New payment'&&allowed('payments'))||(requestedTab==='Jobs & invoices'&&allowed('serviceJobs'))||(requestedTab==='Service catalogue'&&manager))setTab(requestedTab!)},[requestedTab,requestId,hidden,configuration,manager])
+  useEffect(()=>{if(hidden)return;if(configuration){if(requestedTab==='Receipt settings'||requestedTab==='Service catalogue')setTab(requestedTab);return}if((requestedTab==='New payment'&&allowed('payments'))||(requestedTab==='Jobs & invoices'&&allowed('serviceJobs'))||(requestedTab==='Church collections'&&allowed('church'))||(requestedTab==='Service catalogue'&&manager))setTab(requestedTab!)},[requestedTab,requestId,hidden,configuration,manager])
   const [draft, setDraft] = useState<Draft>(() => restore(storageKey))
   const [profile, setProfile] = useState(receiptSettings())
   const [serviceItems, setServiceItems] = useState<Array<{id:string;name:string;price:number}>>([])

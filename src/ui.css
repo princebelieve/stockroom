@@ -62,6 +62,10 @@
 .help-navigation-assistant p { margin:0; }
 .help-navigation-assistant form { display:grid; gap:8px; }
 .help-navigation-answer { display:grid; gap:8px; padding:10px; border-radius:8px; background:var(--surface-soft,#f3f6f4); }
+.help-navigation-answer>p { white-space:pre-line; line-height:1.55; }
+.help-navigation-answer-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.help-navigation-conversation { display:grid; gap:8px; }
+.help-navigation-user-message { justify-self:end; max-width:90%; padding:9px 12px; border-radius:14px 14px 3px 14px; background:var(--brand-wash); }
 .help-navigation-suggestion { justify-self:start; padding:4px 0; text-align:left; }
 .team-management td details label { display:flex; gap:10px; padding:8px 0; align-items:center; min-width:210px; }
 .team-management td details input[type=checkbox] { width:18px; height:18px; flex-shrink:0; }

@@ -58,6 +58,13 @@ const sectionTopics: Record<string, ScreenHelp> = {
   links: { title: 'Staff sign-in links', description: 'Copy the business-specific link for staff to open on their own device, then have them sign in using their own account. The link identifies the business and is not a password.' },
 }
 
+export function allScreenHelpEntries() {
+  return [
+    ...Object.entries(screenTopics).map(([id, topic]) => ({ id: `screen:${id}`, title: topic.title, steps: [topic.description] })),
+    ...Object.entries(sectionTopics).map(([id, topic]) => ({ id: `section:${id}`, title: topic.title, steps: [topic.description] })),
+  ]
+}
+
 export function screenHelpFor(screen: string, section = '', settingsTab = '', paymentTab = ''): ScreenHelp {
   if (screen === 'Settings') {
     if (settingsTab === 'shop') return { title: 'Workspaces and timezone', description: 'Choose the business type and which separate selling screens the business uses. Save workspace changes, then synchronize other devices. The reporting timezone controls report dates; it does not change transaction timestamps.' }
