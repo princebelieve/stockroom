@@ -1079,3 +1079,93 @@
 .daily-screen .overview-workspace-controls { display:flex; align-items:end; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
 .daily-screen .overview-workspace-controls .screen-picker { margin:0; }
 .daily-screen .overview-add-workspace { min-height:38px; padding:8px 12px; font-size:13px; opacity:.76; }
+
+:root {
+  --help-pane-surface:#f3f7fc;
+  --help-answer-surface:#ffffff;
+  --help-user-surface:#e5effb;
+  --help-chat-border:#d7e2ef;
+  --help-chat-text:#21364d;
+  --help-chat-muted:#61758b;
+  --help-chat-action:#e1ebf7;
+}
+:root[data-app-theme="dark"] {
+  --help-pane-surface:#0d1a2d;
+  --help-answer-surface:#15263d;
+  --help-user-surface:#1d3857;
+  --help-chat-border:#304863;
+  --help-chat-text:#e4edf8;
+  --help-chat-muted:#afc1d5;
+  --help-chat-action:#203752;
+}
+.help-menu-panel,
+:root .app-shell .help-menu-panel {
+  color:var(--help-chat-text);
+  border-color:var(--help-chat-border);
+  background:var(--help-pane-surface);
+  box-shadow:0 16px 42px #10243a24;
+  backdrop-filter:blur(14px) saturate(112%);
+}
+.help-menu-panel .help-navigation-assistant {
+  gap:12px;
+  margin:0;
+  padding:6px 0 2px;
+  border:0;
+}
+.help-menu-panel .help-navigation-assistant h2 { color:var(--help-chat-text); font-size:17px; }
+.help-menu-panel .help-navigation-assistant>p { color:var(--help-chat-muted); }
+.help-menu-panel .help-navigation-conversation { gap:10px; }
+.help-menu-panel .help-navigation-user-message {
+  margin:0;
+  border:1px solid var(--help-chat-border);
+  border-radius:17px 17px 4px 17px;
+  color:var(--help-chat-text);
+  background:var(--help-user-surface);
+}
+.help-menu-panel .help-navigation-answer {
+  justify-self:start;
+  width:calc(100% - 16px);
+  box-sizing:border-box;
+  border-color:var(--help-chat-border);
+  border-radius:17px 17px 17px 4px;
+  color:var(--help-chat-text);
+  background:var(--help-answer-surface);
+  box-shadow:0 2px 8px #10243a0d;
+}
+.help-menu-panel .help-navigation-answer>p { color:var(--help-chat-text); }
+.help-menu-panel .help-navigation-answer .help-navigation-route-hint { color:var(--help-chat-muted); }
+.help-menu-panel .help-navigation-answer-actions .filter-button,
+.help-menu-panel .help-navigation-answer-actions a.filter-button {
+  color:var(--help-chat-text);
+  border:1px solid var(--help-chat-border);
+  background:var(--help-chat-action);
+  box-shadow:none;
+}
+.help-menu-panel .help-navigation-assistant form { gap:8px; }
+.help-menu-panel .help-navigation-assistant form label { color:var(--help-chat-muted); font-size:12px; }
+.help-menu-panel .help-navigation-assistant form input {
+  min-height:44px;
+  border:1px solid var(--help-chat-border);
+  border-radius:14px;
+  color:var(--help-chat-text);
+  background:var(--help-answer-surface);
+}
+.help-menu-panel .help-navigation-assistant form input::placeholder { color:var(--help-chat-muted); opacity:.8; }
+.help-menu-panel .help-navigation-assistant form input:focus-visible { outline:2px solid color-mix(in srgb,var(--brand-primary) 45%,transparent); outline-offset:1px; }
+.help-menu-panel .help-navigation-assistant form .primary-button { border-radius:14px; }
+.help-menu-panel .help-navigation-assistant form .primary-button {
+  color:var(--help-chat-text);
+  border:1px solid var(--help-chat-border);
+  background:color-mix(in srgb,var(--brand-primary) 16%,var(--help-answer-surface));
+  box-shadow:none;
+}
+.help-menu-panel .help-navigation-assistant form .primary-button:hover { background:color-mix(in srgb,var(--brand-primary) 23%,var(--help-answer-surface)); }
+.help-menu-panel>button.filter-button {
+  color:var(--help-chat-text);
+  border-color:var(--help-chat-border);
+  background:var(--help-answer-surface);
+  box-shadow:none;
+}
+.help-menu-panel .help-navigation-suggestion { color:var(--help-chat-muted); }
+.help-menu-panel .help-navigation-suggestion:hover { color:var(--help-chat-text); }
+.help-menu-panel>.panel { color:var(--help-chat-text); border-color:var(--help-chat-border); background:var(--help-answer-surface); box-shadow:none; }
