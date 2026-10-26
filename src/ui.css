@@ -61,7 +61,7 @@
 .help-navigation-assistant h2 { margin:0; font-size:17px; }
 .help-navigation-assistant p { margin:0; }
 .help-navigation-assistant form { display:grid; gap:8px; }
-.help-navigation-answer { display:grid; gap:8px; padding:10px; border-radius:8px; background:var(--surface-soft,#f3f6f4); }
+.help-navigation-answer { display:grid; gap:8px; padding:12px; border:1px solid color-mix(in srgb,var(--brand-primary) 34%,var(--line)); border-radius:10px; background:var(--surface-soft,#f3f6f4); scroll-margin:12px; }
 .help-navigation-answer>p { white-space:pre-line; line-height:1.55; }
 .help-navigation-answer-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .help-navigation-conversation { display:grid; gap:8px; }

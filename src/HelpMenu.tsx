@@ -20,6 +20,12 @@ function SupportNavigationHelp({ navigate, topic, role, routes }: { navigate: (s
   const [question, setQuestion] = useState('')
   const [submittedQuestion, setSubmittedQuestion] = useState('')
   const [answer, setAnswer] = useState<ReturnType<typeof answerHelpQuestion>>(null)
+  const answerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!submittedQuestion || !answerRef.current) return
+    const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+    requestAnimationFrame(() => answerRef.current?.scrollIntoView({ behavior, block: 'nearest' }))
+  }, [answer, submittedQuestion])
   function ask(value = question) {
     const clean = value.trim()
     if (!clean) return
@@ -32,7 +38,7 @@ function SupportNavigationHelp({ navigate, topic, role, routes }: { navigate: (s
     <h2>Are you looking for something?</h2><p>I can search Stockroom’s built-in help and show you the matching steps. Ask in your own words.</p>
     <form onSubmit={event => { event.preventDefault(); ask() }}><label htmlFor="help-navigation-question">Your question</label><input id="help-navigation-question" value={question} onChange={event => setQuestion(event.target.value)} placeholder="How do I set up my church business?" maxLength={200} /><button className="primary-button" type="submit" disabled={!question.trim()}>Ask</button></form>
     <button type="button" className="text-button help-navigation-suggestion" onClick={() => setQuestion(example)}>Example for this screen: “{example}”</button>
-    {submittedQuestion && <div className="help-navigation-conversation"><p className="help-navigation-user-message">{submittedQuestion}</p>{answer ? <div className="help-navigation-answer" role="status"><strong>{answer.title}</strong><p>{answer.answer}</p>{answer.destinationLabel && <p className="help-navigation-route-hint">In your navigation: <strong>{answer.destinationLabel}</strong>{answer.destinationHint ? ` — ${answer.destinationHint}` : ''}</p>}<div className="help-navigation-answer-actions">{answer.screen && <button type="button" className="filter-button" onClick={() => navigate(answer.screen!, answer.section, answer.tab, answer.taskId)}>Open {answer.destinationLabel || answer.title}</button>}<button type="button" className="text-button" onClick={() => navigate('Guide')}>Open full guide</button></div></div> : <div className="help-navigation-answer" role="status"><strong>I couldn’t find a close match in the built-in help.</strong><p>Try asking with a task or screen name, such as receipt, printer, stock, staff, payment, or workspace. You can also search the full user guide.</p><button type="button" className="filter-button" onClick={() => navigate('Guide')}>Open the user guide</button></div>}</div>}
+    {submittedQuestion && <div className="help-navigation-conversation"><p className="help-navigation-user-message">{submittedQuestion}</p>{answer ? <div ref={answerRef} tabIndex={-1} className="help-navigation-answer" role="status"><strong>{answer.title}</strong><p>{answer.answer}</p>{answer.destinationLabel && <p className="help-navigation-route-hint">In your navigation: <strong>{answer.destinationLabel}</strong>{answer.destinationHint ? ` — ${answer.destinationHint}` : ''}</p>}<div className="help-navigation-answer-actions">{answer.screen && <button type="button" className="filter-button" onClick={() => navigate(answer.screen!, answer.section, answer.tab, answer.taskId)}>Open {answer.destinationLabel || answer.title}</button>}<button type="button" className="text-button" onClick={() => navigate('Guide')}>Open full guide</button></div></div> : <div ref={answerRef} tabIndex={-1} className="help-navigation-answer" role="status"><strong>I couldn’t find a close match in the built-in help.</strong><p>Try asking with a task or screen name, such as receipt, printer, stock, staff, payment, or workspace. You can also search the full user guide.</p><button type="button" className="filter-button" onClick={() => navigate('Guide')}>Open the user guide</button></div>}</div>}
   </section>
 }
 

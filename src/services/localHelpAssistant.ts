@@ -62,8 +62,28 @@ function score(questionTerms: string[], chapter: GuideChapter, context?: string)
   return points
 }
 
+function greetingReply(question: string): LocalHelpAnswer | null {
+  const text = question.toLowerCase().replace(/[^a-z\s']/g, ' ').replace(/\s+/g, ' ').trim()
+  const match = text.match(/^(hello|hi|hey|good morning|good afternoon|good evening|good day|how are you(?: doing)?)(?: there)?(?: how are you(?: doing)?)?$/)
+  if (!match) return null
+  const greeting = match[1]
+  let answer: string
+  if (greeting === 'how are you' || greeting === 'how are you doing') {
+    answer = "I'm doing well, thank you. What are you trying to do in Stockroom? I can explain the steps and help you open the right screen."
+  } else if (greeting.startsWith('good ')) {
+    answer = `${greeting[0].toUpperCase()}${greeting.slice(1)}! What can I help you find in Stockroom today?`
+  } else {
+    answer = greeting === 'hi'
+      ? 'Hello! What are you trying to do in Stockroom? I can explain the steps and help you open the right screen.'
+      : 'Hi! What are you trying to do in Stockroom? I can explain the steps and help you open the right screen.'
+  }
+  return { title: greeting.startsWith('good ') ? `${greeting[0].toUpperCase()}${greeting.slice(1)}!` : greeting === 'how are you' || greeting === 'how are you doing' ? 'Doing well, thanks!' : 'Hello!', answer, guideTopic: 'greeting', confidence: 'good' }
+}
+
 /** Offline, extractive help: searches the same instructions shown in the user guide. */
 export function answerHelpQuestion(question: string, options: { role?: string; context?: string; routes?: HelpRoute[] } = {}): LocalHelpAnswer | null {
+  const greeting = greetingReply(question)
+  if (greeting) return greeting
   const queryTerms = terms(question)
   if (!queryTerms.length) return null
   const candidates = chapters

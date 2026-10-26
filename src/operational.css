@@ -1063,6 +1063,7 @@
 :root .app-shell .mobile-header-sync,
 :root .app-shell .mobile-header-share,
 :root .app-shell .mobile-header-help>summary { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 92%,var(--mobile-app-header-text)); }
+:root .app-shell .mobile-nav-toggle { color:var(--mobile-app-header-text); border:1px solid color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 92%,var(--mobile-app-header-text)); box-shadow:0 2px 8px #07152522; }
 :root .app-shell .mobile-app-actions .app-theme-toggle { color:var(--mobile-app-header-text); border-color:color-mix(in srgb,var(--mobile-app-header-text) 34%,transparent); background:transparent; }
 :root .app-shell .mobile-app-actions .app-theme-toggle-track { border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 88%,var(--mobile-app-header-text)); }
 :root .app-shell .mobile-app-actions .app-theme-toggle-thumb { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
