@@ -2696,7 +2696,7 @@ function App() {
     {orderToPrint && <OrderDocument order={orderToPrint} />}
     {lastReceipt && active === 'Payments' && <button className="filter-button" onClick={() => { void printReceipt(lastReceipt).catch(error => window.alert(error.message)) }}>Print last receipt</button>}
     <datalist id="approved-payment-providers">{extraPaymentPolicy.providers.map(provider => <option key={provider} value={provider} />)}</datalist>
-    {lastReceipt && <Suspense fallback={null}><Receipt sale={lastReceipt} fallbackName={appName} fallbackCurrency={currency} /></Suspense>}
+    {lastReceipt && <Suspense fallback={null}><Receipt sale={lastReceipt} fallbackName={appName} fallbackCurrency={currency} logoData={logoData} /></Suspense>}
   </div>
 }
 

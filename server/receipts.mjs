@@ -3,9 +3,9 @@ import { posSettings } from './pos-pricing.mjs'
 export function receiptSettings(input = {}) {
   const result = {}
   for (const [key, max] of Object.entries({ businessName: 100, address: 300, phone: 80, email: 254, footer: 1000 })) {
-    const value = input[key] ?? (key === 'footer' ? 'Thank you for your business!' : '')
+    const value = input[key] ?? (key === 'footer' ? 'Thanks for your patronage' : '')
     if (typeof value !== 'string' || value.length > max) throw new Error(`Enter a valid receipt ${key} (up to ${max} characters).`)
-    result[key] = value.trim()
+    result[key] = key === 'footer' && value.trim() === 'Thank you for your business!' ? 'Thanks for your patronage' : value.trim()
   }
   if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error('Enter a valid business email.')
   result.taxEnabled = input.taxEnabled === true
@@ -68,6 +68,6 @@ export function receiptText(sale) {
     ...(details.allocations||[]).map(part=>`${part.method==='cash'?'Cash':part.method==='bank-transfer'?'Bank Transfer':'POS Terminal'}: ${format(part.amount)}${part.provider?' / '+part.provider:''}${part.reference?' / '+part.reference:''}`),
     sale.terminalProvider && `Provider: ${sale.terminalProvider}`, sale.paymentReference && `Reference: ${sale.paymentReference}`,
     details.printExtraDetails && details.extraKept > 0 && `Extra retained: ${format(details.extraKept)} (${details.reason})`,
-    details.pos?.note && `Note: ${details.pos.note}`, '', receipt?.footer ?? 'Thank you for your business!'
+    details.pos?.note && `Note: ${details.pos.note}`, '', receipt?.footer ?? 'Thanks for your patronage'
   ].filter(value => value !== false && value != null).join('\n')
 }
