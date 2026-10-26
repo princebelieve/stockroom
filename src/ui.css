@@ -44,6 +44,9 @@
 .help-menu { position:fixed; right:max(14px,env(safe-area-inset-right)); bottom:calc(14px + env(safe-area-inset-bottom)); z-index:25; }
 .help-menu>summary { display:flex; align-items:center; justify-content:center; list-style:none; cursor:pointer; font-size:0; width:44px; height:44px; min-height:44px; padding:0; border-radius:50%; border:1px solid var(--brand-primary); background:var(--mint); color:var(--ink); box-shadow:0 3px 12px #192e4929; }
 .help-menu>summary svg { width:21px; height:21px; }
+.help-menu>summary[data-suggesting="true"] { position:relative; }
+.help-menu>summary[data-suggesting="true"]::after { content:""; position:absolute; width:10px; height:10px; top:0; right:0; border:2px solid white; border-radius:50%; background:#f59e0b; }
+.help-menu>summary[data-suggesting="true"]::before { content:"Are you looking for something? I can help you find it."; position:absolute; right:54px; bottom:0; width:max-content; max-width:min(260px,calc(100vw - 96px)); box-sizing:border-box; padding:10px 12px; border-radius:12px; background:var(--ink); color:#fff; box-shadow:0 4px 16px #192e4933; font-size:13px; font-weight:500; line-height:1.4; text-align:left; }
 .help-menu>summary::-webkit-details-marker { display:none; }
 .help-menu-panel { position:absolute; bottom:calc(100% + 8px); right:0; width:min(420px,calc(100vw - 36px)); max-height:min(70dvh,calc(100dvh - 140px)); overflow:auto; box-sizing:border-box; padding:12px; border-radius:12px; border:1px solid var(--line); background:white; box-shadow:0 12px 32px #192e4929; }
 @media(max-width:650px){.help-menu{right:max(12px,env(safe-area-inset-right));bottom:calc(14px + env(safe-area-inset-bottom))}.help-menu-panel{width:min(420px,calc(100vw - 24px))}}
@@ -54,6 +57,12 @@
 .help-menu-panel p { font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
 .help-menu-panel input,.help-menu-panel textarea { display:block; width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; }
 .help-menu-panel form { display:grid; gap:12px; }
+.help-navigation-assistant { display:grid; gap:8px; padding:12px 0; margin:8px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+.help-navigation-assistant h2 { margin:0; font-size:17px; }
+.help-navigation-assistant p { margin:0; }
+.help-navigation-assistant form { display:grid; gap:8px; }
+.help-navigation-answer { display:grid; gap:8px; padding:10px; border-radius:8px; background:var(--surface-soft,#f3f6f4); }
+.help-navigation-suggestion { justify-self:start; padding:4px 0; text-align:left; }
 .team-management td details label { display:flex; gap:10px; padding:8px 0; align-items:center; min-width:210px; }
 .team-management td details input[type=checkbox] { width:18px; height:18px; flex-shrink:0; }
 .team-management td details summary { padding:9px; color:var(--brand-primary); border:1px solid var(--line); border-radius:8px; cursor:pointer; }
