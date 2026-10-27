@@ -220,6 +220,14 @@ type AppSettings = {
   existingBusiness?: boolean
 }
 
+function fetchStartupData(path: string, timeoutMs: number) {
+  let timer = 0
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(`Startup request timed out: ${path}`)), timeoutMs)
+  })
+  return Promise.race([fetch(path), timeout]).finally(() => window.clearTimeout(timer))
+}
+
 const UserGuide = lazy(()=>import('./UserGuide').then(module=>({default:module.UserGuide})))
 
 type User = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; permissions?:Record<string,boolean>|null; operationalAccess?: boolean; organizationId: string }
@@ -1471,7 +1479,10 @@ function App() {
     return () => window.clearInterval(interval)
   }, [online, authToken, activeBranchId])
   useEffect(() => {
-    fetch('/api/settings').then((response) => response.ok ? response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }> : Promise.reject()).then((settings) => {
+    fetchStartupData('/api/settings', 30_000).then((response) => {
+      if (!response.ok) throw new Error(`/api/settings returned HTTP ${response.status}`)
+      return response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }>
+    }).then((settings) => {
       const cachedName = localStorage.getItem('stockroom-app-name') || ''
       const rememberedBusiness = Boolean(cachedName && cachedName !== 'My Business')
       const hasOwner = Boolean(settings.ownerConfigured || rememberedBusiness)
@@ -1502,10 +1513,12 @@ function App() {
       localStorage.setItem('stockroom-app-name', displayedName)
       localStorage.setItem('stockroom-currency', displayedCurrency)
       document.title = displayedName
-    }).catch(async () => {
+    }).catch(async (settingsFailure: unknown) => {
+      let statusFailure = 'check not completed'
       try {
-        const response = await fetch('/api/sync/status')
-        const status = response.ok ? await response.json() as { configured?: boolean; existingBusiness?: boolean } : {}
+        const response = await fetchStartupData('/api/sync/status', 8_000)
+        if (!response.ok) throw new Error(`/api/sync/status returned HTTP ${response.status}`)
+        const status = await response.json() as { configured?: boolean; existingBusiness?: boolean }
         // A failed settings read cannot establish that this is an absolute
         // visitor. Keep returning local users on the sign-in path and let the
         // app show the real storage/startup error if the workspace is broken.
@@ -1519,8 +1532,12 @@ function App() {
           setSettingsLoaded(true)
           return
         }
-      } catch { }
-      if (isBrowserPwa()) { setStartupError('Unable to open local storage. Please update your browser, allow website storage, and try again.'); return }
+      } catch (caught) { statusFailure = caught instanceof Error ? caught.message : 'unknown startup error' }
+      if (isBrowserPwa()) {
+        const settingsMessage = settingsFailure instanceof Error ? settingsFailure.message : 'unknown startup error'
+        setStartupError(`Stockroom could not read its business settings (${settingsMessage}). The sync status check also failed (${statusFailure}). No business data was changed. Tap Try again; if this repeats, contact support with this message.`)
+        return
+      }
       // A fresh Android installation can have no saved enrollment yet. If
       // both local status reads fail, keep the promised sign-in-first flow;
       // cloud-session enrolls the phone after credentials are verified.
@@ -2543,7 +2560,7 @@ function App() {
 
   if (!settingsLoaded) return <main className="login-screen"><div className="login-card"><h1>{startupError ? 'Cannot open your business' : 'Loading your business'}</h1>{startupError && <><p>{startupError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button><PublicLandingLink /></>}</div></main>
   if (!user && needsIntroduction) return <main className="login-screen"><AppIntroduction onContinue={()=>{try{localStorage.setItem('stockroom-introduction-v1','seen')}catch{}setNeedsIntroduction(false)}} /></main>
-  if (!user) return <>{(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}<HelpMenu/>{registrationAvailable && registrationRequested
+  if (!user) return <><InstallAppControl showButton={false}/>{(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}<HelpMenu/>{registrationAvailable && registrationRequested
     ? registrationStage === 'request'
       ? <RegistrationRequestScreen onContinue={(key, email) => { setGeneratedRegistrationKey(key); setRegistrationOwnerEmail(email); setRegistrationStage('complete') }} onCancel={() => { setRegistrationRequested(false); setAuthError('') }} />
       : <SetupScreen keyRegistration initialRegistrationKey={generatedRegistrationKey} initialEmail={registrationOwnerEmail} onCancel={() => setRegistrationStage('request')} onCreate={registerBusiness} error={authError} setError={setAuthError} />
