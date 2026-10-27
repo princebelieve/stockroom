@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Bell, BellRing, Check, ExternalLink } from 'lucide-react'
 import { cloudRequest } from './lib/cloudRequest'
 import { disableNativePush, getNativePushToken, hasDeviceNotificationSupport, isAndroidNative, requestDeviceNotificationPermission, showDeviceNotification } from './lib/deviceNotifications'
@@ -21,11 +22,26 @@ export function NotificationCenter({ apiUrl, token, onToken, allowPush = false, 
   const [nativeFcmReady, setNativeFcmReady] = useState(false)
   const [message, setMessage] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
+  const popoverRef = useRef<HTMLElement>(null)
+  const [popoverPosition, setPopoverPosition] = useState({ top: 12, left: 12 })
+
+  const positionPopover = useCallback(() => {
+    const anchor = menuRef.current?.querySelector<HTMLButtonElement>('.notification-bell')
+    const popover = popoverRef.current
+    if (!anchor || !popover) return
+    const rect = anchor.getBoundingClientRect()
+    const width = Math.min(380, window.innerWidth - 24)
+    const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))
+    const height = Math.min(popover.offsetHeight, window.innerHeight - 24)
+    const below = rect.bottom + 8
+    const top = below + height <= window.innerHeight - 12 ? below : Math.max(12, rect.top - height - 8)
+    setPopoverPosition({ top, left })
+  }, [])
 
   useEffect(() => {
     if (!open) return
     const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setOpen(false)
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target) && !popoverRef.current?.contains(event.target)) setOpen(false)
     }
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -40,6 +56,14 @@ export function NotificationCenter({ apiUrl, token, onToken, allowPush = false, 
       document.removeEventListener('keydown', closeOnEscape)
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const frame = window.requestAnimationFrame(positionPopover)
+    window.addEventListener('resize', positionPopover)
+    window.addEventListener('scroll', positionPopover, true)
+    return () => { window.cancelAnimationFrame(frame); window.removeEventListener('resize', positionPopover); window.removeEventListener('scroll', positionPopover, true) }
+  }, [open, data, positionPopover])
 
   const onTokenRef = useRef(onToken)
   onTokenRef.current = onToken
@@ -132,7 +156,7 @@ export function NotificationCenter({ apiUrl, token, onToken, allowPush = false, 
     <button type="button" className="notification-bell" aria-label={`Notifications${data?.unread ? `, ${data.unread} unread` : ''}`} aria-expanded={open} onClick={() => setOpen(value => !value)} title="Notifications">
       {data?.unread ? <BellRing size={19} /> : <Bell size={19} />}{Boolean(data?.unread) && <span className="notification-count">{data!.unread > 99 ? '99+' : data!.unread}</span>}
     </button>
-    {open && <section className="notification-popover" aria-label="Notifications">
+    {open && createPortal(<section ref={popoverRef} className="notification-popover" style={{ top: popoverPosition.top, left: popoverPosition.left }} aria-label="Notifications">
       <div className="notification-popover-heading"><div><strong>Notifications</strong><small>{data?.unread || 0} unread</small></div><button type="button" className="notification-text-action" onClick={() => void markRead()} disabled={!data?.unread}>Mark all read</button></div>
       {!data?.notifications.length && <p className="notification-empty">{message || 'You are all caught up.'}</p>}
       {data?.notifications.map(item => <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
@@ -141,6 +165,6 @@ export function NotificationCenter({ apiUrl, token, onToken, allowPush = false, 
       </article>)}
       <div className="notification-push-settings">{hasDeviceNotificationSupport() && <button type="button" onClick={() => void toggleDeviceAlerts()} disabled={busy}><BellRing size={15} />{busy ? 'Updating...' : deviceAlerts ? 'Turn off device notifications' : 'Enable device notifications'}</button>}{allowPush ? localPush ? <button type="button" onClick={() => void disablePush()} disabled={busy}><BellRing size={15} />{busy ? 'Updating...' : 'Turn off browser push alerts'}</button> : data?.pushSupported ? <button type="button" onClick={() => void enablePush()} disabled={busy}><Bell size={15} />{busy ? 'Enabling...' : 'Enable browser push alerts'}</button> : <span><Bell size={15} /> Browser push alerts are not configured yet</span> : !hasDeviceNotificationSupport() && <span><ExternalLink size={15} /> Browser push alerts are available in the installed PWA</span>}</div>
       {message && data?.notifications.length ? <p className="notification-status" role="status">{message}</p> : null}
-    </section>}
+    </section>, document.body)}
   </div>
 }
