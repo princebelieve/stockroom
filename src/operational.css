@@ -1169,3 +1169,18 @@
 .help-menu-panel .help-navigation-suggestion { color:var(--help-chat-muted); }
 .help-menu-panel .help-navigation-suggestion:hover { color:var(--help-chat-text); }
 .help-menu-panel>.panel { color:var(--help-chat-text); border-color:var(--help-chat-border); background:var(--help-answer-surface); box-shadow:none; }
+
+/* Keep the mobile theme switch in the header's top icon row. */
+@media screen {
+  .app-shell .mobile-app-topline > .app-theme-toggle { position:absolute; top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 6px); right:154px; z-index:146; display:flex; width:40px; min-width:40px; height:40px; min-height:40px; align-items:center; justify-content:center; gap:0; padding:2px; border:1px solid color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); border-radius:10px; color:var(--mobile-app-header-text); background:color-mix(in srgb,var(--mobile-app-header-color) 92%,var(--mobile-app-header-text)); box-shadow:none; }
+  .app-shell .mobile-app-topline > .app-theme-toggle .app-theme-toggle-label { display:none; }
+  .app-shell .mobile-app-topline > .app-theme-toggle .app-theme-toggle-track { width:34px; height:24px; border-color:color-mix(in srgb,var(--mobile-app-header-text) 32%,transparent); background:color-mix(in srgb,var(--mobile-app-header-color) 88%,var(--mobile-app-header-text)); }
+  .app-shell .mobile-app-topline > .app-theme-toggle .app-theme-toggle-thumb { width:18px; height:18px; color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
+  .app-shell .mobile-app-topline > .app-theme-toggle[aria-checked="true"] { border-color:var(--app-brand-color); background:color-mix(in srgb,var(--app-brand-color) 18%,var(--mobile-app-header-color)); }
+  .app-shell .mobile-app-topline > .app-theme-toggle[aria-checked="true"] .app-theme-toggle-track { border-color:var(--app-brand-color); background:color-mix(in srgb,var(--app-brand-color) 42%,var(--mobile-app-header-color)); }
+  .app-shell .mobile-app-topline > .app-theme-toggle[aria-checked="true"] .app-theme-toggle-thumb { color:var(--mobile-app-header-text); background:var(--mobile-app-header-color); }
+}
+@media screen and (max-width:600px) {
+  .app-shell .mobile-app-brand { max-width:calc(100% - 204px); }
+  .app-shell .mobile-app-topline > .app-theme-toggle { top:calc(max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px)) + 5px); right:153px; }
+}
