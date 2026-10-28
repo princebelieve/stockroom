@@ -46,7 +46,7 @@
 .help-menu>summary svg { width:21px; height:21px; }
 .help-menu>summary[data-suggesting="true"] { position:relative; }
 .help-menu>summary[data-suggesting="true"]::after { content:""; position:absolute; width:10px; height:10px; top:0; right:0; border:2px solid white; border-radius:50%; background:#f59e0b; }
-.help-menu>summary[data-suggesting="true"]::before { content:"Are you looking for something? I can help you find it."; position:absolute; right:54px; bottom:0; width:max-content; max-width:min(260px,calc(100vw - 96px)); box-sizing:border-box; padding:10px 12px; border-radius:12px; background:var(--ink); color:#fff; box-shadow:0 4px 16px #192e4933; font-size:13px; font-weight:500; line-height:1.4; text-align:left; }
+.help-menu>summary[data-suggesting="true"]::before { content:attr(data-suggestion); position:absolute; right:54px; bottom:0; width:max-content; max-width:min(260px,calc(100vw - 96px)); box-sizing:border-box; padding:10px 12px; border-radius:12px; background:var(--ink); color:#fff; box-shadow:0 4px 16px #192e4933; font-size:13px; font-weight:500; line-height:1.4; text-align:left; }
 .help-menu>summary::-webkit-details-marker { display:none; }
 .help-menu-panel { position:absolute; bottom:calc(100% + 8px); right:0; width:min(420px,calc(100vw - 36px)); max-height:min(70dvh,calc(100dvh - 140px)); overflow:auto; box-sizing:border-box; padding:12px; border-radius:12px; border:1px solid var(--line); background:white; box-shadow:0 12px 32px #192e4929; }
 @media(max-width:650px){.help-menu{right:max(12px,env(safe-area-inset-right));bottom:calc(14px + env(safe-area-inset-bottom))}.help-menu-panel{width:min(420px,calc(100vw - 24px))}}
@@ -213,3 +213,27 @@
 @media print{.report-chart-grid{display:block}.report-chart{margin-bottom:14px}.daily-sales-chart{height:150px}}
 
 .install-app-control{position:relative;padding:8px 10px 4px;border-top:1px solid #ffffff24}.sidebar .install-app-button{width:100%;border:1px solid #ffffff30;background:#286052;color:#effff5;font-weight:700}.install-app-suggestion{position:relative;margin:0 0 8px;padding:13px;border:1px solid #d5e95c66;border-radius:10px;background:#173f35;color:#f4fff7;box-shadow:0 8px 24px #061b1655}.install-app-suggestion strong{display:block;font-size:14px;padding-right:22px}.install-app-suggestion p{margin:7px 0 10px;color:#d4e6dc;font-size:12px;line-height:1.45}.install-suggestion-close{position:absolute;right:7px;top:7px;border:0;background:transparent;color:inherit;padding:4px}.install-suggestion-action{padding:7px 10px;border:0;border-radius:6px;background:#d5e95c;color:#183b32;font-weight:700}.sidebar .install-app-control .nav-item:hover{background:#34705f}.install-app-prompt{position:fixed;z-index:10000;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));width:min(420px,calc(100vw - 24px));margin:0;transform:translateX(-50%)}@media(min-width:651px){.install-app-prompt{left:auto;right:24px;bottom:24px;transform:none}}
+
+/* Focused install guidance dialog used when the browser cannot open its prompt. */
+.install-modal-backdrop{position:fixed;inset:0;z-index:10001;display:grid;place-items:center;padding:20px max(20px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px));background:#071525bd;backdrop-filter:blur(4px)}
+.install-modal{position:relative;width:min(100%,460px);max-height:calc(100dvh - 40px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));overflow:auto;padding:34px 30px 26px;border:1px solid var(--line,#d8e0e8);border-radius:16px;background:var(--paper,#fff);color:var(--ink,#17283c);box-shadow:0 24px 80px #0006}
+.install-modal-close{position:absolute;top:12px;right:12px;display:grid;width:40px;height:40px;place-items:center;border:1px solid var(--line,#d8e0e8);border-radius:50%;background:transparent;color:inherit}
+.install-modal .kicker{margin:0 44px 8px 0;color:var(--brand-primary,#167bb4);font-size:10px;font-weight:800;letter-spacing:.14em}
+.install-modal h2{margin:0 44px 12px 0;font-size:25px;line-height:1.15;letter-spacing:-.025em}
+.install-modal-intro{margin:0 0 16px;color:var(--muted,#5e6b7a);font-size:14px;line-height:1.5}
+.install-modal ol{display:grid;gap:13px;margin:0;padding-left:24px;color:inherit;font-size:14px;line-height:1.6}
+.install-modal li::marker{color:var(--brand-primary,#167bb4);font-weight:800}
+.install-modal .ios-share-symbol{display:inline-grid;min-width:22px;height:22px;place-items:center;border:1.5px solid currentColor;border-radius:5px;color:#1677d2;font-size:15px;font-weight:700;line-height:1}
+.install-modal-done{width:100%;min-height:44px;margin-top:22px}
+@media(max-width:520px){.install-modal-backdrop{padding:16px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}.install-modal{padding:32px 22px 22px;border-radius:14px}.install-modal h2{font-size:22px}}
+
+
+.keyboard-shortcuts-dialog { width:min(560px,calc(100vw - 32px)); }
+.keyboard-shortcuts-dialog header { align-items:center; }
+.keyboard-shortcuts-dialog .kicker { margin:0 0 5px; color:var(--brand-primary); font-size:10px; font-weight:800; letter-spacing:.12em; }
+.keyboard-shortcuts-tip { margin:16px 0; color:var(--muted); line-height:1.5; }
+.keyboard-shortcuts-list { display:grid; gap:0; margin:0; padding:0; }
+.keyboard-shortcuts-list>div { display:grid; grid-template-columns:minmax(100px,auto) 1fr; align-items:center; gap:16px; padding:12px 0; border-top:1px solid var(--line); }
+.keyboard-shortcuts-list dt { margin:0; }
+.keyboard-shortcuts-list dd { margin:0; }
+.keyboard-shortcuts-list kbd { display:inline-block; min-width:48px; padding:6px 9px; border:1px solid var(--line); border-bottom-width:2px; border-radius:7px; background:color-mix(in srgb,var(--paper) 80%,var(--line)); color:var(--ink); font:700 12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace; text-align:center; }
