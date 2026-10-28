@@ -443,7 +443,8 @@ export function createGooglePlayBilling({ database, accounts, verifyToken, notif
       const owner = await accounts.findOne({ businessId: claims.businessId, role: 'owner' }, { projection: { email: 1 } })
       const sponsor = (await database.collection('subscription_settings').findOne({ _id: 'plan' }, { projection: { sponsorEmails: 1 } }))?.sponsorEmails || []
       const isSponsor = sponsor.includes(String(owner?.email || '').trim().toLowerCase())
-      const purchaseProducts = Object.fromEntries(['monthly','yearly','enterprise','monthlySponsor','yearlySponsor','enterpriseSponsor'].filter(planId => current.products[planId]).map(planId => [planId, current.products[planId]]))
+      const productKeys = ['monthly', 'yearly', 'enterprise', ...(isSponsor ? ['monthlySponsor', 'yearlySponsor', 'enterpriseSponsor'] : [])]
+      const purchaseProducts = Object.fromEntries(productKeys.filter(planId => current.products[planId]).map(planId => [planId, current.products[planId]]))
       return send(response, 200, { enabled: true, packageName: current.packageName, products: purchaseProducts, exportProductId: current.exportProductId, obfuscatedAccountId: accountBinding(claims.businessId, current.packageName), sponsorDiscountPercent: isSponsor ? 50 : 0 })
     }
     if (url.pathname === '/v1/play/subscriptions/verify' && request.method === 'POST') {
