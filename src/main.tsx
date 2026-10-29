@@ -229,6 +229,15 @@ function fetchStartupData(path: string, timeoutMs: number) {
   return Promise.race([fetch(path), timeout]).finally(() => window.clearTimeout(timer))
 }
 
+async function startupResponseError(response: Response, path: string) {
+  let detail = ''
+  try {
+    const payload = await response.clone().json() as { error?: unknown }
+    if (typeof payload.error === 'string') detail = payload.error
+  } catch { /* Keep the HTTP status when the endpoint returned non-JSON. */ }
+  return new Error(`${path} returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`)
+}
+
 const UserGuide = lazy(()=>import('./UserGuide').then(module=>({default:module.UserGuide})))
 
 type User = { id: string; name: string; email: string; username?: string; role: 'owner' | 'admin' | 'cashier'; permissions?:Record<string,boolean>|null; operationalAccess?: boolean; organizationId: string }
@@ -701,7 +710,7 @@ function App() {
   useEffect(() => {
     // All platforms restore identity from their local session store first:
     // Desktop SQLite, PWA IndexedDB, or Android SQLite. Cloud is not involved.
-    if (!settingsLoaded || (!authToken && !isBrowserPwa() && !isNativeMobile())) return
+    if (!authToken && !isBrowserPwa() && !isNativeMobile()) return
     let cancelled = false
     const restore = async () => {
       const response = await fetch('/api/auth/session', { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} }).catch(() => null)
@@ -725,7 +734,7 @@ function App() {
     }
     void restore()
     return () => { cancelled = true }
-  }, [settingsLoaded, authToken])
+  }, [authToken])
   const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}`, 'X-Stockroom-Branch': activeBranchId, 'X-Stockroom-Till': checkoutTillId() } : {}
   useEffect(() => {
     window.stockroomDebugOverview = async () => {
@@ -1481,8 +1490,8 @@ function App() {
     return () => window.clearInterval(interval)
   }, [online, authToken, activeBranchId])
   useEffect(() => {
-    fetchStartupData('/api/settings', 30_000).then((response) => {
-      if (!response.ok) throw new Error(`/api/settings returned HTTP ${response.status}`)
+    fetchStartupData('/api/settings', 10_000).then((response) => {
+      if (!response.ok) return startupResponseError(response, '/api/settings').then(error => { throw error })
       return response.json() as Promise<AppSettings & { ownerConfigured?: boolean; cloudConfigured?: boolean; existingBusiness?: boolean }>
     }).then((settings) => {
       const cachedName = localStorage.getItem('stockroom-app-name') || ''
@@ -1516,10 +1525,11 @@ function App() {
       localStorage.setItem('stockroom-currency', displayedCurrency)
       document.title = displayedName
     }).catch(async (settingsFailure: unknown) => {
+      console.error('[Stockroom startup] Settings request failed.', settingsFailure)
       let statusFailure = 'check not completed'
       try {
         const response = await fetchStartupData('/api/sync/status', 8_000)
-        if (!response.ok) throw new Error(`/api/sync/status returned HTTP ${response.status}`)
+        if (!response.ok) throw await startupResponseError(response, '/api/sync/status')
         const status = await response.json() as { configured?: boolean; existingBusiness?: boolean }
         // A failed settings read cannot establish that this is an absolute
         // visitor. Keep returning local users on the sign-in path and let the
@@ -1534,10 +1544,26 @@ function App() {
           setSettingsLoaded(true)
           return
         }
-      } catch (caught) { statusFailure = caught instanceof Error ? caught.message : 'unknown startup error' }
+      } catch (caught) {
+        statusFailure = caught instanceof Error ? caught.message : 'unknown startup error'
+        console.error('[Stockroom startup] Sync status request failed.', caught)
+      }
       if (isBrowserPwa()) {
-        const settingsMessage = settingsFailure instanceof Error ? settingsFailure.message : 'unknown startup error'
-        setStartupError(`Stockroom could not read its business settings (${settingsMessage}). The sync status check also failed (${statusFailure}). No business data was changed. Tap Try again; if this repeats, contact support with this message.`)
+        const rememberedBusiness = Boolean(
+          localStorage.getItem('stockroom-token') ||
+          localStorage.getItem('stockroom-user') ||
+          (localStorage.getItem('stockroom-app-name') && localStorage.getItem('stockroom-app-name') !== 'My Business')
+        )
+        if (rememberedBusiness) {
+          // Settings can be temporarily unavailable while a saved PWA session
+          // is still valid. Let session restoration/sign-in proceed from the
+          // local identity instead of holding the whole app behind settings.
+          setSetupRequired(false)
+          setInstallerRequired(false)
+          setSettingsLoaded(true)
+          return
+        }
+        setStartupError('Stockroom could not load this business on this device. Your saved business data was not changed. Check your connection and available browser storage, then try again. If the problem continues, contact support.')
         return
       }
       // A fresh Android installation can have no saved enrollment yet. If
@@ -2560,9 +2586,19 @@ function App() {
     setCloudAccessToken('')
   }
 
-  if (!settingsLoaded) return <main className="login-screen"><div className="login-card"><h1>{startupError ? 'Cannot open your business' : 'Loading your business'}</h1>{startupError && <><p>{startupError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button><PublicLandingLink /></>}</div></main>
+  const focusToolSearch = useCallback(() => {
+    if (desktopLayout && desktopSidebarCollapsed) { setDesktopSidebarCollapsed(false); localStorage.setItem('stockroom-sidebar-collapsed','false') }
+    else if (!desktopLayout) setMobileMenuOpen(true)
+    window.setTimeout(() => document.querySelector<HTMLInputElement>('.sidebar .tool-search input')?.focus(), 80)
+  }, [desktopLayout, desktopSidebarCollapsed, setMobileMenuOpen])
+  const openKeyboardShortcuts = useCallback(() => setShortcutHelpOpen(true), [])
+
+  // A remembered, authenticated business can render from its cached identity
+  // while settings load in the background. Settings choose first-run setup
+  // for visitors; they must not gate an existing business after sign-in.
+  if (!settingsLoaded && !user) return <main className="login-screen"><div className="login-card"><h1>{startupError ? 'Cannot open your business' : 'Loading your business'}</h1>{startupError && <><p>{startupError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button><PublicLandingLink /></>}</div></main>
   if (!user && needsIntroduction) return <main className="login-screen"><AppIntroduction onContinue={()=>{try{localStorage.setItem('stockroom-introduction-v1','seen')}catch{}setNeedsIntroduction(false)}} /></main>
-  if (!user) return <><InstallAppControl showButton={false}/>{(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}<HelpMenu/>{registrationAvailable && registrationRequested
+  if (!user) return <><InstallAppControl showButton={false}/>{(isNativeMobile() || isBrowserPwa()) && <div className={refreshingView ? 'mobile-pull-refresh refreshing' : 'mobile-pull-refresh'} style={{ transform: `translate(-50%, ${refreshingView ? 8 : mobilePullDistance - 56}px)` }}><RefreshCw size={17} className={refreshingView ? 'spin' : ''} /><span>{mobilePullDistance >= 64 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}<HelpMenu className="auth-help-menu"/>{registrationAvailable && registrationRequested
     ? registrationStage === 'request'
       ? <RegistrationRequestScreen onContinue={(key, email) => { setGeneratedRegistrationKey(key); setRegistrationOwnerEmail(email); setRegistrationStage('complete') }} onCancel={() => { setRegistrationRequested(false); setAuthError('') }} />
       : <SetupScreen keyRegistration initialRegistrationKey={generatedRegistrationKey} initialEmail={registrationOwnerEmail} onCancel={() => setRegistrationStage('request')} onCreate={registerBusiness} error={authError} setError={setAuthError} />
@@ -2586,12 +2622,6 @@ function App() {
     {label:'Add customer',hint:'Customer navigation menu. Create a customer account.',screen:'Wallet',section:'new-customer'},
   ].filter(route=>screenAllowedForUser(route.screen,user))
   const toolSearchTools = helpRoutes.filter((route,index,routes)=>routes.findIndex(item=>item.label===route.label)===index).map(route=>({label:route.label,open:()=>openHelpDestination(route.screen,route.section,route.tab,route.taskId)}))
-  const focusToolSearch = useCallback(() => {
-    if (desktopLayout && desktopSidebarCollapsed) { setDesktopSidebarCollapsed(false); localStorage.setItem('stockroom-sidebar-collapsed','false') }
-    else if (!desktopLayout) setMobileMenuOpen(true)
-    window.setTimeout(() => document.querySelector<HTMLInputElement>('.sidebar .tool-search input')?.focus(), 80)
-  }, [desktopLayout, desktopSidebarCollapsed, setMobileMenuOpen])
-  const openKeyboardShortcuts = useCallback(() => setShortcutHelpOpen(true), [])
   if(chooseBranch) return <main className="login-screen"><section className="login-card"><div className="brand-mark"><Store size={21}/></div><h1>Choose your branch</h1><p>You can switch branches later from the app header.</p>{branches.length?branches.filter(branch=>branch.isActive!==false).map(branch=><button type="button" key={branch.id} className={activeBranchId===branch.id?'branch-choice selected':'branch-choice'} aria-pressed={activeBranchId===branch.id} onClick={()=>setActiveBranchId(branch.id)}><Store size={18}/><span><strong>{branch.name}</strong>{branch.address&&<small>{branch.address}</small>}</span></button>):!branchError&&<p role="status">Loading your branches...</p>}{branchError&&<div role="alert"><p>{branchError}</p><button type="button" className="filter-button" onClick={()=>setBranchRetry(value=>value+1)}>Retry loading branches</button><button type="button" className="text-button" onClick={()=>void logout()}>Back to sign in</button></div>}<button type="button" className="primary-button login-button" disabled={Boolean(branchError)||!branches.some(branch=>branch.id===activeBranchId&&branch.isActive!==false)} onClick={()=>setChooseBranch(false)}>Continue to your business</button></section></main>
   if(user.role==='owner'&&(workspaceSetupRequested||localStorage.getItem(workspaceSetupKey(user.organizationId))!==null&&localStorage.getItem(workspaceSetupKey(user.organizationId))!=='complete')) return <><HelpMenu screenHelpTopic={{title:'Workspace setup',description:'Choose a business type, select a selling workspace if you need one, and enable Hotel operations or Nightlife operations directly. Select matching starter items where available; you can edit catalogue entries later or skip them.'}}/><WorkspaceOnboarding profile={shopProfile} currency={currency} policy={extraPaymentPolicy} saveProfile={saveShopProfile} savePreferences={saveWorkspacePreferences} saveStarters={saveOnboardingStarters} finish={screen=>{localStorage.setItem(workspaceSetupKey(user.organizationId),'complete');setWorkspaceSetupRequested(false);setActive(screen||'Overview')}}/></>
   return <div className={`app-shell${desktopLayout&&desktopSidebarCollapsed?' sidebar-collapsed':''}`}>{!desktopLayout&&<div className="mobile-app-header"><div className="mobile-app-topline"><div className="mobile-app-brand"><div className="brand-mark">{logoData?<img src={logoData} alt="" className="brand-logo"/>:<img src="/icon-192.png" alt="" className="brand-logo"/>}</div><div className="mobile-app-brand-copy"><strong title={appName}>{appName}</strong><span>Business operations</span></div></div><ThemeToggle/><button className="mobile-header-share" type="button" onClick={() => setNativePromoterOpen(true)} aria-label="Open share referral options" title="Share referral link"><Share2 size={18}/></button><NotificationCenter apiUrl={subscriptionApiUrl} token={cloudAccessToken} onToken={(nextToken,refreshToken)=>{setCloudAccessToken(nextToken);localStorage.setItem('stockroom-cloud-access-token',nextToken);localStorage.setItem('stockroom-cloud-refresh-token',refreshToken)}} allowPush={isBrowserPwa()}/></div><div className="mobile-app-actions"><button className="mobile-header-sync" type="button" onClick={() => syncNow()} disabled={!online || syncing} aria-label="Sync business data" title={syncFeedback || 'Upload local changes and download business updates'}><RefreshCw size={16} className={syncing?'spin':''}/><span>{syncing?'Syncing':'Sync'}</span></button><HelpMenu guide={()=>setActive('Guide')} headers={authHeaders} scope={`${user.organizationId}:${user.id}`} role={user.role} routes={helpRoutes} navigate={openHelpDestination} screenHelpTopic={screenHelpFor(active,section,settingsTab,paymentTab)} className="mobile-header-help" openShortcuts={openKeyboardShortcuts}/></div>{syncFeedback&&<div className="mobile-header-sync-feedback" role="status" aria-live="polite">{syncFeedback}</div>}</div>}<ReadingControls/>
@@ -2805,7 +2835,7 @@ function LoginScreen({ onLogin, error, setError, onRegister, onResetDevice }: { 
     } catch (confirmError) { setError(confirmError instanceof Error ? confirmError.message : 'Unable to reset the password.') } finally { setSubmitting(false) }
   }}><div className="brand-mark"><img src="/icon-192.png" alt="" className="brand-logo" /></div><h1>Enter reset code</h1><p>{message || 'Use the reset code from your email, then choose a new password.'}</p><label>Reset code<input required value={resetCode} onChange={(event) => setResetCode(event.target.value)} autoComplete="one-time-code" placeholder="Code from your email" /></label><label>New password<PasswordInput minLength={6} maxLength={256} required value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} autoComplete="new-password" placeholder="At least 6 characters" /></label>{error && <div className="auth-error">{error}</div>}<SubmitButton className="primary-button login-button">Update password</SubmitButton><button type="button" className="text-button" onClick={() => { resetView(); setMode('request') }}>Use a different email</button><PublicLandingLink /></AsyncForm></main>
 
-  return <main className="login-screen"><AsyncForm busyLabel="Signing in..." className="login-card" onSubmit={async (event) => { event.preventDefault(); setError(''); try { await onLogin(email, password, businessLink) } catch (loginError) { setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.') } }}><div className="brand-mark"><img src="/icon-192.png" alt="" className="brand-logo" /></div><h1>Sign in to your shop</h1><button type="button" className="text-button" onClick={() => setShowIntroduction(true)}>Explore what Stockroom can do</button><WorkspaceHelp title="Workspace help"><p>Owners use their email. Admins and cashiers use the username shown in Team management.</p></WorkspaceHelp><label>Owner email or staff username<input type="text" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@yourshop.com or staffname" autoComplete="username" /></label>{email.trim() && !email.includes('@') && <label>Business sign-in link (staff)<input type="url" value={businessLink} onChange={event => setBusinessLink(event.target.value)} placeholder="Paste the link shared by the owner" autoComplete="url" /></label>}<label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /><button type="button" className="icon-button password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><button type="button" className="text-button forgot-password" onClick={() => { resetView(); setMode('request') }}>Forgot password?</button>{error && <div className="auth-error">{error}</div>}{message && <p className="settings-message">{message}</p>}<SubmitButton className="primary-button login-button">Sign in</SubmitButton>{onRegister && <button type="button" className="text-button" onClick={() => { setError(''); onRegister() }}>Register a new business</button>}{onResetDevice && <AsyncButton busyLabel="Removing business..." className="text-button" onClick={async () => { setError(''); try { if (!email.trim() || !password) throw new Error('Enter the current owner email and password in the fields above first.'); await onResetDevice(email, password) } catch (resetError) { setError(resetError instanceof Error ? resetError.message : 'Could not remove the business from this device.') } }}>Remove business from this device / start fresh</AsyncButton>}<PublicLandingLink /></AsyncForm></main>
+  return <main className="login-screen"><AsyncForm busyLabel="Signing in..." className="login-card" onSubmit={async (event) => { event.preventDefault(); setError(''); try { await onLogin(email, password, businessLink) } catch (loginError) { setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.') } }}><div className="brand-mark"><img src="/icon-192.png" alt="" className="brand-logo" /></div><h1>Sign in to your shop</h1><button type="button" className="text-button intro-link" onClick={() => setShowIntroduction(true)}>Explore what Stockroom can do</button><WorkspaceHelp title="Workspace help"><p>Owners use their email. Admins and cashiers use the username shown in Team management.</p></WorkspaceHelp><label>Owner email or staff username<input type="text" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Owner email or staff username" autoComplete="username" /></label>{email.trim() && !email.includes('@') && <label>Business sign-in link (staff)<input type="url" value={businessLink} onChange={event => setBusinessLink(event.target.value)} placeholder="Paste the link shared by the owner" autoComplete="url" /></label>}<label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /><button type="button" className="icon-button password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label><button type="button" className="text-button forgot-password" onClick={() => { resetView(); setMode('request') }}>Forgot password?</button>{error && <div className="auth-error">{error}</div>}{message && <p className="settings-message">{message}</p>}<SubmitButton className="primary-button login-button">Sign in</SubmitButton>{onRegister && <button type="button" className="auth-secondary-button" onClick={() => { setError(''); onRegister() }}>Register a new business</button>}{onResetDevice && <AsyncButton busyLabel="Removing business..." className="auth-secondary-button" onClick={async () => { setError(''); try { if (!email.trim() || !password) throw new Error('Enter the current owner email and password in the fields above first.'); await onResetDevice(email, password) } catch (resetError) { setError(resetError instanceof Error ? resetError.message : 'Could not remove the business from this device.') } }}>Remove business from this device / start fresh</AsyncButton>}<PublicLandingLink /></AsyncForm></main>
 }
 
 function RegistrationRequestScreen({ onContinue, onCancel }: { onContinue: (key: string, email: string) => void; onCancel: () => void }) {
