@@ -1278,7 +1278,10 @@ function App() {
         if (!salesResponse.ok) throw new Error('Sales could not be refreshed.')
         setSales((await deadline.wait(salesResponse.json())).sales)
         const customersResponse = await deadline.wait(fetch('/api/customers', { headers: authHeaders, signal: deadline.signal }))
-        if (!customersResponse.ok) throw new Error('Customers could not be refreshed.')
+        if (!customersResponse.ok) {
+          const result = await customersResponse.json().catch(() => ({})) as { error?: string }
+          throw new Error(result.error || `Customers could not be refreshed (HTTP ${customersResponse.status}).`)
+        }
         setCustomers((await deadline.wait(customersResponse.json())).customers)
         if (['owner', 'admin'].includes(user?.role || '')) {
           const results = await deadline.wait(Promise.all([
