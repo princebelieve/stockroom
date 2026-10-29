@@ -1280,7 +1280,7 @@ function App() {
         const customersResponse = await deadline.wait(fetch('/api/customers', { headers: authHeaders, signal: deadline.signal }))
         if (!customersResponse.ok) {
           const result = await customersResponse.json().catch(() => ({})) as { error?: string }
-          throw new Error(result.error || `Customers could not be refreshed (HTTP ${customersResponse.status}).`)
+          throw new Error(result.error || `Could not load customer records during refresh (HTTP ${customersResponse.status}).`)
         }
         setCustomers((await deadline.wait(customersResponse.json())).customers)
         if (['owner', 'admin'].includes(user?.role || '')) {
