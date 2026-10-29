@@ -242,14 +242,3 @@
 .install-modal .ios-share-symbol{display:inline-grid;min-width:22px;height:22px;place-items:center;border:1.5px solid currentColor;border-radius:5px;color:#1677d2;font-size:15px;font-weight:700;line-height:1}
 .install-modal-done{width:100%;min-height:44px;margin-top:22px}
 @media(max-width:520px){.install-modal-backdrop{padding:16px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}.install-modal{padding:32px 22px 22px;border-radius:14px}.install-modal h2{font-size:22px}}
-
-
-.keyboard-shortcuts-dialog { width:min(560px,calc(100vw - 32px)); }
-.keyboard-shortcuts-dialog header { align-items:center; }
-.keyboard-shortcuts-dialog .kicker { margin:0 0 5px; color:var(--brand-primary); font-size:10px; font-weight:800; letter-spacing:.12em; }
-.keyboard-shortcuts-tip { margin:16px 0; color:var(--muted); line-height:1.5; }
-.keyboard-shortcuts-list { display:grid; gap:0; margin:0; padding:0; }
-.keyboard-shortcuts-list>div { display:grid; grid-template-columns:minmax(100px,auto) 1fr; align-items:center; gap:16px; padding:12px 0; border-top:1px solid var(--line); }
-.keyboard-shortcuts-list dt { margin:0; }
-.keyboard-shortcuts-list dd { margin:0; }
-.keyboard-shortcuts-list kbd { display:inline-block; min-width:48px; padding:6px 9px; border:1px solid var(--line); border-bottom-width:2px; border-radius:7px; background:color-mix(in srgb,var(--paper) 80%,var(--line)); color:var(--ink); font:700 12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace; text-align:center; }
