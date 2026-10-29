@@ -10,6 +10,7 @@ import { printDocument } from './lib/printing'
 import { controlHardware } from './lib/hardware'
 import { canRecordTerminalPayment, readTerminalSettings } from './lib/terminalSettings'
 import { deviceLabels, readDeviceProfile, saveDeviceProfile, scannerSettings, type DeviceKind } from './lib/deviceSetup'
+import { requiresRearCamera } from './lib/cameraScanner'
 
 type Props = { businessId: string; defaultProvider: string; onTerminalSaved: () => void; createPairing: () => Promise<void>; openSecondMonitor: () => Promise<void>; pairing: { url: string } | null; scan: () => Promise<string | undefined>; initialKind?: DeviceKind }
 
@@ -26,9 +27,11 @@ export function DeviceSetup(props: Props) {
 
 function SetupSteps({ kind, close, ...props }: Props & { kind: DeviceKind; close: () => void }) {
   const previous = readDeviceProfile(kind, props.businessId)
+  const mobileCameraPreferred = requiresRearCamera(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
+  const savedScanner = scannerSettings(mobileCameraPreferred ? 'camera' : 'keyboard')
   const [step, setStep] = useState(1)
   const [model, setModel] = useState(previous?.model || '')
-  const [connection, setConnection] = useState(previous?.connection || (kind === 'scanner' ? scannerSettings().mode : kind === 'display' ? 'monitor' : kind === 'drawer' || kind === 'cutter' ? 'network' : 'system'))
+  const [connection, setConnection] = useState(kind === 'scanner' ? savedScanner.mode : previous?.connection || (kind === 'display' ? 'monitor' : kind === 'drawer' || kind === 'cutter' ? 'network' : 'system'))
   const [suffix, setSuffix] = useState(scannerSettings().suffix)
   const [attempted, setAttempted] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
@@ -70,7 +73,7 @@ function SetupSteps({ kind, close, ...props }: Props & { kind: DeviceKind; close
       {(kind === 'receipt' || kind === 'report') && <PrinterSettings onConfigured={configured} />}
       {hardware && (unavailable ? <><p role="status">This connection cannot send drawer/cutter commands. Save the device details for later, or choose Network ESC/POS.</p><AsyncButton onClick={configured}>Save device details</AsyncButton></> : <HardwareSettings onConfigured={configured} />)}
       {kind === 'terminal' && <TerminalSettings businessId={props.businessId} defaultProvider={props.defaultProvider} onSaved={() => { props.onTerminalSaved(); configured() }} />}
-      {kind === 'scanner' && <>{connection === 'keyboard' && <label>Scanner terminator<select value={suffix} onChange={e => setSuffix(e.target.value as 'Enter' | 'Tab')}><option value="Enter">Enter</option><option value="Tab">Tab</option></select></label>}<AsyncButton className="primary-button" onClick={() => { localStorage.setItem('stockroom-scanner', JSON.stringify({ mode: connection, suffix })); configured() }}>Save scanner settings</AsyncButton></>}
+      {kind === 'scanner' && <>{connection === 'keyboard' && <label>Scanner terminator<select value={suffix} onChange={e => setSuffix(e.target.value as 'Enter' | 'Tab')}><option value="Enter">Enter</option><option value="Tab">Tab</option></select></label>}<AsyncButton className="primary-button" onClick={() => { localStorage.setItem('stockroom-scanner', JSON.stringify({ mode: connection, suffix, modeExplicit: true })); configured() }}>Save scanner settings</AsyncButton></>}
       {kind === 'display' && <><WorkspaceHelp title="Customer display setup"><p>{connection === 'monitor' ? 'Windows display settings must use Extend. The app opens the first non-primary display; arrange your screens in Windows before testing.' : 'Pairing links expire after five minutes. A paired browser can view the basket but cannot edit it. Allow the local display service through the shop computer’s firewall if needed.'}</p></WorkspaceHelp><AsyncButton className="primary-button" onClick={() => { localStorage.setItem('stockroom-display', JSON.stringify({ connection })); configured() }}>Save display setup</AsyncButton></>}
     </>}
     {step === 3 && <><p>{unavailable ? 'Integration unavailable on this platform or connection. Device details are saved, but this feature is not ready to operate.' : kind === 'terminal' ? 'Manual payment mode only. Check the provider/model against your POS and confirm that staff can read its approval/reference. This does not test or verify a payment.' : 'Run the test, then confirm what you observed on the device.'}</p>

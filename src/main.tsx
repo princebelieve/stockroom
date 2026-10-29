@@ -2296,7 +2296,8 @@ function App() {
   async function scanBarcode(target: 'product' | 'payment' | 'setup' | 'intake' | 'ticket' = 'product', intake?: (value: string) => void) {
     const accept = target === 'setup' ? (_code: string) => {} : target === 'intake' || target === 'ticket' ? (value: string) => intake?.(value) : target === 'payment' ? acceptPaymentReference : acceptBarcode
     if (scanning) return
-    const configuredScanner = scannerSettings()
+    const requireRearCamera = requiresRearCamera(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
+    const configuredScanner = scannerSettings(requireRearCamera ? 'camera' : 'keyboard')
     if (configuredScanner.mode === 'keyboard') {
       stopScan()
       const session = cameraSession.current
@@ -2311,7 +2312,6 @@ function App() {
         window.setTimeout(() => { if (session === cameraSession.current && cameraScanResolver.current) stopScan() }, 30_000)
       })
     }
-    const requireRearCamera = requiresRearCamera(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
     if (!navigator.mediaDevices?.getUserMedia) {
       if (target === 'setup') throw new Error('Camera scanning is unavailable on this device. Use keyboard scanner setup instead.')
       window.alert(`${cameraAccessUnavailableMessage(window.isSecureContext, Boolean(navigator.mediaDevices), requireRearCamera)} The barcode field still accepts manual entry.`)

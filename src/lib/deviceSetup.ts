@@ -16,7 +16,12 @@ export function saveDeviceProfile(kind: DeviceKind, businessId: string, profile:
   if (!businessId) throw new Error('Sign in before setting up a device.')
   localStorage.setItem(`stockroom-device:${businessId}:${kind}`, JSON.stringify({ model: profile.model.trim().slice(0, 200), connection: profile.connection, status: profile.status, signature: configurationSignature(kind, businessId), updatedAt: new Date().toISOString() }))
 }
-export function scannerSettings(): { suffix: 'Enter' | 'Tab'; mode: 'keyboard' | 'camera' } {
-  try { const s = JSON.parse(localStorage.getItem('stockroom-scanner') || '{}'); return { suffix: s.suffix === 'Tab' ? 'Tab' : 'Enter', mode: s.mode === 'camera' ? 'camera' : 'keyboard' } }
-  catch { return { suffix: 'Enter', mode: 'keyboard' } }
+export function scannerSettings(defaultMode: 'keyboard' | 'camera' = 'keyboard'): { suffix: 'Enter' | 'Tab'; mode: 'keyboard' | 'camera'; modeExplicit: boolean } {
+  try {
+    const s = JSON.parse(localStorage.getItem('stockroom-scanner') || '{}')
+    // Camera was an explicit choice in the old format. Keyboard was also the
+    // old fallback, so only treat it as deliberate when saved by the new setup.
+    const modeExplicit = s.mode === 'camera' || (s.mode === 'keyboard' && s.modeExplicit === true)
+    return { suffix: s.suffix === 'Tab' ? 'Tab' : 'Enter', mode: modeExplicit ? s.mode : defaultMode, modeExplicit }
+  } catch { return { suffix: 'Enter', mode: defaultMode, modeExplicit: false } }
 }
