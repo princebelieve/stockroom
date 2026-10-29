@@ -1,4 +1,4 @@
-const appVersion = '1.0.10'
+const appVersion = '1.0.21'
 const userAgent = `Stockroom Business/${appVersion} (https://stockroom.globalcreest.com; support@sbi.globalcreest.com)`
 const responseCache = new Map()
 const candidateCache = new Map()
