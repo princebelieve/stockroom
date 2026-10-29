@@ -18,6 +18,7 @@ android/app/google-services.json
 /.gradle-cache/
 /.gradle-user/
 /android/.gradle-user/
+/android/.gradle-cache/
 
 # Environment secrets
 .env

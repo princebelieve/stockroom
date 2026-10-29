@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { isNativeMobile } from './lib/mobileDatabase'
+import { isPlayStoreBuild } from './lib/playBilling'
 
 type UpdateManifest = { windowsVersion?: string; androidVersion?: string; downloadsUrl?: string }
 type AvailableUpdate = { version: string; downloadsUrl: string; platform: 'Windows' | 'Android' }
@@ -28,6 +29,9 @@ export function AppUpdatePrompt() {
 
     const check = async () => {
       try {
+        // Play Store builds use Google's native in-app update flow. The
+        // website download prompt is only appropriate for direct installs.
+        if (nativeAndroid && await isPlayStoreBuild()) return
         const response = await fetch(`https://stockroom.globalcreest.com/app-update.json?check=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
         if (!response.ok) return
         const manifest = await response.json() as UpdateManifest

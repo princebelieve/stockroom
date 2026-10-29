@@ -15,8 +15,8 @@ android {
         applicationId "com.stockroom.business"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 22
-        versionName "1.0.19"
+        versionCode 23
+        versionName "1.0.20"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -88,6 +88,7 @@ dependencies {
     implementation platform('com.google.firebase:firebase-bom:34.19.0')
     implementation 'com.google.firebase:firebase-messaging'
     implementation 'com.android.billingclient:billing:9.1.0'
+    implementation 'com.google.android.play:app-update:2.1.0'
     // Keep the SQLCipher AAR's AndroidX SQLite API aligned with the 4.17.0 source build.
     implementation 'androidx.sqlite:sqlite:2.6.2'
     testImplementation "junit:junit:$junitVersion"

@@ -50,7 +50,7 @@ if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-mot
   for (const element of animated) { element.classList.add('reveal'); observer.observe(element) }
   document.documentElement.classList.add('motion-ready')
 }
-for (const [id, configured, label] of [['apk', import.meta.env.VITE_APK_DOWNLOAD_URL, 'Download Android APK'], ['desktop', import.meta.env.VITE_DESKTOP_DOWNLOAD_URL, 'Download Windows installer']]) {
+for (const [id, configured, label] of [['desktop', import.meta.env.VITE_DESKTOP_DOWNLOAD_URL, 'Download Windows installer']]) {
   if (!configured) continue
   try {
     const url = new URL(configured)
