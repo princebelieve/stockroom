@@ -66,9 +66,9 @@ function SetupSteps({ kind, close, ...props }: Props & { kind: DeviceKind; close
   }
   return <div><h4>{deviceLabels[kind]} setup</h4><p aria-live="polite">Step {step} of 3: {step === 1 ? 'Identify' : step === 2 ? 'Configure' : 'Test and finish'}</p>
     <fieldset className="submission-fields" disabled={busy}>
-    {step === 1 && <><WorkspaceHelp><p>{guidance}</p></WorkspaceHelp>{kind !== 'terminal' && <label>Manufacturer and model<input value={model} maxLength={200} placeholder={kind === 'display' ? 'Optional for standard monitors/tablets' : 'Enter the model printed on the device'} onChange={e => setModel(e.target.value)} /></label>}
+    {step === 1 && <><WorkspaceHelp><p>{guidance}</p></WorkspaceHelp>{kind !== 'terminal' && <label>{kind === 'scanner' ? 'Scanner model (optional)' : 'Manufacturer and model'}<input value={model} maxLength={200} placeholder={kind === 'display' ? 'Optional for standard monitors/tablets' : kind === 'scanner' ? 'Optional — choose camera or keyboard scanner' : 'Enter the model printed on the device'} onChange={e => setModel(e.target.value)} /></label>}
       {kind !== 'terminal' && <label>Connection / printing method<select value={connection} onChange={e => setConnection(e.target.value)}>{choices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
-      <button type="button" className="primary-button" disabled={!model.trim() && !['display', 'terminal'].includes(kind)} onClick={() => setStep(2)}>Continue to configuration</button></>}
+      <button type="button" className="primary-button" disabled={!model.trim() && !['display', 'terminal', 'scanner'].includes(kind)} onClick={() => setStep(2)}>Continue to configuration</button></>}
     {step === 2 && <><WorkspaceHelp><p>{guidance}</p></WorkspaceHelp>
       {(kind === 'receipt' || kind === 'report') && <PrinterSettings onConfigured={configured} />}
       {hardware && (unavailable ? <><p role="status">This connection cannot send drawer/cutter commands. Save the device details for later, or choose Network ESC/POS.</p><AsyncButton onClick={configured}>Save device details</AsyncButton></> : <HardwareSettings onConfigured={configured} />)}
